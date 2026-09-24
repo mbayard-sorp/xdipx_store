@@ -64,6 +64,8 @@ All times UTC. Vercel crons are verified against `vercel.json`; cloud routines a
 | 17:00 (target) | Routine A, daily merchandise | Cloud routine, `homepage-orchestrator` | Picks the featured product, refreshes Emma copy and imagery, publishes content to Sanity within the budget and kill switch | LIVE, **but the trigger fires at 10:00, not 17:00** |
 | 20:00 | R-DEV, bounce pass | Cloud routine, `rr7-engineer` | Third pass; claims bounced tickets first | LIVE (same trigger: `trig_01MEQYsg5sHPbM4v39FqssAD`, cron `0 10,15,20 * * *`) |
 | Mon 12:00 | Weekly strategy retro | Cloud routine, `store-strategist` | Cross-team retro, weekly brief, ticket metrics, routine coverage audit | LIVE |
+| Tue 17:00 | Writers Room | Cloud routine, `series-showrunner` | Pitches the week's 5-clip batch (3 slots plus 2 alternates) of 15 to 30 s product-talk clips from the strategy brief's in-stock shortlist. Propose-only, zero spend. See §The video lane | Trigger LIVE (`trig_01AMt6ARtfgT44EvFy287ESn`); the 5-clip product-talk pitch is PLANNED until `routine-writers-room-weekly.md` v2 merges and the trigger prompt is re-pointed |
+| Thu 13:00 | Video Render | Cloud routine, `video-producer` | Claims up to 3 owner-approved clips, renders on Atlas Cloud (Wavespeed as mirror), parks first frames and final cuts for the owner. See §The video lane | Trigger LIVE (`trig_01T1rn2K5jysEHxrvzzYL5Vd`) but still fires `0 13 * * 1,4` on the RunPod-era prompt; Thursday-only on Atlas is PLANNED until the render playbook and the provider seam merge and the trigger is edited |
 
 **Routine A timing, stated honestly.** The design for this operating system assumes Routine A runs
 at 17:00 UTC (10:00 Pacific), so that the dev pass, the QA pass, and the merchandising run are
@@ -75,6 +77,59 @@ merchandising run happens four hours *before* the QA pass, not after it. Treat 1
 Other crons run on this repo (feed processor, deal activator, profit summary, pricing recompute,
 import monitor and enrich, batch pollers, GSC sweeps, warm). They are not part of the self-healing
 loop; `vercel.json` is their source of truth.
+
+### The video lane (season 1, owner direction 2026-09-23)
+
+The owner, verbatim: "For the video tier, I want to maintain full control and approve each step so
+we don't get AI slop robotic crap from the team." So this lane is the one place where §7's
+team-decided default does not apply: **the owner approves every video step until he delegates a
+step by flipping its valve.** The plan of record is
+[`video-content-strategy-2026-09-23.md`](./video-content-strategy-2026-09-23.md) as amended the same
+day (5 clips per batch, not 7; autopublish stays off). Zero videos had ever posted when this section
+was written.
+
+| Step | When (UTC) | Who | What happens | State |
+|---|---|---|---|---|
+| Shortlist | Mon 12:00 | Weekly strategy, `product-manager` and `inventory-sentinel` sub-step | 8 to 12 products in stock in Shopify and the Nalpac feed, with a bare-product image and an enriched story, published on the brief as `metricsJson.videoShortlist`. The writers never pick a product | PLANNED (strategy Video Plan rewrite) |
+| Pitch | Tue 17:00 | Writers Room, `series-showrunner` | A 5-clip batch (3 slots plus 2 alternates) of 15 to 30 s product-talk clips, pitched only from the shortlist, each with a script, a read in the cast voice, a first-frame concept, and a cost estimate. Each clip carries a production mode the writers choose (owner ruling 2026-09-23): `talking` renders the cast member on camera on InfiniteTalk, `voiceover` renders the product in her hands on Wan 2.7 with the same cast voice laid over, and Grok is not routed. Zero spend | Trigger LIVE; the v2 pitch is PLANNED until its playbook merges and the prompt is re-pointed |
+| Room | Tue evening or Wed | Owner runs `/video-room` with the showrunner, writer, and art director | Lines are argued and revised live; revisions and standing lessons are written back to `video-owner-notes.md`. The room hands the owner the approve link and never approves anything itself | PLANNED |
+| Script approval | before Thursday | Owner, on `/admin/video-studio/scripts` | Nothing spends before this click. Revising a script in place (`episode-revise`) is PLANNED | Page LIVE |
+| Render | Thu 13:00 | Video Render, `video-producer` | Claims up to 3 approved clips, re-checks stock and swaps to the batch alternate if a product went out, renders first frames, then motion on Atlas Cloud with Wavespeed as mirror | PLANNED (Atlas lands through the Phase 2 provider seam; the trigger today still runs Mon + Thu on RunPod-era text) |
+| Frame gate | after first frames | Owner | First frames park at `awaiting_frame_approval` while `video_frame_review` is on | LIVE |
+| Render gate | after motion | Owner | The final cut parks at `awaiting_render_approval` while `video_render_review` is on | PLANNED until the Phase 2 PR merges |
+| Fanout and post | after the cut is approved | Social Studio, then the owner | The approved cut fans out to Social Studio as a `social_posts` row. Today the hourly publish tick would post an approved Instagram reel on its own, because it does not read `video_team_autopublish`; so in season 1 the reel row stays at `pending_review` and the owner posts it by hand with Social Studio's Post now, which double-gates video. X cannot take a video upload today, so X video is by hand as well | Fanout code path exists, never exercised; hands-off posting by valve is PLANNED (Phase 3 double-gate); X video upload PLANNED |
+
+**Five owner touches per clip: pitch, script, first frame, final cut, post.** Nothing spends before
+the script touch. Nothing publishes before the post touch.
+
+**Valves** (all on the Video tab of `/admin/homepage-team`; agents never write them). Live values as
+read 2026-09-23; the season-1 column is the plan, and the owner makes every flip.
+
+| Valve | Live 2026-09-23 | Season 1 |
+|---|---|---|
+| `video_team_enabled` | on | on |
+| `video_program_enabled` | on | on |
+| `video_frame_review` | on | on. **Money valve, owner-gated** |
+| `video_render_review` | does not exist yet | on once the Phase 2 PR ships (PLANNED) |
+| `video_team_autopublish` | off | off |
+| `video_team_auto_approve_suggestions` | **on** (docs said off) | off for season 1, owner flip pending, because while on a trend-scout row can rewrite the writers' brief with no human |
+| `video_endcard_enabled` | **on** | off (a series artifact; the show is shelved) |
+| `video_team_max_cost_cents` (per-video ceiling) | 600 as seeded by migration 065, not re-read 2026-09-23 | 600 |
+| `video_team_daily_cents` | 2000 as seeded by migration 065, not re-read 2026-09-23 | 2000 |
+| `video_team_max_runs` | **10** | 3 |
+
+**The week's clips are the calendar.** Social, content, and email build the week around the
+approved clips. Social reads the fanned-out `social_posts` rows, not the calendar, and runs clip
+days. Content and email read `videoClips` from `GET /api/team/calendar`: content expands a clip's
+fact the day after it posts, and email quotes the previous week's clip. Each `videoClips` row has
+the shape `{episodeId, productHandle, title, speaker, format, status, plannedSlotAt, postedAt?,
+permalink?, posterUrl?, fact, firstLine}`. PLANNED: the calendar field and the three playbook
+changes land with their PRs; until then those routines run as before.
+
+**Binding docs for every video run:** `creative-platform.md`, `video-clip-rules.md`,
+`video-realism-recipe.md`, and `video-owner-notes.md`, all in `docs/store-team/`. All four are
+PLANNED until they exist on main (the first two are still being drafted); a doc that is not on main
+does not bind, and no run invents its content.
 
 ---
 
@@ -337,7 +392,7 @@ Every one of these is a `pipeline_settings` row. Agents may never write `pipelin
 | `seo_curation_enabled`, `trend_scout_enabled` | Those weekly routines exit before starting a run | content tab |
 | `instagram_autopublish_enabled` | The hourly job never posts Instagram drafts. **Owner-gated.** Governs UNATTENDED posting only: the owner's Post-now click in `/admin/socials` publishes a still regardless (owner direction 2026-08-23) | social tab |
 | `x_autopublish_enabled` | The hourly job never posts X drafts. **Money valve, owner-gated** (X bills per post; paired with `x_publish_max_spend_usd_month`). Same scope: Post-now does not read it | social tab |
-| `video_frame_review` | Video frames require owner review. **Money valve, owner-gated** | `/admin/video-studio` |
+| `video_frame_review` | Video frames require owner review. **Money valve, owner-gated** | Video tab of `/admin/homepage-team` (the render queue lives in `/admin/video-studio`, the valve does not) |
 | `import_enrich_enabled` (also listed above) | Imported products never go draft to live. **Money valve, owner-gated**. This replaced the retired `deal_status: approved` metafield row that used to sit here: daily deals were retired and `deal_status` was removed catalog-wide on 2026-08-03 (see `CLAUDE.md`, Shopify Metafields), so product publishing is the gate now | `/admin/imports` |
 
 The three money valves at the bottom (import enrich, video frame review, X autopublish) are
@@ -369,7 +424,9 @@ and an owner ask must land on the blocker list or the 13:00 digest, never only i
   clicked merge. `db/schema.ts` is no longer protected; the SQL that actually changes the database
   still is.
 - **Brand, legal, and likeness judgment.** Cast approvals, charter changes ("codify"), anything
-  with legal exposure.
+  with legal exposure. **Video, season 1:** the five touches per clip in §The video lane (pitch,
+  script, first frame, final cut, post), plus the `/video-room` session. These stay his until he
+  delegates a step by valve.
 - **The five escalations in §5**, when they land. That is the intended inbox volume: rare.
 - **Turning the engine back on after a circuit break**, once you understand why it tripped.
 - **One-time setup that only an owner can do:** GitHub branch protection and the merge token, Vercel

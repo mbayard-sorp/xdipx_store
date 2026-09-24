@@ -1,5 +1,7 @@
 # Social Video Viral Checklist (38 rules, PASS/FAIL)
 
+> Superseded for season 1 by docs/store-team/video-clip-rules.md (lands with this change) (owner decision 2026-09-23). script-doctor and emma-empathy-reviewer gate product-talk clips on that file, not this one. Kept on disk for the shelved serialized program.
+
 > **Provenance note (read first):** the content strategist's original formula memo was lost; it
 > lived only in a session scratchpad and was never committed. This file is a **reconstruction**
 > from the surviving synthesis in `docs/store-team/social-video-strategy-DRAFT.md` §3. Five rules

@@ -78,12 +78,16 @@ negligible cost, and it converts a silent dead row into "gate passed at T, died 
    STOP and report.
 2. `docs/store-team/mission-brief.md` (binding); the strategy brief (`GET /api/team/brief`); it may
    carry a per-team `content` section with the week's topic slate.
-3. Calendar (`GET /api/team/calendar`) for campaign tie-ins.
+3. Calendar (`GET /api/team/calendar`) for campaign tie-ins, and its `videoClips` list for the
+   clip-expansion check in Step 3.
 4. Topic sources, in priority order: the `seoContentBrief` queue (primary — planned weekly by the
    seo-curator routine from the keyword bank), then `docs/store-team/content-plan.md` (the static
    backlog is the floor, still binding for slot themes and standing rules), then the strategy
    brief's content section. If content-plan.md is ever missing in your checkout, fall back
    gracefully and record a `step` event saying you did.
+5. `docs/store-team/creative-platform.md` (binding context once it exists): the brand idea, the
+   manifesto, and the campaign signature every surface shares. Where it and the charter disagree,
+   the charter wins.
 
 ## Step 3: Topic selection + slug pre-check
 
@@ -92,6 +96,28 @@ use `contentSlot.fallbackCategory` only per the Thursday/Sunday rules below). Th
 the weekly rhythm in content-plan.md §2 (Mon/Wed guides, Tue/Fri real-talk, Thu podcast-notes,
 Sat care, Sun comparisons/wellness-basics flex); if the two ever disagree, trust the gate and
 file a suggestion.
+
+**Clip-expansion check (at most once a week).** Read `videoClips` from `GET /api/team/calendar`.
+Each row has this shape (PLANNED: the Phase 2 calendar change builds to it; the email playbook
+references this definition):
+
+```
+{episodeId, productHandle, title, speaker, format, status, plannedSlotAt, postedAt?, permalink?,
+ posterUrl?, fact, firstLine}
+```
+
+`fact` is the single product fact the clip is built on; `firstLine` is its first spoken line.
+If a clip posted yesterday (`postedAt` set, its Instagram post live, not merely approved) and no
+Notebook post this week has already expanded a clip, today's post expands that clip: take its
+`fact`, write the post around it in today's category shape, and embed the clip (`posterUrl` linked
+to `permalink`) alongside the clip's product embed (`productHandle`), which is stock-verified in
+Step 4 like any other embed. "This week" is Monday 00:00 UTC to now; detect a prior expansion with
+`POST /api/team/event {"op":"list","team":"content","sinceDays":7}` and scan each event's `summary`
+for `clipExpansion`, ignoring events before Monday 00:00 UTC. A pending podcast brief on Thursday
+still wins, and the expansion does not carry over to a later day. When the calendar has no
+`videoClips` field, or no clip posted yesterday, skip this check and pick the topic as below.
+Record the expansion in the Step 4 `step` event's summary (`clipExpansion: <episodeId>`) so the next
+run's once-a-week check can find it.
 
 **Thursday first-check (podcast-notes):** query the pending podcast brief before anything else:
 
