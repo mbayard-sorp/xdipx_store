@@ -117,25 +117,21 @@ listed in the route header."
 (`episode-release`, reason `out_of_stock` or `stock_unverified`) and claim the batch alternate
 covering the same format:
 
-- **PLANNED (Phase 2):** a targeted claim of the alternate linked to that slot (the `alternate`
-  field on propose). Use it once the route header lists it.
-- **Until then**, with the plain claim: do not release the failed clip yet, because a released row
-  returns to `approved` and the oldest-first claim would serve it straight back. Hold it, keep
-  claiming, and render the first returned reserve row that shares the failed clip's `batchId` and
-  format (read from `concept` until `format` lands) and passes its own stock check. Hold every other
-  returned row unrendered. Stop after 6 claim calls in total. At the end of Step 4, release every
-  held row that was not enqueued, each with its reason. An out-of-stock primary also goes on the
-  report as an owner decision (reject it on `/admin/video-studio/scripts`), because it will be
-  served again next Thursday. **Caveat:** reserves are served only after every claimable primary,
-  so if older approved rows sit in the queue the 6-call cap can run out before any reserve comes
-  back. Then the slot goes unrendered and the report says so honestly; never raise the cap to chase
-  it.
+1. `POST /api/team/video-episode {"op":"episode-list","status":"approved","batchId":"<the failed
+   clip's batchId>","isReserve":true}` -> `{episodes}`. Filter the result to the row(s) that share
+   the failed clip's format (read from `concept` until `format` lands on the schema) and pick the
+   first.
+2. `POST /api/team/video-episode {"op":"episode-claim","episodeId":<that row's id>,"runId":$RUN_ID}`
+   -> `{episode}` on success, or 409 `episode_not_claimable` if it was already claimed or decided out
+   from under you (another run beat you to it, or the owner rejected it) — try the next candidate
+   from step 1, if any.
+3. Run this alternate through Step 3's own stock check like any other clip before enqueuing it. An
+   out-of-stock primary also goes on the report as an owner decision (reject it on
+   `/admin/video-studio/scripts`), because it will be served again next Thursday.
 
-Follow-up ticket (file once as `kind:'code'`, `dedupeKey:'video:claim-by-episode-id'`):
-"`episode-claim` accepts an explicit `episodeId` (the server still requires the row to be
-`approved` and still honors `video_program_enabled`), so the render routine can claim a slot's
-alternate chosen from `episode-list {status:'approved'}` by `batchId` and `isReserve`. DONE WHEN the
-op accepts `episodeId` on main and the route header documents it."
+This replaced the interim 6-call hold-and-release loop (ticket #11152, `episode-claim` now accepts
+an explicit `episodeId`): no more holding rows unrendered across a capped number of untargeted
+claims, because the alternate is found by `episode-list` and claimed directly, by id, in one shot.
 
 No alternate passes -> the slot goes unrendered this week, and the report says which and why.
 

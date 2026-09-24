@@ -70,6 +70,7 @@ import {
   reapStaleEpisodeClaims,
   decideEpisode,
   editEpisodeScript,
+  claimNextEpisode,
 } from './video-episodes.server'
 
 function episode(over: Partial<EpisodeRow> = {}): EpisodeRow {
@@ -130,6 +131,21 @@ describe('releaseEpisodeClaim', () => {
   it('refuses a missing episode', async () => {
     state.row = null
     await expect(releaseEpisodeClaim(7, 'gated')).resolves.toBe(false)
+  })
+})
+
+describe('claimNextEpisode with an explicit episodeId (ticket #11152)', () => {
+  it('claims exactly that row when it is approved, stamping the same rendering guard', async () => {
+    state.updateReturns = [{ id: 42 }]
+    const result = await claimNextEpisode({ episodeId: 42 })
+    expect(result).toEqual({ id: 42 })
+    expect(state.sets[0]).toMatchObject({ productionStatus: 'rendering' })
+    expect(state.sets[0]?.['renderStartedAt']).toBeInstanceOf(Date)
+  })
+
+  it('returns null (the route answers 409) when the row is not approved or does not exist', async () => {
+    state.updateReturns = []
+    await expect(claimNextEpisode({ episodeId: 42 })).resolves.toBeNull()
   })
 })
 

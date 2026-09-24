@@ -20,11 +20,14 @@
  *     unrenderable ever reaches the owner's batch. Cap 10 per call. Zero
  *     spend: proposing is free, which is the whole point.
  *
- *   { op: 'episode-list', seriesSlug?, status?, limit? }
+ *   { op: 'episode-list', seriesSlug?, status?, limit?, batchId?, isReserve? }
  *     -> { series, episodes, openLoops }
  *     The ledger plus the DERIVED open-loop list (opened by an aired episode,
  *     closed by none). This is the writers room's continuity read and the
- *     script-doctor's evidence source.
+ *     script-doctor's evidence source. batchId + isReserve (ticket #11152)
+ *     are how the render routine finds a failed slot's batch alternate
+ *     ({status: 'approved', batchId, isReserve: true}) before claiming it by
+ *     id.
  *
  *   { op: 'owner-edits', episodeId?, limit?, includeRoom? }
  *     -> { edits, lineNotes }
@@ -49,12 +52,17 @@
  *     per-batch owner edit ratio, needs_changes and approved rates, frame
  *     re-roll rate, hours to decision, and the threshold flags.
  *
- *   { op: 'episode-claim', runId? }
- *     -> { episode } | 404 { error: 'empty_episode_queue' }
- *     Render lane only: the oldest approved episode at/past its planned slot,
- *     else the approved evergreen reserve. Stamps production_status
- *     'rendering' so a duplicate claim cannot double-render. Gated by
- *     video_program_enabled (ships OFF; a missing row reads OFF).
+ *   { op: 'episode-claim', runId?, episodeId? }
+ *     -> { episode } | 404 { error: 'empty_episode_queue' } | 409
+ *        { error: 'episode_not_claimable', episodeId }
+ *     Render lane only: with no episodeId, the oldest approved episode
+ *     at/past its planned slot, else the approved evergreen reserve (404
+ *     empty_episode_queue when neither exists). With an explicit episodeId
+ *     (ticket #11152), a targeted claim of that one row instead — 409
+ *     episode_not_claimable when it is not (or no longer) 'approved'. Either
+ *     way, stamps production_status 'rendering' so a duplicate claim cannot
+ *     double-render. Gated by video_program_enabled (ships OFF; a missing row
+ *     reads OFF).
  *
  *   { op: 'episode-release', episodeId, reason }
  *     -> { released, episodeId, reason }  (409 when the row is not a
@@ -118,6 +126,8 @@ export async function action({ request }: ActionFunctionArgs) {
         ...(typeof b['seriesSlug'] === 'string' ? { seriesSlug: b['seriesSlug'] } : {}),
         ...(typeof b['status'] === 'string' ? { status: b['status'] } : {}),
         ...(typeof b['limit'] === 'number' ? { limit: b['limit'] } : {}),
+        ...(typeof b['batchId'] === 'string' ? { batchId: b['batchId'] } : {}),
+        ...(typeof b['isReserve'] === 'boolean' ? { isReserve: b['isReserve'] } : {}),
       })
       return Response.json(result)
     }
@@ -210,8 +220,20 @@ export async function action({ request }: ActionFunctionArgs) {
       if (!armed) {
         return Response.json({ error: 'video_program_disabled' }, { status: 403 })
       }
-      const episode = await claimNextEpisode()
-      if (!episode) return Response.json({ error: 'empty_episode_queue' }, { status: 404 })
+      // Explicit episodeId (ticket #11152): a targeted claim of a row the
+      // caller already found (typically a batch alternate via
+      // episode-list {status:'approved', batchId, isReserve:true}), instead
+      // of the oldest-first search. "no such approved row" reads as a 409
+      // here (an explicit ask that could not be honored), never the 404
+      // empty-queue answer, which means something different: nothing to claim
+      // at all.
+      const episodeId = typeof b['episodeId'] === 'number' ? b['episodeId'] : undefined
+      const episode = await claimNextEpisode(episodeId != null ? { episodeId } : {})
+      if (!episode) {
+        return episodeId != null
+          ? Response.json({ error: 'episode_not_claimable', episodeId }, { status: 409 })
+          : Response.json({ error: 'empty_episode_queue' }, { status: 404 })
+      }
       return Response.json({ episode })
     }
 
