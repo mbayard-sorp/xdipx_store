@@ -1910,6 +1910,12 @@ export const videoJobs = pgTable('video_jobs', {
   episodeId:             integer('episode_id'),
   runpodIdleConfirmedAt: timestamp('runpod_idle_confirmed_at', { withTimezone: true }),
   runpodIdleProbeJson:   jsonb('runpod_idle_probe_json').$type<RunpodIdleProbe>(),
+  // Owner override for the post-render vision gate (migration 101, ticket
+  // #11150). Set by releaseFlaggedVideoJob when the owner releases a job
+  // parked at awaiting_final_review; advancePoster reads it to skip
+  // re-running the gate (which would just re-park on the same pixels) and
+  // clears it once the job moves past the poster stage.
+  visionGateOverrideAt:  timestamp('vision_gate_override_at', { withTimezone: true }),
   createdAt:         timestamp('created_at').notNull().defaultNow(),
   updatedAt:         timestamp('updated_at').notNull().defaultNow(),
   completedAt:       timestamp('completed_at'),

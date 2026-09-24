@@ -72,6 +72,7 @@ import {
   renderTicketsSection,
   renderAdCampaignQueueSection,
   gatherParkedVideoRenders,
+  gatherParkedVideoFlagged,
   digestFingerprint,
   shouldSendDigest,
   QUEUE_FINGERPRINT_KEY,
@@ -861,6 +862,28 @@ describe('renderNeedsMikeSection', () => {
     expect(renderNeedsMikeSection({ ...emptyFacts, parkedVideoFrames: null, parkedVideoRenders: null })).not.toContain('video-studio')
     expect(renderNeedsMikeSection({ ...emptyFacts, parkedVideoRenders: { count: 0, oldestDays: null } })).not.toContain('video-studio')
   })
+
+  it('folds jobs flagged by the post-render vision gate into the same one video line (#11150)', () => {
+    const html = renderNeedsMikeSection({
+      ...emptyFacts,
+      parkedVideoFrames: { count: 1, oldestDays: 1 },
+      parkedVideoRenders: { count: 0, oldestDays: null },
+      parkedVideoFlagged: { count: 2, oldestDays: 5 },
+    })
+    expect(html).toContain('Video: 1 frame and 0 final cuts awaiting you, 2 flagged by the vision gate (oldest 5d)')
+    expect(html.match(/Video: /g)).toHaveLength(1)
+  })
+
+  it('lists flagged jobs alone when frames and cuts are both empty', () => {
+    const html = renderNeedsMikeSection({ ...emptyFacts, parkedVideoFlagged: { count: 1, oldestDays: 0 } })
+    expect(html).toContain('Video: 0 frames and 0 final cuts awaiting you, 1 flagged by the vision gate (oldest 0d)')
+  })
+
+  it('leaves the frames/cuts wording unchanged when nothing is flagged', () => {
+    const html = renderNeedsMikeSection({ ...emptyFacts, parkedVideoFrames: { count: 3, oldestDays: 4 } })
+    expect(html).toContain('Video: 3 frames and 0 final cuts awaiting you (oldest 4d)')
+    expect(html).not.toContain('flagged')
+  })
 })
 
 describe('pending video pitches (plan Phase 2b)', () => {
@@ -968,6 +991,19 @@ describe('digest fingerprint carries the video gate counts', () => {
     expect(digestFingerprint('q1', null, null, { count: 0, batchMarker: null })).toBe(none)
   })
 
+  it('a day whose only change is a newly flagged job reads as queue-changed (#11150)', () => {
+    const before = digestFingerprint('q1', { count: 1 }, { count: 0 }, null, { count: 0 })
+    const after = digestFingerprint('q1', { count: 1 }, { count: 0 }, null, { count: 1 })
+    expect(decide(after, before)).toEqual({ send: true, reason: 'queue-changed' })
+    expect(decide(after, after)).toEqual({ send: false, reason: 'queue-unchanged' })
+  })
+
+  it('no flagged jobs reads the same whether the read returned zero, failed, or was not passed', () => {
+    const none = digestFingerprint('q1', null, null)
+    expect(digestFingerprint('q1', null, null, null, null)).toBe(none)
+    expect(digestFingerprint('q1', null, null, null, { count: 0 })).toBe(none)
+  })
+
   it('unchanged counts on an unchanged queue stay quiet; null reads as zero', () => {
     expect(decide(digestFingerprint('q1', null, null), digestFingerprint('q1', { count: 0 }, { count: 0 })))
       .toEqual({ send: false, reason: 'queue-unchanged' })
@@ -993,7 +1029,7 @@ describe('digest fingerprint carries the video gate counts', () => {
       await runOwnerDigest({ force: true })
       const stored = vi.mocked(kvSet).mock.calls.find(c => c[0] === QUEUE_FINGERPRINT_KEY)?.[1] as string | undefined
       expect(stored).toBeDefined()
-      expect(stored).toMatch(/\|video:0\/0\|pitch:$/)
+      expect(stored).toMatch(/\|video:0\/0\/0\|pitch:$/)
       vi.mocked(kvGet).mockImplementation(async (key: string) => (key === QUEUE_FINGERPRINT_KEY ? stored : null) as never)
 
       // Same world: skipped as unchanged.
@@ -1070,5 +1106,32 @@ describe('gatherParkedVideoRenders', () => {
     executeMock.mockReset()
     executeMock.mockRejectedValue(new Error('db down'))
     await expect(gatherParkedVideoRenders()).resolves.toBeNull()
+  })
+})
+
+describe('gatherParkedVideoFlagged (#11150)', () => {
+  const dialect = new PgDialect()
+
+  it('counts jobs flagged by the post-render vision gate and ages them from when they parked', async () => {
+    executeMock.mockReset()
+    executeMock.mockResolvedValue({ rows: [{ n: 1, oldest_days: 0.4 }] })
+    await expect(gatherParkedVideoFlagged()).resolves.toEqual({ count: 1, oldestDays: 0 })
+    const { sql: text } = dialect.sqlToQuery(executeMock.mock.calls[0]?.[0])
+    expect(text).toContain("status = 'awaiting_final_review'")
+    expect(text).toContain('MIN(updated_at)')
+    // Not valve-gated: the gate is a hard safety check, not a spend control.
+    expect(executeMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('reads an empty queue as zero with no age', async () => {
+    executeMock.mockReset()
+    executeMock.mockResolvedValue({ rows: [{ n: 0, oldest_days: null }] })
+    await expect(gatherParkedVideoFlagged()).resolves.toEqual({ count: 0, oldestDays: null })
+  })
+
+  it('returns null rather than throwing when the read fails', async () => {
+    executeMock.mockReset()
+    executeMock.mockRejectedValue(new Error('db down'))
+    await expect(gatherParkedVideoFlagged()).resolves.toBeNull()
   })
 })

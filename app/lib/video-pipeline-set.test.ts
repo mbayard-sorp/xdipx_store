@@ -103,7 +103,7 @@ import { enqueueVideoJobSet, estimateJobCostUsd, advanceInflightVideoJobs } from
 import { estimateAvatarSpeechSeconds } from '~/lib/avatar-script'
 import { logVideoCost } from '~/lib/token-log.server'
 import { blobPut, blobFetchToBuffer } from '~/lib/blob.server'
-import { INFLIGHT_VIDEO_STATUSES, approveRenderedVideo, rejectRenderedVideo, fanOutVideoToSocialDrafts } from '~/lib/video-pipeline.server'
+import { INFLIGHT_VIDEO_STATUSES, approveRenderedVideo, rejectRenderedVideo, fanOutVideoToSocialDrafts, releaseFlaggedVideoJob, failFlaggedVideoJob } from '~/lib/video-pipeline.server'
 import { extractPoster, probeDurationSeconds } from '~/lib/video-assembly.server'
 
 const baseArgs = {
@@ -349,6 +349,7 @@ describe('render gate: awaiting_render_approval', () => {
     team: 'video',
     runId: null,
     episodeId: null as number | null,
+    visionGateOverrideAt: null as Date | null,
     createdAt: new Date(),
     updatedAt: new Date(),
     completedAt: null,
@@ -446,5 +447,51 @@ describe('render gate: awaiting_render_approval', () => {
     state.updateReturns = []
     await expect(rejectRenderedVideo(11, 'late change of heart', 'mike')).rejects.toThrow(/not awaiting final-cut approval/)
     expect(episodeMocks.markEpisodeRenderRejected).not.toHaveBeenCalled()
+  })
+
+  // ── Flagged by the post-render vision gate: awaiting_final_review (#11150) ──
+
+  it('releaseFlaggedVideoJob sets status running and stamps visionGateOverrideAt', async () => {
+    await releaseFlaggedVideoJob(11)
+    expect(state.updates[0]).toMatchObject({ status: 'running', error: null })
+    expect(state.updates[0]?.['visionGateOverrideAt']).toBeInstanceOf(Date)
+  })
+
+  it('releaseFlaggedVideoJob throws when nothing was flagged (double click, or already decided)', async () => {
+    state.updateReturns = []
+    await expect(releaseFlaggedVideoJob(11)).rejects.toThrow(/not awaiting final review/)
+  })
+
+  it('failFlaggedVideoJob requires a reason and writes nothing without one', async () => {
+    await expect(failFlaggedVideoJob(11, '   ')).rejects.toThrow(/reason is required/)
+    expect(state.updates).toHaveLength(0)
+  })
+
+  it('failFlaggedVideoJob fails the job with the reason', async () => {
+    await failFlaggedVideoJob(11, 'still shows the extra digit')
+    expect(state.updates[0]).toMatchObject({ status: 'failed', stage: 'failed' })
+    expect(String(state.updates[0]?.['error'])).toMatch(/Flagged by the post-render vision gate, failed by owner: still shows the extra digit/)
+  })
+
+  it('failFlaggedVideoJob refuses a job that is not flagged', async () => {
+    state.updateReturns = []
+    await expect(failFlaggedVideoJob(11, 'late change of heart')).rejects.toThrow(/not awaiting final review/)
+  })
+
+  it('advancePoster skips the gate entirely on an owner-released job and clears the override', async () => {
+    state.selectResults = [
+      [{ ...posterJob, visionGateOverrideAt: new Date() }],
+      [{ id: 90, blobUrl: 'https://blob.test/video/job-cut/final.mp4' }],
+    ]
+    vi.mocked(blobFetchToBuffer).mockResolvedValue(Buffer.from('mp4'))
+    vi.mocked(extractPoster).mockResolvedValue(Buffer.from('jpg'))
+    vi.mocked(probeDurationSeconds).mockResolvedValue(8)
+    vi.mocked(blobPut).mockResolvedValue({ url: 'https://blob.test/video/job-cut/poster.jpg' } as never)
+    gateFramesMock.mockClear()
+    const result = await advanceInflightVideoJobs()
+    expect(gateFramesMock).not.toHaveBeenCalled()
+    expect(result.parked).toBe(1) // video_render_review defaults ON
+    const terminal = state.updates.find(u => u['stage'] === 'done')
+    expect(terminal).toMatchObject({ status: 'awaiting_render_approval', visionGateOverrideAt: null })
   })
 })
