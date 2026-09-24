@@ -87,6 +87,15 @@ describe('estimateVideoCostUsd', () => {
     expect(estimateVideoCostUsd('fal/grok-imagine-1.5', -5)).toBe(0)
     expect(estimateVideoCostUsd('mystery/video', 1)).toBeGreaterThan(0)
   })
+
+  // ADR-016 bake-off 2026-09-23. A missing row would fall through to the
+  // 0.40/s premium fallback and overprice every Atlas job ~3x to 20x.
+  it('prices the Atlas tiers from the bake-off, not the premium fallback', () => {
+    expect(estimateVideoCostUsd('atlascloud/infinitetalk', 10)).toBe(0.6)       // ~$0.60 per 10 s observed
+    expect(estimateVideoCostUsd('atlascloud/grok-imagine-1.5', 10)).toBe(1.41)  // data.price for 10 s at 720p
+    expect(estimateVideoCostUsd('atlascloud/wan-2.7-i2v', 5)).toBe(0.5)         // data.price for 5 s at 720P
+    expect(estimateVideoCostUsd('atlascloud/wan-2.2-turbo-i2v', 5)).toBe(0.1)   // list $0.02/s
+  })
 })
 
 /**

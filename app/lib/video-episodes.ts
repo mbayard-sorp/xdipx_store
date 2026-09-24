@@ -125,6 +125,20 @@ export function mapSpeakerToPresenter(speaker: string | null | undefined, cast: 
  * so a pitch never trips the enqueue's byte-identity guard.
  */
 
+/**
+ * Production mode, the writers' call per clip (owner ruling 2026-09-23):
+ * 'talking' is a cast member on camera performing the line in their own
+ * ElevenLabs voice (InfiniteTalk); 'voiceover' is a silent Wan render with the
+ * cast voice laid over it. Default 'talking' when a pitch names none.
+ */
+export const VIDEO_MODES = ['talking', 'voiceover'] as const
+export type VideoMode = (typeof VIDEO_MODES)[number]
+export const DEFAULT_VIDEO_MODE: VideoMode = 'talking'
+
+export function isVideoMode(v: unknown): v is VideoMode {
+  return typeof v === 'string' && (VIDEO_MODES as readonly string[]).includes(v)
+}
+
 export const PITCH_FACT_SOURCES = ['spec', 'material', 'reviews'] as const
 export type PitchFactSource = (typeof PITCH_FACT_SOURCES)[number]
 
@@ -143,12 +157,14 @@ export interface EpisodePitch {
   readAudioStale?: boolean
   productHandle: string
   alternate?: boolean
+  /** Talking head with the product, or voiceover over a silent render. Default 'talking'. */
+  mode: VideoMode
 }
 
 /** The flat per-clip keys episode-propose accepts for the pitch. */
 export const PITCH_KEYS = [
   'format', 'speaker', 'listener', 'fact', 'factSource', 'laugh',
-  'firstFrameConcept', 'estCostUsd', 'readAudioUrl', 'productHandle', 'alternate',
+  'firstFrameConcept', 'estCostUsd', 'readAudioUrl', 'productHandle', 'alternate', 'mode',
 ] as const
 
 /** True when a proposed clip carries any pitch key (flat or under `pitch`). */
@@ -192,6 +208,9 @@ export function validatePitch(raw: Record<string, unknown>, where: string): Epis
   if (typeof est !== 'number' || !Number.isFinite(est) || est < 0) {
     throw new Error(`${where}.estCostUsd must be a non-negative number`)
   }
+  if (o['mode'] != null && !isVideoMode(o['mode'])) {
+    throw new Error(`${where}.mode must be one of ${VIDEO_MODES.join('|')}`)
+  }
   if (o['alternate'] !== undefined && typeof o['alternate'] !== 'boolean') {
     throw new Error(`${where}.alternate must be a boolean`)
   }
@@ -212,6 +231,7 @@ export function validatePitch(raw: Record<string, unknown>, where: string): Epis
     ...(o['readAudioUrl'] != null ? { readAudioUrl: validateAudioUrl(o['readAudioUrl'], `${where}.readAudioUrl`) } : {}),
     productHandle: reqStr(o, 'productHandle', where, 255),
     ...(o['alternate'] === true ? { alternate: true } : {}),
+    mode: isVideoMode(o['mode']) ? o['mode'] : DEFAULT_VIDEO_MODE,
   }
 }
 
@@ -222,7 +242,8 @@ export function readPitch(script: VideoScriptJson | null | undefined): EpisodePi
   if (!p || typeof p !== 'object' || Array.isArray(p)) return null
   const o = p as Record<string, unknown>
   if (typeof o['productHandle'] !== 'string' || typeof o['format'] !== 'string') return null
-  return o as unknown as EpisodePitch
+  // Pitches stored before the mode field read as the default.
+  return { ...(o as unknown as EpisodePitch), mode: isVideoMode(o['mode']) ? o['mode'] : DEFAULT_VIDEO_MODE }
 }
 
 /* ── Line notes ─────────────────────────────────────────────────────────────

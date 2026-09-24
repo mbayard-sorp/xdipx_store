@@ -7,9 +7,9 @@
  * would implement so a swap never touches calling code. The same shape the
  * social-publish and ad-publish registries already use.
  *
- * SCAFFOLD ONLY. No adapter beyond the thin fal wrapper exists yet, no atlascloud
- * key is used, and no production call path imports this. The follow-up adapter
- * build is GATED on ADR-010 (see docs/media-providers-atlascloud-spike.md).
+ * Status (ADR-016, 2026-09-23): the video pipeline's clip and avatar stages
+ * call the VideoProvider seam through registry.server.ts. Adapters: fal
+ * (legacy, historical rows only), atlascloud (primary), wavespeed (mirror).
  *
  * The neutral shapes below are deliberately structurally identical to fal's
  * current inputs/outputs, so the fal wrapper delegates with zero mapping. A
@@ -19,8 +19,13 @@
  * Pure types (no runtime, no server-only imports): safe to import anywhere.
  */
 
-/** Every media provider the seam knows. `atlascloud` is scaffolded, not wired. */
-export type ProviderId = 'fal' | 'atlascloud'
+/**
+ * Every media provider the seam knows. Video (ADR-016, 2026-09-23): `atlascloud`
+ * is the primary, `wavespeed` its mirror, `fal` stays registered only so
+ * historical rows resolve. RunPod is not a seam provider; its pipeline branches
+ * were removed in ADR-016 and its module is deleted in Phase 4.
+ */
+export type ProviderId = 'fal' | 'atlascloud' | 'wavespeed'
 
 /* ─── Still image generation ──────────────────────────────────────────── */
 
@@ -55,6 +60,12 @@ export interface ImageProvider {
 
 /* ─── Video generation (async queue) ──────────────────────────────────── */
 
+/**
+ * Structurally identical to fal-video's QueueHandle and to the
+ * `providerRequestIds` jsonb shape on video_jobs (db/schema.ts), so a new
+ * provider needs no schema change. Providers with one poll endpoint (Atlas,
+ * Wavespeed) set statusUrl and responseUrl to the same URL.
+ */
 export interface VideoQueueHandle {
   requestId: string
   statusUrl: string
@@ -73,6 +84,19 @@ export interface VideoGenInput {
   negativePrompt?: string
   /** Speech track URL for audio-driven (talking-head) models. */
   audioUrl?: string
+  /**
+   * The gated line a native-audio model speaks in its own voice (Grok on
+   * Atlas has no dialogue field; the adapter writes it into the prompt as
+   * `She looks into the lens and says: "<line>"`). Ignored by models that
+   * take an audio track.
+   */
+  spokenLine?: string
+}
+
+/** Result of one status poll. `error` carries the provider's own message on FAILED. */
+export interface VideoStatusResult {
+  status: VideoQueueStatus
+  error?: string
 }
 
 export interface VideoGenResult {
@@ -91,7 +115,18 @@ export interface VideoProvider {
    * Wan 2.7 Spicy is image/reference-to-video and does NOT satisfy it.
    */
   supportsAudioDriven: boolean
+  /**
+   * `modelId` is the store's tier id (a VideoModelId such as
+   * 'italk-atlas'); each adapter maps it to its own endpoint.
+   */
   submit(modelId: string, input: VideoGenInput): Promise<VideoQueueHandle>
-  status(handle: VideoQueueHandle): Promise<{ status: VideoQueueStatus }>
+  status(handle: VideoQueueHandle): Promise<VideoStatusResult>
   result(handle: VideoQueueHandle): Promise<VideoGenResult>
+  /** Whether this adapter can render the given tier id. Used by the mirror picker. */
+  supportsModel?(modelId: string): boolean
+  /**
+   * Whether a persisted handle was issued by this provider (by poll host).
+   * Lets the poller route a handle the mirror issued back to the mirror.
+   */
+  ownsHandle?(handle: VideoQueueHandle): boolean
 }

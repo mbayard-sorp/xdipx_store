@@ -47,7 +47,8 @@ import {
 import { enqueueVideoJob, enqueueVideoJobSet, listVideoJobs, estimateJobCostUsd, findReusableSceneFrame, isMultiSceneScript, PRESENTER_RE } from '~/lib/video-pipeline.server'
 import { assertEpisodeMatchesScript, linkEpisodeToJob } from '~/lib/video-episodes.server'
 import { getPipelineSetting } from '~/lib/feed-processor.server'
-import { VIDEO_MODELS, isVideoModelId, tierIneligibility } from '~/lib/fal-video.server'
+import { VIDEO_MODELS, isVideoModelId, tierIneligibility, DEFAULT_TIER_BY_MODE, modeTierMismatch } from '~/lib/fal-video.server'
+import { VIDEO_MODES, isVideoMode, readPitch, type VideoMode } from '~/lib/video-episodes'
 import { getApprovedCastMembers } from '~/lib/sanity.server'
 import { db } from '~/lib/db.server'
 import { socialPosts } from '../../db/schema'
@@ -63,6 +64,8 @@ interface ValidatedEnqueueCommon {
   spec: (typeof VIDEO_MODELS)[keyof typeof VIDEO_MODELS]
   script: VideoScriptJson
   platforms: string[]
+  /** The writers' production mode, when the caller named one. */
+  mode?: VideoMode
 }
 
 /**
@@ -81,6 +84,10 @@ function validateEnqueueCommon(b: Record<string, unknown>, scriptField: string):
   if (!PRESENTER_RE.test(presenter)) {
     return new Response('Bad Request: presenter must be none | emma | friend:{slug}', { status: 400 })
   }
+  if (b['mode'] != null && !isVideoMode(b['mode'])) {
+    return new Response(`Bad Request: mode must be one of ${VIDEO_MODES.join('|')}`, { status: 400 })
+  }
+  const mode = isVideoMode(b['mode']) ? b['mode'] : undefined
   if (!isVideoModelId(b['modelTier'])) {
     return new Response(`Bad Request: modelTier must be one of ${Object.keys(VIDEO_MODELS).join('|')}`, { status: 400 })
   }
@@ -92,9 +99,27 @@ function validateEnqueueCommon(b: Record<string, unknown>, scriptField: string):
     return Response.json({ error: ineligible.code, detail: ineligible.message }, { status: 400 })
   }
   const spec = VIDEO_MODELS[b['modelTier']]
+  // Owner-only tiers (grok-atlas: xAI's own voice, owner ruling 2026-09-23)
+  // are never routed by a routine; the studio composer may still select them.
+  if (spec.ownerOnly) {
+    return Response.json({
+      error: 'owner_only_tier',
+      detail: `${b['modelTier']} is owner-only (it speaks in its own voice, not the cast's); routines use ${DEFAULT_TIER_BY_MODE.talking} or ${DEFAULT_TIER_BY_MODE.voiceover}`,
+    }, { status: 400 })
+  }
+  if (mode) {
+    const mismatch = modeTierMismatch(mode, b['modelTier'])
+    if (mismatch) return Response.json({ error: 'mode_tier_mismatch', detail: mismatch }, { status: 400 })
+  }
   const script = b[scriptField]
   if (!script || typeof script !== 'object' || Array.isArray(script)) {
     return new Response(`Bad Request: ${scriptField} object required (framePrompt, motionPrompt, captions)`, { status: 400 })
+  }
+  if (mode === 'voiceover') {
+    const vo = (script as VideoScriptJson).voiceover
+    if (typeof vo !== 'string' || !vo.trim()) {
+      return new Response(`Bad Request: mode 'voiceover' requires ${scriptField}.voiceover`, { status: 400 })
+    }
   }
   // Multi-scene (op:'enqueue' only — enqueue-set does not support scenes; a
   // baseScriptJson.scenes array is left untouched and validated the normal
@@ -137,6 +162,7 @@ function validateEnqueueCommon(b: Record<string, unknown>, scriptField: string):
     spec,
     script: script as VideoScriptJson,
     platforms,
+    ...(mode ? { mode } : {}),
   }
 }
 
@@ -149,6 +175,9 @@ function validateEnqueueCommon(b: Record<string, unknown>, scriptField: string):
  */
 async function withDefaultModelTier(b: Record<string, unknown>): Promise<Record<string, unknown>> {
   if (typeof b['modelTier'] === 'string' && b['modelTier']) return b
+  // A named production mode picks its tier (owner ruling 2026-09-23); the
+  // stored setting only applies when the caller named neither.
+  if (isVideoMode(b['mode'])) return { ...b, modelTier: DEFAULT_TIER_BY_MODE[b['mode']] }
   const v = await getPipelineSetting(VIDEO_EXTRA_KEYS.defaultModelTier).catch(() => null)
   const modelTier = isVideoModelId(v) ? v : VIDEO_DEFAULT_MODEL_TIER_DEFAULT
   return { ...b, modelTier }
@@ -176,7 +205,15 @@ export async function action({ request }: ActionFunctionArgs) {
       const episodeId = typeof b['episodeId'] === 'number' ? b['episodeId'] : undefined
       if (episodeId !== undefined) {
         try {
-          await assertEpisodeMatchesScript(episodeId, v.script)
+          const ep = await assertEpisodeMatchesScript(episodeId, v.script)
+          // The writers decided the mode on the pitch; a render that ignores
+          // it is refused, whether or not the payload repeats it.
+          const pitchMode = readPitch(ep.scriptJson)?.mode
+          if (pitchMode && v.mode && pitchMode !== v.mode) {
+            return Response.json({ error: 'mode_tier_mismatch', detail: `payload mode '${v.mode}' differs from the approved pitch's '${pitchMode}'` }, { status: 400 })
+          }
+          const mismatch = pitchMode ? modeTierMismatch(pitchMode, v.modelTier) : null
+          if (mismatch) return Response.json({ error: 'mode_tier_mismatch', detail: `approved pitch: ${mismatch}` }, { status: 400 })
         } catch (err) {
           if (err instanceof Response) return err
           throw err
@@ -204,6 +241,7 @@ export async function action({ request }: ActionFunctionArgs) {
         presenter: v.presenter,
         scriptJson: v.script,
         modelTier: v.modelTier,
+        ...(v.mode ? { mode: v.mode } : {}),
         durationSeconds,
         targetPlatforms: v.platforms,
         ...(typeof b['aiDisclosure'] === 'boolean' ? { aiDisclosure: b['aiDisclosure'] } : {}),
@@ -335,6 +373,8 @@ export async function action({ request }: ActionFunctionArgs) {
             audioDriven: !!spec.audioDriven,
             lipsync: !!spec.lipsync,
             allowedDurations: spec.allowedDurations,
+            // Owner-only: the team API refuses it; routines must not route it.
+            ownerOnly: !!spec.ownerOnly,
             example8sCostUsd: estimateJobCostUsd(
               id as keyof typeof VIDEO_MODELS,
               exampleSeconds,
@@ -361,6 +401,9 @@ export async function action({ request }: ActionFunctionArgs) {
         tones: VIDEO_TONES,
         platforms: SOCIAL_PLATFORMS,
         models,
+        // The writers pick the mode per clip; the tier follows unless named.
+        modes: VIDEO_MODES,
+        defaultTierByMode: DEFAULT_TIER_BY_MODE,
         sceneKit,
         cast: cast.map(m => ({ slug: m.slug, name: m.name, role: m.role, voiceId: m.voiceId })),
       })

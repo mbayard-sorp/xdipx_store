@@ -10,10 +10,18 @@
  * GPU worker that rejects the mode after billing for its boot.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { VIDEO_MODELS, tierIneligibility, eligibleVideoModelIds, type VideoModelId } from './fal-video.server'
+import { VIDEO_MODELS, tierIneligibility, eligibleVideoModelIds, workerModeIneligibility, type VideoModelId } from './fal-video.server'
 import { runpodWorkerModes, runpodWorkerSupportsMode } from './runpod-video.server'
 
 afterEach(() => { vi.unstubAllEnvs() })
+
+const ATLAS_TIERS: VideoModelId[] = ['italk-atlas', 'grok-atlas', 'wan27-atlas', 'wan22turbo-atlas']
+const RUNPOD_TIERS: VideoModelId[] = ['wan22-i2v', 'wan22-t2v', 'wan22-s2v']
+
+function keys(atlas: string, wavespeed = ''): void {
+  vi.stubEnv('ATLAS_CLOUD_API_KEY', atlas)
+  vi.stubEnv('WAVESPEED_API_KEY', wavespeed)
+}
 
 describe('runpodWorkerModes', () => {
   it('defaults to what the DEPLOYED image implements, not what the repo source does', () => {
@@ -45,20 +53,36 @@ describe('tierIneligibility', () => {
     }
   })
 
-  it('allows the RunPod tiers whose mode the deployed image implements', () => {
-    expect(tierIneligibility('wan22-i2v')).toBeNull()
-    expect(tierIneligibility('wan22-t2v')).toBeNull()
-  })
-
-  it('refuses the s2v tier while the deployed image lacks the mode', () => {
-    const why = tierIneligibility('wan22-s2v')
-    expect(why?.code).toBe('worker_mode_unavailable')
-    expect(why?.message).toMatch(/s2v/)
-  })
-
-  it('allows the s2v tier once the deployed image declares the mode', () => {
+  it('retires every RunPod tier (ADR-016), whatever modes the worker declares', () => {
     vi.stubEnv('RUNPOD_WORKER_MODES', 'i2v,t2v,s2v')
-    expect(tierIneligibility('wan22-s2v')).toBeNull()
+    for (const id of RUNPOD_TIERS) {
+      const why = tierIneligibility(id)
+      expect(why?.code).toBe('retired_provider')
+      expect(why?.message).toMatch(/RunPod/)
+    }
+  })
+
+  it('allows every Atlas tier when the Atlas key is set', () => {
+    keys('atlas-key')
+    for (const id of ATLAS_TIERS) expect(tierIneligibility(id)).toBeNull()
+  })
+
+  it('refuses every Atlas tier as provider_not_configured when no key is set', () => {
+    keys('')
+    for (const id of ATLAS_TIERS) {
+      const why = tierIneligibility(id)
+      expect(why?.code).toBe('provider_not_configured')
+      expect(why?.message).toMatch(/ATLAS_CLOUD_API_KEY/)
+    }
+  })
+
+  it('keeps a mirrored Atlas tier eligible on the Wavespeed key alone, and only those', () => {
+    keys('', 'ws-key')
+    expect(tierIneligibility('italk-atlas')).toBeNull()
+    expect(tierIneligibility('wan22turbo-atlas')).toBeNull()
+    // No like-for-like mirror: an Atlas outage parks these rather than downgrading them.
+    expect(tierIneligibility('grok-atlas')?.code).toBe('provider_not_configured')
+    expect(tierIneligibility('wan27-atlas')?.code).toBe('provider_not_configured')
   })
 
   it('never de-registers a tier: historical rows still resolve their spec', () => {
@@ -73,42 +97,36 @@ describe('tierIneligibility', () => {
 })
 
 describe('required worker mode is declared, not inferred (ticket #5934)', () => {
+  // The worker-mode check survives as workerModeIneligibility until Phase 4
+  // deletes RunPod; tierIneligibility no longer reaches it (every RunPod tier
+  // is retired first).
   it('checks each runpod tier against the mode it actually submits', () => {
-    // The first cut derived this as `audioDriven ? 's2v' : 'i2v'`, so wan22-t2v
-    // was checked against 'i2v'. Harmless while both are deployed, wrong the
-    // moment they are not — and "the app assumed a worker capability" is the
-    // exact bug this whole rule exists to prevent.
     expect(VIDEO_MODELS['wan22-i2v'].workerMode).toBe('i2v')
     expect(VIDEO_MODELS['wan22-t2v'].workerMode).toBe('t2v')
     expect(VIDEO_MODELS['wan22-s2v'].workerMode).toBe('s2v')
   })
 
-  it('refuses wan22-t2v when the worker implements i2v but not t2v', () => {
+  it('still names the missing mode when asked directly', () => {
     vi.stubEnv('RUNPOD_WORKER_MODES', 'i2v')
-    expect(tierIneligibility('wan22-i2v')).toBeNull()
-    const why = tierIneligibility('wan22-t2v')
-    expect(why?.code).toBe('worker_mode_unavailable')
-    expect(why?.message).toMatch(/t2v/)
-  })
-
-  it('every runpod tier declares a mode, so none can skip the check', () => {
-    const runpod = (Object.keys(VIDEO_MODELS) as VideoModelId[]).filter(id => VIDEO_MODELS[id].provider === 'runpod')
-    expect(runpod.length).toBeGreaterThan(0)
-    for (const id of runpod) expect(VIDEO_MODELS[id].workerMode).toBeTruthy()
+    expect(workerModeIneligibility('wan22-i2v')).toBeNull()
+    expect(workerModeIneligibility('wan22-t2v')?.code).toBe('worker_mode_unavailable')
   })
 })
 
 describe('eligibleVideoModelIds', () => {
-  it('is exactly the two live wan22 tiers today', () => {
-    expect(eligibleVideoModelIds()).toEqual(['wan22-i2v', 'wan22-t2v'])
+  it('is exactly the four Atlas tiers when Atlas is keyed', () => {
+    keys('atlas-key')
+    expect(eligibleVideoModelIds()).toEqual(['italk-atlas', 'grok-atlas', 'wan27-atlas', 'wan22turbo-atlas'])
   })
 
-  it('includes the default tier — otherwise every enqueue that omits modelTier fails', () => {
-    expect(eligibleVideoModelIds()).toContain('wan22-i2v')
+  it('is empty when no video provider is keyed, which is the honest state', () => {
+    keys('')
+    expect(eligibleVideoModelIds()).toEqual([])
   })
 
-  it('leaves the program with NO talking tier until s2v is deployed, which is the honest state', () => {
+  it('offers a talking tier again: InfiniteTalk, the audio-driven default', () => {
+    keys('atlas-key')
     const talking = eligibleVideoModelIds().filter(id => VIDEO_MODELS[id].audioDriven || VIDEO_MODELS[id].lipsync)
-    expect(talking).toEqual([])
+    expect(talking).toEqual(['italk-atlas'])
   })
 })
