@@ -140,7 +140,7 @@ Positioned for AI-influencer creators, not product catalogs. Nothing here beats 
 
 Atlas is already the still provider, already behind the ADR-010 provider seam, already paid on a
 prepaid balance, and it hosts the three models this plan needs: Grok Imagine v1.5 for short native
-dialogue clips ($0.08/s, 1 to 15 s, lipsync in the same pass), Wan 2.2 Turbo Spicy and Wan 2.7
+dialogue clips ($0.08/s, 1 to 15 s, lipsync in the same pass; superseded by §4.1, 2026-09-23), Wan 2.2 Turbo Spicy and Wan 2.7
 Spicy for silent product motion, and InfiniteTalk for up to 10 minutes of talking head from one
 frame and one audio file. The spike doc (`docs/media-providers-atlascloud-spike.md`) called the
 talking tier the "HARD blocker" for Atlas; that was written before InfiniteTalk was listed there.
@@ -183,6 +183,10 @@ Compare: the series bible budgeted $2 to $3 per 60-second episode and shipped ze
 - **One speaker on camera,** a cast member or Emma, talking to one viewer. A second cast member may
   appear silent (the listener). Product visible in the first two seconds, in hand or on the body
   where 3.2c allows.
+- **Two production modes, chosen by the writers per clip** (owner ruling 2026-09-23, superseding
+  the Grok routing in §3.5, the video-producer row in §5, and the week 1 and week 2 items in §8): `talking` puts the cast member on camera on InfiniteTalk
+  720p, `voiceover` shows the product in her hands on Wan 2.7 with the same ElevenLabs cast voice
+  laid over, and Grok is not routed because every spoken word must be the speaker's cast voice.
 - **One product, one claim, one laugh.** The claim is a spec or an aggregated reviewer pattern,
   stated plainly. The laugh is the cast member's personality doing something with that fact.
 - **Spoken register 9, plain** (bible amendment 2026-09-04 stands). Caption register per platform:
@@ -227,7 +231,7 @@ agent-editor, one PR each, so the release engine can merge them.
 | episode-writer | 60 s five-beat episodes, captions, site cut | Writes the 15 to 30 s script per clip on the 4.3 rules: beat sheet (3 beats max), spoken lines, first-frame brief for social-art-director, two captions (IG at 9 by implication, X at 6 to 7). Still never writes framePrompt or motionPrompt. |
 | script-doctor | 38-rule PASS/FAIL, part-2 test, continuity test | 7-rule PASS/FAIL plus the read-aloud test. Returns REWRITE THIS LINE. BLOCK authority stays on rule 4 and rule 5 only. |
 | emma-empathy-reviewer | Voice gate, 28 or 38 rule verdicts on scripts | Voice gate unchanged, but verdicts on the 7 rules only. |
-| video-producer | Enqueues on RunPod; fal images only | Enqueues on Atlas: Grok Imagine v1.5 for clips with a spoken line up to 15 s, InfiniteTalk from the cast frame plus ElevenLabs audio for 15 to 30 s, Wan Spicy i2v for silent product beats. Wavespeed is the mirror. Same frame gate, same byte-identical spoken-text assertion. |
+| video-producer | Enqueues on RunPod; fal images only | Enqueues on Atlas: Grok Imagine v1.5 for clips with a spoken line up to 15 s (superseded by §4.1, 2026-09-23), InfiniteTalk from the cast frame plus ElevenLabs audio for 15 to 30 s, Wan Spicy i2v for silent product beats. Wavespeed is the mirror. Same frame gate, same byte-identical spoken-text assertion. |
 | social-media-manager | Stills calendar, one IG plus one X companion daily | Reels on clip days (one to three a week to start), the same clip on X once upload ships, daily stills continue as the base layer. Caption discipline unchanged. |
 
 Unchanged: social-art-director (first-frame briefs, now for video first frames), social-publish-gate,
@@ -310,7 +314,7 @@ state where social, content, and email each choose subjects independently.
 
 **Week 2: wire it.**
 
-- [ ] Code PR: Atlas video adapter behind the ADR-010 seam (Grok, InfiniteTalk, Wan Spicy tiers),
+- [ ] Code PR: Atlas video adapter behind the ADR-010 seam (Grok (superseded by §4.1, 2026-09-23), InfiniteTalk, Wan Spicy tiers),
       Wavespeed mirror, RunPod tiers marked ineligible. Owner merge: `video-worker` paths are
       cost-adjacent, treat as protected.
 - [ ] Code PR: X chunked video upload in `social-publish/x.server.ts`.

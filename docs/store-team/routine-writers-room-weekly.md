@@ -111,6 +111,9 @@ Per clip, the showrunner fixes:
 
 - **product**: the shortlist `handle`;
 - **format**: one of the seven;
+- **mode**: `talking` or `voiceover`, proposed by `episode-writer` with one reason and ratified
+  here (`video-clip-rules.md` §6; routing in `video-realism-recipe.md` §6). The writers own this
+  decision; the render never changes it;
 - **speaker**: an approved cast slug from `config.cast` (or `emma`);
 - **listener**: a second cast slug if the format has a silent listener, else none;
 - **fact**: exactly one, with its source class (from creative-platform §11 or the product's PDP
@@ -119,7 +122,8 @@ Per clip, the showrunner fixes:
 - **first-frame concept**: per `video-realism-recipe.md` §1 to §4 (camera, ground lock, window
   key, named garment, the category grip at the sternum, the one story cue, the full §4 negatives);
 - **est cost**: dollars, from the Step 2 item 11 rates for the tier the recipe routes it to
-  (InfiniteTalk 720p by default, recipe §6), and under the per-video ceiling.
+  (`italk-atlas` for `talking`, `wan27-atlas` for `voiceover`, recipe §6), and under the per-video
+  ceiling.
 
 Then, per clip, in this order:
 
@@ -150,14 +154,14 @@ names the defect; fix it and resend the whole batch, never a partial one.
  "episodes":[{
    "logline":"<one sentence, 240 chars max>",
    "formula":"<a live formula from config.formulas>",
-   "concept":"<format, fact with source class, laugh, first-frame concept>",
+   "concept":"mode: <talking|voiceover> (<one reason>); <format, fact with source class, laugh, first-frame concept>",
    "castSlugs":["<speaker>","<listener if any>"],
    "productPlacements":[{"handle":"<shortlist handle>","role":"considered","mentionType":"spec_cited"}],
    "scriptJson":{ "...": "the script as written and gated" },
    "plannedSlotAt":"<ISO, the render Thursday 13:00 UTC>",
    "isReserve":false,
    "gateVerdicts":{"doctor":"<verdict>","voice":"<verdict>"},
-   "format":"...","speaker":"...","listener":"...","fact":"...","factSource":"...",
+   "format":"...","mode":"<talking|voiceover>","speaker":"...","listener":"...","fact":"...","factSource":"...",
    "laugh":"...","firstFrameConcept":"...","estCostUsd":0,"readAudioUrl":"...",
    "productHandle":"...","alternate":false
  }]}
@@ -166,11 +170,12 @@ names the defect; fix it and resend the whole batch, never a partial one.
 Live today on main: `logline`, `formula` (required, validated against `config.formulas`),
 `concept`, `castSlugs`, `productPlacements` (`role` one of `considered|compared|gifted|rejected`,
 `mentionType` one of `spec_cited|review_pattern|price|category`), `scriptJson`, `modelTier`,
-`plannedSlotAt`, `isReserve`, `gateVerdicts`. **PLANNED (Phase 2):** `format`, `speaker`,
+`plannedSlotAt`, `isReserve`, `gateVerdicts`. **PLANNED (Phase 2):** `format`, `mode`, `speaker`,
 `listener`, `fact`, `factSource`, `laugh`, `firstFrameConcept`, `estCostUsd`, `readAudioUrl`,
 `productHandle`, `alternate`. Until they land the server ignores them, so every load-bearing value
 is also carried in a live field: the product in `productPlacements`, speaker and listener in
-`castSlugs`, the format, fact, laugh and first-frame concept in `concept`, and each alternate as
+`castSlugs`, the mode (as "mode: talking" or "mode: voiceover" with its reason), format, fact,
+laugh and first-frame concept in `concept`, and each alternate as
 `isReserve:true` (the render claim only reaches a reserve after every claimable slot).
 
 **Format to formula.** Both `episode-propose` and the render's `enqueue` validate `formula` against
@@ -208,7 +213,7 @@ report.
   render playbook).
 
 Post a run event (`phase:'slate'`) summarizing the batch: `batchId`, each clip's product, format,
-speaker and est cost, and the batch total.
+mode with the writers' one-line reason, speaker and est cost, and the batch total.
 
 ## Step 5: Retro
 

@@ -38,8 +38,8 @@ curl -s "$BASE_URL/api/team/gate?team=video&excludeRun=$RUN_ID" -H "x-team-secre
 `models`. Any of these missing or off -> skip honestly with the reason. Never enqueue from a script
 that did not come from an approved ledger row.
 
-**Tier gate (until Phase 2):** the Atlas tier ids (`italk-atlas`, `grok-atlas`,
-`wan27-spicy-atlas`) land with the Phase 2 provider seam. If **none of the three** is in
+**Tier gate (until Phase 2):** the Atlas tier ids (`italk-atlas`, `wan27-atlas`,
+`wan22turbo-atlas`) land with the Phase 2 provider seam. If **none of the three** is in
 `config.models`, **stop before claiming**: file the owner blocker below, post a `skipped` event with
 reason `atlas_tier_not_live`, finish `status:'skipped'`, exit. (If some are present, a clip whose
 routed tier is missing is released at Step 4 with reason `tier_not_live`.) Never enqueue on a
@@ -51,7 +51,7 @@ default tier when it is absent).
  "title":"Atlas video tiers not eligible on main","category":"merge",
  "sourceRef":"<Phase 2 provider-seam PR url>",
  "unblocks":"Thursday video render of owner-approved clips on Atlas Cloud",
- "evidence":"config.models on run <RUN_ID> lists <ids>; none of italk-atlas, grok-atlas, wan27-spicy-atlas"}
+ "evidence":"config.models on run <RUN_ID> lists <ids>; none of italk-atlas, wan27-atlas, wan22turbo-atlas"}
 ```
 
 Category `merge` derives a `pr_merged` probe from `sourceRef`, so the row clears itself when the PR
@@ -158,10 +158,24 @@ the writers room stores the speaker at `castSlugs[0]` and the listener, if any, 
   blocker naming both strings, release the claim, and move to the next clip. The server runs the same
   comparison and answers 409 (403 if the row is not approved); hitting either means this assertion
   was skipped, which is itself a finding.
-- **Tier.** InfiniteTalk 720p (`italk-atlas`) is the default for every talking clip. Grok
-  Imagine (`grok-atlas`) only for a clip under 15 s, and only after one recorded A/B against
-  InfiniteTalk on the same first frame. Wan 2.7 Spicy (`wan27-spicy-atlas`) only for the silent
-  3 to 5 s inserts. All three ids are Phase 2; Step 1's tier gate stops the run until they exist.
+- **Tier, by the row's mode** (the writers chose it; `video-realism-recipe.md` §6), read from
+  `mode`, or until Phase 2 from the `mode:` prefix in `concept`; a row with no mode is released
+  with reason `no_mode`, never guessed. `talking` ->
+  InfiniteTalk 720p (`italk-atlas`) with the ElevenLabs read of the spoken line. `voiceover` ->
+  Wan 2.7 (`wan27-atlas`) with the ElevenLabs voiceover of the spoken line overdubbed in assembly
+  (the pipeline's voiceover path). Silent inserts and b-roll per recipe §6. `grok-atlas` is an
+  owner A/B from the studio, never routed by this routine. All of these ids are Phase 2; Step 1's
+  tier gate stops the run until they exist.
+- **Voice consistency.** Every spoken word is the speaker's Sanity `voiceId`. A clip whose speaker
+  has no assigned cast voice is refused, never substituted: release it with reason `no_cast_voice`
+  and file a blocker:
+
+  ```json
+  {"op":"file","dedupeKey":"video:cast-voice-missing-<slug>","category":"approval",
+   "title":"Cast member <slug> has no assigned voiceId",
+   "unblocks":"Rendering approved clips spoken by <slug>",
+   "whereToGo":"Sanity castMember document for <slug> (voiceId field)"}
+  ```
 - **Refusals are valid outcomes.** A 403 `gated` or a per-video-ceiling refusal: report it, never
   downgrade quality to squeeze under, never split a clip across jobs. Release the claim.
 
@@ -171,7 +185,7 @@ rows are claimable, so a refusal that just exits strands the row in `rendering`:
 ```bash
 curl -s -X POST "$BASE_URL/api/team/video-episode" \
   -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
-  -d '{"op":"episode-release","episodeId":'$EPISODE_ID',"reason":"<out_of_stock|gated|over_ceiling|script_mismatch|...>"}'
+  -d '{"op":"episode-release","episodeId":'$EPISODE_ID',"reason":"<out_of_stock|gated|over_ceiling|script_mismatch|no_mode|no_cast_voice|tier_not_live|...>"}'
 ```
 
 Releasing is not approving spend; it restores the approval the owner already gave. A run that dies

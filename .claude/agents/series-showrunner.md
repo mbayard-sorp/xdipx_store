@@ -74,7 +74,9 @@ Pointers, never restatements. A restated rule is a copy that goes stale.
 - **Five clips: three slots plus two alternates.** The alternates are fully written and gated,
   so a stock swap at Thursday's claim or an owner rejection never leaves a slot dark.
 - **Per clip:** the product (handle from the shortlist), the format (one of the seven in the clip
-  rules), the speaker (cast slug), the silent listener if any, the one fact with its source class,
+  rules), the production mode (`talking` or `voiceover`, proposed by episode-writer with one
+  reason and ratified by you in the pitch, clip rules §6; owner ruling 2026-09-23), the speaker
+  (cast slug), the silent listener if any, the one fact with its source class,
   the one laugh, the first-frame concept per the realism recipe (set, hour, garment, grip for the
   category, story cue), and the estimated cost.
 - **Spread.** No two slots in one format; three different speakers a week (recipe §7); no
@@ -139,7 +141,7 @@ Step 5: Voice gate. emma-empathy-reviewer on every script (spoken lines and both
 Step 6: First frame. social-art-director per clip turns your concept into the frame brief against
         the recipe and §3.2a/§3.2c.
 Step 7: File the batch: `POST /api/team/video-episode {"op":"episode-propose", ...}`, one batch
-        id, each clip carrying the script and the pitch fields (`productHandle`, `format`,
+        id, each clip carrying the script and the pitch fields (`productHandle`, `format`, `mode`,
         `speaker`, `listener`, `fact`, `factSource`, `laugh`, `firstFrameConcept`, `estCostUsd`,
         `readAudioUrl`, `alternate`; PLANNED until Phase 2, ignored by the server until then),
         the first-frame brief and both gate verdicts; `Read: missing` when there is no read. Post a run event summarizing the batch.

@@ -77,36 +77,49 @@ catchlights, symmetric studio light, plastic skin, waxy skin, dim light, candlel
 
 - **Carries over:** "the only hand in frame is doing one thing." One prop and an hour of light tell
   the story; a mug going cold and 9 a.m. window light say more than a set dresser.
-- **Does not carry over:** camera placement. The §3.2c winners are shot from behind or below; a
-  talking clip is face-forward, at eye level, by definition.
+- **Does not carry over:** camera placement, for a `talking` clip. The §3.2c winners are shot from
+  behind or below; a talking clip is face-forward, at eye level, by definition. A `voiceover` clip
+  may use those angles (§6).
 - **Portrait cap:** whether reels are exempt from the §3.2a one-portrait-per-seven cap is pending
   owner decision, recommended yes, codified in the Phase 1a charter PR when he rules. Until then the
   cap stands.
-- **On-skin:** product in hand is not an on-skin frame; on-skin stays out of the talking frame
-  entirely.
+- **On-skin:** product in hand is not an on-skin frame; on-skin stays out of every video frame,
+  talking or voiceover (2026-09-22 boundary).
 
 ## 6. Motion routing
 
-- **Default: InfiniteTalk at 720p** (order the upscale), for talking with the product held still.
-  It won lip sync and natural motion in the 2026-08-30 bake-off (`video-worker-runpod.md` lines 162
-  to 169) and it is the only option that covers the 30 s cap in one pass. Length: cap 30 s,
-  aim 15 to 25.
+**Two production modes, chosen by the writers per clip** (owner ruling 2026-09-23,
+`video-owner-notes.md` entry 3). `episode-writer` proposes the mode with one reason and
+`series-showrunner` ratifies it in the pitch (`video-clip-rules.md` §6). The render never changes it.
+
+- **`talking`: InfiniteTalk at 720p** (tier `italk-atlas`; order the upscale). The cast member on
+  camera speaking, driven by her ElevenLabs cast voice, product in hand per §3. It won lip sync and
+  natural motion in the 2026-08-30 bake-off (`video-worker-runpod.md` lines 162 to 169) and it is
+  the only option that covers the 30 s cap in one pass. Length: cap 30 s, aim 15 to 25.
+- **`voiceover`: Wan 2.7** (tier `wan27-atlas`). No lips on camera: a motion clip of the product in
+  the cast member's hands or on a named surface, with the same cast member's ElevenLabs voice laid
+  over it in assembly. The first frame may use the §3.2c shot bank angles (behind, below, hands
+  only), but on-skin stays out of the video lane per the 2026-09-22 boundary
+  (`instagram-campaigns.md`, standing order: it does not reach the video lane).
+- **Voice consistency.** Every spoken word in every clip, in either mode, is the speaker's Sanity
+  `voiceId`. A clip with no assigned cast voice is refused, never substituted.
 - **Control its line-end drift in the script, not the render.** The same bake-off recorded that
   InfiniteTalk's sync drifts slightly on fast speech at the end of a line; that datum is the reason
   for the 12-word rule. Lines of 12 words or fewer, a breath or comma at every line end, a slower
   ElevenLabs pace, stability turned down so the voice varies.
-- **Grok Imagine v1.5 is a fallback only,** for clips under 15 seconds, and only after one A/B
-  against InfiniteTalk on the same first frame. It invents its own voice, which puts cast voice
-  continuity at risk.
+- **Grok Imagine is not routed in season 1.** It invents its own voice, and the owner requires
+  consistent voices. It stays available only for an owner-run A/B from `/admin/video-studio`.
 - **Demonstrations never happen while she is talking.** They are 3 to 5 second silent inserts from
-  Wan 2.7 Spicy image-to-video, with her audio continuing over them. A demonstration insert shows the
-  product in her hand or on the named surface, turned to show the head or the buttons, never
-  switched on against skin and never against the body. Inserts run on a Spicy tier, so every insert
-  prompt carries the full §4 negatives and the §3.2a ceiling, judged on the insert's most revealing
+  Wan 2.7 image-to-video (`wan27-atlas`), with her audio continuing over them. The Spicy ids are
+  not callable on the Atlas key (`docs/media-model-routing.md`, Atlas video bake-off 2026-09-23),
+  so Wan 2.7 is the silent tier. A demonstration insert shows the product in her hand or on the
+  named surface, turned to show the head or the buttons, never switched on against skin and never
+  against the body. Every insert prompt carries the full §4 negatives and the §3.2a ceiling, judged on the insert's most revealing
   frame.
 - **The ceiling holds on every frame of the clip, not only the first.** This replaces the P2 clause
   of the superseded `social-video-viral-checklist.md`.
-- **Silent b-roll** runs on Wan 2.2 Turbo or Wan 2.7 Spicy.
+- **Silent b-roll** runs on Wan 2.7 (`wan27-atlas`), or Wan 2.2 Turbo (`wan22turbo-atlas`) for
+  drafts only.
 - **Set-down fallback.** When hands fuse on a candidate, re-brief with the product set down within
   reach on a named surface (the nightstand, the arm of the sofa) and her hand resting beside it.
 - **Every motion prompt asks for:** minimal hand movement, natural blink, soft breathing.

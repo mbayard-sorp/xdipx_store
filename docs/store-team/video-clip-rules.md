@@ -9,6 +9,11 @@
 > owner-approved and hand-posted; the product is in hand on camera; The Group Chat is shelved for
 > season 1. Charter text: `docs/emma-voice.md` v5.6, "Product-talk clips (owner ruling 2026-09-23)".
 >
+>
+> **The writers own the production mode** (owner ruling 2026-09-23, `video-owner-notes.md` entry 3):
+> `talking` or `voiceover`, per clip, proposed by `episode-writer` and ratified by
+> `series-showrunner` in the pitch (§6). Routing per `video-realism-recipe.md` §6.
+>
 > **The frame every brief carries, verbatim:**
 >
 > "The clip is a person telling a friend one true thing about one product, at the register the
@@ -139,6 +144,9 @@ Any one fails rule 6 (robotic or timid) on sight.
 
 - **Product,** from the merchandising shortlist on the brief only (`productHandle`).
 - **Format,** from §4 (`format`).
+- **Production mode** (`mode`): `talking` or `voiceover`, chosen by episode-writer with
+  series-showrunner, stated with one reason (a demonstration or a product-forward frame favours
+  voiceover; a line that needs a face favours talking).
 - **Speaker** (`speaker`), and the **listener** if any, silent, on camera (`listener`).
 - **The one fact** (`fact`), with its source class per rule 3 (`factSource`).
 - **The one laugh:** the speaker's personality doing something with that fact, never at the
