@@ -129,6 +129,8 @@ const RUTH = {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  // Atlas tiers are refused as provider_not_configured without the key (ADR-016).
+  vi.stubEnv('ATLAS_CLOUD_API_KEY', 'test-atlas-key')
   state.selectResults = []
   state.inserts = []
   configMock.mockResolvedValue({
@@ -157,7 +159,7 @@ const baseEnqueueArgs = {
   productHandle: 'satin-wand',
   formula: 'myth-busting',
   presenter: 'friend:maya',
-  modelTier: 'wan22-i2v' as const,
+  modelTier: 'wan27-atlas' as const,
   durationSeconds: 5,
   targetPlatforms: ['instagram'],
 }
@@ -275,7 +277,7 @@ const jobRow = (overrides: Record<string, unknown> = {}) => ({
   presenter: 'friend:maya',
   scriptJson: {} as Record<string, unknown>,
   aiDisclosure: true,
-  modelTier: 'wan22-i2v',
+  modelTier: 'wan27-atlas',
   targetPlatforms: ['instagram'],
   stage: 'scene_frame',
   status: 'queued',

@@ -19,6 +19,7 @@ import { recordFalBlock, readFalRequestId } from '~/lib/fal.server'
 import { atlasConfigured, atlasGenerate } from '~/lib/atlas.server'
 import { estimateRunpodRatePerSecondUsd, estimateRunpodS2vRatePerSecondUsd } from '~/lib/model-pricing.server'
 import { runpodWorkerModes, runpodWorkerSupportsMode, type RunpodWorkerMode } from '~/lib/runpod-video.server'
+import { wavespeedConfigured, wavespeedMirrorFor } from '~/lib/media-providers/wavespeed-video.server'
 
 const FAL_QUEUE_ENDPOINT = 'https://queue.fal.run'
 const FAL_SYNC_ENDPOINT = 'https://fal.run'
@@ -41,11 +42,12 @@ export function falVideoConfigured(): boolean {
 export type VideoModelId =
   | 'veo31' | 'veo31-fast' | 'kling25-pro' | 'seedance2' | 'grok' | 'omnihuman' | 'sync-lipsync'
   | 'wan22-i2v' | 'wan22-t2v' | 'wan22-s2v'
+  | 'infinitetalk-atlas' | 'grok-atlas' | 'wan27-atlas' | 'wan22turbo-atlas'
 
 export interface VideoModelSpec {
   /**
    * fal queue endpoint path. Required by the interface for every fal-provider
-   * model; a `provider: 'runpod'` spec does not route through fal at all and
+   * model; a `provider: 'runpod'` or `'atlascloud'` spec does not route through fal at all and
    * carries a documentation-only placeholder here (submitVideoRequest refuses
    * to call it — see the provider guard below).
    */
@@ -57,9 +59,24 @@ export interface VideoModelSpec {
    * default and every model until wan22): submitVideoRequest/getVideoRequestStatus/
    * getVideoRequestResult in this file. 'runpod' means the video-pipeline clip
    * stage routes through runpod-video.server.ts instead — this file's queue
-   * client is never called for that tier.
+   * client is never called for that tier. Since ADR-016 (2026-09-23) the
+   * pipeline resolves every provider through app/lib/media-providers/
+   * registry.server.ts; 'atlascloud' is the live one and 'runpod' is retired
+   * (no adapter, tierIneligibility refuses it).
    */
-  provider?: 'fal' | 'runpod'
+  provider?: 'fal' | 'runpod' | 'atlascloud'
+  /**
+   * The provider's own model id for a non-fal tier (for Atlas, the `model`
+   * field of generateVideo). The adapter in app/lib/media-providers/ maps a
+   * tier id to this; fal tiers use `falModel` instead.
+   */
+  providerModel?: string
+  /**
+   * Per-render speech cap, seconds, for an audio-driven tier. Longer lines are
+   * split at beat boundaries and every part renders from the same frame.
+   * Defaults to OMNIHUMAN_MAX_RENDER_SECONDS when unset.
+   */
+  maxRenderSeconds?: number
   /** Cost key understood by model-pricing VIDEO_RATES. */
   costKey: string
   ratePerSecondUsd: number
@@ -80,6 +97,13 @@ export interface VideoModelSpec {
    * clip's audio may ship as-is. Never set together with `audioDriven`.
    */
   inventsDialogue?: boolean
+  /**
+   * The output carries an audio track that is not content: Wan 2.7 on Atlas
+   * returns a near-silent (-69 dB mean) track. Passing it through untouched
+   * would let the post-pass loudness normalization lift the noise floor, so
+   * with no voiceover the lipsync stage strips it (classifyAudioPath).
+   */
+  noiseAudioTrack?: true
   /**
    * Audio-first model: consumes a speech track (audio_url) plus ONE identity
    * frame and performs it. Video length = audio length, so allowedDurations
@@ -268,6 +292,76 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModelSpec> = {
     audioDriven: true,
     allowedDurations: [],
   },
+  // --- Atlas Cloud tiers (ADR-016, bake-off 2026-09-23) --------------------
+  // Submitted through app/lib/media-providers/atlascloud-video.server.ts via
+  // the registry; the Wavespeed mirror covers infinitetalk-atlas and
+  // wan22turbo-atlas only. Rates are per second at 720p.
+  //
+  // Default talking tier: cast plate + the cast member's ElevenLabs read ->
+  // performed clip. Keeps the cast voice and holds hand and product still.
+  // Atlas lists $0.03/s base with an unpublished 720p multiplier; the one
+  // completed response that carried a price read $0.60 for ~10 s, so 0.06 is
+  // the upper-bound estimate. Output length = audio length (704x1280 25 fps),
+  // so allowedDurations stays empty like every audio-driven tier and the
+  // 30 s per-render cap lives in maxRenderSeconds.
+  'infinitetalk-atlas': {
+    falModel: 'atlascloud/infinitetalk', // documentation only, never sent to fal
+    providerModel: 'atlascloud/infinitetalk',
+    label: 'InfiniteTalk 720p (Atlas, audio-driven talking)',
+    tier: 'avatar',
+    provider: 'atlascloud',
+    costKey: 'atlascloud/infinitetalk',
+    ratePerSecondUsd: 0.06,
+    nativeAudio: true,
+    audioDriven: true,
+    maxRenderSeconds: 30,
+    allowedDurations: [],
+  },
+  // Fallback talking tier: best motion realism in the bake-off, but it speaks
+  // in xAI's voice, not the cast's, and xAI bills ToS-blocked requests in
+  // full. No dialogue field: the gated line rides inside the prompt
+  // (VideoGenInput.spokenLine). $1.41 per 10 s at 720p from data.price.
+  'grok-atlas': {
+    falModel: 'xai/grok-imagine-video-v1.5/image-to-video', // documentation only
+    providerModel: 'xai/grok-imagine-video-v1.5/image-to-video',
+    label: 'Grok Imagine 1.5 (Atlas, native audio in its own voice)',
+    tier: 'standard',
+    provider: 'atlascloud',
+    costKey: 'atlascloud/grok-imagine-1.5',
+    ratePerSecondUsd: 0.141,
+    nativeAudio: true,
+    inventsDialogue: true,
+    allowedDurations: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+  },
+  // Silent insert tier. Returns a near-silent (-69 dB) track, stripped at the
+  // lipsync stage (noiseAudioTrack) unless a voiceover replaces it. Needs a "keep the product at the same
+  // distance from the camera" clause in the motion prompt (Sofia's run broke
+  // scale). $0.50 per 5 s at 720P from data.price.
+  'wan27-atlas': {
+    falModel: 'alibaba/wan-2.7/image-to-video', // documentation only
+    providerModel: 'alibaba/wan-2.7/image-to-video',
+    label: 'Wan 2.7 i2v 720P (Atlas, silent insert)',
+    tier: 'standard',
+    provider: 'atlascloud',
+    costKey: 'atlascloud/wan-2.7-i2v',
+    ratePerSecondUsd: 0.10,
+    nativeAudio: false,
+    noiseAudioTrack: true,
+    allowedDurations: [5],
+  },
+  // Cheap draft tier only (B- in the bake-off: off-brief laugh, mild identity
+  // drift). 728x1264 output, rescaled in post. Duration 5 only. List $0.02/s.
+  'wan22turbo-atlas': {
+    falModel: 'atlascloud/wan-2.2-turbo/image-to-video', // documentation only
+    providerModel: 'atlascloud/wan-2.2-turbo/image-to-video',
+    label: 'Wan 2.2 Turbo i2v (Atlas, silent draft)',
+    tier: 'standard',
+    provider: 'atlascloud',
+    costKey: 'atlascloud/wan-2.2-turbo-i2v',
+    ratePerSecondUsd: 0.02,
+    nativeAudio: false,
+    allowedDurations: [5],
+  },
 }
 
 /**
@@ -286,8 +380,17 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModelSpec> = {
  * deleting an entry would break reading the past to stop writing the future.
  */
 export interface TierIneligibility {
-  code: 'retired_provider' | 'worker_mode_unavailable'
+  code: 'retired_provider' | 'worker_mode_unavailable' | 'provider_not_configured'
   message: string
+}
+
+/**
+ * Whether an Atlas tier can be rendered right now: Atlas is keyed, or the
+ * tier has a Wavespeed mirror endpoint and Wavespeed is keyed.
+ */
+function atlasTierRenderable(id: VideoModelId): boolean {
+  if (atlasConfigured()) return true
+  return wavespeedMirrorFor(id) != null && wavespeedConfigured()
 }
 
 export function tierIneligibility(id: VideoModelId): TierIneligibility | null {
@@ -297,9 +400,38 @@ export function tierIneligibility(id: VideoModelId): TierIneligibility | null {
       code: 'retired_provider',
       message:
         `${id} renders video on fal, which is retired for video (owner direction 2026-08-26: fal is images only, ` +
-        'all video and all talking render on the owned RunPod worker). Use a wan22 tier.',
+        'and since ADR-016 all video renders on Atlas Cloud). Use infinitetalk-atlas for talking, wan27-atlas for a silent insert.',
     }
   }
+  if (spec.provider === 'runpod') {
+    // ADR-016 (2026-09-23): RunPod video is retired. The pipeline's RunPod
+    // branches are gone; the module and the worker are deleted in Phase 4.
+    return {
+      code: 'retired_provider',
+      message:
+        `${id} renders on the RunPod worker, which is retired for video (ADR-016, 2026-09-23: Atlas Cloud is the ` +
+        'video provider, Wavespeed its mirror). Use infinitetalk-atlas for talking, wan27-atlas for a silent insert.',
+    }
+  }
+  if (spec.provider === 'atlascloud' && !atlasTierRenderable(id)) {
+    return {
+      code: 'provider_not_configured',
+      message:
+        `${id} renders on Atlas Cloud, and ATLAS_CLOUD_API_KEY is not set` +
+        (wavespeedMirrorFor(id) ? ' (nor WAVESPEED_API_KEY for its mirror)' : ' (this tier has no mirror)') +
+        '. Enqueueing it would fail at the clip stage after frame spend.',
+    }
+  }
+  return null
+}
+
+/**
+ * The pre-ADR-016 worker-mode check, unreachable from tierIneligibility while
+ * every RunPod tier is retired. Kept so the Phase 4 deletion removes it
+ * together with runpod-video.server.ts rather than silently now.
+ */
+export function workerModeIneligibility(id: VideoModelId): TierIneligibility | null {
+  const spec = VIDEO_MODELS[id]
   if (spec.provider === 'runpod' && spec.workerMode) {
     const mode = spec.workerMode
     if (!runpodWorkerSupportsMode(mode)) {
@@ -350,7 +482,7 @@ export type AudioPath = 'authored' | 'overdubbed' | 'stripped' | 'native-silent'
 export function classifyAudioPath(spec: VideoModelSpec, hasVoiceover: boolean): AudioPath {
   if (spec.audioDriven || spec.lipsync) return 'authored'
   if (hasVoiceover) return 'overdubbed'
-  if (spec.inventsDialogue) return 'stripped'
+  if (spec.inventsDialogue || spec.noiseAudioTrack) return 'stripped'
   return 'native-silent'
 }
 
@@ -495,6 +627,13 @@ function buildInput(model: VideoModelId, input: VideoRequestInput): Record<strin
         audio_url: input.audioUrl,
         sync_mode: 'cut_off',
       }
+    case 'infinitetalk-atlas':
+    case 'grok-atlas':
+    case 'wan27-atlas':
+    case 'wan22turbo-atlas':
+      // Atlas tiers submit through app/lib/media-providers/atlascloud-video.server.ts;
+      // the provider guard in submitVideoRequest throws first.
+      throw new Error(`${model} routes through Atlas Cloud, not the fal queue`)
     case 'wan22-i2v':
     case 'wan22-t2v':
     case 'wan22-s2v':
@@ -513,6 +652,9 @@ export async function submitVideoRequest(model: VideoModelId, input: VideoReques
   // legitimately absent on runpod-only deployments and in CI).
   if (spec.provider === 'runpod') {
     throw new Error(`${model} is a RunPod-provider model; call runpod-video.server.ts's submitRunpodVideo instead`)
+  }
+  if (spec.provider && spec.provider !== 'fal') {
+    throw new Error(`${model} is a ${spec.provider}-provider model; submit it through the media-providers registry`)
   }
   const key = requireKey()
   if (spec.lipsync) {

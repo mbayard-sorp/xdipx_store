@@ -67,7 +67,7 @@ const validSet = {
   productHandle: 'satin-wand',
   formula: 'myth-busting',
   presenter: 'none',
-  modelTier: 'wan22-i2v',
+  modelTier: 'wan27-atlas',
   baseScriptJson: { framePrompt: 'archetype B', motionPrompt: 'slow push', voiceover: '{{hook}} explained' },
   durationSeconds: 5,
   targetPlatforms: ['instagram'],
@@ -75,6 +75,9 @@ const validSet = {
 }
 
 beforeEach(() => {
+  // Atlas tiers are refused as provider_not_configured without the key (ADR-016).
+  vi.stubEnv('ATLAS_CLOUD_API_KEY', 'test-atlas-key')
+  vi.stubEnv('WAVESPEED_API_KEY', '')
   vi.clearAllMocks()
   gateMock.mockResolvedValue({ ok: true })
   configMock.mockResolvedValue({ enabled: true, dailyCents: 2000, maxCostCents: 600, maxVariantsPerSet: 4 })
@@ -94,7 +97,7 @@ describe('enqueue-set', () => {
     expect(enqueueSetMock).toHaveBeenCalledWith(expect.objectContaining({
       productHandle: 'satin-wand',
       formula: 'myth-busting',
-      modelTier: 'wan22-i2v',
+      modelTier: 'wan27-atlas',
       durationSeconds: 5,
       hooks: ['Hook one', 'Hook two', 'Hook three'],
       targetPlatforms: ['instagram'],
@@ -128,7 +131,6 @@ describe('talking-tier validation', () => {
   // one. These tests widen the deployed worker's declared modes to reach the
   // per-tier field validation; the refusal when they are NOT widened is its
   // own test below, and is the live behavior today.
-  beforeEach(() => { vi.stubEnv('RUNPOD_WORKER_MODES', 'i2v,t2v,s2v') })
   afterEach(() => { vi.unstubAllEnvs() })
 
   it('rejects enqueue without presenterLine', async () => {
@@ -137,7 +139,7 @@ describe('talking-tier validation', () => {
       productHandle: 'satin-wand',
       formula: 'the-one-thing',
       presenter: 'emma',
-      modelTier: 'wan22-s2v',
+      modelTier: 'infinitetalk-atlas',
       scriptJson: { framePrompt: 'archetype C', motionPrompt: 'hold', talkingHead: true },
       durationSeconds: 5,
       targetPlatforms: ['instagram'],
@@ -152,7 +154,7 @@ describe('talking-tier validation', () => {
       productHandle: 'satin-wand',
       formula: 'the-one-thing',
       presenter: 'none',
-      modelTier: 'wan22-s2v',
+      modelTier: 'infinitetalk-atlas',
       scriptJson: { presenterLine: 'One thing matters.', framePrompt: 'C', motionPrompt: 'hold' },
       durationSeconds: 5,
       targetPlatforms: ['instagram'],
@@ -178,7 +180,7 @@ describe('tier eligibility', () => {
     expect(enqueueSetMock).not.toHaveBeenCalled()
   })
 
-  it('refuses a tier whose worker mode the deployed image does not implement', async () => {
+  it('refuses a retired RunPod tier (ADR-016)', async () => {
     const res = await post({
       op: 'enqueue',
       productHandle: 'satin-wand',
@@ -190,9 +192,19 @@ describe('tier eligibility', () => {
     })
     expect(res.status).toBe(400)
     const json = await res.json() as { error: string; detail: string }
-    expect(json.error).toBe('worker_mode_unavailable')
-    expect(json.detail).toMatch(/s2v/)
+    expect(json.error).toBe('retired_provider')
+    expect(json.detail).toMatch(/RunPod/)
     expect(enqueueMock).not.toHaveBeenCalled()
+  })
+
+  it('refuses an Atlas tier when neither Atlas nor its mirror is keyed', async () => {
+    vi.stubEnv('ATLAS_CLOUD_API_KEY', '')
+    const res = await post({ ...validSet, op: 'enqueue-set', modelTier: 'wan27-atlas' })
+    expect(res.status).toBe(400)
+    const json = await res.json() as { error: string; detail: string }
+    expect(json.error).toBe('provider_not_configured')
+    expect(json.detail).toMatch(/ATLAS_CLOUD_API_KEY/)
+    expect(enqueueSetMock).not.toHaveBeenCalled()
   })
 
   it('refuses BEFORE the money gate, so an ineligible tier never consumes budget', async () => {
@@ -216,7 +228,8 @@ describe('config', () => {
   it('advertises only tiers that can actually be enqueued', async () => {
     const res = await post({ op: 'config' })
     const json = await res.json() as { models: Record<string, unknown> }
-    expect(Object.keys(json.models)).toEqual(['wan22-i2v', 'wan22-t2v'])
+    expect(Object.keys(json.models)).toEqual(['infinitetalk-atlas', 'grok-atlas', 'wan27-atlas', 'wan22turbo-atlas'])
+    expect(json.models['wan22-i2v']).toBeUndefined()
     expect(json.models['sync-lipsync']).toBeUndefined()
     expect(json.models['veo31']).toBeUndefined()
   })

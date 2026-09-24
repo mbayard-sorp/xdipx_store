@@ -256,6 +256,14 @@ const VIDEO_RATES: Record<string, number> = {
   // above; it is NOT the i2v/t2v figure. Actuals replace this per job via
   // computeRunpodActualCostUsd exactly like the i2v tier.
   'runpod/wan22-s2v': estimateRunpodS2vRatePerSecondUsd(),
+  // Atlas Cloud video (ADR-016, bake-off 2026-09-23), all at 720p. Grok and
+  // Wan 2.7 from the completed response's data.price; InfiniteTalk and Wan 2.2
+  // Turbo return no price, so theirs are list-derived upper bounds. A render
+  // the Wavespeed mirror takes is booked at the same tier rate.
+  'atlascloud/infinitetalk':      0.06,  // list $0.03/s base, 720p multiplier unpublished; ~$0.60 per 10 s observed
+  'atlascloud/grok-imagine-1.5':  0.141, // $1.41 per 10 s; xAI bills ToS-blocked requests in full
+  'atlascloud/wan-2.7-i2v':       0.10,  // $0.50 per 5 s
+  'atlascloud/wan-2.2-turbo-i2v': 0.02,  // list $0.02/s = $0.10 per 5 s
   'elevenlabs/tts':   0.003, // voiceover, ~$0.20/min of speech at Creator-plan credit rates
   'elevenlabs/music': 0.008, // music bed, ~$0.48/min — APPROXIMATE Creator-plan credit conversion
 }

@@ -619,20 +619,6 @@ export const CRON_EXPECTATIONS: readonly CronExpectation[] = [
     notes: 'Weekly LLM-discovery surface sweep.',
   },
   {
-    route: '/cron/runpod-pod-watch',
-    plane: 'vercel',
-    schedule: '17 * * * *',
-    periodMinutes: HOURLY,
-    graceMinutes: 30,
-    recorded: false,
-    moneyRelevant: true,
-    ownerTeam: 'social',
-    notes:
-      'Money-relevant in the literal sense: it files an owner blocker when a RunPod pod is left '
-      + 'RUNNING, which bills by the hour. Heartbeat rather than recorded only because it is '
-      + 'hourly and its own output is already a durable blocker row.',
-  },
-  {
     route: '/cron/checkout-probe-report',
     plane: 'vercel',
     schedule: 'internal',

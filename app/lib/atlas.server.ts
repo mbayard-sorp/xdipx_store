@@ -11,8 +11,15 @@
  *   Poll:   GET  https://api.atlascloud.ai/api/v1/model/prediction/{id}
  *           data.status: created|queued|processing -> completed|succeeded|failed
  *   Auth:   Authorization: Bearer ${ATLAS_CLOUD_API_KEY}
- * Output URLs live 14 days; callers must re-host (Sanity/Shopify/Blob) as they
- * already do for fal's 24h URLs. Failed tasks are not billed.
+ * Output URLs expire in 24 hours in practice (the Seedream stills observed in
+ * the 2026-09-23 bake-off came back as TOS-signed URLs with X-Tos-Expires=86400,
+ * not the 14 days the docs claimed); callers must re-host (Sanity/Shopify/Blob)
+ * promptly, exactly as for fal's 24h URLs. Failed tasks are not billed (except
+ * xAI Grok video, which bills ToS-blocked requests in full).
+ *
+ * Video (ADR-016) uses the same host through
+ * app/lib/media-providers/atlascloud-video.server.ts, which reuses this file's
+ * auth header, base URL, and block telemetry.
  *
  * Model choice (POC 2026-08-15, kept in docs/media-model-routing.md):
  * bytedance/seedream-v4.5/edit passed the cast-presenter + insertable-toy
@@ -23,7 +30,26 @@
  * pre-pass needed. $0.036/image, 22-31s observed.
  */
 
-const ATLAS_BASE = 'https://api.atlascloud.ai/api/v1'
+import { classifyProviderResponse, type MediaFailure } from '~/lib/media-block'
+
+export const ATLAS_BASE = 'https://api.atlascloud.ai/api/v1'
+
+/**
+ * Cloudflare in front of api.atlascloud.ai answers 403 "error code: 1010" to a
+ * default Python-urllib User-Agent (bake-off 2026-09-23). Node fetch was fine,
+ * but an explicit UA costs nothing and removes the dependency on the runtime's
+ * default string.
+ */
+export const ATLAS_USER_AGENT = 'xdipx-store/1.0 (+https://xdipx.com)'
+
+/** Auth + UA headers for every Atlas call. `json` adds the JSON content type. */
+export function atlasHeaders(key: string, json = false): Record<string, string> {
+  return {
+    'Authorization': `Bearer ${key}`,
+    'User-Agent':    ATLAS_USER_AGENT,
+    ...(json ? { 'Content-Type': 'application/json' } : {}),
+  }
+}
 
 /** Poll cadence/ceiling for the async prediction loop (observed 22-31s typical). */
 const POLL_INTERVAL_MS = 2500
@@ -105,8 +131,9 @@ export interface AtlasGenerateOpts {
   refImageUrls?: string[]
   /**
    * When false, skip downloading the output URLs to Buffers and return
-   * `buffers: []`. Callers that only need the hosted URLs (Atlas URLs live 14
-   * days and are publicly fetchable) avoid a wasteful download round-trip.
+   * `buffers: []`. Callers that only need the hosted URLs (publicly fetchable,
+   * but they expire in about 24 hours, so re-host the same day) avoid a
+   * wasteful download round-trip.
    * Defaults to true so existing callers keep getting Buffers unchanged.
    */
   download?: boolean
@@ -116,7 +143,7 @@ export interface AtlasGenerateOpts {
 
 export interface AtlasGenerateResult {
   buffers: Buffer[]
-  /** Hosted output URLs (14-day TTL), index-aligned with `requestIds` and, when
+  /** Hosted output URLs (about 24h TTL in practice), index-aligned with `requestIds` and, when
    *  downloaded, with `buffers`. Always populated. */
   urls: string[]
   /** Prediction id per output URL, index-aligned with `urls`. Each image is its
@@ -132,10 +159,23 @@ export function atlasConfigured(): boolean {
   return !!process.env['ATLAS_CLOUD_API_KEY']?.trim()
 }
 
+export function requireAtlasKey(): string {
+  return requireKey()
+}
+
 function requireKey(): string {
   const key = process.env['ATLAS_CLOUD_API_KEY']?.trim()
   if (!key) throw new Error('ATLAS_CLOUD_API_KEY env var is required for Atlas Cloud calls')
   return key
+}
+
+/**
+ * Classify an Atlas failure (HTTP status + body, or a failed prediction's
+ * `error` prose passed with the synthetic status 422). Pure; shared by the
+ * image path and the video adapter so both read a block the same way.
+ */
+export function classifyAtlasBlock(status: number, body: string): MediaFailure {
+  return classifyProviderResponse(status, body)
 }
 
 /**
@@ -145,7 +185,7 @@ function requireKey(): string {
  * message rather than an HTTP 4xx, so callers pass the synthetic status 422
  * for those (classifyProviderResponse treats 422 as a refusal).
  */
-async function recordAtlasBlock(
+export async function recordAtlasBlock(
   model: string,
   status: number,
   body: string,
@@ -153,9 +193,8 @@ async function recordAtlasBlock(
   telemetry?: AtlasGenerateOpts['telemetry'],
 ): Promise<void> {
   try {
-    const { classifyProviderResponse } = await import('~/lib/media-block')
     const { logGenerationBlock } = await import('~/lib/token-log.server')
-    const { reason, surface } = classifyProviderResponse(status, body)
+    const { reason, surface } = classifyAtlasBlock(status, body)
     await logGenerationBlock({
       model,
       reason,
@@ -193,10 +232,7 @@ async function runOne(
 ): Promise<{ urls: string[]; predictionId?: string }> {
   const res = await fetch(`${ATLAS_BASE}/model/generateImage`, {
     method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${key}`,
-      'Content-Type':  'application/json',
-    },
+    headers: atlasHeaders(key, true),
     body: JSON.stringify(body),
   })
   if (!res.ok) {
@@ -212,7 +248,7 @@ async function runOne(
   while (Date.now() < deadline) {
     await new Promise(r => setTimeout(r, POLL_INTERVAL_MS))
     const poll = await fetch(`${ATLAS_BASE}/model/prediction/${predictionId}`, {
-      headers: { 'Authorization': `Bearer ${key}` },
+      headers: atlasHeaders(key),
     })
     if (!poll.ok) continue // transient poll failure; the prediction is still running
     const pred = unwrap(await poll.json())

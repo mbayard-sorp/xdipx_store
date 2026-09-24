@@ -194,3 +194,12 @@ describe('the cron expectation manifest', () => {
     }
   })
 })
+
+describe('RunPod video retirement (ADR-016)', () => {
+  it('no longer schedules or expects the RunPod pod watch', () => {
+    // Retired with the RunPod pipeline branches. Both halves go together, so
+    // the drift guard above cannot red on a half-removed cron.
+    expect(vercelCrons().map((c) => c.path)).not.toContain('/cron/runpod-pod-watch')
+    expect(CRON_EXPECTATION_BY_ROUTE.has('/cron/runpod-pod-watch')).toBe(false)
+  })
+})

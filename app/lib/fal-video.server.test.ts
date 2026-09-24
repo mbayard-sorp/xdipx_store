@@ -186,11 +186,12 @@ describe('VIDEO_MODELS wan22 (RunPod provider)', () => {
   })
 })
 
-describe('every non-runpod model keeps provider fal-implicit (undefined)', () => {
+describe('every fal model keeps provider fal-implicit (undefined)', () => {
   it('never sets provider on a fal-queue tier', () => {
-    for (const [id, spec] of Object.entries(VIDEO_MODELS)) {
-      if (id === 'wan22-i2v' || id === 'wan22-t2v' || id === 'wan22-s2v') continue
+    for (const [, spec] of Object.entries(VIDEO_MODELS)) {
+      if (spec.provider === 'runpod' || spec.provider === 'atlascloud') continue
       expect(spec.provider).toBeUndefined()
+      expect(spec.legacy).toBe(true)
     }
   })
 })
@@ -263,5 +264,70 @@ describe('legacy fal video tiers (owner direction 2026-08-26: fal is images only
     expect(legacy).toEqual(['grok', 'kling25-pro', 'omnihuman', 'seedance2', 'sync-lipsync', 'veo31', 'veo31-fast'])
     expect(VIDEO_MODELS['wan22-i2v'].legacy).toBeUndefined()
     expect(VIDEO_MODELS['wan22-t2v'].legacy).toBeUndefined()
+  })
+})
+
+// ADR-016 (2026-09-23): the Atlas tiers, from the video bake-off capture.
+describe('VIDEO_MODELS Atlas tiers (ADR-016)', () => {
+  it('registers infinitetalk-atlas as the audio-driven talking tier with a 30 s render cap', () => {
+    const spec = VIDEO_MODELS['infinitetalk-atlas']
+    expect(spec.provider).toBe('atlascloud')
+    expect(spec.providerModel).toBe('atlascloud/infinitetalk')
+    expect(spec.costKey).toBe('atlascloud/infinitetalk')
+    expect(spec.ratePerSecondUsd).toBe(0.06)
+    expect(spec.tier).toBe('avatar')
+    expect(spec.audioDriven).toBe(true)
+    expect(spec.nativeAudio).toBe(true)
+    expect(spec.inventsDialogue).toBeUndefined()
+    // Output length = audio length, so no duration enum; the cap is per render.
+    expect(spec.allowedDurations).toEqual([])
+    expect(spec.maxRenderSeconds).toBe(30)
+  })
+
+  it('registers grok-atlas as native audio that invents its own voice, 1 to 15 s', () => {
+    const spec = VIDEO_MODELS['grok-atlas']
+    expect(spec.provider).toBe('atlascloud')
+    expect(spec.providerModel).toBe('xai/grok-imagine-video-v1.5/image-to-video')
+    expect(spec.costKey).toBe('atlascloud/grok-imagine-1.5')
+    expect(spec.ratePerSecondUsd).toBe(0.141)
+    expect(spec.nativeAudio).toBe(true)
+    expect(spec.inventsDialogue).toBe(true)
+    expect(spec.audioDriven).toBeUndefined()
+    expect(spec.allowedDurations).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
+  })
+
+  it('registers the two silent insert tiers at 5 s', () => {
+    const w27 = VIDEO_MODELS['wan27-atlas']
+    expect(w27.providerModel).toBe('alibaba/wan-2.7/image-to-video')
+    expect(w27.costKey).toBe('atlascloud/wan-2.7-i2v')
+    expect(w27.ratePerSecondUsd).toBe(0.10)
+    expect(w27.nativeAudio).toBe(false)
+    expect(w27.allowedDurations).toEqual([5])
+    const w22 = VIDEO_MODELS['wan22turbo-atlas']
+    expect(w22.providerModel).toBe('atlascloud/wan-2.2-turbo/image-to-video')
+    expect(w22.costKey).toBe('atlascloud/wan-2.2-turbo-i2v')
+    expect(w22.ratePerSecondUsd).toBe(0.02)
+    expect(w22.nativeAudio).toBe(false)
+    expect(w22.allowedDurations).toEqual([5])
+  })
+
+  it('is never legacy and never recognized as a fal-queue model', async () => {
+    for (const id of ['infinitetalk-atlas', 'grok-atlas', 'wan27-atlas', 'wan22turbo-atlas'] as const) {
+      expect(isVideoModelId(id)).toBe(true)
+      expect(VIDEO_MODELS[id].legacy).toBeUndefined()
+      await expect(submitVideoRequest(id, {
+        prompt: 'p', imageUrl: 'https://example.com/f.jpg', durationSeconds: 5, audioUrl: 'https://example.com/a.mp3',
+      })).rejects.toThrow(/atlascloud-provider model/)
+    }
+  })
+
+  it('routes audio: InfiniteTalk authored, Grok stripped or overdubbed, Wan 2.7 noise track stripped', () => {
+    expect(classifyAudioPath(VIDEO_MODELS['infinitetalk-atlas'], false)).toBe('authored')
+    expect(classifyAudioPath(VIDEO_MODELS['grok-atlas'], false)).toBe('stripped')
+    expect(classifyAudioPath(VIDEO_MODELS['grok-atlas'], true)).toBe('overdubbed')
+    // Wan 2.7 returns a -69 dB near-silent track; loudness normalization must not lift it.
+    expect(classifyAudioPath(VIDEO_MODELS['wan27-atlas'], false)).toBe('stripped')
+    expect(classifyAudioPath(VIDEO_MODELS['wan27-atlas'], true)).toBe('overdubbed')
+    expect(classifyAudioPath(VIDEO_MODELS['wan22turbo-atlas'], false)).toBe('native-silent')
   })
 })

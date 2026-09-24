@@ -67,7 +67,8 @@ import { blobPut, blobFetchToBuffer } from '~/lib/blob.server'
 import { estimateVideoCostUsd, estimateImageCostUsd, computeRunpodActualCostUsd } from '~/lib/model-pricing.server'
 import { utcIsoToLaWallClock } from '~/lib/social-schedule-ui'
 import { logVideoCost, logImageCost } from '~/lib/token-log.server'
-import { submitRunpodVideo, getRunpodStatus, getRunpodResult, cancelRunpod } from '~/lib/runpod-video.server'
+import { getRunpodStatus, cancelRunpod } from '~/lib/runpod-video.server'
+import { submitVideoWithMirror, providerForHandle } from '~/lib/media-providers/registry.server'
 import { getEditorPhotoUrl, getApprovedCastMembers, presenterPhotoUrlForCrop } from '~/lib/sanity.server'
 import { CROP_SCALES, isCropScale, needsBodyReference, withSkinToneNote } from '~/lib/social-cast-reference.server'
 import { getProductByHandle } from '~/lib/shopify.server'
@@ -1524,46 +1525,23 @@ async function advanceClip(job: VideoJobRow): Promise<AdvanceOutcome> {
     const [frame] = await db.select().from(mediaAssets).where(eq(mediaAssets.id, job.sceneFrameAssetId)).limit(1)
     if (!frame) throw new Error('Approved scene-frame asset not found')
 
-    // Grok image-to-video has no aspect_ratio param and its product fidelity
-    // tracks the input frame's resolution (ticket #3991), so a degraded frame
-    // must fail before the paid submit. Probe the real pixels of the frame
-    // (stored dims are not persisted on scene_frame assets) and assert the
-    // 9:16 full-resolution contract. Other tiers pass aspect_ratio explicitly
-    // to fal and are not subject to this failure mode.
-    if (clipModelId === 'grok') {
+    // Grok image-to-video's product fidelity tracks the input frame's
+    // resolution (ticket #3991), and Atlas's Grok stretches a frame whose
+    // aspect differs from aspect_ratio, so a degraded frame must fail before
+    // the paid submit. Probe the real pixels of the frame (stored dims are not
+    // persisted on scene_frame assets) and assert the 9:16 full-resolution
+    // contract. Other tiers are not subject to this failure mode.
+    if (clipModelId === 'grok' || clipModelId === 'grok-atlas') {
       const frameBuf = await blobFetchToBuffer(frame.blobUrl)
       const { width, height } = await probeImageDimensions(frameBuf)
       assertSceneFrameContract(width, height)
     }
 
-    // RunPod provider (Phase 2, Wan 2.2 14B): the worker uploads its own mp4
-    // straight to Blob, so there is nothing to download/re-upload here, and
-    // its /run + /status protocol is different enough from fal's queue that
-    // it gets its own submit + poll branches rather than reusing
-    // submitVideoRequest/getVideoRequestStatus. Mode is always i2v: the scene
-    // frame is approved before the pipeline ever reaches the clip stage
-    // (FRAME_APPROVED_STAGES), so there is always an image to hand the worker.
-    // No submit-time api_token_log entry for a runpod clip — the ESTIMATE
-    // never lands there at all, only the ACTUAL metered cost does, once the
-    // job completes in the poll branch below. job.costUsd still accrues the
-    // estimate now so the per-video ceiling stays enforced while in flight.
-    if (clipSpec.provider === 'runpod') {
-      const handle = await submitRunpodVideo({
-        prompt: motionPrompt,
-        imageUrl: frame.blobUrl,
-        durationSeconds,
-        mode: 'i2v',
-        blobPathPrefix: `video/${job.jobId}`,
-      })
-      await touch(job, {
-        status: 'awaiting_provider',
-        providerRequestIds: { ...handles, clip: handle },
-        costUsd: String(Number(job.costUsd) + clipCost),
-      })
-      return 'progressed'
-    }
-
-    const handle = await submitVideoRequest(clipModelId, {
+    // One path for every provider (ADR-016): the registry resolves the tier's
+    // adapter, applies the Atlas -> Wavespeed mirror rule, and returns the
+    // handle. The estimate is booked at submit, as it always was for fal; no
+    // provider reports a reliable actual (Atlas's data.price is intermittent).
+    const { handle } = await submitVideoWithMirror(clipModelId, clipSpec.provider, {
       prompt: motionPrompt,
       imageUrl: frame.blobUrl,
       durationSeconds,
@@ -1587,87 +1565,29 @@ async function advanceClip(job: VideoJobRow): Promise<AdvanceOutcome> {
     return 'progressed'
   }
 
-  // Poll — RunPod provider. Same clip/lipsync model resolution the submit
-  // branch used, recomputed here since it is scoped inside the `if
-  // (!existing)` block above.
+  // Poll. The handle's own host picks the adapter (a mirror-issued handle
+  // polls on the mirror); the spec's provider is the fallback. The provider's
+  // output URL expires (Atlas: aliyuncs, fal: ~24h), so the download and the
+  // blobPut happen in this same tick that sees COMPLETED.
   const pollClipModelId = spec.lipsync ? spec.lipsync.baseClip : job.modelTier as VideoModelId
   const pollClipSpec = VIDEO_MODELS[pollClipModelId]
-  if (pollClipSpec.provider === 'runpod') {
-    const { status, executionMs } = await getRunpodStatus(existing as QueueHandle)
-    if (status === 'IN_QUEUE' || status === 'IN_PROGRESS') {
-      await touch(job, {}) // heartbeat so ordering stays fair
-      return 'waiting'
-    }
-    if (status === 'FAILED') {
-      const failedScript = job.scriptJson
-      await logRunpodBurn({
-        costKey: pollClipSpec.costKey,
-        executionMs,
-        seconds: typeof failedScript['durationSeconds'] === 'number' ? failedScript['durationSeconds'] as number : spec.allowedDurations[0] ?? 5,
-        productHandle: job.productHandle,
-        refId: job.jobId,
-        feature: 'video-clip',
-      })
-      throw new Error('runpod video generation failed')
-    }
-
-    const result = await getRunpodResult(existing as QueueHandle)
-    // Worker already wrote the mp4 to Blob under blobPathPrefix — no
-    // download/re-upload, just record the URL it returned.
-    const actualCost = computeRunpodActualCostUsd(result.executionMs)
-    // Replace the submit-time ESTIMATE with the metered ACTUAL on the job
-    // row. durationSeconds is recomputed the same deterministic way the
-    // estimate was (scriptJson.durationSeconds, or the spec's first allowed
-    // duration), so the subtraction exactly reverses what submit added.
-    const pollScript = job.scriptJson
-    const pollDurationSeconds = typeof pollScript['durationSeconds'] === 'number'
-      ? pollScript['durationSeconds'] as number
-      : spec.allowedDurations[0]!
-    const estimatedClipCost = estimateVideoCostUsd(pollClipSpec.costKey, pollDurationSeconds)
-    await db.insert(mediaAssets).values({
-      kind: 'video',
-      purpose: 'clip',
-      blobUrl: result.videoUrl,
-      contentType: 'video/mp4',
-      sourceModel: pollClipSpec.costKey,
-      costUsd: String(actualCost),
-      videoJobId: job.id,
-    })
-    void logVideoCost({
-      feature: 'video-clip',
-      model: pollClipSpec.costKey,
-      seconds: pollDurationSeconds,
-      caller: 'video-pipeline',
-      sku: job.productHandle,
-      refId: job.jobId,
-      actualCostUsd: actualCost,
-    })
-    await touch(job, {
-      stage: 'lipsync',
-      status: 'queued',
-      costUsd: String(Number(job.costUsd) - estimatedClipCost + actualCost),
-    })
-    return 'progressed'
-  }
-
-  // Poll — fal provider.
-  const { status } = await getVideoRequestStatus(existing as QueueHandle)
+  const provider = providerForHandle(existing as QueueHandle, pollClipSpec.provider)
+  const { status, error } = await provider.status(existing as QueueHandle)
   if (status === 'IN_QUEUE' || status === 'IN_PROGRESS') {
     await touch(job, {}) // heartbeat so ordering stays fair
     return 'waiting'
   }
-  if (status === 'FAILED') throw new Error('fal video generation failed')
+  if (status === 'FAILED') throw new Error(`${provider.id} video generation failed${error ? `: ${error}` : ''}`)
 
-  const result = await getVideoRequestResult(existing as QueueHandle)
-  const buf = await downloadFalAsset(result.videoUrl)
+  const result = await provider.result(existing as QueueHandle)
+  const buf = await downloadFalAsset(result.videoUrl) // plain fetch, provider-neutral
   const { url } = await blobPut(`video/${job.jobId}/clip.mp4`, buf, { contentType: 'video/mp4' })
-  const clipSourceSpec = spec.lipsync ? VIDEO_MODELS[spec.lipsync.baseClip] : spec
   await db.insert(mediaAssets).values({
     kind: 'video',
     purpose: 'clip',
     blobUrl: url,
     contentType: 'video/mp4',
-    sourceModel: clipSourceSpec?.costKey ?? job.modelTier,
+    sourceModel: pollClipSpec?.costKey ?? job.modelTier,
     videoJobId: job.id,
   })
   await touch(job, { stage: 'lipsync', status: 'queued' })
@@ -1677,9 +1597,9 @@ async function advanceClip(job: VideoJobRow): Promise<AdvanceOutcome> {
 /**
  * Multi-scene clip stage: render scenes in order, one per tick. 'own-frame'
  * scenes animate their approved frame (scene_frame stage); 'last-frame'
- * scenes animate the PREVIOUS scene's rendered clip's final frame instead —
- * RunPod's worker returns it directly (result.lastFrameUrl); fal providers
- * get it via video-assembly's extractLastFrame. Once every scene is done, the
+ * scenes animate the PREVIOUS scene's rendered clip's final frame instead,
+ * cut from the downloaded clip with video-assembly's extractLastFrame (every
+ * provider since ADR-016; RunPod's worker used to return it directly). Once every scene is done, the
  * per-scene clips are concatenated (concatAndNormalize) into ONE 'clip'-purpose
  * media_assets row — the newest such row — and the job hands off to
  * `stage: 'lipsync'` exactly as the single-clip path does, so advanceLipsync /
@@ -1757,29 +1677,13 @@ async function advanceClipMultiScene(job: VideoJobRow, spec: VideoModelSpec, sce
     }
 
     // Same grok resolution guard as the single-scene submit branch (ticket #3991).
-    if (clipModelId === 'grok') {
+    if (clipModelId === 'grok' || clipModelId === 'grok-atlas') {
       const frameBuf = await blobFetchToBuffer(frameUrl)
       const { width, height } = await probeImageDimensions(frameBuf)
       assertSceneFrameContract(width, height)
     }
 
-    if (clipSpec.provider === 'runpod') {
-      const handle = await submitRunpodVideo({
-        prompt: scene.motionPrompt,
-        imageUrl: frameUrl,
-        durationSeconds: scene.durationSeconds,
-        mode: 'i2v',
-        blobPathPrefix: `video/${job.jobId}/scene-${idx}`,
-      })
-      await touch(job, {
-        status: 'awaiting_provider',
-        providerRequestIds: { ...handles, [sceneKey]: handle },
-        costUsd: String(Number(job.costUsd) + clipCost),
-      })
-      return 'progressed'
-    }
-
-    const handle = await submitVideoRequest(clipModelId, {
+    const { handle } = await submitVideoWithMirror(clipModelId, clipSpec.provider, {
       prompt: scene.motionPrompt,
       imageUrl: frameUrl,
       durationSeconds: scene.durationSeconds,
@@ -1805,70 +1709,18 @@ async function advanceClipMultiScene(job: VideoJobRow, spec: VideoModelSpec, sce
   // scene actually needs one — skips a free-but-unnecessary ffmpeg call.
   const needsLastFrame = idx + 1 < scenes.length && scenes[idx + 1]!.continuity === 'last-frame'
 
-  if (clipSpec.provider === 'runpod') {
-    const { status, executionMs } = await getRunpodStatus(existing as QueueHandle)
-    if (status === 'IN_QUEUE' || status === 'IN_PROGRESS') {
-      await touch(job, {}) // heartbeat so ordering stays fair
-      return 'waiting'
-    }
-    if (status === 'FAILED') {
-      await logRunpodBurn({
-        costKey: clipSpec.costKey,
-        executionMs,
-        seconds: scene.durationSeconds,
-        productHandle: job.productHandle,
-        refId: `${job.jobId}#scene-${idx}`,
-        feature: 'video-clip',
-      })
-      throw new Error(`runpod video generation failed (scene ${idx})`)
-    }
-
-    const result = await getRunpodResult(existing as QueueHandle)
-    if (needsLastFrame && !result.lastFrameUrl) {
-      throw new Error(`Scene ${idx}'s RunPod result is missing lastFrameUrl, needed by scene ${idx + 1}'s last-frame continuity`)
-    }
-    const actualCost = computeRunpodActualCostUsd(result.executionMs)
-    const estimatedClipCost = estimateVideoCostUsd(clipSpec.costKey, scene.durationSeconds)
-    const [row] = await db.insert(mediaAssets).values({
-      kind: 'video',
-      purpose: 'clip',
-      blobUrl: result.videoUrl,
-      contentType: 'video/mp4',
-      sourceModel: clipSpec.costKey,
-      costUsd: String(actualCost),
-      videoJobId: job.id,
-    }).returning({ id: mediaAssets.id })
-    if (!row) throw new Error(`Scene ${idx} clip asset insert failed`)
-    void logVideoCost({
-      feature: 'video-clip',
-      model: clipSpec.costKey,
-      seconds: scene.durationSeconds,
-      caller: 'video-pipeline',
-      sku: job.productHandle,
-      refId: `${job.jobId}#scene-${idx}`,
-      actualCostUsd: actualCost,
-    })
-    const nextState: VideoSceneState[] = state.map((s, i) =>
-      i === idx ? { ...s, clipAssetId: row.id, status: 'done', ...(result.lastFrameUrl ? { lastFrameUrl: result.lastFrameUrl } : {}) } : s,
-    )
-    await touch(job, {
-      status: 'queued',
-      sceneStateJson: nextState,
-      costUsd: String(Number(job.costUsd) - estimatedClipCost + actualCost),
-    })
-    return 'progressed'
-  }
-
-  // Poll — fal provider.
-  const { status } = await getVideoRequestStatus(existing as QueueHandle)
+  // Poll this scene through the adapter that issued its handle; download and
+  // re-host in the same tick (provider URLs expire).
+  const provider = providerForHandle(existing as QueueHandle, clipSpec.provider)
+  const { status, error } = await provider.status(existing as QueueHandle)
   if (status === 'IN_QUEUE' || status === 'IN_PROGRESS') {
     await touch(job, {}) // heartbeat so ordering stays fair
     return 'waiting'
   }
-  if (status === 'FAILED') throw new Error(`fal video generation failed (scene ${idx})`)
+  if (status === 'FAILED') throw new Error(`${provider.id} video generation failed (scene ${idx})${error ? `: ${error}` : ''}`)
 
-  const result = await getVideoRequestResult(existing as QueueHandle)
-  const buf = await downloadFalAsset(result.videoUrl)
+  const result = await provider.result(existing as QueueHandle)
+  const buf = await downloadFalAsset(result.videoUrl) // plain fetch, provider-neutral
   const { url } = await blobPut(`video/${job.jobId}/scene-${idx}-clip.mp4`, buf, { contentType: 'video/mp4' })
   let lastFrameUrl: string | undefined
   if (needsLastFrame) {
@@ -1892,7 +1744,7 @@ async function advanceClipMultiScene(job: VideoJobRow, spec: VideoModelSpec, sce
   return 'progressed'
 }
 
-// ─── Stage: clip (avatar tier, audio-first OmniHuman) ───────────────────────
+// ─── Stage: clip (avatar tier, audio-first: InfiniteTalk / OmniHuman) ──────
 
 /**
  * Part keys double as providerRequestIds keys and media_assets purposes so
@@ -1900,14 +1752,6 @@ async function advanceClipMultiScene(job: VideoJobRow, spec: VideoModelSpec, sce
  * With the 35s speech cap and 24s part budget that is two parts in practice,
  * but the key scheme and the poll/assembly loops handle any count.
  */
-// Provisional per-render caps for the own-worker audio-driven tier (ticket
-// #5714). PENDING THE BAKE-OFF (docs/store-team/video-worker-runpod.md): the
-// real chunking behavior of the chosen model replaces these numbers; until
-// then a 60s line renders as one part and the worker's execution timeout is
-// the hard backstop.
-const S2V_MAX_RENDER_SECONDS = 60
-const S2V_PART_MAX_SECONDS = 55
-
 function avatarPartKey(i: number): string {
   return i === 0 ? 'clip' : `clip_${String.fromCharCode(97 + i)}`
 }
@@ -1924,14 +1768,15 @@ async function advanceClipAvatar(job: VideoJobRow, spec: VideoModelSpec): Promis
 
   if (!handles['clip']) {
     // Submit pass: TTS the presenterLine (split BEFORE TTS when the estimated
-    // read exceeds one part budget), upload frame + speech to fal storage, and
-    // submit one OmniHuman render per part from the SAME identity frame.
+    // read exceeds one part budget), park each speech part on Blob, and submit
+    // one audio-driven render per part from the SAME identity frame, through
+    // the tier's provider (InfiniteTalk on Atlas since ADR-016; OmniHuman on
+    // fal for historical rows).
     const line = typeof job.scriptJson['presenterLine'] === 'string' ? (job.scriptJson['presenterLine'] as string).trim() : ''
     if (!line) throw new Error('scriptJson.presenterLine is required for the avatar tier')
     if (!job.sceneFrameAssetId) throw new Error('No approved scene frame for the avatar render')
 
-    const isRunpodAvatar = spec.provider === 'runpod'
-    const parts = isRunpodAvatar ? splitPresenterLine(line, S2V_PART_MAX_SECONDS) : splitPresenterLine(line)
+    const parts = splitPresenterLine(line)
     if (!parts.length) throw new Error('presenterLine produced no speakable parts')
 
     const tone = isVideoTone(job.scriptJson['presenterTone']) ? job.scriptJson['presenterTone'] : undefined
@@ -1941,7 +1786,7 @@ async function advanceClipAvatar(job: VideoJobRow, spec: VideoModelSpec): Promis
     const wordTimings: WordTiming[] = []
     let timingsComplete = true
     let totalSpeechSeconds = 0
-    const perRenderCap = isRunpodAvatar ? S2V_MAX_RENDER_SECONDS : OMNIHUMAN_MAX_RENDER_SECONDS
+    const perRenderCap = spec.maxRenderSeconds ?? OMNIHUMAN_MAX_RENDER_SECONDS
     for (const part of parts) {
       // with-timestamps: same audio, plus the char alignment that drives the
       // word-timed caption burn. A missing alignment falls back to the
@@ -1991,49 +1836,30 @@ async function advanceClipAvatar(job: VideoJobRow, spec: VideoModelSpec): Promis
     const [frame] = await db.select().from(mediaAssets).where(eq(mediaAssets.id, job.sceneFrameAssetId)).limit(1)
     if (!frame) throw new Error('Approved scene-frame asset not found')
 
+    // The frame's Blob URL is already public; each speech part parks on Blob
+    // too, and the adapter hands both URLs to the provider (Atlas falls back
+    // to its own uploadMedia if a URL is refused). Estimate booked at submit.
     const newHandles: Record<string, QueueHandle> = {}
-    if (isRunpodAvatar) {
-      // Own-worker audio-driven tier (ticket #5714): frame and speech never
-      // leave our infrastructure. The frame's Blob URL is already public; each
-      // speech part parks on Blob for the worker to fetch; the worker (mode
-      // 's2v', ticket #5713) performs the part and uploads the mp4 itself.
-      // Like the clip stage's runpod branch, NO submit-time api_token_log row:
-      // only the metered actual lands there, in the poll branch. job.costUsd
-      // still accrues the estimate now so the ceiling stays enforced.
-      for (let i = 0; i < audios.length; i++) {
-        const { url: audioUrl } = await blobPut(`video/${job.jobId}/speech-${i}.mp3`, audios[i]!, { contentType: 'audio/mpeg' })
-        newHandles[avatarPartKey(i)] = await submitRunpodVideo({
-          prompt: tone ? TONE_EXPRESSION[tone] : '',
-          imageUrl: frame.blobUrl,
-          audioUrl,
-          durationSeconds: Math.ceil(partSeconds[i]!),
-          mode: 's2v',
-          blobPathPrefix: `video/${job.jobId}/part-${i}`,
-        })
-      }
-    } else {
-      const frameBuf = await blobFetchToBuffer(frame.blobUrl)
-      const imageUrl = await uploadToFalStorage(frameBuf, 'image/jpeg', `frame-${job.jobId}.jpg`)
-      for (let i = 0; i < audios.length; i++) {
-        const audioUrl = await uploadToFalStorage(audios[i]!, 'audio/mpeg', `speech-${job.jobId}-${i}.mp3`)
-        newHandles[avatarPartKey(i)] = await submitVideoRequest('omnihuman', {
-          // Tone colors the performance, not just the read (spec §5 Phase 3).
-          prompt: tone ? TONE_EXPRESSION[tone] : '',
-          imageUrl,
-          audioUrl,
-          durationSeconds: 0,
-          aspect: '9:16',
-        })
-      }
-      void logVideoCost({
-        feature: 'video-avatar',
-        model: spec.costKey,
-        seconds: billedSeconds,
-        caller: 'video-pipeline',
-        sku: job.productHandle,
-        refId: job.jobId,
+    for (let i = 0; i < audios.length; i++) {
+      const { url: audioUrl } = await blobPut(`video/${job.jobId}/speech-${i}.mp3`, audios[i]!, { contentType: 'audio/mpeg' })
+      const { handle } = await submitVideoWithMirror(job.modelTier, spec.provider, {
+        // Tone colors the performance, not just the read (spec §5 Phase 3).
+        prompt: tone ? TONE_EXPRESSION[tone] : '',
+        imageUrl: frame.blobUrl,
+        audioUrl,
+        durationSeconds: Math.ceil(partSeconds[i]!),
+        aspect: '9:16',
       })
+      newHandles[avatarPartKey(i)] = handle
     }
+    void logVideoCost({
+      feature: 'video-avatar',
+      model: spec.costKey,
+      seconds: billedSeconds,
+      caller: 'video-pipeline',
+      sku: job.productHandle,
+      refId: job.jobId,
+    })
 
     // Persist word timings alongside the handles: assembly runs on a later
     // cron tick and reads them back off the row. Partial coverage (some part
@@ -2045,14 +1871,7 @@ async function advanceClipAvatar(job: VideoJobRow, spec: VideoModelSpec): Promis
 
     await touch(job, {
       status: 'awaiting_provider',
-      providerRequestIds: {
-        ...handles,
-        ...newHandles,
-        // Non-handle bookkeeping key (assembly_attempts precedent): the poll
-        // branch reverses the submit-time ESTIMATE with the metered actual,
-        // and the real billed speech seconds are not otherwise recoverable.
-        ...(isRunpodAvatar ? ({ avatar_billed_seconds: billedSeconds } as unknown as Record<string, QueueHandle>) : {}),
-      },
+      providerRequestIds: { ...handles, ...newHandles },
       scriptJson: scriptWithTimings,
       costUsd: String(Number(job.costUsd) + clipCost + ttsCost),
     })
@@ -2062,80 +1881,25 @@ async function advanceClipAvatar(job: VideoJobRow, spec: VideoModelSpec): Promis
   // Poll pass: wait for EVERY part, then persist them all in one go.
   const activeKeys = avatarPartKeys(handles)
 
-  if (spec.provider === 'runpod') {
-    for (const key of activeKeys) {
-      const { status, executionMs } = await getRunpodStatus(handles[key] as QueueHandle)
-      if (status === 'FAILED') {
-        // One failed part fails the job, but every part that already ran was
-        // billed; record this one's burn on the way out (ticket #5726). The
-        // sibling parts' burns land when their own poll sees them terminal,
-        // or are lost — an accepted floor, not a silent zero.
-        const billedRaw = (handles as Record<string, unknown>)['avatar_billed_seconds']
-        await logRunpodBurn({
-          costKey: spec.costKey,
-          executionMs,
-          seconds: typeof billedRaw === 'number' && billedRaw > 0 ? billedRaw : 1,
-          productHandle: job.productHandle,
-          refId: `${job.jobId}#${key}`,
-          feature: 'video-avatar',
-        })
-        throw new Error(`runpod avatar render failed (${key})`)
-      }
-      if (status === 'IN_QUEUE' || status === 'IN_PROGRESS') {
-        await touch(job, {}) // heartbeat so ordering stays fair
-        return 'waiting'
-      }
-    }
-    let actualTotal = 0
-    for (const key of activeKeys) {
-      const result = await getRunpodResult(handles[key] as QueueHandle)
-      const actualCost = computeRunpodActualCostUsd(result.executionMs)
-      actualTotal += actualCost
-      // Worker already wrote the mp4 to Blob — record its URL, no re-upload.
-      await db.insert(mediaAssets).values({
-        kind: 'video',
-        purpose: key,
-        blobUrl: result.videoUrl,
-        contentType: 'video/mp4',
-        sourceModel: spec.costKey,
-        costUsd: String(actualCost),
-        videoJobId: job.id,
-      })
-    }
-    // Reverse the submit-time estimate with the metered actual (same
-    // discipline as the clip stage's runpod poll branch).
-    const billedRaw = (handles as Record<string, unknown>)['avatar_billed_seconds']
-    const billed = typeof billedRaw === 'number' ? billedRaw : 0
-    const estimated = billed > 0 ? estimateVideoCostUsd(spec.costKey, billed) : 0
-    void logVideoCost({
-      feature: 'video-avatar',
-      model: spec.costKey,
-      seconds: billed,
-      caller: 'video-pipeline',
-      sku: job.productHandle,
-      refId: job.jobId,
-      actualCostUsd: actualTotal,
-    })
-    await touch(job, {
-      stage: 'lipsync',
-      status: 'queued',
-      costUsd: String(Number(job.costUsd) - estimated + actualTotal),
-    })
-    return 'progressed'
-  }
-
+  // Poll every part through the adapter that issued it; a mirror can have
+  // taken some parts and not others.
   for (const key of activeKeys) {
-    const { status } = await getVideoRequestStatus(handles[key] as QueueHandle)
-    if (status === 'FAILED') throw new Error(`fal avatar render failed (${key})`)
+    const handle = handles[key] as QueueHandle
+    const provider = providerForHandle(handle, spec.provider)
+    const { status, error } = await provider.status(handle)
+    if (status === 'FAILED') throw new Error(`${provider.id} avatar render failed (${key})${error ? `: ${error}` : ''}`)
     if (status === 'IN_QUEUE' || status === 'IN_PROGRESS') {
       await touch(job, {}) // heartbeat so ordering stays fair
       return 'waiting'
     }
   }
 
+  // Every part is done: download and re-host all of them in this same tick
+  // (provider output URLs expire).
   for (const key of activeKeys) {
-    const result = await getVideoRequestResult(handles[key] as QueueHandle)
-    const buf = await downloadFalAsset(result.videoUrl)
+    const handle = handles[key] as QueueHandle
+    const result = await providerForHandle(handle, spec.provider).result(handle)
+    const buf = await downloadFalAsset(result.videoUrl) // plain fetch, provider-neutral
     const { url } = await blobPut(`video/${job.jobId}/${key}.mp4`, buf, { contentType: 'video/mp4' })
     await db.insert(mediaAssets).values({
       kind: 'video',

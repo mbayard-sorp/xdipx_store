@@ -126,7 +126,7 @@ import { enqueueVideoJobSet, estimateJobCostUsd, advanceInflightVideoJobs } from
 import { estimateAvatarSpeechSeconds } from '~/lib/avatar-script'
 import { logVideoCost } from '~/lib/token-log.server'
 import { blobPut, blobFetchToBuffer } from '~/lib/blob.server'
-import { computeRunpodActualCostUsd, estimateVideoCostUsd } from '~/lib/model-pricing.server'
+import { computeRunpodActualCostUsd } from '~/lib/model-pricing.server'
 import { INFLIGHT_VIDEO_STATUSES, rejectVideoJob, approveRenderedVideo, rejectRenderedVideo, fanOutVideoToSocialDrafts } from '~/lib/video-pipeline.server'
 import { extractPoster, probeDurationSeconds } from '~/lib/video-assembly.server'
 
@@ -135,7 +135,7 @@ const baseArgs = {
   formula: 'myth-busting',
   presenter: 'none',
   baseScriptJson: { framePrompt: 'archetype B', motionPrompt: 'slow push', voiceover: '{{hook}}' },
-  modelTier: 'wan22-i2v' as const,
+  modelTier: 'wan27-atlas' as const,
   durationSeconds: 5,
   targetPlatforms: ['instagram'],
   hooks: ['Hook one', 'Hook two', 'Hook three'],
@@ -143,6 +143,8 @@ const baseArgs = {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  // Atlas tiers are refused as provider_not_configured without the key (ADR-016).
+  vi.stubEnv('ATLAS_CLOUD_API_KEY', 'test-atlas-key')
   state.selectResults = []
   state.inserts = []
   state.updates = []
@@ -163,7 +165,7 @@ describe('enqueueVideoJobSet', () => {
     expect(groupIds.size).toBe(1)
     expect([...groupIds][0]).toBe(result.variantGroupId)
     expect(state.inserts.map(r => (r['variantAxes'] as { hook: string }).hook)).toEqual(['Hook one', 'Hook two', 'Hook three'])
-    const perJob = estimateJobCostUsd('wan22-i2v', 5, { reuseFrame: false })
+    const perJob = estimateJobCostUsd('wan27-atlas', 5, { reuseFrame: false })
     expect(result.totalEstCostUsd).toBeCloseTo(perJob * 3, 4)
   })
 
@@ -186,11 +188,8 @@ describe('enqueueVideoJobSet', () => {
   })
 
   it('zeroes the frame cost for variants whose scene already has an approved frame', async () => {
-    // The avatar path needs an avatar tier, and the only one left is the
-    // RunPod s2v tier — omnihuman is retired with the rest of fal video. Widen
-    // the worker's declared modes for this test only; the point under test is
-    // the frame-cost arithmetic, not tier eligibility.
-    workerModes.value = ['i2v', 't2v', 's2v']
+    // The avatar path needs an avatar tier: InfiniteTalk on Atlas since
+    // ADR-016 (omnihuman is retired with fal video, wan22-s2v with RunPod).
     const line = 'Short spoken line about {{hook}}.'
     // One findReusableSceneFrame lookup per variant (set estimate); the
     // enqueue itself does not re-query in this path.
@@ -198,14 +197,14 @@ describe('enqueueVideoJobSet', () => {
     const result = await enqueueVideoJobSet({
       ...baseArgs,
       presenter: 'emma',
-      modelTier: 'wan22-s2v',
+      modelTier: 'infinitetalk-atlas',
       durationSeconds: 0,
       hooks: ['now', 'later'],
       baseScriptJson: { presenterLine: line, talkingHead: true, sceneSlug: 'couch-cozy', framePrompt: 'C' },
     })
     const expected = ['now', 'later'].reduce((sum, hook) => {
       const speech = estimateAvatarSpeechSeconds(line.split('{{hook}}').join(hook))
-      return sum + estimateJobCostUsd('wan22-s2v', 0, { speechSeconds: speech, reuseFrame: true })
+      return sum + estimateJobCostUsd('infinitetalk-atlas', 0, { speechSeconds: speech, reuseFrame: true })
     }, 0)
     expect(result.totalEstCostUsd).toBeCloseTo(expected, 4)
     expect(state.inserts).toHaveLength(2)
@@ -224,10 +223,12 @@ describe('estimateJobCostUsd — Grok Imagine tier (ticket #3991)', () => {
   })
 })
 
-// RunPod provider branch in the clip stage (video-provider Phase 2, Wan 2.2
-// 14B). Fal's own clip path is untouched (byte-for-byte); these tests only
-// exercise the new `spec.provider === 'runpod'` fork.
-describe('advanceClip — RunPod provider (wan22-i2v)', () => {
+// Legacy RunPod rows after ADR-016 (2026-09-23). The pipeline's RunPod
+// branches are gone: a wan22 row can no longer submit or complete, and an
+// in-flight RunPod handle fails loudly and is cancelled (the orphan-cancel
+// path below still runs, until Phase 4 deletes the module). The Atlas
+// submit -> poll -> re-host flow is covered in video-pipeline-atlas.test.ts.
+describe('advanceClip: legacy RunPod rows (retired, ADR-016)', () => {
   const baseJobRow = {
     id: 7,
     jobId: 'job-wan22',
@@ -257,76 +258,18 @@ describe('advanceClip — RunPod provider (wan22-i2v)', () => {
     completedAt: null,
   }
 
-  it('submits with mode i2v and the frame URL, and accrues the ESTIMATE without logging it (no api_token_log row at submit)', async () => {
+  it('never submits a queued wan22 clip to the RunPod worker: it fails with the retirement named', async () => {
     state.selectResults = [
       [baseJobRow],                                          // advanceInflightVideoJobs' job-rows query
       [{ id: 55, blobUrl: 'https://blob.test/frame.jpg' }],   // scene-frame asset lookup
     ]
-    runpodSubmitMock.mockResolvedValue({
-      requestId: 'rp-1',
-      statusUrl: 'https://api.runpod.ai/v2/ep/status/rp-1',
-      responseUrl: 'https://api.runpod.ai/v2/ep/status/rp-1',
-    })
 
     const result = await advanceInflightVideoJobs()
 
-    expect(result.failed).toBe(0)
-    expect(result.advanced).toBe(1)
-    expect(runpodSubmitMock).toHaveBeenCalledWith({
-      prompt: 'slow push toward the product',
-      imageUrl: 'https://blob.test/frame.jpg',
-      durationSeconds: 8,
-      mode: 'i2v',
-      blobPathPrefix: 'video/job-wan22',
-    })
-    // Estimate accrues to the job row (ceiling enforcement) but never lands in
-    // api_token_log — only the ACTUAL cost does, once the job completes.
+    expect(result.failed).toBe(1)
+    expect(runpodSubmitMock).not.toHaveBeenCalled()
+    expect(state.updates.map(u => String(u['error'] ?? '')).join(' ')).toMatch(/runpod.*retired|RunPod video is retired/i)
     expect(logVideoCost).not.toHaveBeenCalled()
-    // Never touches the fal queue client's blob round-trip.
-    expect(blobPut).not.toHaveBeenCalled()
-    expect(blobFetchToBuffer).not.toHaveBeenCalled()
-  })
-
-  it('on COMPLETED, records the mediaAssets clip row with blobUrl = the worker videoUrl (no download/re-upload), and replaces the estimate with the actual cost', async () => {
-    const awaitingRow = {
-      ...baseJobRow,
-      status: 'awaiting_provider',
-      costUsd: String(estimateVideoCostUsd('runpod/wan22', 8)), // what submit accrued
-      providerRequestIds: {
-        clip: { requestId: 'rp-1', statusUrl: 'https://api.runpod.ai/v2/ep/status/rp-1', responseUrl: 'https://api.runpod.ai/v2/ep/status/rp-1' },
-      },
-    }
-    state.selectResults = [[awaitingRow]] // only the job-rows query; no frame lookup on poll
-    runpodStatusMock.mockResolvedValue({ status: 'COMPLETED' })
-    runpodResultMock.mockResolvedValue({
-      videoUrl: 'https://blob.vercel-storage.com/video/job-wan22/clip.mp4',
-      renderSeconds: 300,
-      executionMs: 300000,
-    })
-
-    const result = await advanceInflightVideoJobs()
-
-    expect(result.failed).toBe(0)
-    expect(result.advanced).toBe(1)
-    expect(blobPut).not.toHaveBeenCalled()
-    expect(blobFetchToBuffer).not.toHaveBeenCalled()
-
-    const clipInsert = state.inserts.find(r => r['purpose'] === 'clip')
-    expect(clipInsert).toMatchObject({
-      kind: 'video',
-      purpose: 'clip',
-      blobUrl: 'https://blob.vercel-storage.com/video/job-wan22/clip.mp4',
-      contentType: 'video/mp4',
-      sourceModel: 'runpod/wan22',
-    })
-    const actualCost = computeRunpodActualCostUsd(300000)
-    expect(clipInsert?.['costUsd']).toBe(String(actualCost))
-    expect(logVideoCost).toHaveBeenCalledWith(expect.objectContaining({
-      feature: 'video-clip',
-      model: 'runpod/wan22',
-      seconds: 8,
-      actualCostUsd: actualCost,
-    }))
   })
 
   /**
@@ -472,7 +415,7 @@ describe('advanceClip — RunPod provider (wan22-i2v)', () => {
     expect(state.updates.map(u => String(u['error'] ?? '')).join(' ')).not.toMatch(/per-video ceiling/)
   })
 
-  it('waits (does not insert or log) while the runpod job is still in progress', async () => {
+  it('fails an in-flight RunPod handle and cancels it, rather than polling a retired worker forever', async () => {
     const awaitingRow = {
       ...baseJobRow,
       status: 'awaiting_provider',
@@ -481,14 +424,14 @@ describe('advanceClip — RunPod provider (wan22-i2v)', () => {
       },
     }
     state.selectResults = [[awaitingRow]]
-    runpodStatusMock.mockResolvedValue({ status: 'IN_PROGRESS' })
+    runpodStatusMock.mockResolvedValue({ status: 'IN_PROGRESS', executionMs: 12_000 })
 
     const result = await advanceInflightVideoJobs()
 
-    expect(result.failed).toBe(0)
+    expect(result.failed).toBe(1)
     expect(runpodResultMock).not.toHaveBeenCalled()
-    expect(state.inserts).toHaveLength(0)
-    expect(logVideoCost).not.toHaveBeenCalled()
+    expect(state.inserts.filter(r => r['purpose'] === 'clip')).toHaveLength(0)
+    expect(runpodCancelMock).toHaveBeenCalledWith(expect.objectContaining({ requestId: 'rp-1' }))
   })
 })
 
