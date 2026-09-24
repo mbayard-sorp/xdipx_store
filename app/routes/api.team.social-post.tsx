@@ -6,6 +6,16 @@
  *     subject?, sceneLocation?, castSlugs?, bodyZone?, contactMode?, cropScale?,
  *     pairingNoneReason?,
  *     voiceGate: { verdict:'PASS', reviewer, addendum?, notes? } } -> { id, deduped }
+ *     Fail-closed library-membership requirement (ticket #11311, split from
+ *     #11302): every mediaUrls/posterUrl entry must be the literal url of a
+ *     real `social_media_assets` row (query string ignored), or the draft is
+ *     refused with 400 naming the offending url(s). Without this, a
+ *     hallucinated or mismatched-product url (right scene suffix, wrong
+ *     product handle) reached `social_posts` with no signal at all —
+ *     `createDraftSocialPost` only READS from the asset a url resolves to and
+ *     silently falls through when nothing matches — until the vision-verdict
+ *     gate blocked it days later with a confusing legacy-cutoff message that
+ *     read like a gate bug (#11302's own misdiagnosis).
  *     `deduped:true` means a still-open (pending_review/needs_changes) row for
  *     the same platform, caption, and campaign day already existed and `id`
  *     is THAT row, not a new one (ticket #4069 — see createDraftSocialPost).
@@ -185,6 +195,26 @@ export async function action({ request }: ActionFunctionArgs) {
         { status: 400 },
       )
     }
+    const posterUrl = typeof b['posterUrl'] === 'string' ? b['posterUrl'] : undefined
+    // Fail-closed library-membership requirement (#11311): see the op header
+    // comment. Checked here, before any write, because this is the only point
+    // in the draft path that has both the caller's exact url string and a
+    // reason to refuse it — everything downstream only reads from the asset a
+    // url resolves to and treats "resolves to nothing" as "nothing to add".
+    const urlsToVerify = [...(mediaUrls ?? []), ...(posterUrl ? [posterUrl] : [])]
+    if (urlsToVerify.length > 0) {
+      const { isLibraryMember } = await import('~/lib/social-asset-library.server')
+      const unknown: string[] = []
+      for (const u of urlsToVerify) {
+        if (!(await isLibraryMember(u))) unknown.push(u)
+      }
+      if (unknown.length > 0) {
+        return new Response(
+          `Bad Request: no social_media_assets row indexes ${unknown.join(', ')} — a drafted url must be the literal url of a real, checked library asset`,
+          { status: 400 },
+        )
+      }
+    }
     // Scene axes (#10480): validated against the single-source vocabulary
     // rather than by string length. A length-only check let `hip_hollow` or
     // `Hip-Hollow` persist cleanly and then classify as neither ceiling nor
@@ -213,7 +243,7 @@ export async function action({ request }: ActionFunctionArgs) {
       scheduledFor:  typeof b['scheduledFor'] === 'string' ? b['scheduledFor'] : undefined,
       reworkedFrom:  typeof b['reworkedFrom'] === 'number' ? b['reworkedFrom'] : undefined,
       videoJobId:    typeof b['videoJobId'] === 'number' ? b['videoJobId'] : undefined,
-      posterUrl:     typeof b['posterUrl'] === 'string' ? b['posterUrl'] : undefined,
+      posterUrl,
       shopifyProductId:
         typeof b['shopifyProductId'] === 'string' && b['shopifyProductId'].length > 0 && b['shopifyProductId'].length <= 60
           ? b['shopifyProductId']
