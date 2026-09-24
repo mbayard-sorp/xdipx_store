@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 
 import {
   VIDEO_MODELS,
+  DEFAULT_TIER_BY_MODE,
+  modeTierMismatch,
   isVideoModelId,
   submitVideoRequest,
   assertSceneFrameContract,
@@ -337,5 +339,25 @@ describe('tier ids fit the column', () => {
     // infinitetalk-atlas (18) would have failed every enqueue in Postgres,
     // after the ceiling checks, where a db mock never sees it. Rename, never widen.
     for (const id of Object.keys(VIDEO_MODELS)) expect(id.length, id).toBeLessThanOrEqual(16)
+  })
+})
+
+describe('production mode -> tier (owner ruling 2026-09-23)', () => {
+  it('defaults talking to InfiniteTalk and voiceover to Wan 2.7', () => {
+    expect(DEFAULT_TIER_BY_MODE).toEqual({ talking: 'italk-atlas', voiceover: 'wan27-atlas' })
+  })
+
+  it('refuses talking on a silent tier and voiceover on an on-camera performer', () => {
+    expect(modeTierMismatch('talking', 'italk-atlas')).toBeNull()
+    expect(modeTierMismatch('talking', 'wan27-atlas')).toMatch(/silent/)
+    expect(modeTierMismatch('talking', 'wan22turbo-atlas')).toMatch(/silent/)
+    expect(modeTierMismatch('voiceover', 'wan27-atlas')).toBeNull()
+    expect(modeTierMismatch('voiceover', 'wan22turbo-atlas')).toBeNull()
+    expect(modeTierMismatch('voiceover', 'italk-atlas')).toMatch(/performs the line on camera/)
+  })
+
+  it('keeps grok-atlas registered and eligible but owner-only', () => {
+    expect(VIDEO_MODELS['grok-atlas'].ownerOnly).toBe(true)
+    for (const id of ['italk-atlas', 'wan27-atlas', 'wan22turbo-atlas'] as const) expect(VIDEO_MODELS[id].ownerOnly).toBeUndefined()
   })
 })

@@ -579,6 +579,39 @@ describe('enqueueVideoJob — presenter voice guard (ticket #6584)', () => {
     expect(state.inserts).toHaveLength(1)
   })
 
+  // Voiceover mode (owner ruling 2026-09-23): the voiceover is spoken in the
+  // cast voice, so it is gated at enqueue exactly like a talking tier.
+  const { modelTier: _tier, ...noTier } = baseEnqueueArgs
+  const voScript = { framePrompt: 'the wand on linen', motionPrompt: 'she turns the wand slowly', voiceover: 'This is the mini wand.' }
+
+  it("mode 'voiceover' with no tier enqueues on wan27-atlas in the cast voice", async () => {
+    vi.mocked(getApprovedCastMembers).mockResolvedValueOnce([castMember({ voiceId: 'maya-voice-1' })])
+    const result = await enqueueVideoJob({ ...noTier, presenter: 'friend:maya', mode: 'voiceover', durationSeconds: 5, scriptJson: voScript })
+    expect(result.jobId).toBeTruthy()
+    expect(state.inserts[0]!['modelTier']).toBe('wan27-atlas')
+  })
+
+  it("refuses a voiceover for a friend with no voiceId, before any spend", async () => {
+    vi.mocked(getApprovedCastMembers).mockResolvedValueOnce([castMember({ voiceId: null })])
+    await expect(enqueueVideoJob({ ...noTier, presenter: 'friend:maya', mode: 'voiceover', durationSeconds: 5, scriptJson: voScript }))
+      .rejects.toThrow(/no voiceId assigned/i)
+    expect(state.inserts).toHaveLength(0)
+  })
+
+  it("refuses mode 'voiceover' with no voiceover line, and a mode that contradicts the named tier", async () => {
+    await expect(enqueueVideoJob({ ...noTier, mode: 'voiceover', durationSeconds: 5, scriptJson: { framePrompt: 'a', motionPrompt: 'b' } }))
+      .rejects.toThrow(/requires scriptJson\.voiceover/)
+    await expect(enqueueVideoJob({ ...noTier, mode: 'talking', modelTier: 'wan27-atlas', durationSeconds: 5, scriptJson: voScript }))
+      .rejects.toThrow(/wan27-atlas is silent/)
+    expect(state.inserts).toHaveLength(0)
+  })
+
+  it("mode 'talking' with no tier defaults to italk-atlas", async () => {
+    vi.mocked(getApprovedCastMembers).mockResolvedValueOnce([castMember({ voiceId: 'maya-voice-1' })])
+    await enqueueVideoJob({ ...noTier, presenter: 'friend:maya', mode: 'talking', durationSeconds: 0, scriptJson: { presenterLine: 'This one is my favorite.', talkingHead: true } })
+    expect(state.inserts[0]!['modelTier']).toBe('italk-atlas')
+  })
+
   it('does not gate a silent tier (no presenter voice ever spoken)', async () => {
     // grok-atlas is neither audioDriven nor lipsync, so a friend with no
     // voiceId still enqueues — nothing about this tier ever calls TTS for

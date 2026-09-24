@@ -234,3 +234,86 @@ describe('config', () => {
     expect(json.models['veo31']).toBeUndefined()
   })
 })
+
+/**
+ * Production mode (owner ruling 2026-09-23): the writers decide talking head
+ * vs voiceover; the tier follows the mode unless named, and a named tier that
+ * contradicts the mode is a 400.
+ */
+describe('production mode', () => {
+  const single = {
+    op: 'enqueue',
+    productHandle: 'satin-wand',
+    formula: 'myth-busting',
+    presenter: 'friend:maya',
+    targetPlatforms: ['instagram'],
+  }
+  const talkingScript = { presenterLine: 'This is the mini wand.', framePrompt: 'C', motionPrompt: 'hold' }
+  const voiceoverScript = { voiceover: 'This is the mini wand.', framePrompt: 'C', motionPrompt: 'turn it slowly' }
+
+  it('talking with no tier defaults to italk-atlas and passes the mode through', async () => {
+    const res = await post({ ...single, mode: 'talking', scriptJson: talkingScript })
+    expect(res.status).toBe(200)
+    expect(enqueueMock).toHaveBeenCalledWith(expect.objectContaining({ modelTier: 'italk-atlas', mode: 'talking' }))
+  })
+
+  it('voiceover with no tier defaults to wan27-atlas', async () => {
+    const res = await post({ ...single, mode: 'voiceover', durationSeconds: 5, scriptJson: voiceoverScript })
+    expect(res.status).toBe(200)
+    expect(enqueueMock).toHaveBeenCalledWith(expect.objectContaining({ modelTier: 'wan27-atlas', mode: 'voiceover' }))
+  })
+
+  it('a named tier wins when it fits the mode', async () => {
+    const res = await post({ ...single, mode: 'voiceover', modelTier: 'wan22turbo-atlas', durationSeconds: 5, scriptJson: voiceoverScript })
+    expect(res.status).toBe(200)
+    expect(enqueueMock).toHaveBeenCalledWith(expect.objectContaining({ modelTier: 'wan22turbo-atlas' }))
+  })
+
+  it("400s talking on a silent tier, naming the mismatch", async () => {
+    const res = await post({ ...single, mode: 'talking', modelTier: 'wan27-atlas', durationSeconds: 5, scriptJson: talkingScript })
+    expect(res.status).toBe(400)
+    const json = await res.json() as { error: string; detail: string }
+    expect(json.error).toBe('mode_tier_mismatch')
+    expect(json.detail).toMatch(/talking.*wan27-atlas is silent/)
+    expect(enqueueMock).not.toHaveBeenCalled()
+  })
+
+  it('400s voiceover on an audio-driven tier, naming the mismatch', async () => {
+    const res = await post({ ...single, mode: 'voiceover', modelTier: 'italk-atlas', scriptJson: { ...talkingScript, voiceover: 'x' } })
+    expect(res.status).toBe(400)
+    const json = await res.json() as { error: string; detail: string }
+    expect(json.error).toBe('mode_tier_mismatch')
+    expect(json.detail).toMatch(/voiceover.*italk-atlas performs the line on camera/)
+  })
+
+  it('400s voiceover with no voiceover line', async () => {
+    const res = await post({ ...single, mode: 'voiceover', durationSeconds: 5, scriptJson: { framePrompt: 'C', motionPrompt: 'm' } })
+    expect(res.status).toBe(400)
+    expect(await res.text()).toMatch(/voiceover/)
+  })
+
+  it('400s an unknown mode', async () => {
+    const res = await post({ ...single, mode: 'b-roll', scriptJson: talkingScript })
+    expect(res.status).toBe(400)
+    expect(await res.text()).toMatch(/talking\|voiceover/)
+  })
+})
+
+describe('owner-only tiers', () => {
+  it('refuses grok-atlas on the team API (routines never route it)', async () => {
+    const res = await post({ ...validSet, modelTier: 'grok-atlas', durationSeconds: 10 })
+    expect(res.status).toBe(400)
+    const json = await res.json() as { error: string }
+    expect(json.error).toBe('owner_only_tier')
+    expect(enqueueSetMock).not.toHaveBeenCalled()
+  })
+
+  it('config reports grok-atlas as ownerOnly and publishes the mode defaults', async () => {
+    const res = await post({ op: 'config' })
+    const json = await res.json() as { models: Record<string, { ownerOnly: boolean }>; modes: string[]; defaultTierByMode: Record<string, string> }
+    expect(json.models['grok-atlas']?.ownerOnly).toBe(true)
+    expect(json.models['italk-atlas']?.ownerOnly).toBe(false)
+    expect(json.modes).toEqual(['talking', 'voiceover'])
+    expect(json.defaultTierByMode).toEqual({ talking: 'italk-atlas', voiceover: 'wan27-atlas' })
+  })
+})

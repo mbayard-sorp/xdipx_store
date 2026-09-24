@@ -191,6 +191,16 @@ describe('validatePitch (plan Phase 2b)', () => {
     expect(readPitch({ pitch: p } as VideoScriptJson)?.productHandle).toBe('womanizer-premium-2')
   })
 
+  it("carries the writers' production mode, defaulting to talking (owner ruling 2026-09-23)", () => {
+    expect(validatePitch(full, 'e').mode).toBe('talking')
+    expect(validatePitch({ ...full, mode: 'voiceover' }, 'e').mode).toBe('voiceover')
+    expect(validatePitch({ pitch: { ...full, mode: 'voiceover' } }, 'e').mode).toBe('voiceover')
+    expect(() => validatePitch({ ...full, mode: 'b-roll' }, 'e')).toThrow(/e\.mode must be one of talking\|voiceover/)
+    // A pitch stored before the field existed reads as talking.
+    const { mode: _m, ...legacy } = validatePitch(full, 'e')
+    expect(readPitch({ pitch: legacy } as VideoScriptJson)?.mode).toBe('talking')
+  })
+
   it('never counts as spoken text, so a pitch cannot trip the enqueue byte-identity guard', () => {
     const p = validatePitch(full, 'e')
     const a: VideoScriptJson = { presenterLine: 'same line' }

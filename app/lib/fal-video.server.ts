@@ -20,6 +20,7 @@ import { atlasConfigured, atlasGenerate } from '~/lib/atlas.server'
 import { estimateRunpodRatePerSecondUsd, estimateRunpodS2vRatePerSecondUsd } from '~/lib/model-pricing.server'
 import { runpodWorkerModes, runpodWorkerSupportsMode, type RunpodWorkerMode } from '~/lib/runpod-video.server'
 import { wavespeedConfigured, wavespeedMirrorFor } from '~/lib/media-providers/wavespeed-video.server'
+import type { VideoMode } from '~/lib/video-episodes'
 
 const FAL_QUEUE_ENDPOINT = 'https://queue.fal.run'
 const FAL_SYNC_ENDPOINT = 'https://fal.run'
@@ -134,6 +135,12 @@ export interface VideoModelSpec {
    * video-producer charter refuses selecting one for new work.
    */
   legacy?: true
+  /**
+   * Eligible, but for the owner only (owner ruling 2026-09-23: cast voices
+   * must be consistent). The team API refuses it and the config op flags it,
+   * so no routine routes it; the studio composer may.
+   */
+  ownerOnly?: true
 }
 
 export const VIDEO_MODELS: Record<VideoModelId, VideoModelSpec> = {
@@ -329,6 +336,7 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModelSpec> = {
     provider: 'atlascloud',
     costKey: 'atlascloud/grok-imagine-1.5',
     ratePerSecondUsd: 0.141,
+    ownerOnly: true,
     nativeAudio: true,
     inventsDialogue: true,
     allowedDurations: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
@@ -443,6 +451,33 @@ export function workerModeIneligibility(id: VideoModelId): TierIneligibility | n
           'handler, and bill for the boot. See docs/store-team/video-worker-runpod.md.',
       }
     }
+  }
+  return null
+}
+
+/**
+ * Production mode -> default tier when the caller names a mode but no tier
+ * (owner ruling 2026-09-23): talking is InfiniteTalk in the cast voice,
+ * voiceover is a silent Wan 2.7 render with the cast voice overdubbed.
+ */
+export const DEFAULT_TIER_BY_MODE: Record<VideoMode, VideoModelId> = {
+  talking: 'italk-atlas',
+  voiceover: 'wan27-atlas',
+}
+
+/**
+ * Why a tier does not fit a production mode, or null. 'talking' refuses a
+ * silent tier (nothing would speak on camera); 'voiceover' refuses an
+ * audio-driven or lipsync tier (it performs the line on camera instead).
+ */
+export function modeTierMismatch(mode: VideoMode, id: VideoModelId): string | null {
+  const spec = VIDEO_MODELS[id]
+  const performsOnCamera = !!(spec.audioDriven || spec.lipsync)
+  if (mode === 'talking' && !performsOnCamera && !spec.inventsDialogue) {
+    return `mode 'talking' needs a talking tier (${DEFAULT_TIER_BY_MODE.talking}); ${id} is silent`
+  }
+  if (mode === 'voiceover' && performsOnCamera) {
+    return `mode 'voiceover' needs a silent tier (${DEFAULT_TIER_BY_MODE.voiceover}); ${id} performs the line on camera`
   }
   return null
 }

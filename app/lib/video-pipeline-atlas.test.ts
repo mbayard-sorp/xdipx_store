@@ -17,10 +17,15 @@ const state = {
 
 vi.mock('~/lib/db.server', () => {
   const selectChain = () => {
-    const chain: Record<string, unknown> = {}
+    // Thenable, so a query that ends at .orderBy() (latestAssetByPurpose)
+    // resolves against the same queue as one that ends at .limit().
+    const chain: Record<string, unknown> = {
+      then: (resolve: (v: unknown[]) => void, reject?: (e: unknown) => void) =>
+        Promise.resolve(state.selectResults.shift() ?? []).then(resolve, reject),
+    }
     chain['where'] = () => chain
     chain['orderBy'] = () => chain
-    chain['limit'] = () => Promise.resolve(state.selectResults.shift() ?? [])
+    chain['limit'] = () => chain
     return chain
   }
   return {
@@ -61,21 +66,26 @@ vi.mock('~/lib/video-episodes.server', () => ({
   episodeForJob: vi.fn(async () => null),
 }))
 const blobPutMock = vi.hoisted(() => vi.fn())
-vi.mock('~/lib/blob.server', () => ({ blobPut: blobPutMock, blobFetchToBuffer: vi.fn() }))
+const blobFetchMock = vi.hoisted(() => vi.fn())
+vi.mock('~/lib/blob.server', () => ({ blobPut: blobPutMock, blobFetchToBuffer: blobFetchMock }))
 const logVideoCostMock = vi.hoisted(() => vi.fn())
 vi.mock('~/lib/token-log.server', () => ({ logVideoCost: logVideoCostMock, logImageCost: vi.fn(), logGenerationBlock: vi.fn(async () => {}) }))
-vi.mock('~/lib/sanity.server', () => ({ getEditorPhotoUrl: vi.fn(), getApprovedCastMembers: vi.fn().mockResolvedValue([]), presenterPhotoUrlForCrop: vi.fn() }))
+const castMock = vi.hoisted(() => vi.fn())
+vi.mock('~/lib/sanity.server', () => ({ getEditorPhotoUrl: vi.fn(), getApprovedCastMembers: castMock, presenterPhotoUrlForCrop: vi.fn() }))
 vi.mock('~/lib/shopify.server', () => ({ getProductByHandle: vi.fn() }))
-vi.mock('~/lib/ivr-voice.server', () => ({ getActiveIvrVoiceId: vi.fn().mockResolvedValue('voice-1') }))
+const ivrVoiceMock = vi.hoisted(() => vi.fn())
+vi.mock('~/lib/ivr-voice.server', () => ({ getActiveIvrVoiceId: ivrVoiceMock }))
 const ttsMock = vi.hoisted(() => vi.fn())
-vi.mock('~/lib/elevenlabs.server', () => ({ generateVoiceover: vi.fn(), generateVoiceoverWithTimestamps: ttsMock }))
+const voiceoverMock = vi.hoisted(() => vi.fn())
+vi.mock('~/lib/elevenlabs.server', () => ({ generateVoiceover: voiceoverMock, generateVoiceoverWithTimestamps: ttsMock }))
 const probeMock = vi.hoisted(() => vi.fn())
+const muxMock = vi.hoisted(() => vi.fn())
 vi.mock('~/lib/video-assembly.server', () => ({
   extractPoster: vi.fn(),
   extractFrames: vi.fn(async () => []),
   applyWatermark: vi.fn(),
   probeDurationSeconds: probeMock,
-  muxAudio: vi.fn(),
+  muxAudio: muxMock,
   renderAspectMaster: vi.fn(),
   extractLastFrame: vi.fn(),
 }))
@@ -151,6 +161,8 @@ beforeEach(() => {
   vi.stubEnv('WAVESPEED_API_KEY', '')
   fetchMock = vi.fn()
   vi.stubGlobal('fetch', fetchMock)
+  castMock.mockResolvedValue([])
+  ivrVoiceMock.mockResolvedValue('ivr-voice-1')
   configMock.mockResolvedValue({
     team: 'video', enabled: true, dailyCents: 2000, maxRunsPerDay: 1,
     autoApproveSuggestions: false, maxCostCents: 600, maxVariantsPerSet: 4,
@@ -315,5 +327,69 @@ describe('Atlas avatar: InfiniteTalk keeps the ElevenLabs step and hands the aud
     expect(parked?.['providerRequestIds']).toEqual({ clip: HANDLE })
     expect(logVideoCostMock).toHaveBeenCalledWith(expect.objectContaining({ feature: 'video-avatar', model: 'atlascloud/infinitetalk', seconds: 10 }))
     expectRunpodUntouched()
+  })
+})
+
+/**
+ * Voiceover mode (owner ruling 2026-09-23): a silent Wan render, then the cast
+ * member's own ElevenLabs voice overdubbed at the lipsync stage. Never Emma or
+ * the IVR voice for a friend presenter.
+ */
+describe('Atlas voiceover: silent wan27-atlas render -> cast-voice overdub -> assembly', () => {
+  const maya = (voiceId: string | null) => ({ slug: 'maya', name: 'Maya', photoUrl: 'https://blob.test/maya.jpg', voiceId })
+  const VO_LINE = 'This is the mini wand. It fits in a coat pocket.'
+  const voJob = (over: Record<string, unknown> = {}) => jobRow({
+    presenter: 'friend:maya',
+    scriptJson: { motionPrompt: 'she turns the wand slowly', durationSeconds: 5, voiceover: VO_LINE },
+    ...over,
+  })
+
+  it('renders silent on Atlas, then overdubs in the cast voiceId and hands off to assembly', async () => {
+    // Tick 1: the silent render completes and is re-hosted.
+    state.selectResults = [[voJob({ status: 'awaiting_provider', providerRequestIds: { clip: HANDLE } })]]
+    fetchMock
+      .mockResolvedValueOnce(prediction('completed', [OUT_MP4]))
+      .mockResolvedValueOnce(prediction('completed', [OUT_MP4]))
+      .mockResolvedValueOnce(new Response(new Uint8Array([0, 0, 0, 24])))
+    blobPutMock.mockResolvedValueOnce({ url: 'https://x.public.blob.vercel-storage.com/video/job-atlas/clip-silent.mp4' })
+    let r = await advanceInflightVideoJobs()
+    expect(r.failed).toBe(0)
+    expect(state.updates.some(u => u['stage'] === 'lipsync')).toBe(true)
+
+    // Tick 2: lipsync stage. wan27-atlas + a voiceover classifies 'overdubbed'.
+    state.selectResults = [
+      [voJob({ stage: 'lipsync', status: 'queued' })],
+      [{ id: 1, blobUrl: 'https://x.public.blob.vercel-storage.com/video/job-atlas/clip-silent.mp4', purpose: 'clip', createdAt: new Date() }],
+    ]
+    castMock.mockResolvedValue([maya('maya-voice-1')])
+    blobFetchMock.mockResolvedValueOnce(Buffer.from('silent-mp4'))
+    voiceoverMock.mockResolvedValueOnce(Buffer.from('maya-mp3'))
+    muxMock.mockResolvedValueOnce(Buffer.from('voiced-mp4'))
+    blobPutMock.mockResolvedValueOnce({ url: 'https://x.public.blob.vercel-storage.com/video/job-atlas/clip-vo.mp4' })
+    r = await advanceInflightVideoJobs()
+
+    expect(r.failed).toBe(0)
+    expect(voiceoverMock).toHaveBeenCalledWith({ text: VO_LINE, voiceId: 'maya-voice-1' })
+    expect(ivrVoiceMock).not.toHaveBeenCalled()
+    expect(muxMock).toHaveBeenCalledWith(Buffer.from('silent-mp4'), Buffer.from('maya-mp3'))
+    expect(state.inserts.at(-1)).toMatchObject({ purpose: 'clip', blobUrl: 'https://x.public.blob.vercel-storage.com/video/job-atlas/clip-vo.mp4' })
+    expect(state.updates.some(u => u['stage'] === 'assembly' && u['status'] === 'queued')).toBe(true)
+    expectRunpodUntouched()
+  })
+
+  it('refuses at the overdub, clearly, when the cast member has no voiceId (never falls back to Emma or IVR)', async () => {
+    state.selectResults = [
+      [voJob({ stage: 'lipsync', status: 'queued' })],
+      [{ id: 1, blobUrl: 'https://x.public.blob.vercel-storage.com/video/job-atlas/clip-silent.mp4', purpose: 'clip', createdAt: new Date() }],
+    ]
+    castMock.mockResolvedValue([maya(null)])
+    blobFetchMock.mockResolvedValueOnce(Buffer.from('silent-mp4'))
+
+    const r = await advanceInflightVideoJobs()
+
+    expect(r.failed).toBe(1)
+    expect(state.updates.map(u => String(u['error'] ?? '')).join(' ')).toMatch(/maya.*no voiceId assigned/)
+    expect(voiceoverMock).not.toHaveBeenCalled()
+    expect(ivrVoiceMock).not.toHaveBeenCalled()
   })
 })

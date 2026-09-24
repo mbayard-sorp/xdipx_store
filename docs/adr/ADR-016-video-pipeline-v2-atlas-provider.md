@@ -78,6 +78,19 @@ default Python User-Agent.
    synthetic 500, so a GPU fault is not counted as a refusal while a message
    with content wording still is.
 
+7. **The writers pick the production mode** (owner ruling 2026-09-23: "I want
+   the voices to be consistent"). The pitch carries `mode: 'talking' |
+   'voiceover'` (default `talking`). With no tier named, talking renders on
+   `italk-atlas` and voiceover on `wan27-atlas` (silent render, the cast
+   member's ElevenLabs voice overdubbed at the lipsync stage). A named tier
+   wins, but talking on a silent tier or voiceover on an audio-driven tier is a
+   400 naming the mismatch, and an enqueue carrying an `episodeId` is checked
+   against the approved pitch's mode. A voiceover resolves the presenter's
+   voice at enqueue like a talking tier, so a friend with no `voiceId` is
+   refused before spend. `grok-atlas` stays eligible but `ownerOnly`: the team
+   API refuses it and the config op flags it, so no routine routes it; the
+   studio composer may.
+
 ## The mirror rule
 
 Wavespeed (`app/lib/media-providers/wavespeed-video.server.ts`, key

@@ -62,7 +62,10 @@ import {
   type AudioPath,
   type QueueHandle,
   tierIneligibility,
+  DEFAULT_TIER_BY_MODE,
+  modeTierMismatch,
 } from '~/lib/fal-video.server'
+import type { VideoMode } from '~/lib/video-episodes'
 import { blobPut, blobFetchToBuffer } from '~/lib/blob.server'
 import { estimateVideoCostUsd, estimateImageCostUsd, computeRunpodActualCostUsd } from '~/lib/model-pricing.server'
 import { utcIsoToLaWallClock } from '~/lib/social-schedule-ui'
@@ -421,8 +424,17 @@ export interface EnqueueVideoJobArgs {
   presenter: string
   /** Script beats + per-platform captions + framePrompt/motionPrompt. */
   scriptJson: VideoScriptJson
-  /** Omit to fall back to the video_default_model_tier pipeline setting (getDefaultModelTier). */
+  /**
+   * Omit to default by `mode` (DEFAULT_TIER_BY_MODE) when one is given, else to
+   * the video_default_model_tier pipeline setting (getDefaultModelTier).
+   */
   modelTier?: VideoModelId
+  /**
+   * The writers' production mode (owner ruling 2026-09-23). When set, a tier
+   * that does not fit it is refused, and 'voiceover' requires
+   * scriptJson.voiceover.
+   */
+  mode?: VideoMode
   /** Ignored when scriptJson.scenes describes a multi-scene job (2+ entries) — the total there is the sum of scene durations. */
   durationSeconds: number
   targetPlatforms: string[]
@@ -535,7 +547,8 @@ export function estimateExceedsRemainingBudget(
 }
 
 export async function enqueueVideoJob(args: EnqueueVideoJobArgs): Promise<{ jobId: string; estCostUsd: number }> {
-  const modelTier = args.modelTier ?? await getDefaultModelTier()
+  const modelTier = args.modelTier
+    ?? (args.mode ? DEFAULT_TIER_BY_MODE[args.mode] : await getDefaultModelTier())
   if (!isVideoModelId(modelTier)) throw new Error(`Unknown model tier: ${modelTier}`)
   // Backstop for the eligibility rule the callers already apply (ticket
   // #5727). Every enqueue path funnels through here — the team API, the ad-hoc
@@ -546,15 +559,25 @@ export async function enqueueVideoJob(args: EnqueueVideoJobArgs): Promise<{ jobI
   // came from the video_default_model_tier setting rather than the request.
   const ineligible = tierIneligibility(modelTier)
   if (ineligible) throw new Error(ineligible.message)
+  if (args.mode) {
+    const mismatch = modeTierMismatch(args.mode, modelTier)
+    if (mismatch) throw new Error(mismatch)
+  }
   const spec = VIDEO_MODELS[modelTier]
   const script = args.scriptJson
   const reuseFrame = typeof script.reuseFrameAssetId === 'number'
+  const voiceoverLine = typeof script.voiceover === 'string' ? script.voiceover.trim() : ''
+  if (args.mode === 'voiceover' && !voiceoverLine) {
+    throw new Error("mode 'voiceover' requires scriptJson.voiceover (the line the cast voice reads over the silent render)")
+  }
 
   // Refuse before any spend when this tier will speak the presenter's line
   // (ticket #6584): a friend cast member with no Sanity voiceId would
   // otherwise render three stages deep in the IVR/Emma voice with no gate
   // catching it. Same posture as the missing-presenterLine checks below.
-  if (spec.audioDriven || spec.lipsync) {
+  // A voiceover is spoken too (ElevenLabs overdub at the lipsync stage), so a
+  // friend presenter with no voiceId is refused here, not three stages deep.
+  if (spec.audioDriven || spec.lipsync || voiceoverLine) {
     await resolvePresenterVoiceId(args.presenter)
   }
 
