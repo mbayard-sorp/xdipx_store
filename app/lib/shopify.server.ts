@@ -1251,6 +1251,63 @@ export async function isProductAvailableForSaleById(shopifyProductId: string): P
   return product.variants.some(v => v.availableForSale)
 }
 
+export interface ProductStockCheckVariant {
+  id: string
+  title: string
+  availableForSale: boolean
+  quantityAvailable: number | null
+}
+
+export interface ProductStockCheck {
+  handle: string
+  availableForSale: boolean
+  totalInventory: number | null
+  nalpacSku: string | null
+  variants: ProductStockCheckVariant[]
+}
+
+/**
+ * Uncached Storefront read of a product's current availability. Every call
+ * hits Shopify directly (deliberately not wrapped in `cached()`), for
+ * callers that cannot tolerate the PDP's edge cache staleness — the Thursday
+ * video-render routine's Step 3 stock re-check used to scrape the cached PDP
+ * JSON-LD (`docs/store-team/routine-video-render.md`), which can run up to
+ * ~10 minutes stale. Returns null when Shopify answers and the product does
+ * not exist (never for a transport/GraphQL error, which throws).
+ */
+export async function getProductStockCheck(handle: string): Promise<ProductStockCheck | null> {
+  const data = await storefront<{
+    product: {
+      handle: string
+      totalInventory: number | null
+      variants: { edges: { node: ProductStockCheckVariant }[] }
+      metafields: ({ namespace: string; key: string; value: string } | null)[]
+    } | null
+  }>(`
+    query StockCheck($handle: String!) {
+      product(handle: $handle) {
+        handle
+        totalInventory
+        variants(first: 50) {
+          edges { node { id title availableForSale quantityAvailable } }
+        }
+        metafields(identifiers: [{ namespace: "xdipx", key: "nalpac_sku" }]) {
+          namespace key value
+        }
+      }
+    }
+  `, { handle })
+  if (!data.product) return null
+  const variants = data.product.variants.edges.map(e => e.node)
+  return {
+    handle: data.product.handle,
+    availableForSale: variants.some(v => v.availableForSale),
+    totalInventory: data.product.totalInventory,
+    nalpacSku: parseMetafield(data.product.metafields, 'nalpac_sku') || null,
+    variants,
+  }
+}
+
 export async function getProductsByIds(ids: string[]): Promise<Product[]> {
   if (ids.length === 0) return []
   // `nodes` yields null for any id the Storefront API cannot resolve, which is

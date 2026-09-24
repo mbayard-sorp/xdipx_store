@@ -12,6 +12,10 @@
  *                                                — the agent's training channel)
  *   { op: 'config' } -> valves, model tiers/rates, formulas, tones, approved
  *                       cast, platform frequencies
+ *   { op: 'stock-check', handle } -> { found, availableForSale, totalInventory,
+ *     variants, nalpac } — read-only, uncached Shopify availability plus the
+ *     Nalpac feed quantity, for the render routine's Step 3 stock re-check
+ *     instead of scraping the cached PDP JSON-LD
  *
  * Multi-scene jobs (Phase 3, 20-60s videos): op:'enqueue' accepts
  * scriptJson.scenes, an array of 2-8
@@ -50,9 +54,10 @@ import { getPipelineSetting } from '~/lib/feed-processor.server'
 import { VIDEO_MODELS, isVideoModelId, isRetiredVideoTierId, tierIneligibility, DEFAULT_TIER_BY_MODE, modeTierMismatch } from '~/lib/fal-video.server'
 import { VIDEO_MODES, isVideoMode, readPitch, type VideoMode } from '~/lib/video-episodes'
 import { getApprovedCastMembers } from '~/lib/sanity.server'
+import { getProductStockCheck } from '~/lib/shopify.server'
 import { db } from '~/lib/db.server'
-import { socialPosts } from '../../db/schema'
-import { inArray } from 'drizzle-orm'
+import { socialPosts, nalpacPriceHistory } from '../../db/schema'
+import { inArray, eq } from 'drizzle-orm'
 import { apiError } from '~/lib/api-error.server'
 import type { VideoScriptJson } from '../../db/schema'
 
@@ -414,6 +419,30 @@ export async function action({ request }: ActionFunctionArgs) {
         defaultTierByMode: DEFAULT_TIER_BY_MODE,
         sceneKit,
         cast: cast.map(m => ({ slug: m.slug, name: m.name, role: m.role, voiceId: m.voiceId })),
+      })
+    }
+
+    if (b['op'] === 'stock-check') {
+      const handle = typeof b['handle'] === 'string' ? b['handle'] : ''
+      if (!handle) return new Response('Bad Request: handle required', { status: 400 })
+      const stock = await getProductStockCheck(handle)
+      if (!stock) return Response.json({ found: false, handle })
+      let nalpac: { qty: number | null; refreshedAt: string | null } | null = null
+      if (stock.nalpacSku) {
+        const [row] = await db
+          .select({ qty: nalpacPriceHistory.qty, observedAt: nalpacPriceHistory.observedAt })
+          .from(nalpacPriceHistory)
+          .where(eq(nalpacPriceHistory.sku, stock.nalpacSku))
+          .limit(1)
+        nalpac = row ? { qty: row.qty, refreshedAt: row.observedAt?.toISOString() ?? null } : null
+      }
+      return Response.json({
+        found: true,
+        handle: stock.handle,
+        availableForSale: stock.availableForSale,
+        totalInventory: stock.totalInventory,
+        variants: stock.variants,
+        nalpac,
       })
     }
 
