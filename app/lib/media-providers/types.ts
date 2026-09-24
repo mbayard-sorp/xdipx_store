@@ -22,8 +22,8 @@
 /**
  * Every media provider the seam knows. Video (ADR-016, 2026-09-23): `atlascloud`
  * is the primary, `wavespeed` its mirror, `fal` stays registered only so
- * historical rows resolve. RunPod is not a seam provider; its pipeline branches
- * were removed in ADR-016 and its module is deleted in Phase 4.
+ * historical rows resolve. RunPod is retired (ADR-016) and is not a seam
+ * provider; a historical RunPod row fails loudly in requireVideoProvider.
  */
 export type ProviderId = 'fal' | 'atlascloud' | 'wavespeed'
 

@@ -10,7 +10,7 @@
  * are mocked; the media-provider registry is mocked at its two pipeline entry
  * points (submitVideoWithMirror, providerForHandle), so no provider network
  * call happens. fal-video.server is left real (data-only at this scope).
- * Tiers are the Atlas ones since ADR-016 (RunPod is retired); the Atlas key
+ * Tiers are the Atlas ones since ADR-016; the Atlas key
  * is stubbed so tierIneligibility does not refuse them as unconfigured.
  */
 
@@ -94,18 +94,6 @@ vi.mock('~/lib/video-postpass.server', () => ({
   concatWithAudio: vi.fn(),
   runPostPass: vi.fn(),
   buildEndCard: vi.fn(),
-}))
-// RunPod stays mocked only because fal-video.server imports its worker-mode
-// helpers at module scope; no test here reaches RunPod (retired, ADR-016).
-const workerModes = vi.hoisted(() => ({ value: ['i2v', 't2v'] as string[] }))
-vi.mock('~/lib/runpod-video.server', () => ({
-  submitRunpodVideo: vi.fn(),
-  getRunpodStatus: vi.fn(),
-  getRunpodResult: vi.fn(),
-  runpodVideoConfigured: vi.fn(() => true),
-  runpodWorkerModes: () => workerModes.value,
-  runpodWorkerSupportsMode: (m: string) => workerModes.value.includes(m),
-  cancelRunpod: vi.fn(),
 }))
 const submitMock = vi.hoisted(() => vi.fn())
 const statusMock = vi.hoisted(() => vi.fn())

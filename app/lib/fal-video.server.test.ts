@@ -5,6 +5,9 @@ import {
   DEFAULT_TIER_BY_MODE,
   modeTierMismatch,
   isVideoModelId,
+  isRetiredVideoTierId,
+  RETIRED_VIDEO_TIER_IDS,
+  tierIneligibility,
   submitVideoRequest,
   assertSceneFrameContract,
   classifyAudioPath,
@@ -157,41 +160,10 @@ describe('classifyAudioPath', () => {
   })
 })
 
-// RunPod provider, Phase 2 (Wan 2.2 14B): the clip stage in video-pipeline
-// routes these through runpod-video.server.ts instead of this file's fal
-// queue client, keyed off `provider`.
-describe('VIDEO_MODELS wan22 (RunPod provider)', () => {
-  it('registers both wan22 tiers with provider runpod and no native audio', () => {
-    for (const id of ['wan22-i2v', 'wan22-t2v'] as const) {
-      const spec = VIDEO_MODELS[id]
-      expect(spec.provider).toBe('runpod')
-      expect(spec.costKey).toBe('runpod/wan22')
-      expect(spec.nativeAudio).toBe(false)
-      expect(spec.inventsDialogue).toBeUndefined()
-      expect(spec.audioDriven).toBeUndefined()
-      expect(spec.lipsync).toBeUndefined()
-      expect(spec.allowedDurations).toEqual([5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
-      expect(spec.ratePerSecondUsd).toBeGreaterThan(0)
-    }
-  })
-
-  it('are recognized video model ids', () => {
-    expect(isVideoModelId('wan22-i2v')).toBe(true)
-    expect(isVideoModelId('wan22-t2v')).toBe(true)
-  })
-
-  it('take the same silent-tier lipsync path as kling25-pro (no invented dialogue to strip)', () => {
-    expect(classifyAudioPath(VIDEO_MODELS['wan22-i2v'], true)).toBe('overdubbed')
-    expect(classifyAudioPath(VIDEO_MODELS['wan22-i2v'], false)).toBe('native-silent')
-    expect(classifyAudioPath(VIDEO_MODELS['wan22-t2v'], true)).toBe('overdubbed')
-    expect(classifyAudioPath(VIDEO_MODELS['wan22-t2v'], false)).toBe('native-silent')
-  })
-})
-
 describe('every fal model keeps provider fal-implicit (undefined)', () => {
   it('never sets provider on a fal-queue tier', () => {
     for (const [, spec] of Object.entries(VIDEO_MODELS)) {
-      if (spec.provider === 'runpod' || spec.provider === 'atlascloud') continue
+      if (spec.provider === 'atlascloud') continue
       expect(spec.provider).toBeUndefined()
       expect(spec.legacy).toBe(true)
     }
@@ -228,44 +200,41 @@ describe('assertSceneFrameContract', () => {
   })
 })
 
-describe('VIDEO_MODELS.wan22-s2v (own-worker talking tier, ticket #5714)', () => {
-  it('is an audio-driven RunPod tier with derived duration', () => {
-    const spec = VIDEO_MODELS['wan22-s2v']
-    expect(spec.provider).toBe('runpod')
-    expect(spec.audioDriven).toBe(true)
-    expect(spec.nativeAudio).toBe(true)
-    expect(spec.allowedDurations).toEqual([])
-    expect(spec.costKey).toBe('runpod/wan22-s2v')
-    expect(spec.legacy).toBeUndefined()
-  })
-
-  it('never routes through the fal queue', async () => {
-    await expect(submitVideoRequest('wan22-s2v', {
-      prompt: '', imageUrl: 'https://example.com/f.jpg', durationSeconds: 10,
-    })).rejects.toThrow(/RunPod-provider/)
-  })
-
-  // #6834, follow-up to #6585: the advertised rate this spec surfaces (read
-  // verbatim by the config op and the fal-video Labs route) must use the
-  // s2v-specific render-multiplier estimate, not the shared i2v/t2v one --
-  // sharing it under-priced s2v's advertised rate by ~1.8x while the
-  // enforcement path (estimateVideoCostUsd via costKey) was already correct.
-  it('advertises a rate distinct from the shared i2v/t2v estimate', () => {
-    const s2vRate = VIDEO_MODELS['wan22-s2v'].ratePerSecondUsd
-    const i2vRate = VIDEO_MODELS['wan22-i2v'].ratePerSecondUsd
-    const t2vRate = VIDEO_MODELS['wan22-t2v'].ratePerSecondUsd
-    expect(i2vRate).toBe(t2vRate) // i2v/t2v deliberately still share one estimator
-    expect(s2vRate).not.toBe(i2vRate)
-    expect(s2vRate).toBeGreaterThan(0)
+describe('legacy fal video tiers (owner direction 2026-08-26: fal is images only)', () => {
+  it('flags every fal video tier legacy', () => {
+    const legacy = Object.entries(VIDEO_MODELS).filter(([, s]) => s.legacy).map(([id]) => id).sort()
+    expect(legacy).toEqual(['grok', 'kling25-pro', 'omnihuman', 'seedance2', 'sync-lipsync', 'veo31', 'veo31-fast'])
   })
 })
 
-describe('legacy fal video tiers (owner direction 2026-08-26: fal is images only)', () => {
-  it('flags every fal video tier legacy and no runpod tier', () => {
-    const legacy = Object.entries(VIDEO_MODELS).filter(([, s]) => s.legacy).map(([id]) => id).sort()
-    expect(legacy).toEqual(['grok', 'kling25-pro', 'omnihuman', 'seedance2', 'sync-lipsync', 'veo31', 'veo31-fast'])
-    expect(VIDEO_MODELS['wan22-i2v'].legacy).toBeUndefined()
-    expect(VIDEO_MODELS['wan22-t2v'].legacy).toBeUndefined()
+// ADR-016 Phase 4 (2026-09-23): the RunPod tiers are deleted from the
+// registry. Historical rows still name them and must resolve to a clean
+// retired_provider refusal, never an unknown-tier error or an undefined spec.
+describe('retired RunPod tiers (ADR-016 Phase 4)', () => {
+  it('are no longer registered or selectable', () => {
+    for (const id of RETIRED_VIDEO_TIER_IDS) {
+      expect(isVideoModelId(id)).toBe(false)
+      expect(id in VIDEO_MODELS).toBe(false)
+    }
+    for (const spec of Object.values(VIDEO_MODELS)) {
+      expect(spec.costKey.startsWith('runpod/')).toBe(false)
+    }
+  })
+
+  it('refuse a historical row as retired_provider, not unknown_tier', () => {
+    for (const id of [...RETIRED_VIDEO_TIER_IDS, 'wan22-i2v-fast']) {
+      expect(isRetiredVideoTierId(id)).toBe(true)
+      const why = tierIneligibility(id)
+      expect(why?.code).toBe('retired_provider')
+      expect(why?.message).toMatch(/ADR-016/)
+      expect(why?.message).toMatch(/italk-atlas/)
+    }
+  })
+
+  it('do not swallow the live Atlas Wan tiers or a genuinely unknown id', () => {
+    expect(isRetiredVideoTierId('wan22turbo-atlas')).toBe(false)
+    expect(isRetiredVideoTierId('wan27-atlas')).toBe(false)
+    expect(tierIneligibility('not-a-tier')?.code).toBe('unknown_tier')
   })
 })
 

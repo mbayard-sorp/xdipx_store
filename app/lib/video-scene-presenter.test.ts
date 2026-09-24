@@ -82,15 +82,6 @@ vi.mock('~/lib/video-postpass.server', () => ({
   runPostPass: vi.fn(),
   buildEndCard: vi.fn(),
 }))
-vi.mock('~/lib/runpod-video.server', () => ({
-  submitRunpodVideo: vi.fn(),
-  getRunpodStatus: vi.fn(),
-  getRunpodResult: vi.fn(),
-  runpodVideoConfigured: vi.fn(() => true),
-  runpodWorkerModes: () => ['i2v', 't2v'],
-  runpodWorkerSupportsMode: (m: string) => ['i2v', 't2v'].includes(m),
-  cancelRunpod: vi.fn(),
-}))
 const composeSceneFrameMock = vi.hoisted(() => vi.fn())
 const downloadFalAssetMock = vi.hoisted(() => vi.fn(async () => Buffer.from('fake-jpeg')))
 vi.mock('~/lib/fal-video.server', async () => {
@@ -129,7 +120,7 @@ const multiSceneJobRow = {
   presenter: 'friend:maya', // job-level presenter — scene 1 below overrides it
   scriptJson: {},
   aiDisclosure: true,
-  modelTier: 'wan22-i2v',
+  modelTier: 'wan27-atlas',
   targetPlatforms: ['instagram'],
   stage: 'scene_frame',
   status: 'queued',

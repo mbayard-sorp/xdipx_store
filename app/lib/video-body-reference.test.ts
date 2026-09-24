@@ -15,7 +15,7 @@
  * still resolving the portrait.
  *
  * Mocking follows video-scene-presenter.test.ts exactly (db/kv/team/blob/
- * sanity/shopify/runpod mocked, composeSceneFrame mocked so the frame stage
+ * sanity/shopify mocked, composeSceneFrame mocked so the frame stage
  * is reachable without network).
  */
 
@@ -95,15 +95,6 @@ vi.mock('~/lib/video-postpass.server', () => ({
   concatWithAudio: vi.fn(),
   runPostPass: vi.fn(),
   buildEndCard: vi.fn(),
-}))
-vi.mock('~/lib/runpod-video.server', () => ({
-  submitRunpodVideo: vi.fn(),
-  getRunpodStatus: vi.fn(),
-  getRunpodResult: vi.fn(),
-  runpodVideoConfigured: vi.fn(() => true),
-  runpodWorkerModes: () => ['i2v', 't2v'],
-  runpodWorkerSupportsMode: (m: string) => ['i2v', 't2v'].includes(m),
-  cancelRunpod: vi.fn(),
 }))
 const composeSceneFrameMock = vi.hoisted(() => vi.fn())
 const downloadFalAssetMock = vi.hoisted(() => vi.fn(async () => Buffer.from('fake-jpeg')))

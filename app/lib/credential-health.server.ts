@@ -167,26 +167,6 @@ const CHECKERS: Record<string, Checker> = {
     }
     return { state: 'live', detail: 'account active' }
   },
-
-  runpod: async () => {
-    const res = await timedFetch('https://api.runpod.io/graphql', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${process.env['RUNPOD_API_KEY']!.trim()}`,
-      },
-      body: JSON.stringify({ query: '{ myself { id } }' }),
-    })
-    if (res.status < 200 || res.status >= 300) {
-      return { state: stateFromStatus(res.status), detail: `graphql HTTP ${res.status}` }
-    }
-    const body = await res.json().catch(() => null) as { data?: { myself?: { id?: string } }; errors?: unknown[] } | null
-    if (body?.data?.myself?.id) return { state: 'live', detail: 'myself resolved' }
-    if (Array.isArray(body?.errors) && body.errors.length > 0) {
-      return { state: 'dead', detail: `graphql errors: ${JSON.stringify(body.errors).slice(0, 160)}` }
-    }
-    return { state: 'unknown', detail: 'graphql answered 200 with an unrecognised shape' }
-  },
 }
 
 /**
@@ -224,7 +204,7 @@ export async function checkAllCredentials(): Promise<CredentialVerdict[]> {
  * File one blocker per credential that is authoritatively broken.
  *
  * `unknown` files nothing, ever. That is the whole discipline: this sweep runs
- * every six hours against nine third-party APIs, so transient failures are
+ * every six hours against eight third-party APIs, so transient failures are
  * certain, and a blocker list that fills with them is a blocker list nobody
  * reads.
  */

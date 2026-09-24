@@ -1,7 +1,7 @@
 # ADR-014: Multi-cast-member scenes — contract change and voice binding
 
 Date: 2026-08-31
-Status: Proposed
+Status: Proposed. Amended by ADR-016 Phase 4 (2026-09-23): every RunPod reference below is historical, not live.
 Author: tech-architect
 Implementation owner: rr7-engineer (render/schema), sanity-content-builder (CastMember voiceId field)
 

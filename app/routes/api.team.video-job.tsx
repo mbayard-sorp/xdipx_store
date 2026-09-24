@@ -47,7 +47,7 @@ import {
 import { enqueueVideoJob, enqueueVideoJobSet, listVideoJobs, estimateJobCostUsd, findReusableSceneFrame, isMultiSceneScript, PRESENTER_RE } from '~/lib/video-pipeline.server'
 import { assertEpisodeMatchesScript, linkEpisodeToJob } from '~/lib/video-episodes.server'
 import { getPipelineSetting } from '~/lib/feed-processor.server'
-import { VIDEO_MODELS, isVideoModelId, tierIneligibility, DEFAULT_TIER_BY_MODE, modeTierMismatch } from '~/lib/fal-video.server'
+import { VIDEO_MODELS, isVideoModelId, isRetiredVideoTierId, tierIneligibility, DEFAULT_TIER_BY_MODE, modeTierMismatch } from '~/lib/fal-video.server'
 import { VIDEO_MODES, isVideoMode, readPitch, type VideoMode } from '~/lib/video-episodes'
 import { getApprovedCastMembers } from '~/lib/sanity.server'
 import { db } from '~/lib/db.server'
@@ -88,12 +88,18 @@ function validateEnqueueCommon(b: Record<string, unknown>, scriptField: string):
     return new Response(`Bad Request: mode must be one of ${VIDEO_MODES.join('|')}`, { status: 400 })
   }
   const mode = isVideoMode(b['mode']) ? b['mode'] : undefined
+  // A deleted RunPod tier id (ADR-016 Phase 4) gets the retired_provider
+  // refusal, not the unknown-tier 400 below.
+  if (isRetiredVideoTierId(b['modelTier'])) {
+    const retired = tierIneligibility(String(b['modelTier']))!
+    return Response.json({ error: retired.code, detail: retired.message }, { status: 400 })
+  }
   if (!isVideoModelId(b['modelTier'])) {
     return new Response(`Bad Request: modelTier must be one of ${Object.keys(VIDEO_MODELS).join('|')}`, { status: 400 })
   }
-  // Retired provider / unavailable worker mode (ticket #5727). Refused here,
+  // Retired provider or unconfigured provider (ticket #5727). Refused here,
   // before the money gate and before any provider call, so an ineligible tier
-  // costs a 400 rather than a cold GPU boot or a fal invoice.
+  // costs a 400 rather than a failed render or a fal invoice.
   const ineligible = tierIneligibility(b['modelTier'])
   if (ineligible) {
     return Response.json({ error: ineligible.code, detail: ineligible.message }, { status: 400 })
@@ -179,7 +185,9 @@ async function withDefaultModelTier(b: Record<string, unknown>): Promise<Record<
   // stored setting only applies when the caller named neither.
   if (isVideoMode(b['mode'])) return { ...b, modelTier: DEFAULT_TIER_BY_MODE[b['mode']] }
   const v = await getPipelineSetting(VIDEO_EXTRA_KEYS.defaultModelTier).catch(() => null)
-  const modelTier = isVideoModelId(v) ? v : VIDEO_DEFAULT_MODEL_TIER_DEFAULT
+  // A stored retired RunPod id is kept so validation refuses it with the
+  // retirement named (ADR-016, blocker 226), mirroring getDefaultModelTier.
+  const modelTier = isVideoModelId(v) || isRetiredVideoTierId(v) ? v : VIDEO_DEFAULT_MODEL_TIER_DEFAULT
   return { ...b, modelTier }
 }
 

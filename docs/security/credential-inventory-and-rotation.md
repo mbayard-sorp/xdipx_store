@@ -143,9 +143,14 @@ credential, not as a big-bang.
 
 Cadence: every 90 days for anything that can spend money or publish
 (`SHOPIFY_ADMIN_ACCESS_TOKEN`, `IG_GRAPH_ACCESS_TOKEN`, the X set,
-`KLAVIYO_API_KEY`, `RUNPOD_API_KEY`, `GITHUB_TOKEN`), and immediately on any
+`KLAVIYO_API_KEY`, `GITHUB_TOKEN`), and immediately on any
 suspicion, on any contractor offboarding, and on any credential that has ever
 been pasted into a chat, a ticket, or a log.
+
+Retired, remove rather than rotate: `RUNPOD_API_KEY` and every other `RUNPOD_*`
+variable. RunPod video was retired and its code deleted (ADR-016, 2026-09-23);
+nothing reads these any more. Delete them from Vercel and revoke the key in the
+RunPod console.
 
 **This session's own access is in scope.** A Claude Code session working on this
 repository holds the production database credential, the trigger API, and the

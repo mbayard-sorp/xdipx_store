@@ -172,11 +172,11 @@ describe('markEpisodeRenderRejected (render gate reject)', () => {
 describe('markEpisodeRenderFailed', () => {
   it('moves a rendering episode to failed with the reason attached', async () => {
     state.row = episode()
-    await expect(markEpisodeRenderFailed(7, 'job vid-1 failed: runpod timed out')).resolves.toBe(true)
+    await expect(markEpisodeRenderFailed(7, 'job vid-1 failed: atlas timed out')).resolves.toBe(true)
     expect(state.sets[0]).toMatchObject({ productionStatus: 'failed' })
     const notes = state.sets[0]?.['reviewNotesJson'] as { decision: string; note: string }[]
     expect(notes[0]?.decision).toBe('render_failed')
-    expect(notes[0]?.note).toMatch(/runpod timed out/)
+    expect(notes[0]?.note).toMatch(/atlas timed out/)
   })
 
   it('does NOT auto-return to approved: a deterministic failure would re-burn GPU every run', async () => {

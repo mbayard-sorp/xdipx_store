@@ -470,7 +470,8 @@ export const VALVE_KEYS = {
   // OFF; `getValve` treats the missing row as off so it ships inert.
   socialMetricsSweep: 'social_metrics_sweep_enabled',
   // Serialized video program (all-hands 2026-08-26): arms the 2x-weekly render
-  // routine that claims owner-APPROVED episodes and spends real RunPod money.
+  // routine that claims owner-APPROVED episodes and spends real video-provider
+  // money (Atlas Cloud since ADR-016).
   // Ships OFF with no migration seed: getValve treats the missing row as off,
   // and the owner's first flip on the Video tab creates the row. The writers
   // room (zero spend) is NOT gated by this; only the render lane is.
