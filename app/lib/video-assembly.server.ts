@@ -268,9 +268,8 @@ export const ASPECT_MASTER_SIZES = ASPECT_DIMENSIONS
  * continuity (Phase 3, video-pipeline.server.ts): the next scene's
  * image-to-video input is the previous scene's last frame rather than a
  * freshly composed one, so motion reads as one continuous shot across the
- * cut. RunPod's worker returns lastFrameUrl directly in its result, so this
- * helper is only needed for fal providers, which hand back just the finished
- * mp4. Seeks near (not exactly) the end — `-sseof -0.1` — because seeking to
+ * cut. Every video provider hands back just the finished mp4, so the last
+ * frame is always cut here. Seeks near (not exactly) the end, `-sseof -0.1`, because seeking to
  * the reported duration can land past the last decodable frame on some fal
  * encodes and produce a black/empty still.
  */

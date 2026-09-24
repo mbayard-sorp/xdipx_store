@@ -8,8 +8,8 @@
 > here; anything here that would need a daily write is in the wrong place.
 >
 > Owner approvals that bind this file: shoppers-not-owners (2026-08-26), 2 episodes/week during
-> learn mode, fal for images only with all video and lipsync on the RunPod Wan worker, X video
-> manual only, and (2026-09-04) a register-9 plain spoken track with the cast written as real
+> learn mode, fal for images only with all video and lipsync on the owned video provider
+> (Atlas Cloud since ADR-016, 2026-09-23), X video manual only, and (2026-09-04) a register-9 plain spoken track with the cast written as real
 > people who may name and want sensation, the only hard product line being that no character
 > claims to have tested or tried a specific product. The working title stands until the owner
 > renames it.

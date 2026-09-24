@@ -147,12 +147,7 @@ tier's Atlas rate.
 
 ## What is deferred
 
-- **Phase 4 (RunPod deletion):** `runpod-video/endpoint/pods.server.ts`,
-  `infra/video-worker/`, `logRunpodBurn`, `cancelInflightRunpodRequests`,
-  `jobUsedRunpod`, `confirmRunpodIdle`, `workerModeIneligibility`, the pod-watch
-  route, credential-health entries. The owner-blocker probes `runpodNoPods` /
-  `runpodEndpointIdle` stay until the owner deletes the endpoint and the 100 GB
-  volume (both still bill).
+- **Phase 4 (RunPod deletion):** done 2026-09-23, see §Retired below.
 - **`video_default_model_tier`**: the code default
   `VIDEO_DEFAULT_MODEL_TIER_DEFAULT` in `team-keys.ts` (protected) moves from
   the retired `kling25-pro` to `italk-atlas` in this change. The stored setting
@@ -180,3 +175,51 @@ tier's Atlas rate.
   the draft tier only. An Atlas outage stops Grok and Wan 2.7 renders.
 - Verification for Phase 2 is one real `italk-atlas` job on a disposable
   product ($1 to $2), watched through frame approval, clip, assembly and poster.
+
+## Retired
+
+Phase 4, 2026-09-23. The owner deleted the RunPod serverless endpoint and its
+100 GB network volume (blocker 225), so the RunPod video path was removed from
+the code and docs rather than left dormant.
+
+Removed:
+
+- Modules and their tests: `app/lib/runpod-video.server.ts`,
+  `runpod-endpoint.server.ts`, `runpod-pods.server.ts`, and
+  `owner-blockers-runpod-probe.test.ts`.
+- The worker: all of `infra/video-worker/`, including `bakeoff/`.
+- `fal-video.server.ts`: the `wan22-i2v`, `wan22-t2v`, `wan22-s2v` specs, the
+  `workerMode` field, `workerModeIneligibility`, and `'runpod'` from the
+  `provider` union. The three ids now live in `RETIRED_VIDEO_TIER_IDS`;
+  `tierIneligibility` accepts any string and returns `retired_provider` for
+  them (and any other historical `wan22-*` id), so a historical row gets the
+  retirement named, never an unknown-tier error or an undefined spec.
+  `advanceJob`, `enqueueVideoJob`, `enqueueVideoJobSet`, the episode validator
+  and the team video-job route all check it first. A stored
+  `video_default_model_tier` of `wan22-i2v` is still refused, not swapped for a
+  paid Atlas tier (blocker 226).
+- `video-pipeline.server.ts`: `logRunpodBurn`, `cancelInflightRunpodRequests`
+  (on job failure and on owner reject), `jobUsedRunpod`, `confirmRunpodIdle`, and
+  the poster-stage idle probe. No Atlas or Wavespeed cancel existed to keep.
+- `server/cron.ts`: the `/cron/runpod-pod-watch` handler.
+- Owner-blocker probes `runpod_no_pods` and `runpod_endpoint_idle`, and the
+  `runpod:stray-pod` and `runpod:endpoint-workers-up` filings. An open row that
+  still names one of those probes is skipped by `verifyBlockers` (unknown probe),
+  so it needs clearing by hand.
+- The `runpod` credential-health integration (`RUNPOD_API_KEY`).
+- `token-log.server.ts`: `logRunpodPodCost`, `RUNPOD_POD_FEATURE`, and
+  `getTodayRunpodPodSpendCents`, plus the Video tab's "Out-of-band GPU" card.
+  Historical `bakeoff-gpu` rows still show in `/admin/usage`.
+- `model-pricing.server.ts`: the RunPod rate estimators and
+  `computeRunpodActualCostUsd`. `runpod/wan22` and `runpod/wan22-s2v` stay in
+  `VIDEO_RATES` as tombstones at their last default estimate so historical rows
+  resolve; no tier selects them.
+- Admin: the `wan22-*` options in the Video tab's default-tier picker (now
+  derived from `VIDEO_MODELS`), and the Video Studio GPU-idle badge.
+- `blob.server.ts` `requireBlobToken`, whose only caller was the RunPod client.
+
+Kept on purpose: `requireVideoProvider('runpod')` still throws the ADR-016
+retirement message. The `video_jobs.runpod_idle_confirmed_at` and
+`runpod_idle_probe_json` columns are no longer read or written; dropping them is
+a separate `db/migrations` PR. `docs/store-team/video-worker-runpod.md` stays as
+the history of the bake-off.

@@ -1,7 +1,7 @@
 /**
  * ADR-016: a clip on an Atlas tier goes submit -> awaiting_provider -> done ->
  * blobPut through the REAL media-provider registry and the REAL Atlas adapter,
- * with fetch mocked at the network edge, and never touches RunPod.
+ * with fetch mocked at the network edge.
  *
  * Harness copied from video-pipeline-set.test.ts (db/kv/blob/token-log/sanity/
  * shopify/elevenlabs/video-assembly mocked). The only provider-shaped mock is
@@ -90,18 +90,6 @@ vi.mock('~/lib/video-assembly.server', () => ({
   extractLastFrame: vi.fn(),
 }))
 vi.mock('~/lib/video-postpass.server', () => ({ concatWithAudio: vi.fn(), runPostPass: vi.fn(), buildEndCard: vi.fn() }))
-const runpod = vi.hoisted(() => ({
-  submitRunpodVideo: vi.fn(),
-  getRunpodStatus: vi.fn(),
-  getRunpodResult: vi.fn(),
-  cancelRunpod: vi.fn(),
-}))
-vi.mock('~/lib/runpod-video.server', () => ({
-  ...runpod,
-  runpodVideoConfigured: vi.fn(() => true),
-  runpodWorkerModes: () => ['i2v', 't2v'],
-  runpodWorkerSupportsMode: (m: string) => ['i2v', 't2v'].includes(m),
-}))
 
 import { advanceInflightVideoJobs } from '~/lib/video-pipeline.server'
 import { estimateVideoCostUsd } from '~/lib/model-pricing.server'
@@ -174,14 +162,6 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-function expectRunpodUntouched(): void {
-  expect(runpod.submitRunpodVideo).not.toHaveBeenCalled()
-  expect(runpod.getRunpodStatus).not.toHaveBeenCalled()
-  expect(runpod.getRunpodResult).not.toHaveBeenCalled()
-  expect(runpod.cancelRunpod).not.toHaveBeenCalled()
-  for (const call of fetchMock.mock.calls) expect(String(call[0])).not.toMatch(/runpod/)
-}
-
 describe('Atlas clip: submit -> awaiting_provider -> done -> blobPut (wan27-atlas)', () => {
   it('tick 1 submits to Atlas and parks awaiting_provider with the prediction handle', async () => {
     state.selectResults = [[jobRow()], [{ id: 55, blobUrl: FRAME }]]
@@ -198,7 +178,6 @@ describe('Atlas clip: submit -> awaiting_provider -> done -> blobPut (wan27-atla
     expect(Number(parked?.['costUsd'])).toBeCloseTo(estimateVideoCostUsd('atlascloud/wan-2.7-i2v', 5), 6)
     expect(logVideoCostMock).toHaveBeenCalledWith(expect.objectContaining({ feature: 'video-clip', model: 'atlascloud/wan-2.7-i2v', seconds: 5 }))
     expect(blobPutMock).not.toHaveBeenCalled()
-    expectRunpodUntouched()
   })
 
   it('tick 2 waits while Atlas reports processing, then pending (InfiniteTalk reports pending after processing)', async () => {
@@ -210,7 +189,6 @@ describe('Atlas clip: submit -> awaiting_provider -> done -> blobPut (wan27-atla
     }
     expect(state.inserts).toHaveLength(0)
     expect(blobPutMock).not.toHaveBeenCalled()
-    expectRunpodUntouched()
   })
 
   it('tick 3 sees completed and downloads + blobPuts the mp4 in the same tick, then hands off to lipsync', async () => {
@@ -232,7 +210,6 @@ describe('Atlas clip: submit -> awaiting_provider -> done -> blobPut (wan27-atla
       sourceModel: 'atlascloud/wan-2.7-i2v',
     })
     expect(state.updates.some(u => u['stage'] === 'lipsync' && u['status'] === 'queued')).toBe(true)
-    expectRunpodUntouched()
   })
 
   it('a transient download or blobPut failure after COMPLETED waits and retries, and never burns the render', async () => {
@@ -281,7 +258,6 @@ describe('Atlas clip: submit -> awaiting_provider -> done -> blobPut (wan27-atla
 
     expect(r.failed).toBe(1)
     expect(state.updates.map(u => String(u['error'] ?? '')).join(' ')).toMatch(/atlascloud video generation failed: atlas: CUDA out of memory/)
-    expectRunpodUntouched()
   })
 
   it('polls a mirror-issued handle on Wavespeed even though the tier names Atlas', async () => {
@@ -294,7 +270,6 @@ describe('Atlas clip: submit -> awaiting_provider -> done -> blobPut (wan27-atla
 
     expect(r.failed).toBe(0)
     expect(String(fetchMock.mock.calls[0]![0])).toBe(ws.statusUrl)
-    expectRunpodUntouched()
   })
 })
 
@@ -326,7 +301,6 @@ describe('Atlas avatar: InfiniteTalk keeps the ElevenLabs step and hands the aud
     const parked = state.updates.find(u => u['status'] === 'awaiting_provider')
     expect(parked?.['providerRequestIds']).toEqual({ clip: HANDLE })
     expect(logVideoCostMock).toHaveBeenCalledWith(expect.objectContaining({ feature: 'video-avatar', model: 'atlascloud/infinitetalk', seconds: 10 }))
-    expectRunpodUntouched()
   })
 })
 
@@ -374,7 +348,6 @@ describe('Atlas voiceover: silent wan27-atlas render -> cast-voice overdub -> as
     expect(muxMock).toHaveBeenCalledWith(Buffer.from('silent-mp4'), Buffer.from('maya-mp3'))
     expect(state.inserts.at(-1)).toMatchObject({ purpose: 'clip', blobUrl: 'https://x.public.blob.vercel-storage.com/video/job-atlas/clip-vo.mp4' })
     expect(state.updates.some(u => u['stage'] === 'assembly' && u['status'] === 'queued')).toBe(true)
-    expectRunpodUntouched()
   })
 
   it('refuses at the overdub, clearly, when the cast member has no voiceId (never falls back to Emma or IVR)', async () => {

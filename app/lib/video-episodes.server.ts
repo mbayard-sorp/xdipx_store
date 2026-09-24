@@ -35,7 +35,7 @@ import {
 } from './video-episodes'
 import type { EpisodePitch, ReviseField } from './video-episodes'
 import { dryRunEpisodeScript, getMaxCostCents } from './video-pipeline.server'
-import { isVideoModelId, tierIneligibility } from './fal-video.server'
+import { isVideoModelId, isRetiredVideoTierId, tierIneligibility } from './fal-video.server'
 import type { VideoModelId } from './fal-video.server'
 
 export type VideoEpisodeRow = typeof videoEpisodes.$inferSelect
@@ -149,6 +149,8 @@ export async function proposeEpisodes(args: {
     const placements = validatePlacements(e.productPlacements)
     let modelTier: VideoModelId | null = null
     if (e.modelTier != null) {
+      // A deleted RunPod tier id gets the retired_provider message (ADR-016).
+      if (isRetiredVideoTierId(e.modelTier)) throw new Error(`${where}.modelTier ${tierIneligibility(String(e.modelTier))!.message}`)
       if (!isVideoModelId(e.modelTier)) throw new Error(`${where}.modelTier is not a known tier`)
       // Refuse a retired or unrenderable tier HERE (ticket #5727), not eight
       // days later at the enqueue. A batch is one owner sitting: an episode

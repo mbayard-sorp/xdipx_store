@@ -77,12 +77,12 @@ describe('op:record with finish (#8027)', () => {
   it('carries error and prUrl through when present', async () => {
     await post({
       op: 'record', runId: 7, summary: 'x',
-      finish: { status: 'failed', error: 'RunPod pod stray', prUrl: 'https://github.com/x/y/pull/1' },
+      finish: { status: 'failed', error: 'Atlas render stalled', prUrl: 'https://github.com/x/y/pull/1' },
     })
     expect(updateRun).toHaveBeenCalledWith(7, {
       finished: true,
       status: 'failed',
-      error: 'RunPod pod stray',
+      error: 'Atlas render stalled',
       prUrl: 'https://github.com/x/y/pull/1',
     })
   })

@@ -4,8 +4,8 @@
  * pre-canonical keys. Re-filing one of those blockers today canonicalizes
  * the incoming key and misses the stored raw row on `ON CONFLICT
  * (dedupe_key)`, inserting a duplicate instead of updating it — reproduced
- * live 2026-09-02, blocker #16 ('runpod:vercel-env') vs the duplicate #69
- * ('runpod-vercel-env') it produced. Migration 092 canonicalizes the
+ * live 2026-09-02, blocker #16 (a colon-spelled key) vs the duplicate #69
+ * (its dashed canonical twin) it produced. Migration 092 canonicalizes the
  * existing rows; this test locks down the write-path half of the fix: every
  * call to fileBlocker(), whatever spelling of the key the caller passes,
  * targets the same canonical dedupe_key in its SQL, which is what lets
@@ -50,10 +50,10 @@ describe('fileBlocker canonicalizes the write key regardless of caller spelling 
   it('a raw, colon-separated key is written under its canonical form', async () => {
     // category: 'console' sidesteps the #8028 probe-required gate, which is
     // orthogonal to what this suite tests (dedupe-key canonicalization).
-    await fileBlocker({ dedupeKey: 'runpod:vercel-env', title: 'RunPod vercel env missing', category: 'console' })
+    await fileBlocker({ dedupeKey: 'atlas:vercel-env', title: 'Atlas vercel env missing', category: 'console' })
 
-    const canon = canonicalDedupeKey('runpod:vercel-env', { maxLength: 80 })
-    expect(canon).toBe('runpod-vercel-env')
+    const canon = canonicalDedupeKey('atlas:vercel-env', { maxLength: 80 })
+    expect(canon).toBe('atlas-vercel-env')
     expect(dedupeKeyParam(0)).toBe(canon) // the prior-status SELECT
     expect(dedupeKeyParam(1)).toBe(canon) // the INSERT ... ON CONFLICT
   })
@@ -61,14 +61,14 @@ describe('fileBlocker canonicalizes the write key regardless of caller spelling 
   it('a raw key and its already-canonical form resolve to the identical stored key', async () => {
     // category: 'console' sidesteps the #8028 probe-required gate, which is
     // orthogonal to what this suite tests (dedupe-key canonicalization).
-    await fileBlocker({ dedupeKey: 'runpod:vercel-env', title: 'RunPod vercel env missing', category: 'console' })
+    await fileBlocker({ dedupeKey: 'atlas:vercel-env', title: 'Atlas vercel env missing', category: 'console' })
     const rawWrite = dedupeKeyParam(1)
 
     executeMock.mockReset()
     executeMock
       .mockResolvedValueOnce({ rows: [{ status: 'open' }] })
       .mockResolvedValueOnce({ rows: [{ id: 1, created: false }] })
-    await fileBlocker({ dedupeKey: 'runpod-vercel-env', title: 'RunPod vercel env missing', category: 'console' })
+    await fileBlocker({ dedupeKey: 'atlas-vercel-env', title: 'Atlas vercel env missing', category: 'console' })
     const canonicalWrite = dedupeKeyParam(1)
 
     // Same target row either way: this is what makes ON CONFLICT (dedupe_key)

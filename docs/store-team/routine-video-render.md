@@ -12,8 +12,8 @@ never renders a product that cannot ship.**
 Money model: reasoning bills to the Max subscription; each enqueued job is METERED REAL MONEY on
 Atlas Cloud (Wavespeed as mirror, called only when Atlas errors or its balance is exhausted),
 logged to `api_token_log` under `video-*`, gated by `video_team_daily_cents` and the per-video
-ceiling `video_team_max_cost_cents`. The enqueue API enforces both server-side. RunPod is retired
-and fal is images only; this routine never enqueues on either.
+ceiling `video_team_max_cost_cents`. The enqueue API enforces both server-side. fal is images
+only; this routine never enqueues on a fal tier.
 
 ## Step 0: Start
 
@@ -43,7 +43,7 @@ that did not come from an approved ledger row.
 `config.models`, **stop before claiming**: file the owner blocker below, post a `skipped` event with
 reason `atlas_tier_not_live`, finish `status:'skipped'`, exit. (If some are present, a clip whose
 routed tier is missing is released at Step 4 with reason `tier_not_live`.) Never enqueue on a
-RunPod tier (`wan22-*`) or a fal tier as a substitute, and never omit `modelTier` (the route fills a
+fal tier as a substitute, and never omit `modelTier` (the route fills a
 default tier when it is absent).
 
 ```json

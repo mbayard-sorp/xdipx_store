@@ -166,42 +166,6 @@ const EXPECTED_WEBHOOK_TOPICS: readonly string[] = [
 ]
 
 /**
- * Is any RunPod pod (the hourly-billed Pods product) currently RUNNING? A
- * forgotten bootstrap pod costs $0.74/hr with nothing to show for it. The
- * incident that motivated this probe left one running 18.7h (~$14) on
- * 2026-08-22/23. Arg is unused. `null` on any API error (missing/scoped key,
- * non-2xx): "could not ask" must never collapse into "all clear".
- */
-async function runpodNoPods(): Promise<ProbeVerdict> {
-  try {
-    const { listRunningRunpodPods } = await import('~/lib/runpod-pods.server')
-    const running = await listRunningRunpodPods()
-    return running.length === 0
-  } catch {
-    return null
-  }
-}
-
-/**
- * Has the video render ENDPOINT scaled to zero active workers with an empty
- * queue? The pods probe above cannot see the serverless endpoint at all, so
- * without this the render fleet has a permanent false all-clear. `null` when
- * the API is unreachable OR RUNPOD_VIDEO_ENDPOINT_ID is unset: the unset-env
- * case is a "succeeded but empty" read guardedRun cannot catch, and it must
- * never read as idle.
- */
-async function runpodEndpointIdle(): Promise<ProbeVerdict> {
-  try {
-    if (!process.env['RUNPOD_VIDEO_ENDPOINT_ID']) return null
-    const { getRunpodEndpointHealth } = await import('~/lib/runpod-endpoint.server')
-    const health = await getRunpodEndpointHealth()
-    return health.workers.active === 0 && health.jobs.inQueue === 0 && health.jobs.inProgress === 0
-  } catch {
-    return null
-  }
-}
-
-/**
  * True when `platform` has no approved draft left days past its slot.
  *
  * Asks `findOverdueApproved`, the same read the blocker was filed from, so the
@@ -372,8 +336,6 @@ const RUNNERS: Record<string, (arg: string) => Promise<ProbeVerdict>> = {
   rows_exist:    rowsExist,
   routine_ran:   routineRan,
   webhook_registered: webhookRegistered,
-  runpod_no_pods: runpodNoPods,
-  runpod_endpoint_idle: runpodEndpointIdle,
   social_no_overdue: socialNoOverdue,
   env_present:   envPresent,
   pr_merged:     prMerged,

@@ -54,7 +54,7 @@ describe('the registry', () => {
 
 describe('what gets filed', () => {
   const req = integration('github')!
-  const opt = integration('runpod')!
+  const opt = integration('instagram')!
 
   it('files on an authoritative rejection', () => {
     expect(shouldFile(req, 'dead')).toBe(true)
@@ -62,7 +62,7 @@ describe('what gets filed', () => {
   })
 
   it('never files on a could-not-ask', () => {
-    // The whole discipline. This runs every six hours against nine third-party
+    // The whole discipline. This runs every six hours against eight third-party
     // APIs, so transient failures are certain, and a blocker list that fills
     // with them is a blocker list nobody reads. It is also #4702 as a rule:
     // unreachable from this process is not proof of broken.

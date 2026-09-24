@@ -127,10 +127,8 @@ describe('enqueue-set', () => {
 
 describe('talking-tier validation', () => {
   // sync-lipsync and omnihuman are retired with the rest of fal video (owner
-  // direction 2026-08-26), so the surviving talking tier is the RunPod s2v
-  // one. These tests widen the deployed worker's declared modes to reach the
-  // per-tier field validation; the refusal when they are NOT widened is its
-  // own test below, and is the live behavior today.
+  // direction 2026-08-26), so the surviving talking tier is italk-atlas
+  // (ADR-016).
   afterEach(() => { vi.unstubAllEnvs() })
 
   it('rejects enqueue without presenterLine', async () => {
@@ -166,9 +164,9 @@ describe('talking-tier validation', () => {
 
 /**
  * Tier eligibility (ticket #5727). Before this, an enqueue on a retired fal
- * tier spent fal money, and one on wan22-s2v woke a RunPod worker whose image
- * does not implement mode s2v, failed inside the handler, and billed for the
- * boot. Both are now a 400 before the money gate and before any provider call.
+ * tier spent fal money, and one on a retired RunPod tier billed a GPU boot
+ * before failing. Both are now a 400 before the money gate and before any
+ * provider call.
  */
 describe('tier eligibility', () => {
   it('refuses a retired fal video tier', async () => {
@@ -180,7 +178,7 @@ describe('tier eligibility', () => {
     expect(enqueueSetMock).not.toHaveBeenCalled()
   })
 
-  it('refuses a retired RunPod tier (ADR-016)', async () => {
+  it('refuses a deleted RunPod tier id as retired_provider, not unknown (ADR-016)', async () => {
     const res = await post({
       op: 'enqueue',
       productHandle: 'satin-wand',

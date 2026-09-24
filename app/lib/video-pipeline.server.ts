@@ -41,11 +41,12 @@
 import { randomUUID } from 'node:crypto'
 import { eq, and, inArray, desc, isNotNull, ne, sql } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
-import { videoJobs, mediaAssets, socialMediaAssets, socialPosts, videoEpisodes, type VideoScriptJson, type VideoSceneSpec, type VideoSceneState, type RunpodIdleProbe } from '../../db/schema'
+import { videoJobs, mediaAssets, socialMediaAssets, socialPosts, videoEpisodes, type VideoScriptJson, type VideoSceneSpec, type VideoSceneState } from '../../db/schema'
 import { kvSet, kvDel, KV_KEYS } from '~/lib/kv.server'
 import {
   VIDEO_MODELS,
   isVideoModelId,
+  isRetiredVideoTierId,
   composeSceneFrame,
   submitVideoRequest,
   getVideoRequestStatus,
@@ -67,10 +68,9 @@ import {
 } from '~/lib/fal-video.server'
 import type { VideoMode } from '~/lib/video-episodes'
 import { blobPut, blobFetchToBuffer } from '~/lib/blob.server'
-import { estimateVideoCostUsd, estimateImageCostUsd, computeRunpodActualCostUsd } from '~/lib/model-pricing.server'
+import { estimateVideoCostUsd, estimateImageCostUsd } from '~/lib/model-pricing.server'
 import { utcIsoToLaWallClock } from '~/lib/social-schedule-ui'
 import { logVideoCost, logImageCost } from '~/lib/token-log.server'
-import { getRunpodStatus, cancelRunpod } from '~/lib/runpod-video.server'
 import { submitVideoWithMirror, providerForHandle } from '~/lib/media-providers/registry.server'
 import { getEditorPhotoUrl, getApprovedCastMembers, presenterPhotoUrlForCrop } from '~/lib/sanity.server'
 import { CROP_SCALES, isCropScale, needsBodyReference, withSkinToneNote } from '~/lib/social-cast-reference.server'
@@ -469,13 +469,18 @@ export async function getMaxCostCents(): Promise<number> {
  * omits modelTier. Reads the same way getMaxCostCents' sibling frameReviewEnabled/
  * endcardEnabled do (plain getPipelineSetting call, not getTeamConfig — this is
  * NOT a 'video_team_%' key). No migration seeds `video_default_model_tier`, so
- * an unset or invalid stored value (typo, retired tier id) falls back to
- * VIDEO_DEFAULT_MODEL_TIER_DEFAULT rather than throwing — a bad setting write
- * can never brick every video enqueue.
+ * an unset or unknown stored value (a typo) falls back to
+ * VIDEO_DEFAULT_MODEL_TIER_DEFAULT rather than throwing, so a bad setting write
+ * can never brick every video enqueue. A deleted RunPod id is the exception:
+ * it is refused, see below.
  */
-async function getDefaultModelTier(): Promise<VideoModelId> {
+async function getDefaultModelTier(): Promise<string> {
   const v = await getPipelineSetting(VIDEO_EXTRA_KEYS.defaultModelTier).catch(() => null)
-  return isVideoModelId(v) ? v : (VIDEO_DEFAULT_MODEL_TIER_DEFAULT as VideoModelId)
+  // A stored retired RunPod id is passed through so the enqueue refuses it
+  // with the retirement named (ADR-016: the owner resets the setting, blocker
+  // 226), rather than being silently swapped for a paid Atlas tier.
+  if (isVideoModelId(v) || isRetiredVideoTierId(v)) return v as string
+  return VIDEO_DEFAULT_MODEL_TIER_DEFAULT
 }
 
 /**
@@ -549,6 +554,9 @@ export function estimateExceedsRemainingBudget(
 export async function enqueueVideoJob(args: EnqueueVideoJobArgs): Promise<{ jobId: string; estCostUsd: number }> {
   const modelTier = args.modelTier
     ?? (args.mode ? DEFAULT_TIER_BY_MODE[args.mode] : await getDefaultModelTier())
+  // A retired tier id (regenerateVideoJob re-filing a historical RunPod row)
+  // gets the retired_provider message, not "Unknown model tier".
+  if (isRetiredVideoTierId(modelTier)) throw new Error(tierIneligibility(modelTier)!.message)
   if (!isVideoModelId(modelTier)) throw new Error(`Unknown model tier: ${modelTier}`)
   // Backstop for the eligibility rule the callers already apply (ticket
   // #5727). Every enqueue path funnels through here — the team API, the ad-hoc
@@ -745,6 +753,7 @@ export interface EnqueueVideoJobSetResult {
  */
 export async function enqueueVideoJobSet(args: EnqueueVideoJobSetArgs): Promise<EnqueueVideoJobSetResult> {
   const modelTier = args.modelTier ?? await getDefaultModelTier()
+  if (isRetiredVideoTierId(modelTier)) throw new Error(tierIneligibility(modelTier)!.message)
   if (!isVideoModelId(modelTier)) throw new Error(`Unknown model tier: ${modelTier}`)
   const spec = VIDEO_MODELS[modelTier]
 
@@ -811,114 +820,6 @@ export async function enqueueVideoJobSet(args: EnqueueVideoJobSetArgs): Promise<
   return { variantGroupId, totalEstCostUsd: Math.round(totalEstCostUsd * 1e5) / 1e5, jobs }
 }
 
-/**
- * Record the GPU-seconds a FAILED RunPod render already burned (ticket #5726).
- *
- * A job that times out or crashes was still billed for the time it ran, but
- * only the COMPLETED branches used to call logVideoCost — so a failure spent
- * real money that reached neither api_token_log nor the team budget gate, and
- * the endpoint's own history is 4 failures in 10 jobs. Best-effort and never
- * throws: this runs on the way to failing a job, and losing the accounting
- * must not also lose the error that caused it.
- *
- * `seconds` is the clip duration that was ATTEMPTED (logVideoCost drops a row
- * with no seconds); the money is carried by actualCostUsd either way.
- */
-async function logRunpodBurn(args: {
-  costKey: string
-  executionMs: number
-  seconds: number
-  productHandle: string
-  refId: string
-  feature: 'video-clip' | 'video-avatar'
-}): Promise<void> {
-  if (!(args.executionMs > 0)) return
-  try {
-    const burnedUsd = computeRunpodActualCostUsd(args.executionMs)
-    if (!(burnedUsd > 0)) return
-    await logVideoCost({
-      feature: args.feature,
-      model: args.costKey,
-      seconds: Math.max(1, args.seconds),
-      caller: 'video-pipeline/failed',
-      sku: args.productHandle,
-      refId: args.refId,
-      actualCostUsd: burnedUsd,
-    })
-    console.warn(`[video-pipeline] recorded $${burnedUsd.toFixed(4)} burned by failed runpod render ${args.refId}`)
-  } catch (err) {
-    console.error(`[video-pipeline] failed-render burn accounting lost for ${args.refId}:`, err)
-  }
-}
-
-/** RunPod's queue host, used to tell a runpod handle from a fal one. */
-const RUNPOD_API_BASE_FOR_CANCEL = 'https://api.runpod.ai/v2'
-
-/**
- * Cancel every RunPod request still in flight for a job that has stopped
- * mattering, and record what it burned (ticket #5728).
- *
- * A RunPod request outlives the row that submitted it. Nothing consumes the
- * result of a job that is already terminal, but the GPU keeps running and
- * billing until the render finishes or the endpoint's 1800s execution timeout
- * fires — up to ~$1.43 an orphan at the all-in rate, more for a multi-part
- * avatar job where one failed part abandons its siblings mid-render. The
- * client has had cancelRunpod() since the provider shipped; nothing called it.
- *
- * Safe precisely because the caller has already made the row terminal: the
- * work being cancelled is work the app can no longer use, so this only ever
- * stops spend on an output nobody will read. Best-effort throughout — a failed
- * cancel must never mask the error that led here, and a cancel that succeeds
- * must not be lost to a later accounting hiccup.
- *
- * fal handles are left alone: fal video is retired (ticket #5727), its queue
- * has different cancel semantics, and no new job can reach it anyway.
- */
-async function cancelInflightRunpodRequests(job: VideoJobRow, reason: string): Promise<number> {
-  const handles = (job.providerRequestIds ?? {}) as Record<string, unknown>
-  const runpodHandles = Object.entries(handles).filter((e): e is [string, QueueHandle] => {
-    const h = e[1] as Partial<QueueHandle> | null
-    // providerRequestIds also carries non-handle bookkeeping keys
-    // (assembly_attempts, avatar_billed_seconds), so shape-check rather than
-    // trusting every value to be a handle.
-    return !!h && typeof h === 'object'
-      && typeof h.requestId === 'string'
-      && typeof h.statusUrl === 'string'
-      && h.statusUrl.startsWith(`${RUNPOD_API_BASE_FOR_CANCEL}/`)
-  })
-  if (!runpodHandles.length) return 0
-
-  const spec = VIDEO_MODELS[job.modelTier as VideoModelId]
-  const costKey = spec?.costKey ?? 'runpod/wan22'
-  let cancelled = 0
-  for (const [key, handle] of runpodHandles) {
-    // Read the burn BEFORE cancelling: a cancelled request still bills for the
-    // seconds it ran, and after the cancel RunPod may report it as CANCELLED
-    // with no executionTime at all.
-    let executionMs = 0
-    try {
-      executionMs = (await getRunpodStatus(handle)).executionMs
-    } catch { /* accounting is best-effort; the cancel below is the point */ }
-    try {
-      await cancelRunpod(handle)
-      cancelled++
-      console.warn(`[video-pipeline] cancelled orphaned runpod request ${handle.requestId} (${job.jobId}#${key}): ${reason}`)
-    } catch (err) {
-      // Already terminal on RunPod's side is the common case and is fine.
-      console.warn(`[video-pipeline] could not cancel runpod request ${handle.requestId} (${job.jobId}#${key}):`, err)
-    }
-    await logRunpodBurn({
-      costKey,
-      executionMs,
-      seconds: 1,
-      productHandle: job.productHandle,
-      refId: `${job.jobId}#${key}#cancelled`,
-      feature: spec?.audioDriven ? 'video-avatar' : 'video-clip',
-    })
-  }
-  return cancelled
-}
-
 // ─── Advance loop (called by /cron/video-job-poller) ─────────────────────────
 
 export interface AdvanceVideoResult {
@@ -968,12 +869,6 @@ export async function advanceInflightVideoJobs(opts: { maxJobs?: number } = {}):
         .update(videoJobs)
         .set({ status: 'failed', stage: 'failed', error: String(err), updatedAt: new Date() })
         .where(eq(videoJobs.jobId, job.jobId))
-      // The row is terminal now, but a submitted RunPod request is not: it
-      // keeps rendering and billing for an output nothing will ever read
-      // (ticket #5728). This is also what covers the avatar multi-part case,
-      // where one failed part throws while its siblings are mid-render.
-      await cancelInflightRunpodRequests(job, `job failed: ${String(err).slice(0, 200)}`)
-        .catch(cancelErr => console.error(`[video-pipeline] orphan cancel failed for ${job.jobId}:`, cancelErr))
       // The episode this job was rendering has to come off 'rendering' with
       // it (ticket #5726). Nothing else writes that transition, so before this
       // a failed render left the row unclaimable AND undecidable: its episode
@@ -1042,6 +937,10 @@ function withoutRehostAttempts(handles: VideoJobRow['providerRequestIds']): Vide
 }
 
 async function advanceJob(job: VideoJobRow): Promise<AdvanceOutcome> {
+  // A row still in flight on a deleted RunPod tier (ADR-016 Phase 4) has no
+  // spec to advance with. Fail it with the retired_provider message rather
+  // than a TypeError from an undefined spec; the caller marks it failed.
+  if (isRetiredVideoTierId(job.modelTier)) throw new Error(tierIneligibility(job.modelTier)!.message)
   switch (job.stage) {
     case 'scene_frame': return advanceSceneFrame(job)
     case 'clip':        return advanceClip(job)
@@ -1664,8 +1563,8 @@ async function advanceClip(job: VideoJobRow): Promise<AdvanceOutcome> {
  * Multi-scene clip stage: render scenes in order, one per tick. 'own-frame'
  * scenes animate their approved frame (scene_frame stage); 'last-frame'
  * scenes animate the PREVIOUS scene's rendered clip's final frame instead,
- * cut from the downloaded clip with video-assembly's extractLastFrame (every
- * provider since ADR-016; RunPod's worker used to return it directly). Once every scene is done, the
+ * cut from the downloaded clip with video-assembly's extractLastFrame. Once
+ * every scene is done, the
  * per-scene clips are concatenated (concatAndNormalize) into ONE 'clip'-purpose
  * media_assets row — the newest such row — and the job hands off to
  * `stage: 'lipsync'` exactly as the single-clip path does, so advanceLipsync /
@@ -2410,8 +2309,7 @@ async function advancePoster(job: VideoJobRow): Promise<AdvanceOutcome> {
   }
   // Render gate: with video_render_review ON (default) the finished cut parks
   // for the owner instead of reaching 'done'. stage is 'done' either way (the
-  // machine has nothing left to do, and completedAt is the render time the
-  // RunPod re-probe keys on); only the status differs, and the poller never
+  // machine has nothing left to do); only the status differs, and the poller never
   // selects the parked one. fanOutVideoToSocialDrafts refuses anything but
   // status 'done', so a parked cut cannot reach Social Studio by any path.
   const parkForReview = await renderReviewEnabled()
@@ -2422,91 +2320,7 @@ async function advancePoster(job: VideoJobRow): Promise<AdvanceOutcome> {
     completedAt: new Date(),
   })
   console.log(`[video-pipeline] job ${job.jobId} ${parkForReview ? 'rendered, parked for final-cut approval' : 'complete'} (${duration.toFixed(1)}s, $${Number(job.costUsd).toFixed(2)})`)
-
-  // RunPod off-confirmation (ticket #5717). Ordering is load-bearing: this
-  // sits AFTER the terminal write, in its own catch, so a RunPod API hiccup
-  // can never turn a finished, paid-for video into a failed row.
-  if (jobUsedRunpod(job)) {
-    try {
-      await confirmRunpodIdle(job.id)
-    } catch (err) {
-      console.warn(`[video-pipeline] job ${job.jobId} runpod idle probe failed:`, err)
-    }
-  }
   return parkForReview ? 'parked' : 'done'
-}
-
-// ─── RunPod off-confirmation (ticket #5717) ─────────────────────────────────
-
-/**
- * True when this job's render path touched the RunPod serverless endpoint:
- * the job's own tier, a compound tier's base clip, or (per-scene tiers,
- * later) any scene's tier. Derived, never stored — a stored flag would be a
- * fourth writer on a row three things already write.
- */
-export function jobUsedRunpod(job: Pick<VideoJobRow, 'modelTier' | 'scenesJson'>): boolean {
-  const spec = VIDEO_MODELS[job.modelTier as VideoModelId]
-  if (!spec) return false
-  if (spec.provider === 'runpod') return true
-  const base = spec.lipsync ? VIDEO_MODELS[spec.lipsync.baseClip] : undefined
-  if (base?.provider === 'runpod') return true
-  return (job.scenesJson ?? []).some(sc => {
-    const t = (sc as { modelTier?: string }).modelTier
-    return typeof t === 'string' && VIDEO_MODELS[t as VideoModelId]?.provider === 'runpod'
-  })
-}
-
-/**
- * Probe BOTH RunPod surfaces (the serverless endpoint's workers/queue AND the
- * hourly-billed pods list) and stamp the result on the job row. The pods list
- * alone is a permanent false all-clear for the render fleet: video renders on
- * the endpoint, which that list never contains.
- *
- * Three outcomes, never conflated (the owner-blocker guardedRun discipline):
- *   clear: true    both reads succeeded AND both are zero -> confirmedAt set
- *   clear: false   a read succeeded and found work still up
- *   couldNotAsk    a read threw; recorded by surface name, NEVER an all-clear
- *
- * Never throws: the caller sits AFTER the terminal stage write, and a RunPod
- * API hiccup must never turn a finished, paid-for video into a failed row.
- */
-export async function confirmRunpodIdle(jobRowId: number): Promise<RunpodIdleProbe> {
-  const probe: RunpodIdleProbe = {
-    checkedAt: new Date().toISOString(),
-    endpoint: null,
-    pods: null,
-    clear: false,
-    couldNotAsk: [],
-  }
-  try {
-    const { getRunpodEndpointHealth } = await import('./runpod-endpoint.server')
-    probe.endpoint = await getRunpodEndpointHealth()
-  } catch {
-    probe.couldNotAsk.push('endpoint')
-  }
-  try {
-    const { listRunningRunpodPods } = await import('./runpod-pods.server')
-    const pods = await listRunningRunpodPods()
-    probe.pods = pods.map(pd => ({ id: pd.id, name: pd.name, hoursRunning: pd.hoursRunning, costPerHour: pd.costPerHour }))
-  } catch {
-    probe.couldNotAsk.push('pods')
-  }
-  probe.clear = probe.couldNotAsk.length === 0
-    && probe.endpoint != null
-    && probe.endpoint.workers.active === 0
-    && probe.endpoint.jobs.inQueue === 0
-    && probe.endpoint.jobs.inProgress === 0
-    && (probe.pods?.length ?? 1) === 0
-
-  try {
-    await db.update(videoJobs).set({
-      runpodIdleProbeJson: probe,
-      ...(probe.clear ? { runpodIdleConfirmedAt: new Date() } : {}),
-    }).where(eq(videoJobs.id, jobRowId))
-  } catch (err) {
-    console.warn(`[video-pipeline] runpod idle probe write failed for job row ${jobRowId}:`, err)
-  }
-  return probe
 }
 
 // ─── Owner actions (Video Studio) ────────────────────────────────────────────
@@ -2587,21 +2401,11 @@ export async function retrySceneFrames(jobRowId: number, feedback: string, scene
   await kvDel(KV_KEYS.videoPollerIdle)
 }
 
-/**
- * Terminal owner rejection. Also cancels anything still rendering for this job
- * (ticket #5728): Reject used to flip the row and walk away, leaving a live
- * RunPod request billing for a video the owner had just said no to. Prod job 4
- * ("Rejected by owner: cancelled during step-4 test") took exactly that path.
- */
+/** Terminal owner rejection. */
 export async function rejectVideoJob(jobRowId: number, reason: string): Promise<void> {
-  const [job] = await db.select().from(videoJobs).where(eq(videoJobs.id, jobRowId)).limit(1)
   await db.update(videoJobs)
     .set({ status: 'failed', stage: 'failed', error: `Rejected by owner: ${reason || 'no reason given'}`, updatedAt: new Date() })
     .where(eq(videoJobs.id, jobRowId))
-  if (job) {
-    await cancelInflightRunpodRequests(job, `rejected by owner: ${reason || 'no reason given'}`)
-      .catch(err => console.error(`[video-pipeline] orphan cancel failed for rejected job ${job.jobId}:`, err))
-  }
 }
 
 /**
@@ -2640,8 +2444,7 @@ export async function rejectRenderedVideo(jobRowId: number, reason: string, reje
   if (!job) throw new Error('Job not found')
   const updated = await db.update(videoJobs)
     // stage stays 'done' on purpose: status 'failed' already keeps the row out
-    // of every list and fan-out, and the hourly RunPod idle re-probe keys on
-    // stage 'done' + completedAt, so a rejected cut still gets its GPU checked.
+    // of every list and fan-out.
     .set({ status: 'failed', error: `Final cut rejected by owner: ${why}`.slice(0, 2000), updatedAt: new Date() })
     .where(and(eq(videoJobs.id, jobRowId), eq(videoJobs.status, AWAITING_RENDER_APPROVAL)))
     .returning({ id: videoJobs.id })
