@@ -88,6 +88,15 @@ plus the retired-route denylist stand.
   prototype — not just polish of existing sections. Judge concepts by whether a visitor learns
   something about what fits them while moving toward a product. Log rejected concepts + reasons so
   ambition compounds across cycles.
+- **Banked-concept ceiling (ticket #11085): more than five wires with zero prototypes is a stated
+  decision, not a silent default.** Nine cycles running the wire option in a row (2026-07-15 through
+  2026-09-23: sensation-map, either-or, how-you-arrive, the-next-step, first-tap, curiosity-echo,
+  nothing-in-the-way, whos-holding-it, plus the shipped Compass) converts ambition into paper at
+  about one per cycle and into product at zero. The traffic gate is a reason not to ship an
+  *expensive* build; it is not a reason the *cheapest* banked concept has never been costed against
+  it. Once the banked-concept count exceeds five, the cycle must either prototype the cheapest banked
+  concept, or record, in one line each, why each of the top three is not the cheapest thing available
+  this cycle. This does not force a build and does not override the traffic gate below.
 - **While traffic-gated, keep the cycle cheap: bank design capital, defer expensive builds.** With
   GA4 far below the 300-sessions/week weighting threshold, no shipped homepage change is currently
   GA4-measurable, so big asset-generation or new-machinery builds (generated-imagery waves, interactive
@@ -251,14 +260,20 @@ curl -s -X POST "$BASE_URL/api/homepage-team/run" \
   -d '{"op":"update","id":'"$RUN_ID"',"update":{"status":"succeeded","finished":true,"currentPhase":"pr-open","prUrl":"https://github.com/<org>/<repo>/pull/<n>","summary":"Design cycle: new hero block + category-nav block; preview deploy attached, awaiting approval"}}'
 ```
 
-The Vercel preview URL (auto-attached to the PR) is the review surface. **The routine stops here.**
-Review happens on that preview (`qa-reviewer` on the daily QA pass, or you), and the release engine
-squash-merges once CI is green, the linked ticket is `verified`, and the protected-path classifier
-finds nothing sensitive in the diff. Anything touching checkout and payment, cart, migrations and
-schema, auth and session, team valves and spend controls, CI and deploy config, or the release
-engine itself stops and emails you; only you merge those. **The team still cannot merge its own
-code.** That remains the enforcement of the "gate code" decision, and `release_engine_enabled` off
-restores owner-merges-everything.
+The Vercel preview URL (auto-attached to the PR) is the **human** review surface. It is
+SSO-gated (Vercel Deployment Protection) and unreachable from a cloud routine: fetching it returns a
+302 to `vercel.com/login`, not the storefront (confirmed against PR #1301's own preview, ticket
+#11087). **A cloud routine cannot self-verify its own change on the branch this way.** Its substitute
+is typecheck + the full local test suite on the branch, plus reading the served **production** HTML
+where the change is a fix to something already live (never claim you verified against "the preview"
+when you read production instead); state in the run summary which of these you did. **The routine
+stops here.** Human review happens on the actual preview (`qa-reviewer` on the daily QA pass, or you),
+and the release engine squash-merges once CI is green, the linked ticket is `verified`, and the
+protected-path classifier finds nothing sensitive in the diff. Anything touching checkout and payment,
+cart, migrations and schema, auth and session, team valves and spend controls, CI and deploy config, or
+the release engine itself stops and emails you; only you merge those. **The team still cannot merge
+its own code.** That remains the enforcement of the "gate code" decision, and `release_engine_enabled`
+off restores owner-merges-everything.
 
 ### 6. Spend
 
