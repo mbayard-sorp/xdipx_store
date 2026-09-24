@@ -38,7 +38,7 @@ curl -s "$BASE_URL/api/team/gate?team=video&excludeRun=$RUN_ID" -H "x-team-secre
 `models`. Any of these missing or off -> skip honestly with the reason. Never enqueue from a script
 that did not come from an approved ledger row.
 
-**Tier gate (until Phase 2):** the Atlas tier ids (`infinitetalk-atlas`, `grok-atlas`,
+**Tier gate (until Phase 2):** the Atlas tier ids (`italk-atlas`, `grok-atlas`,
 `wan27-spicy-atlas`) land with the Phase 2 provider seam. If **none of the three** is in
 `config.models`, **stop before claiming**: file the owner blocker below, post a `skipped` event with
 reason `atlas_tier_not_live`, finish `status:'skipped'`, exit. (If some are present, a clip whose
@@ -51,7 +51,7 @@ default tier when it is absent).
  "title":"Atlas video tiers not eligible on main","category":"merge",
  "sourceRef":"<Phase 2 provider-seam PR url>",
  "unblocks":"Thursday video render of owner-approved clips on Atlas Cloud",
- "evidence":"config.models on run <RUN_ID> lists <ids>; none of infinitetalk-atlas, grok-atlas, wan27-spicy-atlas"}
+ "evidence":"config.models on run <RUN_ID> lists <ids>; none of italk-atlas, grok-atlas, wan27-spicy-atlas"}
 ```
 
 Category `merge` derives a `pr_merged` probe from `sourceRef`, so the row clears itself when the PR
@@ -158,7 +158,7 @@ the writers room stores the speaker at `castSlugs[0]` and the listener, if any, 
   blocker naming both strings, release the claim, and move to the next clip. The server runs the same
   comparison and answers 409 (403 if the row is not approved); hitting either means this assertion
   was skipped, which is itself a finding.
-- **Tier.** InfiniteTalk 720p (`infinitetalk-atlas`) is the default for every talking clip. Grok
+- **Tier.** InfiniteTalk 720p (`italk-atlas`) is the default for every talking clip. Grok
   Imagine (`grok-atlas`) only for a clip under 15 s, and only after one recorded A/B against
   InfiniteTalk on the same first frame. Wan 2.7 Spicy (`wan27-spicy-atlas`) only for the silent
   3 to 5 s inserts. All three ids are Phase 2; Step 1's tier gate stops the run until they exist.
@@ -207,7 +207,7 @@ reaper marked them `'auto-expired'`.
 curl -s -X POST "$BASE_URL/api/team/event" \
   -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
   -d '{"op":"record","runId":'$RUN_ID',"phase":"retro",
-       "summary":"3 clips enqueued on infinitetalk-atlas, est $X; 1 alternate used (out_of_stock)",
+       "summary":"3 clips enqueued on italk-atlas, est $X; 1 alternate used (out_of_stock)",
        "finish":{"status":"succeeded","summary":"..."}}'
 ```
 
