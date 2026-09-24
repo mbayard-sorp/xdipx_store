@@ -223,6 +223,44 @@ describe('Atlas clip: submit -> awaiting_provider -> done -> blobPut (wan27-atla
     expectRunpodUntouched()
   })
 
+  it('a transient download or blobPut failure after COMPLETED waits and retries, and never burns the render', async () => {
+    const completed = () => {
+      fetchMock
+        .mockResolvedValueOnce(prediction('completed', [OUT_MP4]))
+        .mockResolvedValueOnce(prediction('completed', [OUT_MP4]))
+        .mockResolvedValueOnce(new Response(new Uint8Array([0, 0, 0, 24])))
+    }
+    // Attempt 1: Blob is down -> waiting, bookkeeping key set.
+    state.selectResults = [[jobRow({ status: 'awaiting_provider', providerRequestIds: { clip: HANDLE } })]]
+    completed()
+    blobPutMock.mockRejectedValueOnce(new Error('blob 503'))
+    let r = await advanceInflightVideoJobs()
+    expect(r.failed).toBe(0)
+    expect(state.updates.at(-1)?.['providerRequestIds']).toEqual({ clip: HANDLE, download_attempts: 1 })
+    expect(state.inserts).toHaveLength(0)
+
+    // Attempt 2 succeeds: clip recorded, bookkeeping key cleared.
+    state.selectResults = [[jobRow({ status: 'awaiting_provider', providerRequestIds: { clip: HANDLE, download_attempts: 1 } })]]
+    completed()
+    blobPutMock.mockResolvedValueOnce({ url: 'https://x.public.blob.vercel-storage.com/video/job-atlas/clip-ok.mp4' })
+    r = await advanceInflightVideoJobs()
+    expect(r.failed).toBe(0)
+    expect(state.inserts.find(i => i['purpose'] === 'clip')?.['blobUrl']).toBe('https://x.public.blob.vercel-storage.com/video/job-atlas/clip-ok.mp4')
+    const done = state.updates.find(u => u['stage'] === 'lipsync')
+    expect(done?.['providerRequestIds']).toEqual({ clip: HANDLE })
+  })
+
+  it('fails the job on the third failed re-host attempt', async () => {
+    state.selectResults = [[jobRow({ status: 'awaiting_provider', providerRequestIds: { clip: HANDLE, download_attempts: 2 } })]]
+    fetchMock
+      .mockResolvedValueOnce(prediction('completed', [OUT_MP4]))
+      .mockResolvedValueOnce(prediction('completed', [OUT_MP4]))
+      .mockResolvedValueOnce(new Response('gone', { status: 503 }))
+    const r = await advanceInflightVideoJobs()
+    expect(r.failed).toBe(1)
+    expect(state.updates.map(u => String(u['error'] ?? '')).join(' ')).toMatch(/re-hosted after 3 attempts/)
+  })
+
   it('a failed prediction fails the job with the provider message', async () => {
     state.selectResults = [[jobRow({ status: 'awaiting_provider', providerRequestIds: { clip: HANDLE } })]]
     fetchMock.mockResolvedValueOnce(json({ code: 200, data: { id: PRED_ID, model: 'alibaba/wan-2.7/image-to-video', status: 'failed', error: 'CUDA out of memory' } }))
@@ -251,7 +289,7 @@ describe('Atlas clip: submit -> awaiting_provider -> done -> blobPut (wan27-atla
 describe('Atlas avatar: InfiniteTalk keeps the ElevenLabs step and hands the audio URL to Atlas', () => {
   it('TTS -> blobPut speech -> submit {image, audio} -> parks awaiting_provider', async () => {
     const job = jobRow({
-      modelTier: 'infinitetalk-atlas',
+      modelTier: 'italk-atlas',
       presenter: 'emma',
       scriptJson: { presenterLine: 'This is the mini wand. It fits in a coat pocket.' },
     })

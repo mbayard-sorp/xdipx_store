@@ -197,14 +197,14 @@ describe('enqueueVideoJobSet', () => {
     const result = await enqueueVideoJobSet({
       ...baseArgs,
       presenter: 'emma',
-      modelTier: 'infinitetalk-atlas',
+      modelTier: 'italk-atlas',
       durationSeconds: 0,
       hooks: ['now', 'later'],
       baseScriptJson: { presenterLine: line, talkingHead: true, sceneSlug: 'couch-cozy', framePrompt: 'C' },
     })
     const expected = ['now', 'later'].reduce((sum, hook) => {
       const speech = estimateAvatarSpeechSeconds(line.split('{{hook}}').join(hook))
-      return sum + estimateJobCostUsd('infinitetalk-atlas', 0, { speechSeconds: speech, reuseFrame: true })
+      return sum + estimateJobCostUsd('italk-atlas', 0, { speechSeconds: speech, reuseFrame: true })
     }, 0)
     expect(result.totalEstCostUsd).toBeCloseTo(expected, 4)
     expect(state.inserts).toHaveLength(2)

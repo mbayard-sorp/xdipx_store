@@ -217,7 +217,7 @@ describe('enqueueVideoJob — multi-scene validation', () => {
   it('rejects the avatar tier for a multi-scene job (no per-scene motion prompt concept)', async () => {
     await expect(enqueueVideoJob({
       ...baseEnqueueArgs,
-      modelTier: 'infinitetalk-atlas',
+      modelTier: 'italk-atlas',
       durationSeconds: 0,
       scriptJson: { scenes: [scene(), scene()] },
     })).rejects.toThrow(/avatar tier/)
@@ -561,7 +561,7 @@ describe('enqueueVideoJob — presenter voice guard (ticket #6584)', () => {
     await expect(enqueueVideoJob({
       ...baseEnqueueArgs,
       presenter: 'friend:maya',
-      modelTier: 'infinitetalk-atlas',
+      modelTier: 'italk-atlas',
       scriptJson: { presenterLine: 'This one is my favorite.', talkingHead: true },
     })).rejects.toThrow(/no voiceId assigned/i)
     expect(state.inserts).toHaveLength(0)
@@ -572,7 +572,7 @@ describe('enqueueVideoJob — presenter voice guard (ticket #6584)', () => {
     const result = await enqueueVideoJob({
       ...baseEnqueueArgs,
       presenter: 'friend:maya',
-      modelTier: 'infinitetalk-atlas',
+      modelTier: 'italk-atlas',
       scriptJson: { presenterLine: 'This one is my favorite.', talkingHead: true },
     })
     expect(result.jobId).toBeTruthy()

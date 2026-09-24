@@ -15,7 +15,7 @@ import { runpodWorkerModes, runpodWorkerSupportsMode } from './runpod-video.serv
 
 afterEach(() => { vi.unstubAllEnvs() })
 
-const ATLAS_TIERS: VideoModelId[] = ['infinitetalk-atlas', 'grok-atlas', 'wan27-atlas', 'wan22turbo-atlas']
+const ATLAS_TIERS: VideoModelId[] = ['italk-atlas', 'grok-atlas', 'wan27-atlas', 'wan22turbo-atlas']
 const RUNPOD_TIERS: VideoModelId[] = ['wan22-i2v', 'wan22-t2v', 'wan22-s2v']
 
 function keys(atlas: string, wavespeed = ''): void {
@@ -78,7 +78,7 @@ describe('tierIneligibility', () => {
 
   it('keeps a mirrored Atlas tier eligible on the Wavespeed key alone, and only those', () => {
     keys('', 'ws-key')
-    expect(tierIneligibility('infinitetalk-atlas')).toBeNull()
+    expect(tierIneligibility('italk-atlas')).toBeNull()
     expect(tierIneligibility('wan22turbo-atlas')).toBeNull()
     // No like-for-like mirror: an Atlas outage parks these rather than downgrading them.
     expect(tierIneligibility('grok-atlas')?.code).toBe('provider_not_configured')
@@ -116,7 +116,7 @@ describe('required worker mode is declared, not inferred (ticket #5934)', () => 
 describe('eligibleVideoModelIds', () => {
   it('is exactly the four Atlas tiers when Atlas is keyed', () => {
     keys('atlas-key')
-    expect(eligibleVideoModelIds()).toEqual(['infinitetalk-atlas', 'grok-atlas', 'wan27-atlas', 'wan22turbo-atlas'])
+    expect(eligibleVideoModelIds()).toEqual(['italk-atlas', 'grok-atlas', 'wan27-atlas', 'wan22turbo-atlas'])
   })
 
   it('is empty when no video provider is keyed, which is the honest state', () => {
@@ -127,6 +127,6 @@ describe('eligibleVideoModelIds', () => {
   it('offers a talking tier again: InfiniteTalk, the audio-driven default', () => {
     keys('atlas-key')
     const talking = eligibleVideoModelIds().filter(id => VIDEO_MODELS[id].audioDriven || VIDEO_MODELS[id].lipsync)
-    expect(talking).toEqual(['infinitetalk-atlas'])
+    expect(talking).toEqual(['italk-atlas'])
   })
 })

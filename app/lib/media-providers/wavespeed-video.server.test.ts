@@ -39,7 +39,7 @@ afterEach(() => {
 
 describe('mirror map', () => {
   it('mirrors only like-for-like tiers', () => {
-    expect(wavespeedMirrorFor('infinitetalk-atlas')).toBe('wavespeed-ai/infinitetalk')
+    expect(wavespeedMirrorFor('italk-atlas')).toBe('wavespeed-ai/infinitetalk')
     expect(wavespeedMirrorFor('wan22turbo-atlas')).toBe('wavespeed-ai/wan-2.2/i2v-720p')
     expect(wavespeedMirrorFor('grok-atlas')).toBeNull()
     expect(wavespeedMirrorFor('wan27-atlas')).toBeNull()
@@ -55,7 +55,7 @@ describe('mirror map', () => {
 
 describe('buildWavespeedVideoBody', () => {
   it('maps a tier id to its mirror endpoint and body', () => {
-    expect(buildWavespeedVideoBody('infinitetalk-atlas', { prompt: 'warm', imageUrl: FRAME, audioUrl: SPEECH, durationSeconds: 9 })).toEqual({
+    expect(buildWavespeedVideoBody('italk-atlas', { prompt: 'warm', imageUrl: FRAME, audioUrl: SPEECH, durationSeconds: 9 })).toEqual({
       model: 'wavespeed-ai/infinitetalk',
       body: { image: FRAME, audio: SPEECH, prompt: 'warm', resolution: '720p', seed: -1 },
     })
@@ -73,14 +73,14 @@ describe('buildWavespeedVideoBody', () => {
 
   it('refuses an unmirrored tier and an audio-driven call with no audio', () => {
     expect(() => buildWavespeedVideoBody('grok-atlas', { prompt: 'p', imageUrl: FRAME, durationSeconds: 5 })).toThrow(/no Wavespeed endpoint/)
-    expect(() => buildWavespeedVideoBody('infinitetalk-atlas', { prompt: '', imageUrl: FRAME, durationSeconds: 9 })).toThrow(/audioUrl/)
+    expect(() => buildWavespeedVideoBody('italk-atlas', { prompt: '', imageUrl: FRAME, durationSeconds: 9 })).toThrow(/audioUrl/)
   })
 })
 
 describe('submit / status / result', () => {
   it('POSTs to {base}/{model} with bearer auth and a User-Agent, and returns a handle built from the id', async () => {
     fetchMock.mockResolvedValueOnce(json({ code: 200, message: 'success', data: { id: ID, status: 'created', urls: { get: 'https://evil.example/x' } } }))
-    const handle = await submitWavespeedVideo('infinitetalk-atlas', { prompt: '', imageUrl: FRAME, audioUrl: SPEECH, durationSeconds: 9 })
+    const handle = await submitWavespeedVideo('italk-atlas', { prompt: '', imageUrl: FRAME, audioUrl: SPEECH, durationSeconds: 9 })
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toBe(`${WAVESPEED_API.base}/wavespeed-ai/infinitetalk`)
     const headers = init.headers as Record<string, string>

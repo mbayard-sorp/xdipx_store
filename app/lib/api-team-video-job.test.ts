@@ -139,7 +139,7 @@ describe('talking-tier validation', () => {
       productHandle: 'satin-wand',
       formula: 'the-one-thing',
       presenter: 'emma',
-      modelTier: 'infinitetalk-atlas',
+      modelTier: 'italk-atlas',
       scriptJson: { framePrompt: 'archetype C', motionPrompt: 'hold', talkingHead: true },
       durationSeconds: 5,
       targetPlatforms: ['instagram'],
@@ -154,7 +154,7 @@ describe('talking-tier validation', () => {
       productHandle: 'satin-wand',
       formula: 'the-one-thing',
       presenter: 'none',
-      modelTier: 'infinitetalk-atlas',
+      modelTier: 'italk-atlas',
       scriptJson: { presenterLine: 'One thing matters.', framePrompt: 'C', motionPrompt: 'hold' },
       durationSeconds: 5,
       targetPlatforms: ['instagram'],
@@ -228,7 +228,7 @@ describe('config', () => {
   it('advertises only tiers that can actually be enqueued', async () => {
     const res = await post({ op: 'config' })
     const json = await res.json() as { models: Record<string, unknown> }
-    expect(Object.keys(json.models)).toEqual(['infinitetalk-atlas', 'grok-atlas', 'wan27-atlas', 'wan22turbo-atlas'])
+    expect(Object.keys(json.models)).toEqual(['italk-atlas', 'grok-atlas', 'wan27-atlas', 'wan22turbo-atlas'])
     expect(json.models['wan22-i2v']).toBeUndefined()
     expect(json.models['sync-lipsync']).toBeUndefined()
     expect(json.models['veo31']).toBeUndefined()

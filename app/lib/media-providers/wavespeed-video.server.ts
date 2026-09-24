@@ -113,7 +113,7 @@ const MODEL_ADAPTERS: Record<string, WavespeedModelAdapter> = {
  * downgrading them.
  */
 const TIER_MIRRORS: Record<string, string> = {
-  'infinitetalk-atlas': 'wavespeed-ai/infinitetalk',
+  'italk-atlas': 'wavespeed-ai/infinitetalk',
   'wan22turbo-atlas': 'wavespeed-ai/wan-2.2/i2v-720p',
 }
 

@@ -117,7 +117,7 @@ export interface VideoProvider {
   supportsAudioDriven: boolean
   /**
    * `modelId` is the store's tier id (a VideoModelId such as
-   * 'infinitetalk-atlas'); each adapter maps it to its own endpoint.
+   * 'italk-atlas'); each adapter maps it to its own endpoint.
    */
   submit(modelId: string, input: VideoGenInput): Promise<VideoQueueHandle>
   status(handle: VideoQueueHandle): Promise<VideoStatusResult>

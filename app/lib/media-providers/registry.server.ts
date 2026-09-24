@@ -70,18 +70,42 @@ export function providerForHandle(handle: VideoQueueHandle, specProvider: string
   return requireVideoProvider(specProvider)
 }
 
-/** A submit error the mirror must NOT retry: a refusal is a verdict on the content, not the provider. */
-function isContentRefusal(err: unknown): boolean {
-  return err instanceof AtlasVideoSubmitError && err.kind === 'content'
+/**
+ * Gateway statuses where the origin may already have accepted the render: the
+ * edge timed out or lost the upstream response, not the request.
+ */
+const AMBIGUOUS_GATEWAY_STATUSES = new Set([502, 504, 524])
+
+/**
+ * Whether a primary submit failure may be retried on the mirror. Only when
+ * Atlas answered with an error envelope that proves the render was NOT
+ * accepted: an AtlasVideoSubmitError (a response was received and classified),
+ * not a content refusal (a verdict on the content, not the provider), and not a
+ * gateway status that may hide an accepted render. Everything else rethrows:
+ * a network error after the POST (the render may be running), an input read or
+ * uploadMedia failure, a body validation error, a 200 with no id.
+ *
+ * Residual bound: a duplicate needs Atlas to return a non-gateway error
+ * envelope for a render it nonetheless ran. Then at most one duplicate per
+ * submit, on a mirrored tier only (Grok is not mirrored): at most one
+ * InfiniteTalk part, capped at maxRenderSeconds 30 x $0.06/s = $1.80, about
+ * $0.60 for a typical 10 s part; $0.10 for Wan 2.2 Turbo.
+ */
+export function isMirrorableSubmitError(err: unknown): boolean {
+  if (!(err instanceof AtlasVideoSubmitError)) return false
+  if (err.kind === 'content') return false
+  if (AMBIGUOUS_GATEWAY_STATUSES.has(err.httpStatus)) return false
+  return true
 }
 
 /**
  * Submit a tier's render, applying the mirror rule (ADR-016):
  *  - the primary (the spec's provider) is always tried first when configured;
  *  - the Wavespeed mirror is used ONLY when the primary is Atlas and it is
- *    unconfigured, or its submit throws for any reason except a content
- *    refusal (balance exhaustion, 5xx, unknown model, rejected input), and
- *    only for tiers with a like-for-like mirror endpoint;
+ *    unconfigured, or its submit returned an error envelope that proves the
+ *    render was not accepted (isMirrorableSubmitError: balance exhaustion,
+ *    non-gateway 5xx, 429, unknown model, rejected input), and only for tiers
+ *    with a like-for-like mirror endpoint;
  *  - never load-balanced: a healthy Atlas takes every render.
  * Returns the handle and the provider that actually took it.
  */
@@ -99,7 +123,7 @@ export async function submitVideoWithMirror(
     try {
       return { handle: await primary.submit(tierId, input), providerId: primary.id }
     } catch (err) {
-      if (!mirror || !mirror.configured() || isContentRefusal(err)) throw err
+      if (!mirror || !mirror.configured() || !isMirrorableSubmitError(err)) throw err
       log(`[media-providers] ${primary.id} submit failed for ${tierId}, using the ${mirror.id} mirror: ${String(err).slice(0, 300)}`)
       return { handle: await mirror.submit(tierId, input), providerId: mirror.id }
     }

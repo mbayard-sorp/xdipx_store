@@ -267,7 +267,9 @@ export async function submitAtlasVideo(tierId: string, input: VideoGenInput): Pr
     throw new AtlasVideoSubmitError(kind, json.code, `atlas ${atlasModel} submit error (${kind}): ${json.code} ${msg}`)
   }
   const id = json.data?.id
-  if (!id) throw new AtlasVideoSubmitError('server', res.status, `atlas ${atlasModel} submit response missing data.id`)
+  // A 200 with no id is ambiguous (the render may have been accepted), so it is
+  // a plain Error, which the registry never mirrors.
+  if (!id) throw new Error(`atlas ${atlasModel} submit response missing data.id`)
   return handleFor(id)
 }
 

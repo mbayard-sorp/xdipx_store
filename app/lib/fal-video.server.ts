@@ -42,7 +42,7 @@ export function falVideoConfigured(): boolean {
 export type VideoModelId =
   | 'veo31' | 'veo31-fast' | 'kling25-pro' | 'seedance2' | 'grok' | 'omnihuman' | 'sync-lipsync'
   | 'wan22-i2v' | 'wan22-t2v' | 'wan22-s2v'
-  | 'infinitetalk-atlas' | 'grok-atlas' | 'wan27-atlas' | 'wan22turbo-atlas'
+  | 'italk-atlas' | 'grok-atlas' | 'wan27-atlas' | 'wan22turbo-atlas'
 
 export interface VideoModelSpec {
   /**
@@ -294,7 +294,7 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModelSpec> = {
   },
   // --- Atlas Cloud tiers (ADR-016, bake-off 2026-09-23) --------------------
   // Submitted through app/lib/media-providers/atlascloud-video.server.ts via
-  // the registry; the Wavespeed mirror covers infinitetalk-atlas and
+  // the registry; the Wavespeed mirror covers italk-atlas and
   // wan22turbo-atlas only. Rates are per second at 720p.
   //
   // Default talking tier: cast plate + the cast member's ElevenLabs read ->
@@ -304,7 +304,7 @@ export const VIDEO_MODELS: Record<VideoModelId, VideoModelSpec> = {
   // the upper-bound estimate. Output length = audio length (704x1280 25 fps),
   // so allowedDurations stays empty like every audio-driven tier and the
   // 30 s per-render cap lives in maxRenderSeconds.
-  'infinitetalk-atlas': {
+  'italk-atlas': {
     falModel: 'atlascloud/infinitetalk', // documentation only, never sent to fal
     providerModel: 'atlascloud/infinitetalk',
     label: 'InfiniteTalk 720p (Atlas, audio-driven talking)',
@@ -400,7 +400,7 @@ export function tierIneligibility(id: VideoModelId): TierIneligibility | null {
       code: 'retired_provider',
       message:
         `${id} renders video on fal, which is retired for video (owner direction 2026-08-26: fal is images only, ` +
-        'and since ADR-016 all video renders on Atlas Cloud). Use infinitetalk-atlas for talking, wan27-atlas for a silent insert.',
+        'and since ADR-016 all video renders on Atlas Cloud). Use italk-atlas for talking, wan27-atlas for a silent insert.',
     }
   }
   if (spec.provider === 'runpod') {
@@ -410,7 +410,7 @@ export function tierIneligibility(id: VideoModelId): TierIneligibility | null {
       code: 'retired_provider',
       message:
         `${id} renders on the RunPod worker, which is retired for video (ADR-016, 2026-09-23: Atlas Cloud is the ` +
-        'video provider, Wavespeed its mirror). Use infinitetalk-atlas for talking, wan27-atlas for a silent insert.',
+        'video provider, Wavespeed its mirror). Use italk-atlas for talking, wan27-atlas for a silent insert.',
     }
   }
   if (spec.provider === 'atlascloud' && !atlasTierRenderable(id)) {
@@ -627,7 +627,7 @@ function buildInput(model: VideoModelId, input: VideoRequestInput): Record<strin
         audio_url: input.audioUrl,
         sync_mode: 'cut_off',
       }
-    case 'infinitetalk-atlas':
+    case 'italk-atlas':
     case 'grok-atlas':
     case 'wan27-atlas':
     case 'wan22turbo-atlas':

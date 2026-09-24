@@ -228,11 +228,12 @@ export const VIDEO_MAX_VARIANTS_PER_SET_DEFAULT = 4
 
 /**
  * Default modelTier when video_default_model_tier is unset AND the caller
- * omits modelTier. kling25-pro: the cheapest fully-silent standard tier
- * already in production use, so a misconfigured/absent default never
- * accidentally selects an expensive or unvalidated tier.
+ * omits modelTier. italk-atlas (ADR-016): InfiniteTalk on Atlas, the default
+ * talking tier from the 2026-09-23 bake-off. The previous default,
+ * kling25-pro, was a retired fal tier, so every enqueue that omitted
+ * modelTier was refused. The stored setting stays the owner's override.
  */
-export const VIDEO_DEFAULT_MODEL_TIER_DEFAULT = 'kling25-pro'
+export const VIDEO_DEFAULT_MODEL_TIER_DEFAULT = 'italk-atlas'
 
 /**
  * Delivery-tone vocabulary for video speech (spec §5 Phase 3). Optional and

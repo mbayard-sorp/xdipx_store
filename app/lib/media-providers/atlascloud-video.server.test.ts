@@ -74,7 +74,7 @@ afterEach(() => {
 
 describe('buildAtlasVideoBody (request shapes from the capture)', () => {
   it('InfiniteTalk: {model, image, audio, prompt, resolution:"720p", seed:-1}', () => {
-    expect(buildAtlasVideoBody('infinitetalk-atlas', {
+    expect(buildAtlasVideoBody('italk-atlas', {
       prompt: 'A woman talking to her phone camera', imageUrl: PLATE, audioUrl: AUDIO, durationSeconds: 10,
     })).toEqual({
       model: 'atlascloud/infinitetalk',
@@ -132,7 +132,7 @@ describe('buildAtlasVideoBody (request shapes from the capture)', () => {
   })
 
   it('refuses before any network: no audio on InfiniteTalk, a bad duration, a non-Atlas tier', () => {
-    expect(() => buildAtlasVideoBody('infinitetalk-atlas', { prompt: '', imageUrl: PLATE, durationSeconds: 10 })).toThrow(/audioUrl/)
+    expect(() => buildAtlasVideoBody('italk-atlas', { prompt: '', imageUrl: PLATE, durationSeconds: 10 })).toThrow(/audioUrl/)
     expect(() => buildAtlasVideoBody('wan22turbo-atlas', { prompt: 'p', imageUrl: PLATE, durationSeconds: 8 })).toThrow(/duration 8s/)
     expect(() => buildAtlasVideoBody('wan22-i2v', { prompt: 'p', imageUrl: PLATE, durationSeconds: 5 })).toThrow(/not an Atlas video tier/)
     expect(atlasModelFor('omnihuman')).toBeNull()
@@ -144,7 +144,7 @@ describe('submitAtlasVideo', () => {
   it('POSTs generateVideo with bearer auth, an explicit User-Agent, and the flat body; returns the handle at once', async () => {
     fetchMock.mockResolvedValueOnce(json(submitResponse()))
 
-    const handle = await submitAtlasVideo('infinitetalk-atlas', {
+    const handle = await submitAtlasVideo('italk-atlas', {
       prompt: 'talking', imageUrl: PLATE, audioUrl: AUDIO, durationSeconds: 10,
     })
 
@@ -185,7 +185,7 @@ describe('submitAtlasVideo', () => {
 
   it('marks balance exhaustion so the registry can fail over to the mirror', async () => {
     fetchMock.mockResolvedValueOnce(json({ code: 402, msg: 'Insufficient balance' }, 402))
-    const err = await submitAtlasVideo('infinitetalk-atlas', { prompt: '', imageUrl: PLATE, audioUrl: AUDIO, durationSeconds: 9 }).catch(e => e)
+    const err = await submitAtlasVideo('italk-atlas', { prompt: '', imageUrl: PLATE, audioUrl: AUDIO, durationSeconds: 9 }).catch(e => e)
     expect((err as AtlasVideoSubmitError).kind).toBe('balance')
     expect(isAtlasBalanceExhausted(200, 'your account balance is insufficient')).toBe(true)
     expect(isAtlasBalanceExhausted(400, 'bad request')).toBe(false)
@@ -202,7 +202,7 @@ describe('submitAtlasVideo', () => {
       .mockResolvedValueOnce(json({ code: 200, message: 'success', data: { type: 'audio', download_url: AUDIO } }))
       .mockResolvedValueOnce(json(submitResponse()))
 
-    const handle = await submitAtlasVideo('infinitetalk-atlas', { prompt: '', imageUrl: blobFrame, audioUrl: blobAudio, durationSeconds: 9 })
+    const handle = await submitAtlasVideo('italk-atlas', { prompt: '', imageUrl: blobFrame, audioUrl: blobAudio, durationSeconds: 9 })
 
     expect(handle.requestId).toBe(ID)
     const urls = fetchMock.mock.calls.map(c => c[0])
@@ -298,7 +298,7 @@ describe('atlascloudVideoProvider', () => {
     vi.stubEnv('ATLAS_CLOUD_API_KEY', '')
     expect(atlascloudVideoProvider.configured()).toBe(false)
     expect(atlascloudVideoProvider.supportsAudioDriven).toBe(true)
-    expect(atlascloudVideoProvider.supportsModel?.('infinitetalk-atlas')).toBe(true)
+    expect(atlascloudVideoProvider.supportsModel?.('italk-atlas')).toBe(true)
     expect(atlascloudVideoProvider.supportsModel?.('wan22-i2v')).toBe(false)
     expect(atlascloudVideoProvider.ownsHandle?.({ requestId: ID, statusUrl: PRED_URL, responseUrl: PRED_URL })).toBe(true)
     expect(atlascloudVideoProvider.ownsHandle?.({ requestId: 'x', statusUrl: 'https://queue.fal.run/a/requests/x', responseUrl: '' })).toBe(false)

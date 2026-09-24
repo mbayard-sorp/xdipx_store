@@ -978,6 +978,46 @@ async function touch(job: VideoJobRow, set: Partial<typeof videoJobs.$inferInser
   await db.update(videoJobs).set({ ...set, updatedAt: new Date() }).where(eq(videoJobs.id, job.id))
 }
 
+/**
+ * Re-host attempts for a COMPLETED provider render (ADR-016). The render is
+ * paid for; a transient Blob or provider-CDN failure on the download must not
+ * burn it. Stored as a non-handle bookkeeping key on providerRequestIds (the
+ * assembly_attempts precedent), cleared on success.
+ */
+const MAX_REHOST_ATTEMPTS = 3
+const REHOST_ATTEMPTS_KEY = 'download_attempts'
+
+/**
+ * Run the result-fetch + download + blobPut step. On failure, heartbeat and
+ * return null (the caller returns 'waiting') until the third failed attempt,
+ * which throws. Provider output URLs live about 24 h, so a retry a poller
+ * tick later still finds the file.
+ */
+async function rehostWithRetry<T>(job: VideoJobRow, work: () => Promise<T>): Promise<T | null> {
+  try {
+    return await work()
+  } catch (err) {
+    const handles = job.providerRequestIds as Record<string, unknown>
+    const prior = typeof handles[REHOST_ATTEMPTS_KEY] === 'number' ? handles[REHOST_ATTEMPTS_KEY] as number : 0
+    const attempts = prior + 1
+    if (attempts >= MAX_REHOST_ATTEMPTS) {
+      throw new Error(`completed render could not be re-hosted after ${attempts} attempts: ${String(err).slice(0, 300)}`)
+    }
+    console.warn(`[video-pipeline] job ${job.jobId} re-host attempt ${attempts} failed, retrying next tick:`, err)
+    await touch(job, {
+      providerRequestIds: { ...handles, [REHOST_ATTEMPTS_KEY]: attempts } as unknown as VideoJobRow['providerRequestIds'],
+    })
+    return null
+  }
+}
+
+/** providerRequestIds without the re-host bookkeeping key. */
+function withoutRehostAttempts(handles: VideoJobRow['providerRequestIds']): VideoJobRow['providerRequestIds'] {
+  const copy = { ...(handles as Record<string, unknown>) }
+  delete copy[REHOST_ATTEMPTS_KEY]
+  return copy as unknown as VideoJobRow['providerRequestIds']
+}
+
 async function advanceJob(job: VideoJobRow): Promise<AdvanceOutcome> {
   switch (job.stage) {
     case 'scene_frame': return advanceSceneFrame(job)
@@ -1579,18 +1619,21 @@ async function advanceClip(job: VideoJobRow): Promise<AdvanceOutcome> {
   }
   if (status === 'FAILED') throw new Error(`${provider.id} video generation failed${error ? `: ${error}` : ''}`)
 
-  const result = await provider.result(existing as QueueHandle)
-  const buf = await downloadFalAsset(result.videoUrl) // plain fetch, provider-neutral
-  const { url } = await blobPut(`video/${job.jobId}/clip.mp4`, buf, { contentType: 'video/mp4' })
+  const hosted = await rehostWithRetry(job, async () => {
+    const result = await provider.result(existing as QueueHandle)
+    const buf = await downloadFalAsset(result.videoUrl) // plain fetch, provider-neutral
+    return blobPut(`video/${job.jobId}/clip.mp4`, buf, { contentType: 'video/mp4' })
+  })
+  if (!hosted) return 'waiting'
   await db.insert(mediaAssets).values({
     kind: 'video',
     purpose: 'clip',
-    blobUrl: url,
+    blobUrl: hosted.url,
     contentType: 'video/mp4',
     sourceModel: pollClipSpec?.costKey ?? job.modelTier,
     videoJobId: job.id,
   })
-  await touch(job, { stage: 'lipsync', status: 'queued' })
+  await touch(job, { stage: 'lipsync', status: 'queued', providerRequestIds: withoutRehostAttempts(job.providerRequestIds) })
   return 'progressed'
 }
 
@@ -1719,15 +1762,20 @@ async function advanceClipMultiScene(job: VideoJobRow, spec: VideoModelSpec, sce
   }
   if (status === 'FAILED') throw new Error(`${provider.id} video generation failed (scene ${idx})${error ? `: ${error}` : ''}`)
 
-  const result = await provider.result(existing as QueueHandle)
-  const buf = await downloadFalAsset(result.videoUrl) // plain fetch, provider-neutral
-  const { url } = await blobPut(`video/${job.jobId}/scene-${idx}-clip.mp4`, buf, { contentType: 'video/mp4' })
-  let lastFrameUrl: string | undefined
-  if (needsLastFrame) {
-    const lastFrameBuf = await extractLastFrame(buf)
-    const put = await blobPut(`video/${job.jobId}/scene-${idx}-lastframe.jpg`, lastFrameBuf, { contentType: 'image/jpeg' })
-    lastFrameUrl = put.url
-  }
+  const hosted = await rehostWithRetry(job, async () => {
+    const result = await provider.result(existing as QueueHandle)
+    const buf = await downloadFalAsset(result.videoUrl) // plain fetch, provider-neutral
+    const { url } = await blobPut(`video/${job.jobId}/scene-${idx}-clip.mp4`, buf, { contentType: 'video/mp4' })
+    let lastFrameUrl: string | undefined
+    if (needsLastFrame) {
+      const lastFrameBuf = await extractLastFrame(buf)
+      const put = await blobPut(`video/${job.jobId}/scene-${idx}-lastframe.jpg`, lastFrameBuf, { contentType: 'image/jpeg' })
+      lastFrameUrl = put.url
+    }
+    return { url, lastFrameUrl }
+  })
+  if (!hosted) return 'waiting'
+  const { url, lastFrameUrl } = hosted
   const [row] = await db.insert(mediaAssets).values({
     kind: 'video',
     purpose: 'clip',
@@ -1740,7 +1788,7 @@ async function advanceClipMultiScene(job: VideoJobRow, spec: VideoModelSpec, sce
   const nextState: VideoSceneState[] = state.map((s, i) =>
     i === idx ? { ...s, clipAssetId: row.id, status: 'done', ...(lastFrameUrl ? { lastFrameUrl } : {}) } : s,
   )
-  await touch(job, { status: 'queued', sceneStateJson: nextState })
+  await touch(job, { status: 'queued', sceneStateJson: nextState, providerRequestIds: withoutRehostAttempts(job.providerRequestIds) })
   return 'progressed'
 }
 
@@ -1896,15 +1944,24 @@ async function advanceClipAvatar(job: VideoJobRow, spec: VideoModelSpec): Promis
 
   // Every part is done: download and re-host all of them in this same tick
   // (provider output URLs expire).
+  // Every part is re-hosted before any row is written, so a retry after a
+  // partial failure cannot leave duplicate part assets behind.
+  const hosted = await rehostWithRetry(job, async () => {
+    const urls: Record<string, string> = {}
+    for (const key of activeKeys) {
+      const handle = handles[key] as QueueHandle
+      const result = await providerForHandle(handle, spec.provider).result(handle)
+      const buf = await downloadFalAsset(result.videoUrl) // plain fetch, provider-neutral
+      urls[key] = (await blobPut(`video/${job.jobId}/${key}.mp4`, buf, { contentType: 'video/mp4' })).url
+    }
+    return urls
+  })
+  if (!hosted) return 'waiting'
   for (const key of activeKeys) {
-    const handle = handles[key] as QueueHandle
-    const result = await providerForHandle(handle, spec.provider).result(handle)
-    const buf = await downloadFalAsset(result.videoUrl) // plain fetch, provider-neutral
-    const { url } = await blobPut(`video/${job.jobId}/${key}.mp4`, buf, { contentType: 'video/mp4' })
     await db.insert(mediaAssets).values({
       kind: 'video',
       purpose: key,
-      blobUrl: url,
+      blobUrl: hosted[key]!,
       contentType: 'video/mp4',
       sourceModel: spec.costKey,
       videoJobId: job.id,
@@ -1912,7 +1969,7 @@ async function advanceClipAvatar(job: VideoJobRow, spec: VideoModelSpec): Promis
   }
   // Lipsync is a no-op for the avatar tier (speech is already embedded); the
   // stage machine still passes through it so the flow stays uniform.
-  await touch(job, { stage: 'lipsync', status: 'queued' })
+  await touch(job, { stage: 'lipsync', status: 'queued', providerRequestIds: withoutRehostAttempts(job.providerRequestIds) })
   return 'progressed'
 }
 

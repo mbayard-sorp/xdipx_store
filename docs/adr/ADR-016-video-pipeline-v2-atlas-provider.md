@@ -1,7 +1,7 @@
 # ADR-016: Video pipeline v2, Atlas Cloud as the video provider
 
 Date: 2026-09-23
-Status: Proposed (owner merge; cost-adjacent)
+Status: Accepted on merge (owner merge; cost-adjacent, touches protected `app/lib/team-keys.ts`)
 Author: rr7-engineer (plan unit "Phase 2a: provider seam", video content strategy 2026-09-23)
 Supersedes: the video half of ADR-010 (video stays on fal) and ADR-014's assumption
 that the audio-driven talking tier is `wan22-s2v` on the RunPod worker.
@@ -44,7 +44,7 @@ default Python User-Agent.
 ## Decision
 
 1. **Atlas Cloud is the video provider.** Four tiers, all `provider: 'atlascloud'`
-   in `VIDEO_MODELS`: `infinitetalk-atlas` (default talking), `grok-atlas`
+   in `VIDEO_MODELS`: `italk-atlas` (default talking), `grok-atlas`
    (fallback talking, owner A/B only), `wan27-atlas` (silent insert),
    `wan22turbo-atlas` (draft). Matching cost keys in `model-pricing.server.ts`.
 2. **One seam, no provider branches in the pipeline.** `advanceClip`,
@@ -56,10 +56,19 @@ default Python User-Agent.
    `{requestId, statusUrl, responseUrl}` stored in `video_jobs.providerRequestIds`,
    so there is no migration. Atlas and Wavespeed set statusUrl = responseUrl =
    the prediction URL, built from the id (never taken from the response, since
-   the poller sends the bearer key to it).
+   the poller sends the bearer key to it). **Tier ids are at most 16 chars**:
+   `video_jobs.model_tier` and `video_episodes.model_tier` are `varchar(16)`, so
+   the InfiniteTalk tier is `italk-atlas`, not `infinitetalk-atlas` (18 chars,
+   which would have failed every enqueue in Postgres after the ceiling checks).
+   The column is not widened; a test asserts every `VideoModelId` fits.
 4. **Download and re-host in the same tick.** When a poll sees COMPLETED, the
    pipeline fetches the result, downloads the mp4 and `blobPut`s it before the
-   tick ends. Nothing stores a provider URL.
+   tick ends. Nothing stores a provider URL. A transient failure in that step
+   does not burn the paid render: the job heartbeats and waits, counting
+   attempts in a `download_attempts` bookkeeping key on `providerRequestIds`
+   (the `assembly_attempts` precedent), and fails only on the third failed
+   attempt. The key is cleared on success. Avatar parts are all re-hosted
+   before any asset row is written, so a retry cannot duplicate part assets.
 5. **Audio-driven tiers keep the ElevenLabs step.** The cast member's voice is
    synthesized as before, each speech part is parked on Blob, and the Blob URL
    is handed to the provider with the frame's Blob URL. Atlas falls back to its
@@ -74,9 +83,16 @@ default Python User-Agent.
 Wavespeed (`app/lib/media-providers/wavespeed-video.server.ts`, key
 `WAVESPEED_API_KEY`) is a mirror, not a second primary:
 
-- used only when Atlas is unconfigured, or an Atlas submit fails for any reason
-  except a content refusal (balance exhaustion, 5xx, unknown model, rejected input);
-- only for tiers with a like-for-like endpoint: `infinitetalk-atlas` ->
+- used only when Atlas is unconfigured, or an Atlas submit returned an error
+  envelope that proves the render was not accepted (`isMirrorableSubmitError`):
+  the error is an `AtlasVideoSubmitError` (a response was received and
+  classified), it is not a content refusal, and its status is not 502, 504 or
+  524 (a gateway that may have lost an accepted render). Balance exhaustion,
+  429, other 5xx, unknown model and rejected input qualify. Everything else is
+  rethrown and never mirrored: a network error after the POST (the render may be
+  running), an input read or `uploadMedia` failure, a body validation error, a
+  200 with no prediction id;
+- only for tiers with a like-for-like endpoint: `italk-atlas` ->
   `wavespeed-ai/infinitetalk`, `wan22turbo-atlas` -> `wavespeed-ai/wan-2.2/i2v-720p`.
   `grok-atlas` and `wan27-atlas` have no mirror and park on an Atlas outage
   rather than silently downgrade;
@@ -84,6 +100,13 @@ Wavespeed (`app/lib/media-providers/wavespeed-video.server.ts`, key
 - a content refusal is never retried on the mirror (it is a verdict on the
   content, not the provider);
 - a mirror-issued handle is polled on the mirror (`ownsHandle`, by poll host).
+
+**Residual double-spend bound.** A duplicate needs Atlas to return a non-gateway
+error envelope for a render it nonetheless ran. Then there is at most one
+duplicate per submit, and only on a mirrored tier (Grok is not mirrored): at
+most one InfiniteTalk part, capped at `maxRenderSeconds` 30 x $0.06/s = $1.80,
+about $0.60 for a typical 10 s part, or $0.10 for Wan 2.2 Turbo. (The $1.41
+figure sometimes quoted is one 10 s Grok clip; Grok never reaches the mirror.)
 
 `tierIneligibility` returns `provider_not_configured` for an Atlas tier when
 neither Atlas nor (for a mirrored tier) Wavespeed is keyed.
@@ -117,9 +140,12 @@ tier's Atlas rate.
   route, credential-health entries. The owner-blocker probes `runpodNoPods` /
   `runpodEndpointIdle` stay until the owner deletes the endpoint and the 100 GB
   volume (both still bill).
-- **`video_default_model_tier`**: `team-keys.ts` is protected; its code default
-  (`kling25-pro`) is already ineligible. The owner flips the stored setting to
-  `infinitetalk-atlas` (or `wan27-atlas`). Until then an enqueue that omits
+- **`video_default_model_tier`**: the code default
+  `VIDEO_DEFAULT_MODEL_TIER_DEFAULT` in `team-keys.ts` (protected) moves from
+  the retired `kling25-pro` to `italk-atlas` in this change. The stored setting
+  stays the owner's override and in production it reads `wan22-i2v`, a valid
+  but retired id, so it wins over the code default: the owner sets it to
+  `italk-atlas` after merge (blocker 226). Until then an enqueue that omits
   `modelTier` is refused with the retirement message, not rendered.
 - **Grok as a talking tier:** the adapter supports `spokenLine` (written into the
   prompt as `She looks into the lens and says: "<line>"`), but the pipeline does
@@ -139,5 +165,5 @@ tier's Atlas rate.
   $0.60 per 10 s clip, with no GPU infrastructure to run.
 - One vendor carries all video; the mirror covers the default talking tier and
   the draft tier only. An Atlas outage stops Grok and Wan 2.7 renders.
-- Verification for Phase 2 is one real `infinitetalk-atlas` job on a disposable
+- Verification for Phase 2 is one real `italk-atlas` job on a disposable
   product ($1 to $2), watched through frame approval, clip, assembly and poster.

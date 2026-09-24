@@ -269,8 +269,8 @@ describe('legacy fal video tiers (owner direction 2026-08-26: fal is images only
 
 // ADR-016 (2026-09-23): the Atlas tiers, from the video bake-off capture.
 describe('VIDEO_MODELS Atlas tiers (ADR-016)', () => {
-  it('registers infinitetalk-atlas as the audio-driven talking tier with a 30 s render cap', () => {
-    const spec = VIDEO_MODELS['infinitetalk-atlas']
+  it('registers italk-atlas as the audio-driven talking tier with a 30 s render cap', () => {
+    const spec = VIDEO_MODELS['italk-atlas']
     expect(spec.provider).toBe('atlascloud')
     expect(spec.providerModel).toBe('atlascloud/infinitetalk')
     expect(spec.costKey).toBe('atlascloud/infinitetalk')
@@ -312,7 +312,7 @@ describe('VIDEO_MODELS Atlas tiers (ADR-016)', () => {
   })
 
   it('is never legacy and never recognized as a fal-queue model', async () => {
-    for (const id of ['infinitetalk-atlas', 'grok-atlas', 'wan27-atlas', 'wan22turbo-atlas'] as const) {
+    for (const id of ['italk-atlas', 'grok-atlas', 'wan27-atlas', 'wan22turbo-atlas'] as const) {
       expect(isVideoModelId(id)).toBe(true)
       expect(VIDEO_MODELS[id].legacy).toBeUndefined()
       await expect(submitVideoRequest(id, {
@@ -322,12 +322,20 @@ describe('VIDEO_MODELS Atlas tiers (ADR-016)', () => {
   })
 
   it('routes audio: InfiniteTalk authored, Grok stripped or overdubbed, Wan 2.7 noise track stripped', () => {
-    expect(classifyAudioPath(VIDEO_MODELS['infinitetalk-atlas'], false)).toBe('authored')
+    expect(classifyAudioPath(VIDEO_MODELS['italk-atlas'], false)).toBe('authored')
     expect(classifyAudioPath(VIDEO_MODELS['grok-atlas'], false)).toBe('stripped')
     expect(classifyAudioPath(VIDEO_MODELS['grok-atlas'], true)).toBe('overdubbed')
     // Wan 2.7 returns a -69 dB near-silent track; loudness normalization must not lift it.
     expect(classifyAudioPath(VIDEO_MODELS['wan27-atlas'], false)).toBe('stripped')
     expect(classifyAudioPath(VIDEO_MODELS['wan27-atlas'], true)).toBe('overdubbed')
     expect(classifyAudioPath(VIDEO_MODELS['wan22turbo-atlas'], false)).toBe('native-silent')
+  })
+})
+
+describe('tier ids fit the column', () => {
+  it('every VideoModelId is at most 16 chars (video_jobs/video_episodes.model_tier are varchar(16))', () => {
+    // infinitetalk-atlas (18) would have failed every enqueue in Postgres,
+    // after the ceiling checks, where a db mock never sees it. Rename, never widen.
+    for (const id of Object.keys(VIDEO_MODELS)) expect(id.length, id).toBeLessThanOrEqual(16)
   })
 })
