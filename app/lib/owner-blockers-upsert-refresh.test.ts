@@ -98,6 +98,65 @@ describe('authored-once fields are never clobbered', () => {
   })
 })
 
+describe('priority is measured, omission-safe', () => {
+  // Ticket #11385: priority was absent from the SET list entirely (like title
+  // used to be), so a re-file could never correct a wrong priority. Unlike
+  // title/detail, priority cannot use a bare EXCLUDED reference: the column is
+  // NOT NULL with a DB default of 3, so an omitted priority and an explicit 3
+  // are indistinguishable once they round-trip through EXCLUDED. fileBlocker
+  // instead binds the caller's raw (possibly null) priority directly.
+
+  it('is present in the SET list at all', () => {
+    expect(upsertSql()).toMatch(/\bpriority\s*=/i)
+  })
+
+  it('does not read EXCLUDED.priority, since EXCLUDED.priority is never null', () => {
+    expect(assignment('priority')).not.toMatch(/EXCLUDED\.priority/i)
+  })
+
+  it('falls back to the stored priority when the caller omits it', () => {
+    expect(assignment('priority')).toMatch(/owner_blockers\.priority/i)
+  })
+
+  /** The bound value behind the `priority` SET clause's own placeholder. */
+  function priorityUpdateParam(): unknown {
+    const clause = assignment('priority')
+    const m = /\$(\d+)/.exec(clause)
+    if (!m) throw new Error(`no placeholder found in priority assignment: ${clause}`)
+    const { params } = new PgDialect().sqlToQuery(executeMock.mock.calls[1]![0])
+    return params[Number(m[1]) - 1]
+  }
+
+  it('re-files an open row with a different priority and reads the new value back', async () => {
+    executeMock.mockReset()
+    executeMock
+      .mockResolvedValueOnce({ rows: [{ status: 'open' }] })
+      .mockResolvedValueOnce({ rows: [{ id: 1, created: false }] })
+    await fileBlocker({
+      dedupeKey: 'atlas-key-missing',
+      title: 'ATLAS_CLOUD_API_KEY missing for 0.2h',
+      category: 'console',
+      priority: 1,
+    })
+    expect(priorityUpdateParam()).toBe(1)
+  })
+
+  it('re-files with priority omitted and does not change the stored priority', async () => {
+    executeMock.mockReset()
+    executeMock
+      .mockResolvedValueOnce({ rows: [{ status: 'open' }] })
+      .mockResolvedValueOnce({ rows: [{ id: 1, created: false }] })
+    await fileBlocker({
+      dedupeKey: 'atlas-key-missing',
+      title: 'ATLAS_CLOUD_API_KEY missing for 0.4h',
+      category: 'console',
+    })
+    // rawPriority binds as null on omission, so COALESCE falls through to
+    // owner_blockers.priority and the stored value is left untouched.
+    expect(priorityUpdateParam()).toBeNull()
+  })
+})
+
 describe('reopen semantics are untouched', () => {
   it('still flips a cleared row back to open', () => {
     const sql = upsertSql()
