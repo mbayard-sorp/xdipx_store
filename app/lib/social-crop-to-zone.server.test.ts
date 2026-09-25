@@ -22,7 +22,14 @@ async function fakeImage(width: number, height: number): Promise<Buffer> {
     .toBuffer()
 }
 
-const CLEAN_BOX = { box: { x0: 0.3, y0: 0.3, x1: 0.7, y1: 0.7 }, zoneAnatomy: 'small of back', zoneMatches: true, uncroppable: false, notes: 'clean, zone matches' }
+const CLEAN_BOX = {
+  box: { x0: 0.3, y0: 0.3, x1: 0.7, y1: 0.7 },
+  productBox: { x0: 0.45, y0: 0.45, x1: 0.55, y1: 0.55 },
+  zoneAnatomy: 'small of back',
+  zoneMatches: true,
+  uncroppable: false,
+  notes: 'clean, zone matches',
+}
 
 function deps(over: Partial<CropToZoneDeps> = {}): CropToZoneDeps {
   return {
@@ -66,6 +73,15 @@ describe('isValidCropShape', () => {
     expect(isValidCropShape(rest)).toBe(false)
   })
 
+  it('rejects a missing productBox (ticket #11486)', () => {
+    const { productBox: _productBox, ...rest } = CLEAN_BOX
+    expect(isValidCropShape(rest)).toBe(false)
+  })
+
+  it('rejects a productBox with x1 <= x0', () => {
+    expect(isValidCropShape({ ...CLEAN_BOX, productBox: { x0: 0.5, y0: 0.45, x1: 0.5, y1: 0.55 } })).toBe(false)
+  })
+
   it('rejects null and non-objects', () => {
     expect(isValidCropShape(null)).toBe(false)
     expect(isValidCropShape('nope')).toBe(false)
@@ -96,6 +112,87 @@ describe('expandBoxToAspect', () => {
 
   it('returns null for a degenerate zero-area box', () => {
     expect(expandBoxToAspect({ x0: 0.5, y0: 0.5, x1: 0.5, y1: 0.9 }, 1000, 1000, '4:5')).toBeNull()
+  })
+
+  // Ticket #11486 DONE WHEN: "a unit test proves that for a product box near
+  // the top or bottom of a render, the returned 4:5 window puts the product
+  // inside the central square" (the middle 80% of the output's height, the
+  // band Instagram's own 1:1 profile-grid crop keeps).
+  describe('product safe-area placement (ticket #11486)', () => {
+    // A 4000px image, a zone box that expands to an 800x1000 4:5 window
+    // (comfortable slack on every side), and a small product tucked near the
+    // top or bottom of that zone: centring on the zone union (the old
+    // behaviour) put the product wherever the union's own centre fell, not
+    // where the product actually was.
+    const zoneBox = { x0: 0.35, y0: 0.35, x1: 0.55, y1: 0.45 }
+    const productNearTop = { x0: 0.45, y0: 0.36, x1: 0.55, y1: 0.385 }
+    const productNearBottom = { x0: 0.45, y0: 0.415, x1: 0.55, y1: 0.44 }
+
+    it('places a product near the top of the render inside the central safe band', () => {
+      const rect = expandBoxToAspect(zoneBox, 4000, 4000, '4:5', productNearTop)
+      expect(rect).not.toBeNull()
+      const safeMargin = rect!.height * 0.1
+      const productTopPx = productNearTop.y0 * 4000
+      const productBottomPx = productNearTop.y1 * 4000
+      expect(productTopPx).toBeGreaterThanOrEqual(rect!.top + safeMargin - 0.5)
+      expect(productBottomPx).toBeLessThanOrEqual(rect!.top + rect!.height - safeMargin + 0.5)
+    })
+
+    it('places a product near the bottom of the render inside the central safe band', () => {
+      const rect = expandBoxToAspect(zoneBox, 4000, 4000, '4:5', productNearBottom)
+      expect(rect).not.toBeNull()
+      const safeMargin = rect!.height * 0.1
+      const productTopPx = productNearBottom.y0 * 4000
+      const productBottomPx = productNearBottom.y1 * 4000
+      expect(productTopPx).toBeGreaterThanOrEqual(rect!.top + safeMargin - 0.5)
+      expect(productBottomPx).toBeLessThanOrEqual(rect!.top + rect!.height - safeMargin + 0.5)
+    })
+
+    it('centres the window on the product rather than the zone+product union', () => {
+      // A wide, short zone box whose own centre sits far from a product
+      // tucked into its right-hand side.
+      const rect = expandBoxToAspect(
+        { x0: 0.2, y0: 0.45, x1: 0.8, y1: 0.55 },
+        4000, 4000, '4:5',
+        { x0: 0.65, y0: 0.48, x1: 0.75, y1: 0.52 },
+      )
+      expect(rect).not.toBeNull()
+      const productCx = 0.5 * (0.65 + 0.75) * 4000
+      const zoneCx = 0.5 * (0.2 + 0.8) * 4000
+      const windowCx = rect!.left + rect!.width / 2
+      // The window's own centre lands on the product's centre, not the
+      // zone's centre (2000px away).
+      expect(Math.abs(windowCx - productCx)).toBeLessThan(1)
+      expect(Math.abs(windowCx - zoneCx)).toBeGreaterThan(500)
+    })
+
+    // Ticket #11486 DONE WHEN: "a test proves refusal when it cannot."
+    it('refuses the crop when the product cannot fit inside the safe band at this crop size', () => {
+      // The product itself is taller than the 80%-of-height safe band could
+      // ever be for a tightly-sized 4:5 window: no shift can rescue it.
+      const tallProduct = { x0: 0.45, y0: 0.05, x1: 0.55, y1: 0.95 }
+      const rect = expandBoxToAspect(
+        { x0: 0.3, y0: 0.3, x1: 0.7, y1: 0.7 },
+        2000, 2000, '4:5',
+        tallProduct,
+      )
+      expect(rect).toBeNull()
+    })
+
+    it('does not enforce the safe area for 16:9 (not an Instagram feed shape)', () => {
+      // Same geometry that would refuse at 4:5 must still produce a rect at 16:9.
+      const rect = expandBoxToAspect(
+        { x0: 0.1, y0: 0.05, x1: 0.9, y1: 0.95 },
+        2000, 2000, '16:9',
+        { x0: 0.4, y0: 0.06, x1: 0.6, y1: 0.16 },
+      )
+      expect(rect).not.toBeNull()
+    })
+
+    it('falls back to zone-centred placement when no productBox is given (unchanged behaviour)', () => {
+      const rect = expandBoxToAspect({ x0: 0.3, y0: 0.3, x1: 0.7, y1: 0.7 }, 1000, 1000, '4:5')
+      expect(rect).not.toBeNull()
+    })
   })
 })
 
@@ -141,6 +238,7 @@ describe('cropImageToZone', () => {
       deps({
         callVision: vi.fn(async () => ({
           box: { x0: 0.2, y0: 0.1, x1: 0.8, y1: 0.6 },
+          productBox: { x0: 0.4, y0: 0.3, x1: 0.6, y1: 0.5 },
           zoneAnatomy: 'sternum and breast',
           zoneMatches: true,
           uncroppable: true,
@@ -162,6 +260,7 @@ describe('cropImageToZone', () => {
       deps({
         callVision: vi.fn(async () => ({
           box: { x0: 0.2, y0: 0.2, x1: 0.8, y1: 0.8 },
+          productBox: { x0: 0.4, y0: 0.4, x1: 0.6, y1: 0.6 },
           zoneAnatomy: 'navel and stomach',
           zoneMatches: false,
           uncroppable: false,
@@ -183,6 +282,7 @@ describe('cropImageToZone', () => {
       deps({
         callVision: vi.fn(async () => ({
           box: { x0: 0.45, y0: 0.45, x1: 0.55, y1: 0.55 },
+          productBox: { x0: 0.47, y0: 0.47, x1: 0.53, y1: 0.53 },
           zoneAnatomy: 'ankle',
           zoneMatches: true,
           uncroppable: false,
