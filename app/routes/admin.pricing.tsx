@@ -14,7 +14,7 @@ import {
   getApprovalModeV2,
   getGlobalRule,
 } from '~/lib/pricing-admin.server'
-import { getModeThresholds } from '~/lib/pricing-apply-v2.server'
+import { getModeThresholds, getClearanceLadder } from '~/lib/pricing-apply-v2.server'
 import type {
   GroupRuleValues,
   AuditPendingRow,
@@ -41,6 +41,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     webhookActivityToday,
     globalRule,
     modeThresholds,
+    clearanceLadder,
   ] = await Promise.all([
     loadGroupTree(),
     countVariantsByGroup(),
@@ -54,6 +55,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     getWebhookActivityToday(),
     getGlobalRule(),
     getModeThresholds(),
+    getClearanceLadder(),
   ])
 
   // Merge coverage counts and last rationale into the tree
@@ -77,6 +79,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     last7Days,
     approvalMode,
     modeThresholds,
+    clearanceLadder: clearanceLadder.map(([days, pct]) => ({ days, pct })),
     adminEmail: adminUser?.email ?? '',
     webhook: {
       enabled: webhookEnabled,
@@ -1102,6 +1105,72 @@ function PricingRulesCard({ groups, globalRule }: PricingRulesCardProps) {
 }
 
 // ---------------------------------------------------------------------------
+// Clearance ladder panel (discontinued markdown steps, owner-editable)
+// ---------------------------------------------------------------------------
+
+function ClearanceLadderPanel({ ladder }: { ladder: Array<{ days: number; pct: number }> }) {
+  const fetcher = useFetcher<{ ok: boolean; error?: string }>()
+  const [rows, setRows] = useState(() => ladder.map(r => ({ days: String(r.days), pct: String(Math.round(r.pct * 100)) })))
+  const dirty = JSON.stringify(rows) !== JSON.stringify(ladder.map(r => ({ days: String(r.days), pct: String(Math.round(r.pct * 100)) })))
+
+  function save() {
+    const clean = rows
+      .map(r => [parseInt(r.days, 10), (parseFloat(r.pct) || 0) / 100] as [number, number])
+      .filter(([d, p]) => Number.isFinite(d) && d >= 0 && p >= 0 && p < 1)
+    fetcher.submit(
+      JSON.stringify({ clearanceLadder: clean }),
+      { method: 'post', action: '/api/pricing/settings', encType: 'application/json' },
+    )
+  }
+
+  return (
+    <section className="bg-white rounded-2xl border border-line p-5 space-y-3">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <h2 className="text-base font-semibold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
+            Clearance ladder
+          </h2>
+          <p className="text-xs text-muted mt-0.5">
+            Discontinued items (absent from the Nalpac feed) are marked down off the discontinued group's cost-based target by days since discontinued. MAP does not apply to them. The last step is the floor for anything older.
+          </p>
+        </div>
+        {dirty && (
+          <button
+            type="button"
+            onClick={save}
+            disabled={fetcher.state !== 'idle'}
+            className="text-xs font-semibold px-4 py-2 bg-coral text-white rounded-full hover:opacity-90 transition-opacity disabled:opacity-50"
+          >
+            {fetcher.state !== 'idle' ? 'Saving...' : 'Save ladder'}
+          </button>
+        )}
+      </div>
+      <div className="flex flex-col gap-2 md:flex-row md:flex-wrap md:items-center">
+        {rows.map((r, i) => (
+          <div key={i} className="flex items-center gap-1.5 text-xs text-muted">
+            <span>up to</span>
+            <input type="number" min={0} step={1} value={r.days}
+              onChange={e => setRows(prev => prev.map((x, j) => j === i ? { ...x, days: e.target.value } : x))}
+              className="w-16 text-sm border border-line rounded-lg px-2 py-1 bg-white text-ink" />
+            <span>days:</span>
+            <input type="number" min={0} max={99} step={1} value={r.pct}
+              onChange={e => setRows(prev => prev.map((x, j) => j === i ? { ...x, pct: e.target.value } : x))}
+              className="w-14 text-sm border border-line rounded-lg px-2 py-1 bg-white text-ink" />
+            <span>% off</span>
+            {rows.length > 1 && (
+              <button type="button" aria-label="Remove step" onClick={() => setRows(prev => prev.filter((_, j) => j !== i))} className="text-muted hover:text-ink">×</button>
+            )}
+          </div>
+        ))}
+        <button type="button" onClick={() => setRows(prev => [...prev, { days: '', pct: '' }])} className="text-xs text-coral font-semibold">+ step</button>
+      </div>
+      {fetcher.data?.ok === false && <p className="text-xs text-red-500">{fetcher.data.error}</p>}
+      {fetcher.state === 'idle' && fetcher.data?.ok && <p className="text-xs text-green-600">Ladder saved. A recompute has been started.</p>}
+    </section>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Approval mode panel
 // ---------------------------------------------------------------------------
 
@@ -1391,7 +1460,7 @@ export default function AdminPricingPage() {
   const data = useLoaderData<typeof loader>()
   const auditFetcher = useFetcher<{ ok: boolean; error?: string }>()
   const approveAllFetcher = useFetcher<{ ok: boolean; approved?: number; failed?: number; total?: number; errors?: string[]; error?: string }>()
-  const runFetcher = useFetcher<{ ok: boolean; total?: number; autoApplied?: number; pending?: number; skipped?: number; rejected?: number; errors?: number; durationMs?: number; error?: string }>()
+  const runFetcher = useFetcher<{ ok: boolean; started?: boolean; error?: string }>()
   const [autoExpanded, setAutoExpanded] = useState(false)
   const [confirmApproveAll, setConfirmApproveAll] = useState(false)
 
@@ -1453,7 +1522,7 @@ export default function AdminPricingPage() {
       {runFetcher.data && (
         <div className={`rounded-2xl px-5 py-3 text-sm border ${runFetcher.data.ok ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-600'}`}>
           {runFetcher.data.ok
-            ? `Review complete. Scanned ${runFetcher.data.total ?? '?'}, auto-applied ${runFetcher.data.autoApplied ?? '?'}, queued ${runFetcher.data.pending ?? '?'}.`
+            ? 'Recompute started in the background. Results land in the audit log over the next few minutes; reload to see them.'
             : `Error: ${runFetcher.data.error ?? 'Unknown error'}`}
         </div>
       )}
@@ -1463,6 +1532,8 @@ export default function AdminPricingPage() {
 
       {/* Approval Mode */}
       <ApprovalModePanel current={data.approvalMode} thresholds={data.modeThresholds} />
+
+      <ClearanceLadderPanel ladder={data.clearanceLadder} />
 
       {/* Webhook */}
       <WebhookCard webhook={data.webhook} />

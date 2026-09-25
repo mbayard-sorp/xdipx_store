@@ -58,6 +58,7 @@ export async function handlePricingBatchRecompute(req: Request, res: Response): 
   const trigger =
     asked === 'batch_catchup'      ? ('batch_catchup' as const)
     : asked === 'batch_continuation' ? ('batch_continuation' as const)
+    : asked === 'manual'             ? ('manual' as const)
     : ('batch' as const)
 
   // A continuation resumes today's checkpoint; so does a catch-up, so the agent's

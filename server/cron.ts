@@ -284,7 +284,7 @@ export function createCronRoutes() {
         reconcile = { error: String(err) }
       }
 
-      res.json({ ok: true, ...result.discontinuedSweep, reconcile })
+      res.json({ ok: true, ...result.discontinuedSweep, state: result.state, reconcile })
     } catch (err) {
       console.error('[cron:discontinued-sweep]', err)
       res.status(500).json({ error: String(err) })

@@ -689,6 +689,40 @@ export function isRestockCrossing(prev: number | null, current: number): boolean
   return prev !== null && prev <= 0 && current > 0
 }
 
+interface ShopifyInventoryItemWebhook {
+  id: number
+  sku?: string | null
+  cost?: string | number | null
+}
+
+/** Per-inventory-item throttle so an edit storm on one product reprices it once. */
+const INVENTORY_ITEM_REPRICE_THROTTLE_SECONDS = 300
+
+/**
+ * inventory_items/update fires when the Nalpac app writes a new Cost per item.
+ * Before this, a cost change only reached a price at the next 07:00 UTC batch
+ * (up to 24h of selling on yesterday's cost). Reprice the matching variant
+ * now through the v2 engine; the batch remains the backstop.
+ */
+async function handleInventoryItemUpdated(item: ShopifyInventoryItemWebhook): Promise<void> {
+  const sku = (item.sku ?? '').trim()
+  if (!sku) return
+  const { kvSetNX } = await import('../app/lib/kv.server.js')
+  const fresh = await kvSetNX(`pricing:inv-item-reprice:${item.id}`, '1', INVENTORY_ITEM_REPRICE_THROTTLE_SECONDS)
+  if (!fresh) return
+
+  const { findVariantsBySkus } = await import('../app/lib/shopify.server.js')
+  const { recomputeVariant } = await import('../app/lib/pricing-apply-v2.server.js')
+  const matches = await findVariantsBySkus([sku])
+  const match = matches.find(m => m.variant.sku === sku) ?? matches[0]
+  if (!match) {
+    console.log(`[webhook:inventory-item-updated] no variant for sku ${sku}; skipping`)
+    return
+  }
+  const result = await recomputeVariant({ variantId: match.variant.variantId, trigger: 'webhook' })
+  console.log(`[webhook:inventory-item-updated] ${sku} cost=${item.cost ?? '?'} -> ${result.status}${result.error ? ` (${result.error})` : ''}`)
+}
+
 async function handleInventoryUpdate(level: ShopifyInventoryLevel): Promise<void> {
   const { kvGet, kvSet } = await import('../app/lib/kv.server.js')
   const key = inventoryLevelKey(level.inventory_item_id)
@@ -992,6 +1026,20 @@ export function createWebhookRoutes() {
     if (product) {
       await runWebhookWork('product-updated', handleProductUpdated(product))
     }
+
+    res.json({ ok: true })
+  })
+
+  router.post('/inventory-item-updated', async (req: Request, res: Response) => {
+    if (!verifyShopifyWebhook(req)) {
+      res.status(401).json({ error: 'Unauthorized' })
+      return
+    }
+
+    const item = parseWebhookBody<ShopifyInventoryItemWebhook>(req, res, 'inventory-item-updated')
+    if (!item) return
+
+    await runWebhookWork('inventory-item-updated', handleInventoryItemUpdated(item))
 
     res.json({ ok: true })
   })

@@ -7,6 +7,7 @@ import {
   roundPsychological,
   roundUpPsychological,
   ABSOLUTE_PRICE_FLOOR_DEFAULT,
+  parseClearanceLadder,
   type PricingConfig,
 } from './pricing-engine-v2.server'
 
@@ -708,5 +709,34 @@ describe('computeDiscontinuedPrice — msrpCeiling=false', () => {
     expect(free!.compare_at).toBeNull()
     const high = computeDiscontinuedPrice({ cost: 10, msrp: 60, daysDiscontinued: 0, cfg, msrpCeiling: false })
     expect(high!.compare_at).toBe(60)
+  })
+})
+
+describe('clearance ladder (owner-editable)', () => {
+  const cfg = { target_margin_pct: 0.5, margin_floor_pct: 0.3 }
+
+  it('parseClearanceLadder accepts [[days, pct]] and sorts + caps it', () => {
+    const l = parseClearanceLadder('[[60,0.25],[30,0.15]]')!
+    expect(l.map(s => s[0])).toEqual([30, 60, 10_000])
+    expect(l[2]![1]).toBe(0.25)
+  })
+
+  it('parseClearanceLadder rejects malformed input', () => {
+    expect(parseClearanceLadder('')).toBeNull()
+    expect(parseClearanceLadder('nope')).toBeNull()
+    expect(parseClearanceLadder('[]')).toBeNull()
+    expect(parseClearanceLadder('[[30,1.5]]')).toBeNull()
+    expect(parseClearanceLadder('[[-1,0.1]]')).toBeNull()
+  })
+
+  it('computeDiscontinuedPrice uses the supplied ladder step for the age', () => {
+    const ladder = parseClearanceLadder('[[10,0.10],[20,0.40]]')!
+    const day5  = computeDiscontinuedPrice({ cost: 10, msrp: 100, daysDiscontinued: 5,  cfg, ladder, msrpCeiling: false })!
+    const day15 = computeDiscontinuedPrice({ cost: 10, msrp: 100, daysDiscontinued: 15, cfg, ladder, msrpCeiling: false })!
+    const day99 = computeDiscontinuedPrice({ cost: 10, msrp: 100, daysDiscontinued: 99, cfg, ladder, msrpCeiling: false })!
+    // target 20 -> 10% off = 18 -> 17.99 ; 40% off = 12 -> 11.99 ; beyond last step stays at last pct
+    expect(day5.sell).toBe(17.99)
+    expect(day15.sell).toBe(14.99) // 12 rounds to 11.99 but floor 10/0.7=14.29 -> 14.99
+    expect(day99.sell).toBe(day15.sell)
   })
 })

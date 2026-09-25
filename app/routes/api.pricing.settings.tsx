@@ -5,6 +5,9 @@ import { db } from '~/lib/db.server'
 import { pipelineSettings } from '../../db/schema'
 
 import type { ApprovalModeV2 } from '~/lib/pricing-admin.server'
+import { parseClearanceLadder } from '~/lib/pricing-engine-v2.server'
+import { CLEARANCE_LADDER_SETTING_KEY } from '~/lib/pricing-apply-v2.server'
+import { kickPricingRecompute } from '~/lib/pricing-kick.server'
 
 const VALID_MODES: ApprovalModeV2[] = ['aggressive', 'balanced', 'conservative', 'review_all', 'autopilot']
 
@@ -15,6 +18,7 @@ export async function action({ request }: ActionFunctionArgs) {
   let webhookEnabled: string | undefined
   let webhookThrottleSecs: string | undefined
   let modeThresholds: string | undefined
+  let clearanceLadder: string | undefined
 
   const ct = request.headers.get('content-type') ?? ''
   if (ct.includes('application/json')) {
@@ -29,6 +33,9 @@ export async function action({ request }: ActionFunctionArgs) {
     modeThresholds = body['modeThresholds'] !== undefined
       ? JSON.stringify(body['modeThresholds'])
       : undefined
+    clearanceLadder = body['clearanceLadder'] !== undefined
+      ? JSON.stringify(body['clearanceLadder'])
+      : undefined
   } else {
     const fd = await request.formData()
     mode = fd.get('approvalMode') as string | undefined
@@ -38,6 +45,8 @@ export async function action({ request }: ActionFunctionArgs) {
     webhookThrottleSecs = wht != null ? String(wht) : undefined
     const mt = fd.get('modeThresholds')
     modeThresholds = mt != null ? String(mt) : undefined
+    const cl = fd.get('clearanceLadder')
+    clearanceLadder = cl != null ? String(cl) : undefined
   }
 
   const updates: Record<string, unknown> = {}
@@ -74,6 +83,17 @@ export async function action({ request }: ActionFunctionArgs) {
     }
     await setPipelineSetting('pricing_mode_thresholds', JSON.stringify(clean))
     updates['modeThresholds'] = clean
+  }
+
+  if (clearanceLadder !== undefined) {
+    const ladder = parseClearanceLadder(clearanceLadder)
+    if (!ladder) {
+      return Response.json({ ok: false, error: 'Invalid clearanceLadder: expected [[days, pct], ...] with 0 <= pct < 1' }, { status: 400 })
+    }
+    await setPipelineSetting(CLEARANCE_LADDER_SETTING_KEY, JSON.stringify(ladder))
+    updates['clearanceLadder'] = ladder
+    // The ladder is a pricing rule: changing it changes the math now.
+    updates['recompute'] = await kickPricingRecompute('clearance ladder saved')
   }
 
   if (webhookEnabled !== undefined) {

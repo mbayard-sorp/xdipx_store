@@ -15,7 +15,10 @@ import {
   enforceMapFloor,
   roundUpPsychological,
   ABSOLUTE_PRICE_FLOOR_DEFAULT,
+  DEFAULT_CLEARANCE_LADDER,
+  parseClearanceLadder,
 } from './pricing-engine-v2.server'
+import type { ClearanceLadder } from './pricing-engine-v2.server'
 import {
   resolvePricingConfig,
   buildRationale,
@@ -75,6 +78,25 @@ export async function getMsrpCeilingEnabled(): Promise<boolean> {
     return false
   }
 }
+
+/** pipeline_settings key: JSON [[days, pct], ...] clearance markdown steps. */
+export const CLEARANCE_LADDER_SETTING_KEY = 'pricing_clearance_ladder'
+
+export async function getClearanceLadder(): Promise<ClearanceLadder> {
+  try {
+    const rows = await db
+      .select({ value: pipelineSettings.value })
+      .from(pipelineSettings)
+      .where(eq(pipelineSettings.key, CLEARANCE_LADDER_SETTING_KEY))
+      .limit(1)
+    return parseClearanceLadder(rows[0]?.value) ?? DEFAULT_CLEARANCE_LADDER
+  } catch {
+    return DEFAULT_CLEARANCE_LADDER
+  }
+}
+
+/** The product type whose rule row is the discontinued (clearance) group. */
+export const DISCONTINUED_PRODUCT_TYPE = 'Discontinued'
 
 export async function getDigestMinDelta(): Promise<number> {
   try {
@@ -326,6 +348,8 @@ interface RunContext {
   mapBrands:  string[]
   /** Whether MSRP caps the sell price (pricing_msrp_ceiling_enabled). */
   msrpCeiling: boolean
+  /** Clearance markdown steps for discontinued items. */
+  ladder: ClearanceLadder
 }
 
 // Minimal variant/product data the compute core needs. Matches both the
@@ -359,7 +383,7 @@ async function recomputeFromData(
   ctx: RunContext,
 ): Promise<RecomputeVariantResult> {
   const { variantId } = variant
-  const { trigger, mode, thresholds, mapBrands, msrpCeiling } = ctx
+  const { trigger, mode, thresholds, mapBrands, msrpCeiling, ladder } = ctx
 
   // Prefer Shopify's native variant Cost per item (inventoryItem.unitCost).
   // Fall back to the legacy xdipx.wholesale_cost product metafield only if unset.
@@ -367,17 +391,35 @@ async function recomputeFromData(
   // MAP is a per-brand contractual floor (owner rule 2026-08-29): honor the
   // feed's MAP only for the MAP brands. Every other vendor resolves MAP to null
   // so it prices off the markup rules instead of being held at MAP/MSRP.
-  const map         = mapAppliesToVendor(product.vendor, mapBrands)
-    ? product.metafields.mapPrice
-    : null
   const msrp        = product.metafields.originalPrice
   const oldSell     = variant.price
   const oldCompare  = variant.compareAtPrice
   const productType = product.productType
   const sku         = variant.sku
 
-  const cfg   = await resolvePricingConfig(productType)
-  const group = await getGroupForProductType(productType)
+  // Discontinued is a STATE, not a product type (owner direction 2026-09-25).
+  // `xdipx.discontinued_at` is written by the nightly sweep the first day a
+  // carried SKU has been absent from every Nalpac feed past the grace period.
+  // A product in that state prices off the discontinued group's rules whatever
+  // its product type says, and MAP no longer binds it. The legacy type-based
+  // routing is kept for anything still typed "Discontinued".
+  const discontinuedAt   = product.metafields.discontinuedAt ?? null
+  const discontinuedByState = discontinuedAt != null
+  const ruleType = discontinuedByState ? DISCONTINUED_PRODUCT_TYPE : productType
+
+  const cfg   = await resolvePricingConfig(ruleType)
+  const group = await getGroupForProductType(ruleType)
+
+  const isDiscontinued = discontinuedByState || group?.usesClearanceLadder === true || productType === DISCONTINUED_PRODUCT_TYPE
+
+  // MAP is a per-brand contractual floor (owner rule 2026-08-29): honor the
+  // feed's MAP only for the MAP brands, and never for a discontinued item
+  // (owner direction 2026-09-25: discontinued Lovense/Playground may clear
+  // below MAP). Every other case resolves MAP to null so it prices off the
+  // markup rules instead of being held at MAP/MSRP.
+  const map         = !isDiscontinued && mapAppliesToVendor(product.vendor, mapBrands)
+    ? product.metafields.mapPrice
+    : null
 
   let velocityBucket: VelocityBucket | undefined
   let effectiveCfg = cfg
@@ -390,19 +432,18 @@ async function recomputeFromData(
     effectiveCfg = { ...shifted, groupId: cfg.groupId, subGroupId: cfg.subGroupId }
   }
 
-  const isDiscontinued = group?.usesClearanceLadder === true || productType === 'Discontinued'
-
   let newSell:    number | null = null
   let newCompare: number | null = null
   let daysDisc:   number | undefined
+  let clearancePct: number | undefined
   let msrpBelowFloor = false
 
   if (isDiscontinued) {
-    const discontinuedAt = product.metafields.discontinuedAt ?? null
     daysDisc = discontinuedAt
       ? Math.max(0, Math.floor((Date.now() - discontinuedAt.getTime()) / 86_400_000))
       : 0
-    const result = computeDiscontinuedPrice({ cost, msrp, daysDiscontinued: daysDisc, cfg: effectiveCfg, msrpCeiling })
+    clearancePct = (ladder.find(([maxDays]) => daysDisc! <= maxDays) ?? ladder[ladder.length - 1])?.[1]
+    const result = computeDiscontinuedPrice({ cost, msrp, daysDiscontinued: daysDisc, cfg: effectiveCfg, msrpCeiling, ladder })
     if (result) { newSell = result.sell; newCompare = result.compare_at }
   } else {
     const result = computePrice({ cost, map, msrp, cfg: effectiveCfg, msrpCeiling })
@@ -453,6 +494,7 @@ async function recomputeFromData(
     msrpBelowFloor,
     ...(velocityBucket !== undefined ? { velocityBucket }             : {}),
     ...(daysDisc       !== undefined ? { daysDisc }                  : {}),
+    ...(clearancePct   !== undefined ? { clearancePct }              : {}),
     ...(map            != null       ? { map }                       : {}),
     ...(msrp           != null       ? { msrp }                      : {}),
     ...(deltaPct       != null       ? { deltaPct }                  : {}),
@@ -629,8 +671,9 @@ export async function recomputeVariant(
   const thresholds  = await getModeThresholds()
   const mapBrands   = await getMapBrands()
   const msrpCeiling = await getMsrpCeilingEnabled()
+  const ladder      = await getClearanceLadder()
 
-  return recomputeFromData(product, variant, { trigger, mode, thresholds, mapBrands, msrpCeiling })
+  return recomputeFromData(product, variant, { trigger, mode, thresholds, mapBrands, msrpCeiling, ladder })
 }
 
 
@@ -697,6 +740,7 @@ export async function dryRunRuleChange(opts: {
   const thresholds = await getModeThresholds()
   const mapBrands = await getMapBrands()
   const msrpCeiling = await getMsrpCeilingEnabled()
+  const ladder = await getClearanceLadder()
 
   const result: DryRunResult = {
     totalAffected: 0,
@@ -722,10 +766,12 @@ export async function dryRunRuleChange(opts: {
 
       try {
         const productType = (product as { productType?: string | null }).productType ?? null
-        const group = await getGroupForProductType(productType)
+        const discontinuedAt = product.metafields.discontinuedAt ?? null
+        const ruleType = discontinuedAt != null ? DISCONTINUED_PRODUCT_TYPE : productType
+        const group = await getGroupForProductType(ruleType)
 
         // Build base config from resolver, then patch with overrides.
-        const base = await resolvePricingConfig(productType)
+        const base = await resolvePricingConfig(ruleType)
         let cfg = { ...base }
 
         // Apply overrides narrowest-to-broadest (product_type > sub_group > group > global)
@@ -733,7 +779,7 @@ export async function dryRunRuleChange(opts: {
           'global:global',
           group?.groupId ? `group:${group.groupId}` : null,
           group?.subGroupId ? `sub_group:${group.subGroupId}` : null,
-          productType ? `product_type:${productType}` : null,
+          ruleType ? `product_type:${ruleType}` : null,
         ].filter(Boolean) as string[]
 
         for (const key of scopeKeys) {
@@ -744,23 +790,22 @@ export async function dryRunRuleChange(opts: {
         // Prefer Shopify's native variant Cost per item (inventoryItem.unitCost).
         // Fall back to the legacy xdipx.wholesale_cost product metafield only if unset.
         const cost = variant.unitCost ?? product.metafields.wholesaleCost
-        // MAP is brand-scoped (owner rule 2026-08-29): non-MAP brands ignore MAP.
+        const isDiscontinued = discontinuedAt != null || group?.usesClearanceLadder === true || productType === DISCONTINUED_PRODUCT_TYPE
+        // MAP is brand-scoped (owner rule 2026-08-29) and lifted for discontinued items.
         const vendor = (product as { vendor?: string | null }).vendor ?? null
-        const map = mapAppliesToVendor(vendor, mapBrands) ? product.metafields.mapPrice : null
+        const map = !isDiscontinued && mapAppliesToVendor(vendor, mapBrands) ? product.metafields.mapPrice : null
         const msrp = product.metafields.originalPrice
         const oldSell = variant.price
 
         if (cost == null) continue
 
-        const isDiscontinued = group?.usesClearanceLadder === true || productType === 'Discontinued'
         let newSell: number | null = null
 
         if (isDiscontinued) {
-          const discontinuedAt = product.metafields.discontinuedAt ?? null
           const daysDiscontinued = discontinuedAt
             ? Math.max(0, Math.floor((Date.now() - discontinuedAt.getTime()) / 86_400_000))
             : 0
-          const r = computeDiscontinuedPrice({ cost, msrp, daysDiscontinued, cfg, msrpCeiling })
+          const r = computeDiscontinuedPrice({ cost, msrp, daysDiscontinued, cfg, msrpCeiling, ladder })
           if (r) newSell = r.sell
         } else {
           const r = computePrice({ cost, map, msrp, cfg, msrpCeiling })
@@ -1002,7 +1047,8 @@ export async function recomputeCatalog(opts: {
   const thresholds  = await getModeThresholds()
   const mapBrands   = await getMapBrands()
   const msrpCeiling = await getMsrpCeilingEnabled()
-  const ctx: RunContext = { trigger: opts.trigger, mode, thresholds, mapBrands, msrpCeiling }
+  const ladder      = await getClearanceLadder()
+  const ctx: RunContext = { trigger: opts.trigger, mode, thresholds, mapBrands, msrpCeiling, ladder }
 
   for (;;) {
     // Budget is checked at the page boundary, before fetching more work.

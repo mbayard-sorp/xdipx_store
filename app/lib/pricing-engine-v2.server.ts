@@ -207,12 +207,42 @@ export function computePrice(params: {
 // Discontinued clearance ladder (spec ss2.3)
 // ---------------------------------------------------------------------------
 
-const CLEARANCE_LADDER: Array<[number, number]> = [
+/** [maxDaysDiscontinued, markdownFraction] steps, ascending by days. */
+export type ClearanceLadder = ReadonlyArray<readonly [number, number]>
+
+export const DEFAULT_CLEARANCE_LADDER: ClearanceLadder = [
   [30,    0.15],
   [60,    0.25],
   [90,    0.35],
   [10_000, 0.50],
 ]
+
+/**
+ * Parse an owner-edited ladder (pipeline_settings `pricing_clearance_ladder`,
+ * JSON `[[days, pct], ...]`). Returns null on anything malformed so the caller
+ * falls back to the default instead of pricing off garbage. Steps are sorted
+ * by days; a final catch-all step is appended when the last one is finite.
+ */
+export function parseClearanceLadder(raw: string | null | undefined): ClearanceLadder | null {
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed) || parsed.length === 0) return null
+    const steps: Array<[number, number]> = []
+    for (const step of parsed) {
+      if (!Array.isArray(step) || step.length !== 2) return null
+      const days = Number(step[0]); const pct = Number(step[1])
+      if (!Number.isFinite(days) || days < 0 || !Number.isFinite(pct) || pct < 0 || pct >= 1) return null
+      steps.push([Math.floor(days), pct])
+    }
+    steps.sort((a, b) => a[0] - b[0])
+    const last = steps[steps.length - 1]!
+    if (last[0] < 10_000) steps.push([10_000, last[1]])
+    return steps
+  } catch {
+    return null
+  }
+}
 
 /**
  * Compute sell price for a discontinued item using age-based markdown.
@@ -234,14 +264,17 @@ export function computeDiscontinuedPrice(params: {
   cfg:              Pick<PricingConfig, 'target_margin_pct' | 'margin_floor_pct'>
   /** See computePrice. When false, MSRP is compare-at only, never a cap. */
   msrpCeiling?:     boolean
+  /** Owner-edited markdown steps; defaults to DEFAULT_CLEARANCE_LADDER. */
+  ladder?:          ClearanceLadder
 }): PriceResult | null {
   const { cost, daysDiscontinued, cfg } = params
   const msrp = params.msrpCeiling === false ? null : params.msrp
+  const ladder = params.ladder ?? DEFAULT_CLEARANCE_LADDER
 
   if (cost == null) return null
 
-  const entry = CLEARANCE_LADDER.find(([maxDays]) => daysDiscontinued <= maxDays)
-  const discountPct = entry ? entry[1] : 0.50
+  const entry = ladder.find(([maxDays]) => daysDiscontinued <= maxDays)
+  const discountPct = entry ? entry[1] : ladder[ladder.length - 1]?.[1] ?? 0.50
 
   // Cost-based anchor: the cost-plus-target price, marked down by the age-based
   // clearance percentage, never below the cost-based margin floor.

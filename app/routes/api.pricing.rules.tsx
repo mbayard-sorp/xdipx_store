@@ -4,6 +4,7 @@ import { db } from '~/lib/db.server'
 import { pricingRules } from '../../db/schema'
 import { invalidatePricingRuleCache } from '~/lib/pricing-rules.server'
 import { pricingRulesFromCSV } from '~/lib/pricing-rules-csv.server'
+import { kickPricingRecompute } from '~/lib/pricing-kick.server'
 import { and, eq } from 'drizzle-orm'
 
 interface RulePatch {
@@ -65,7 +66,11 @@ async function applyPatches(patches: RulePatch[], updatedBy: string): Promise<Re
   }
 
   invalidatePricingRuleCache()
-  return Response.json({ ok: true, patched: patches.length })
+  // A rule edit is the owner's approval (2026-09-25): the math changes for
+  // that group now, not at the next 07:00 UTC batch. Locked and budgeted by
+  // the cron handler, so this is safe even mid-walk (it just reports locked).
+  const recompute = await kickPricingRecompute(`rules saved by ${updatedBy}`)
+  return Response.json({ ok: true, patched: patches.length, recompute })
 }
 
 // ---------------------------------------------------------------------------

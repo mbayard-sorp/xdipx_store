@@ -27,6 +27,7 @@ describe('shopify webhook registration map (tickets #4361 / #4594)', () => {
     // A sanity anchor so the correspondence above cannot be satisfied by an
     // empty map on both sides.
     expect(Object.values(WEBHOOK_TOPICS).sort()).toEqual([
+      'inventory_items/update',
       'inventory_levels/update',
       'orders/create',
       'orders/fulfilled',

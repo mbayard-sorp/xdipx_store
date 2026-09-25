@@ -46,6 +46,7 @@ export const WEBHOOK_TOPICS: Readonly<Record<string, string>> = {
   'product-created': 'products/create',
   'product-updated': 'products/update',
   'inventory-update': 'inventory_levels/update',
+  'inventory-item-updated': 'inventory_items/update',
   'returns-update': 'returns/update',
 }
 
