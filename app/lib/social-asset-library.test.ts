@@ -45,12 +45,13 @@ function fakeRow(row: SocialMediaAssetInsert, id = 7): SocialMediaAssetRow {
     createdBy: row.createdBy ?? 'system',
     createdAt: new Date('2026-08-22T00:00:00Z'),
     updatedAt: null,
-    archivedAt: null,
-    archivedBy: null,
+    archivedAt: row.archivedAt ?? null,
+    archivedBy: row.archivedBy ?? null,
     purgedAt: null,
     shopifyFileId: row.shopifyFileId ?? null,
     visionVerdict: row.visionVerdict ?? null,
     visionVerdictAt: row.visionVerdictAt ?? null,
+    providerRequestId: row.providerRequestId ?? null,
   }
 }
 
@@ -119,6 +120,32 @@ describe('ingestSocialAsset', () => {
     expect(d.fetchBuffer).toHaveBeenCalledWith('https://example.com/a.png')
     expect(d.inserted[0]!.url).toBe(SANITY.url)
     expect(d.inserted[0]!.createdBy).toBe('system')
+  })
+
+  it('maps providerRequestId and archive fields onto the row (#11548, #11549)', async () => {
+    const d = deps()
+    const at = new Date('2026-09-25T00:00:00Z')
+    await ingestSocialAsset({
+      buffer: Buffer.from('x'),
+      filename: 'a.jpg',
+      source: 'generated',
+      provider: 'atlas',
+      providerRequestId: 'd91a5b6dfdc0483c9b02c795194bb0ee',
+      archivedAt: at,
+      archivedBy: 'system:crop-reject',
+    }, d)
+    const w = d.inserted[0]!
+    expect(w.provider).toBe('atlas')
+    expect(w.providerRequestId).toBe('d91a5b6dfdc0483c9b02c795194bb0ee')
+    expect(w.archivedAt).toBe(at)
+    expect(w.archivedBy).toBe('system:crop-reject')
+  })
+
+  it('omits providerRequestId and archive fields when absent', async () => {
+    const d = deps()
+    await ingestSocialAsset({ buffer: Buffer.from('x'), filename: 'a.jpg', source: 'upload' }, d)
+    expect(d.inserted[0]!).not.toHaveProperty('providerRequestId')
+    expect(d.inserted[0]!).not.toHaveProperty('archivedAt')
   })
 
   it('throws without a buffer or sourceUrl', async () => {

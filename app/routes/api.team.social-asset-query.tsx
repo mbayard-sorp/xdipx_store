@@ -71,6 +71,7 @@ export async function action({ request }: ActionFunctionArgs) {
       before: null,
       archived: false,
       generationBatchId: str(b['generationBatchId']),
+      dropped: false,
     })
 
     const assets = page.assets.slice(0, limit).map(a => ({

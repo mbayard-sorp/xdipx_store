@@ -21,6 +21,8 @@ export interface LibraryAsset {
   createdAt: string | Date
   width?: number | null
   height?: number | null
+  /** Provider generation id (#11548); the card shows its first 8 chars. */
+  providerRequestId?: string | null
 }
 
 export function aspectClassOf(aspect: string | null | undefined, w?: number | null, h?: number | null): string {
@@ -92,6 +94,11 @@ export function LibraryGrid({
             {!dense && (
               <p className="mt-1 text-[11px] text-ink-3 truncate">
                 {a.productHandle ?? (a.tags?.length ? a.tags.slice(0, 3).join(', ') : a.source)}
+              </p>
+            )}
+            {!dense && a.providerRequestId && (
+              <p className="text-[10px] font-mono text-ink-4 truncate" title={a.providerRequestId}>
+                {a.providerRequestId.slice(0, 8)}
               </p>
             )}
           </li>
