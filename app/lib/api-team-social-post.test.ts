@@ -18,6 +18,17 @@ const reworkMock = vi.hoisted(() => vi.fn())
 
 const getValveMock = vi.hoisted(() => vi.fn().mockResolvedValue(false))
 
+// Ticket #11311: every draft's mediaUrls/posterUrl must resolve to a real
+// library row. Defaults to "yes, it's a member" so every pre-existing test
+// below (none of which cares about this check) keeps passing; the dedicated
+// describe block flips it to false per-url to exercise the rejection.
+const isLibraryMemberMock = vi.hoisted(() => vi.fn().mockResolvedValue(true))
+const tryMarkPickedMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
+vi.mock('~/lib/social-asset-library.server', () => ({
+  isLibraryMember: isLibraryMemberMock,
+  tryMarkPickedByUrls: tryMarkPickedMock,
+}))
+
 vi.mock('~/lib/team.server', () => ({
   assertTeamAuth: vi.fn(),
   createDraftSocialPost: createDraftMock,
@@ -69,6 +80,8 @@ beforeEach(() => {
   vi.clearAllMocks()
   voiceGateMock.mockReturnValue({ ok: true, verdict: voiceGate })
   createDraftMock.mockResolvedValue({ id: 42, deduped: false })
+  isLibraryMemberMock.mockResolvedValue(true)
+  tryMarkPickedMock.mockResolvedValue(undefined)
 })
 
 describe('draft op — X media preflight', () => {
@@ -155,6 +168,68 @@ describe('draft op — alt-text preflight (#5486)', () => {
   it('does not require alt text on other platforms (LinkedIn media with no altText passes)', async () => {
     const res = await post({ op: 'draft', platform: 'linkedin', tweetText: 'LI post', voiceGate, mediaUrls: ['https://cdn.shopify.com/files/li-scene.jpg'] })
     expect(res.status).toBe(200)
+    expect(createDraftMock).toHaveBeenCalled()
+  })
+})
+
+// Ticket #11311 (split from #11302): a drafted url that resolves to no real
+// social_media_assets row must be refused at write time, not discovered days
+// later as a confusing vision-verdict gate block. Row 306's actual failure
+// mode — the right scene suffix, the wrong product handle prefix — is the
+// mismatched-prefix case below; a url nobody ever generated at all is the
+// second.
+describe('draft op — library-membership preflight (#11311)', () => {
+  const mismatchedPrefixUrl =
+    'https://cdn.shopify.com/s/files/1/0761/6872/4651/files/social-womanizer-beauty-lilac-cast-playful-idle-20260923-2.jpg'
+  const neverGeneratedUrl = 'https://cdn.shopify.com/s/files/1/0761/6872/4651/files/social-totally-invented-scene.jpg'
+
+  it('rejects a mediaUrls entry with the right scene suffix but the wrong product prefix (row 306\'s actual failure)', async () => {
+    isLibraryMemberMock.mockResolvedValue(false)
+    const res = await post({
+      op: 'draft', platform: 'x', tweetText: 'Some afternoons', voiceGate,
+      mediaUrls: [mismatchedPrefixUrl], altText: 'A cast member with the toy.',
+    })
+    expect(res.status).toBe(400)
+    const body = await res.text()
+    expect(body).toMatch(/no social_media_assets row indexes/)
+    expect(body).toContain(mismatchedPrefixUrl)
+    expect(createDraftMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects a mediaUrls entry that was never generated at all', async () => {
+    isLibraryMemberMock.mockResolvedValue(false)
+    const res = await post({
+      op: 'draft', platform: 'x', tweetText: 'caption', voiceGate,
+      mediaUrls: [neverGeneratedUrl], altText: 'alt',
+    })
+    expect(res.status).toBe(400)
+    expect(createDraftMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects a posterUrl with no matching library row, even when mediaUrls is clean', async () => {
+    isLibraryMemberMock.mockImplementation(async (u: string) => u !== neverGeneratedUrl)
+    const res = await post({
+      op: 'draft', platform: 'x', tweetText: 'video post', voiceGate,
+      mediaUrls: ['https://cdn.shopify.com/files/social-real-scene.jpg'], altText: 'alt',
+      posterUrl: neverGeneratedUrl,
+    })
+    expect(res.status).toBe(400)
+    expect(createDraftMock).not.toHaveBeenCalled()
+  })
+
+  it('accepts a draft whose mediaUrls all resolve to real library rows', async () => {
+    const res = await post({
+      op: 'draft', platform: 'x', tweetText: 'caption', voiceGate,
+      mediaUrls: ['https://cdn.shopify.com/files/social-real-scene.jpg'], altText: 'alt',
+    })
+    expect(res.status).toBe(200)
+    expect(createDraftMock).toHaveBeenCalled()
+  })
+
+  it('skips the check entirely for a text-only draft with no mediaUrls and no posterUrl', async () => {
+    const res = await post({ op: 'draft', platform: 'instagram', tweetText: 'text only', voiceGate })
+    expect(res.status).toBe(200)
+    expect(isLibraryMemberMock).not.toHaveBeenCalled()
     expect(createDraftMock).toHaveBeenCalled()
   })
 })
