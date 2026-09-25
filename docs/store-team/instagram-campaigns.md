@@ -61,7 +61,7 @@ start and drafts against them.
 | Trend React | A reaction to an adopted trend brief. Never chases a trend we have no view on. |
 | Inspo Carousel | Multi-slide affirming or educational message over a metaphor hook. Built for saves. |
 | Field Notes | Advice slides. Toy advice or plain sex advice, the thing a reader would otherwise search for. The resource format (§4a). Since 2026-08-22: when the advice is about a category we sell, the product is in frame (§3.9); product-free only when the subject has no product in it. |
-| WTF Is… | A one-question mechanism carousel ("WTF is air pulsation?"): slide 1 the question, slide 2 the science, the last slide why she will care tonight. The 2026 carousel format with the highest save rate, and a mechanism post that still carries heat. |
+| WTF Is… | A one-question mechanism carousel ("WTF is air pulsation?"): slide 1 the question, slide 2 the science, the last slide why she will care tonight. The 2026 carousel format with the highest save rate, and a mechanism post that still carries heat. **The mechanism curiosity is raised and answered through effect/ownership language (what changes for the reader), never through literal motor-spec explanation** ("low-frequency motor", "built for full-hand rumble" are voice-gate mechanism-in-selling-copy violations regardless of format, ticket #11088): myth-bust with what the reader will feel and own, not a spec sheet. The slides carry the curiosity; the caption still sells the experience. |
 | Send This To | A caption written to be forwarded: to the partner who keeps asking what she wants, to the friend who overthinks the lube aisle. The engagement close is the forward itself. |
 | Let Me Guess | A list of three habits the reader recognises, the third one the drawer. Recognition is the hook, the product is the punchline she already owns or wants. |
 | Today's Pick | One in-stock product, presented by a cast member. Editorial, never an offer: see §4b for what may and may not be said about its price. |
@@ -1422,6 +1422,13 @@ roughly 9x the saves of a single image and single images are losing reach year o
 | Fri | **Lights On** | "Who said this happens in the dark?" Two cast members, daylight, curiosity on both faces. | Single still at the ceiling, two cast | Yes |
 | Sat | **Nightstand** | "What is actually in the drawer?" Care, lube, storage, pairing. | Still or carousel, product and its companion in frame (§3.9) | Yes, the care or lube product |
 | Sun | **Ask Emma** | "Can I ask you something?" The embarrassed question, answered warmly and hot. | Text-on-image still or Story poll, confession shape | Optional |
+
+**Wed's "Mechanism as curiosity" is answered through effect/ownership language, not spec explanation**
+(§2's WTF Is… entry, ticket #11088): a drafter who writes the caption as literal mechanism-explaining
+copy burns the voice gate every time (a Zola Mini Wand caption took one BLOCK and two REVISEs on
+exactly this before the PASS dropped mechanism language for an ownership/nightstand framing). The
+curiosity lives in the slides; the caption sells what changes for the reader, never how the motor
+does it.
 
 **The first slate, 2026-08-24 through 2026-09-06**, riding the Vibrator Field Guide tail into
 "Talk Yourself Into It" (§5). Working subjects; every caption still goes through the gate.

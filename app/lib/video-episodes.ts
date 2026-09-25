@@ -55,8 +55,18 @@ export function validatePlacements(raw: unknown): VideoEpisodePlacement[] {
  * The spoken surface of a script, flattened to one canonical string. This is
  * what the enqueue guard compares byte-for-byte against the owner-approved
  * episode row: presenterLine, per-scene spoken lines (forward-compatible with
- * per-scene dialogue), voiceover, and every caption, in a stable order with
- * field markers so a move between fields can never read as "identical".
+ * per-scene dialogue), voiceover, cta, and every caption, in a stable order
+ * with field markers so a move between fields can never read as "identical".
+ *
+ * cta (ticket #11150): the season-1 format speaks this line half a beat after
+ * the sign-off on the site-hosted cut and email (creative-platform.md §6),
+ * per episode-writer.md's own script format ("Site cut only: <whitelist
+ * CTA>"). Included here whether or not the render pipeline currently
+ * synthesizes it as audio anywhere (today it does not — video-pipeline.server.ts
+ * only reads scriptJson.cta to pick the SILENT visual end card's text): the
+ * owner's approval must cover a change to this field either way, since
+ * whether it renders as speech is a separate, still-open owner ruling
+ * (creative-platform.md §12), not a reason to let it drift unnoticed.
  */
 export function spokenTextOf(script: VideoScriptJson | null | undefined): string {
   if (!script || typeof script !== 'object') return ''
@@ -66,6 +76,7 @@ export function spokenTextOf(script: VideoScriptJson | null | undefined): string
   }
   push('presenterLine', script.presenterLine)
   push('voiceover', (script as Record<string, unknown>)['voiceover'])
+  push('cta', script.cta)
   const scenes = (script as Record<string, unknown>)['scenes']
   if (Array.isArray(scenes)) {
     scenes.forEach((s, i) => {
