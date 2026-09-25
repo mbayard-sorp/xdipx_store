@@ -59,6 +59,26 @@ by `manual` rows is reported as short, not full, and the run drafts an on-skin b
 it ends.** A run ends with the day's count in front of it: count `approved` plus `posted` rows per
 platform for today's UTC date, and the on-skin subset, before you write the final run update.
 
+**The format debt is part of done (owner direction 2026-09-25, ticket #11492).** The owner: *"We need
+to keep posting so we can get some reach."* Reach on this account comes from the two formats
+Instagram distributes beyond followers, carousels (saves) and Reels (non-follower delivery), and
+neither has shipped in weeks even though the publisher builds both (`instagram.server.ts` handles
+`CAROUSEL` and `REELS`). So the day's count carries two more numbers, read from `mixReport`
+(Step 7) and the post list:
+
+- **Carousel obligation.** At least one Instagram carousel (`mediaUrls` of 2 or more generated
+  slides, §3.3 arc) `approved` or `posted` in the rolling 14 published Instagram rows. When the
+  rolling-14 carousel count reads 0, the day is **short**, not full, exactly as an all-`manual` day
+  is short under the on-skin order, and the run that finds it builds the carousel before it ends
+  (the evening run owns this on a met day; see the recovery-run paragraph below). "Not attempted,
+  time budget" is the run summary line this rule retires: it has appeared on three consecutive
+  runs while the floor read 0/14.
+- **Reel obligation.** At least one Instagram Reel `posted` per rolling 7 days. The social run
+  never makes a Reel itself (Step 2.8: reels arrive from the video lane's owner-approved renders),
+  so this obligation is reported, not filled: the summary names the Reel's post id for the week, or
+  names the exact block (today: owner blocker #57, the Writers Room pitches no new batch while the
+  last one sits undecided on `/admin/video-studio/scripts`). An unmet Reel week is never silent.
+
 **Run status is derived from that count, not from effort.**
 
 - A run that ends with every live platform at one or more `approved`/`posted` rows today finishes
@@ -159,6 +179,18 @@ live platform at zero means recovery is its first job and its quota arithmetic m
 `rejected` rows do not count against `slot_remaining` (Step 3), and rung 1 reworks bind before any
 new drafting. "The morning run already used the quota" describes a day the morning run filled with
 live posts, not one it filled with rejections.
+
+**On a day the morning run already met the bar, the evening run's first job is the format debt.**
+Read `mixReport` before deciding there is nothing to do. If the rolling-14 carousel count is 0, the
+evening run builds one carousel this run: draft it from the next queued Notebook promo (Step 2 item
+9) or the active campaign's next beat, on the §3.3 arc at the four-slide floor (hook, question,
+substance, save close), and fill slides from the team's own library first (`social-asset-query`
+`op:'search'`, then `media-manager` reuse), generating only the slides the library cannot supply,
+so the carousel costs at most two fresh generations and fits the image cap. Slide 2 and the save
+close are typography over a flat campaign plate, which is a plate render, not a cast render. A
+carousel drafted this way still clears every gate (provenance is `every`, not `some`; no baked-in
+text on any slide). If the day's image allowance genuinely cannot carry it, the summary says
+`carousel: unmet (<reason>)` in the obligation line and the next run inherits the debt.
 
 **Recovery may not be bought by retreating to a cold frame.** A zero-day recovery draft is held to
 the same mix as any other draft: the evening run may satisfy a zero-post day with an educational or
@@ -2313,3 +2345,8 @@ not say how many are live has not reported the run.
 Also carries, per the drift-floor checks in Step 3: a register self-assessment per Instagram post,
 the trailing-7-day product-forward percentage, and, per Instagram post, which `marketing_calendar`
 row id its theme was drawn from.
+
+Also carries, on its own lines and every run, the two format obligations from Step 1b:
+`carousel: met (post <id>, rolling-14 count <n>)` or `carousel: unmet (<reason>)`, and
+`reel: met (post <id>)` or `reel: unmet (<the block, by name>)`. A run summary without both lines
+has not reported the run.

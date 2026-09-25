@@ -1126,7 +1126,8 @@ A through D.
 | **B** | **Campaign.** The active campaign's next beat, on its pillar and format rotation. | any campaign format | Usually |
 | **C** | **Today's Pick.** One in-stock product presented by a cast member (§4b). | Today's Pick | Yes |
 | **D** | **What's new.** A Notebook promo when one is queued, else Brand Crush, This Week at xdipx, or Trend React. | those four | No |
-| **E** | **Carousel**, on the days a carousel is scheduled. | Inspo Carousel, Field Notes | Either |
+| **E** | **Carousel.** Scheduled Mon and Wed per §5a, and on any day the rolling-14 carousel count reads 0 (owner direction 2026-09-25, ticket #11492: reach comes from saves, and a single still earns almost none). | Inspo Carousel, Field Notes, WTF Is… | Either |
+| **R** | **Reel**, at least one a week per §5a. Produced by the video lane, never by the social run: an owner-approved render fans out as a `video_reel` row and is the day's Instagram post (routine Step 2.8). The social run reports the week's Reel by post id, or names the block. | product-talk clip | Yes |
 
 Rules that survive the slate, because they are what keep it a publication:
 
