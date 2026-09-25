@@ -606,6 +606,15 @@ happened in run 595: the morning run's full IG rework allowance (4/4) went to ro
 three of the reworks (139, 141, 143) came back REVISE and still needed one more fix with no rework
 budget left, and the correct move was `op:'draft'` with `reworkedFrom` still set, not left unset.
 
+**Staleness rule for `needs_changes` (ticket #11144).** This rework pass has no aging or dismissal
+mechanism analogous to the 14-day suggestion sweep in Step 7b, so a `needs_changes` row tied to a
+campaign that has since closed sits in every future rework-pass read forever with no exit: reworking
+it is really drafting fresh copy under a stale row id, not addressing the original feedback clauses.
+A `needs_changes` row whose `scheduledFor` is more than **7 days** past AND whose campaign has closed
+since qualifies as stale. Mark it `rejected` with a note naming the closed campaign and the days past
+`scheduledFor`, instead of reworking it or leaving it to be re-read next run. Sweep up to **5 stale
+rows per run** so the queue converges instead of aging in place.
+
 ## Step 2.6 — Stock gate (never feature an out-of-stock product)
 
 Owner direction 2026-08-09, after a live post featuring an out-of-stock product had to be deleted.
