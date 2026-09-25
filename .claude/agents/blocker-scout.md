@@ -86,7 +86,14 @@ But you should know what is there before you decide what is new.
 - `verifyProbe` / `verifyArg` — wherever a machine check exists. `POST {op:'probes'}` lists
   them. **Prefer a probe over no probe every time**: a row that closes itself is worth several
   that need curating.
-- `priority` — 1 blocks revenue or a whole lane, 3 default, 5 nice to have.
+- `priority` — 1 blocks revenue or a whole lane, 3 default, 5 nice to have. **A release-path
+  surface is always 1**, regardless of what the generic severity rules above would score: a fault
+  in `/cron/release-engine`, `/cron/main-ci-watch`, the `check` job in `.github/workflows/ci.yml`,
+  GitHub Actions runner provisioning, or `.github/workflows/agent-allowlist.yml` doesn't degrade
+  one lane, it stops every lane's merges, so its cost is the whole estate's throughput for as long
+  as it is down. Never leave the companion ticket at status `blocked` for one of these — `blocked`
+  is a parking lot nothing surfaces. If two release-path faults are open at once, cross-reference
+  them in each blocker's detail so fixing one alone doesn't read as fixing the stall.
 
 **5. Report.** Return a short summary: what you filed, what you re-observed, what you
 deliberately routed to the bus as a ticket instead, and anything you suspect but could not

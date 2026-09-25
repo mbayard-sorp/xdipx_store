@@ -53,6 +53,31 @@ Each of these is a known hiding place. Details and probe choices are in the agen
 | Tracker "Asks for the owner" unanswered | Program drift | none |
 | Migration file on main, table/column absent from the DB | Migrations are applied by hand here, so this is the most common silent blocker | `table_exists`, `column_exists` |
 
+## Step 2.5 — Release-path failures are always P1, never parked
+
+A failure in the release path itself is not a lane degradation; it is the merge pipeline for the
+entire estate going dark, and it must be filed and treated that way. On 2026-09-24 the release
+engine returned 503 on every 10-minute invocation for roughly 22 hours (a GitHub token had lost the
+Checks repository permission). Detection worked: the fault was found and a blocker was filed. But the
+filing itself buried it — priority 2, sitting below unrelated P1s, indistinguishable on the digest
+from any other single-lane issue — and the companion cron-liveness tickets landed in ticket status
+`blocked`, which nothing surfaces. The owner discovered the stall himself; 12 PRs sat green and
+stranded with zero auto-merges in the meantime.
+
+1. **A named RELEASE-PATH SURFACES list.** `/cron/release-engine`, `/cron/main-ci-watch`, the
+   `check` job in `.github/workflows/ci.yml`, GitHub Actions runner provisioning, and
+   `.github/workflows/agent-allowlist.yml`.
+2. **Priority 1, regardless of the generic cron-alarm severity rules.** A blocker whose failing
+   surface is on that list is filed at priority 1 even when the usual scoring would call it lower.
+   Rationale, write it inline on the row: these surfaces don't degrade one lane, they stop every
+   lane, so their cost is the whole estate's throughput for as long as they are down.
+3. **Never left at ticket status `blocked`.** A release-path fault stays `approved` with an owner
+   blocker attached instead — `blocked` is a parking lot nothing surfaces, and this class of fault
+   cannot afford to sit in one.
+4. **Cross-reference concurrent release-path faults.** When two release-path faults are open at
+   once, each blocker's detail names the other and says plainly that fixing one alone changes
+   nothing. (Blockers #230 and #231 did this correctly on 2026-09-24 — keep that as the standard.)
+
 ## Step 3 — Mine yesterday's conversations
 
 The part nothing else does. Full method and the trigger-phrase vocabulary are in the agent
