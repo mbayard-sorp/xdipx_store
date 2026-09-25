@@ -107,12 +107,14 @@ const MAYA = {
   photoUrl: 'https://cdn/maya-portrait.jpg',
   bodyReferencePhotoUrl: 'https://cdn/maya-body.jpg',
   skinToneNote: 'deep brown skin with warm undertones',
+  handReferencePhotoUrl: 'https://cdn/maya-hand.jpg',
 }
 const RUTH = {
   slug: 'ruth', name: 'Ruth',
   photoUrl: 'https://cdn/ruth-portrait.jpg',
   bodyReferencePhotoUrl: null,
   skinToneNote: null,
+  handReferencePhotoUrl: null,
 }
 
 beforeEach(() => {
@@ -413,6 +415,59 @@ describe('cast: body reference + skin tone + castSlugs (#10336)', () => {
     const res = await post({ ...castBySlug, castSlug: 'maya', cropScale: 'close' })
     expect(res.status).toBe(400)
     expect(castMock).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * Ticket #11476: the cast member's own handReferencePhoto rides alongside
+ * (never instead of) the presenter reference, attached automatically for a
+ * held contact mode via extraImageUrls, since a briefed grip cannot escape
+ * the body plate's own static pose.
+ */
+describe('cast: hand reference for held contact modes (#11476)', () => {
+  const castBySlug = {
+    op: 'cast',
+    prompt: 'held at the collarbone, window light',
+    handle: 'we-vibe-chorus',
+    mood: 'daylight',
+    date: '2026-08-18',
+    productImageUrl: 'https://cdn/product.jpg',
+    scale: 'palm',
+    sceneLocation: 'bedroom-loft',
+  }
+
+  it('attaches the hand reference via extraImageUrls for a held contact mode', async () => {
+    const res = await post({ ...castBySlug, castSlug: 'maya', cropScale: 'medium', contactMode: 'self-held' })
+    expect(res.status).toBe(200)
+    expect(castMock).toHaveBeenCalledWith(expect.objectContaining({
+      extraImageUrls: ['https://cdn/maya-hand.jpg'],
+    }))
+    expect(await res.json()).not.toHaveProperty('handReferenceMissing')
+  })
+
+  it('attaches nothing extra for a non-held contact mode', async () => {
+    await post({ ...castBySlug, castSlug: 'maya', cropScale: 'medium', contactMode: 'resting' })
+    expect(castMock).toHaveBeenCalledWith(expect.not.objectContaining({ extraImageUrls: expect.anything() }))
+  })
+
+  it('merges with, and dedupes against, a caller-supplied extraImageUrls', async () => {
+    await post({
+      ...castBySlug, castSlug: 'maya', cropScale: 'medium', contactMode: 'other-held',
+      extraImageUrls: ['https://cdn/maya-hand.jpg', 'https://cdn/plate.jpg'],
+    })
+    expect(castMock).toHaveBeenCalledWith(expect.objectContaining({
+      extraImageUrls: ['https://cdn/maya-hand.jpg', 'https://cdn/plate.jpg'],
+    }))
+  })
+
+  it('returns handReferenceMissing and a warning for a held contact mode with no hand reference', async () => {
+    const res = await post({ ...castBySlug, castSlug: 'ruth', cropScale: 'medium', contactMode: 'drawn' })
+    expect(res.status).toBe(200)
+    const body = await res.json() as { handReferenceMissing?: boolean; warning?: string }
+    expect(body.handReferenceMissing).toBe(true)
+    expect(body.warning).toContain('Ruth')
+    // Still generated: a route refusal would kill the whole scheduled run.
+    expect(castMock).toHaveBeenCalledWith(expect.not.objectContaining({ extraImageUrls: expect.anything() }))
   })
 })
 

@@ -15,6 +15,7 @@ import castMemberEditorialFields from './castMemberEditorialFields'
 import castMemberVoiceFields from './castMemberVoiceFields'
 import castMemberBodyFields from './castMemberBodyFields'
 import castMemberCastingFields from './castMemberCastingFields'
+import castMemberHandFields from './castMemberHandFields'
 
 export default {
   name: 'castMember',
@@ -99,6 +100,9 @@ export default {
     // ADR-015 / ticket #10730 imagery-casting extension, same additive
     // pattern. See ./castMemberCastingFields.js
     ...castMemberCastingFields,
+    // Ticket #11476 hand-reference extension, same additive pattern. See
+    // ./castMemberHandFields.js
+    ...castMemberHandFields,
   ],
 
   preview: {

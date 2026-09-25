@@ -57,6 +57,7 @@ describe('presenterPhotoUrlForCrop, as the routes call it', () => {
     photoUrl: PORTRAIT,
     bodyReferencePhotoUrl: BODY,
     skinToneNote: 'deep brown skin with warm undertones',
+    handReferencePhotoUrl: null,
   }
 
   it('hands the body reference to the composite for a close crop', () => {

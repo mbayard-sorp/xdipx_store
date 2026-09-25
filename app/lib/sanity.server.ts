@@ -403,6 +403,18 @@ export interface CastMember {
   /** Plain skin-tone description for a brief to state rather than a model to invent. */
   skinToneNote: string | null
   /**
+   * Hand reference for a held product frame (ticket #11476, migration-free
+   * Sanity extension). `bodyReferencePhoto` is a single static seated plate
+   * that a briefed hand grip cannot escape: the composite path edits that
+   * plate as a strong pose prior, and a hand is never pose-neutral, so a grip
+   * frame built from the body plate alone tends to render with no hand in
+   * frame at all. This is a SECOND reference, passed alongside the plate
+   * (never in place of it) for held contact modes. Null until the owner
+   * approves one; the on-skin path attaches nothing extra when it is null,
+   * exactly like bodyReferencePhotoUrl falling back above.
+   */
+  handReferencePhotoUrl: string | null
+  /**
    * ADR-015, ticket #10730 — 'masculine' | 'feminine', which xdipx.cast_target
    * products this presenter may be shown alone with. Null until the
    * castMemberCastingFields backfill has run for this member. Production/
@@ -433,6 +445,7 @@ export async function getApprovedCastMembers(): Promise<CastMember[]> {
         voiceId,
         "bodyReferencePhotoUrl": bodyReferencePhoto.asset->url,
         skinToneNote,
+        "handReferencePhotoUrl": handReferencePhoto.asset->url,
         bodyPresentation
       }`,
     )
@@ -454,6 +467,7 @@ export async function getApprovedCastMembers(): Promise<CastMember[]> {
         voiceId:      m.voiceId ?? null,
         bodyReferencePhotoUrl: m.bodyReferencePhotoUrl ?? null,
         skinToneNote: m.skinToneNote ?? null,
+        handReferencePhotoUrl: m.handReferencePhotoUrl ?? null,
         bodyPresentation: m.bodyPresentation === 'masculine' || m.bodyPresentation === 'feminine'
           ? m.bodyPresentation
           : null,
