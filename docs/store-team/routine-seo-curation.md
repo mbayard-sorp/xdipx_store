@@ -78,11 +78,27 @@ the catalog honestly answer it?
 Batch patches in Sanity transactions of ≤100. One `step` event (`phase:'triage'`) with counts and
 3 example terms per bucket.
 
-## Step 4: Cluster hygiene (propose only)
+## Step 4: Cluster hygiene (execute the backlog before proposing anything new)
 
-Identify active singletons (approved count ≤ 1) and near-duplicate titles/pillar terms. Build a
-merge map: `[{"canonical":"<slug>","absorb":["<slug>",...],"newTitle":"<optional>"}]`. Canonical =
-the cluster with the most approved keywords. File it as ONE suggestion row:
+**Execute first.** List approved `kind:'config'` suggestions whose text starts `Cluster merge map`
+(`{"op":"list","status":"approved","kind":"config","orderBy":"age","limit":200}`, then filter
+client-side). If one exists, run the **oldest** one now — `npx tsx scripts/merge-seo-clusters.ts
+--map '<the JSON from the suggestion text>'` — before doing anything else in this step, then mark
+it `applied` (`{"op":"mark","id":<id>,"status":"applied"}`). This is not a new authority: the
+suggestion's own text already says "after approval", and approval already happened; the only thing
+missing was a routine that actually ran it. Report the active `seoCluster` count before and after
+in the run summary so execution is machine-checkable, not just claimed.
+
+This exists because branch (b) below — report and wait — was tried and failed. Three merge maps
+(#3600, #9128, #10393) were filed seven, five, and four weeks apart, each re-covering ground the
+prior one already covered, and all three independently measured the same 339 active `seoCluster`
+count. A map that is never executed cannot be superseded by a better report; only running it moves
+the number.
+
+**Then, and only if no approved-unexecuted map remains, identify new hygiene.** Active singletons
+(approved count ≤ 1) and near-duplicate titles/pillar terms. Build a merge map:
+`[{"canonical":"<slug>","absorb":["<slug>",...],"newTitle":"<optional>"}]`. Canonical = the cluster
+with the most approved keywords. File it as ONE suggestion row:
 
 ```bash
 curl -s -X POST "$BASE_URL/api/team/suggestion" \
@@ -90,15 +106,11 @@ curl -s -X POST "$BASE_URL/api/team/suggestion" \
   -d '{"op":"create","team":"content","category":"other","kind":"config","suggestion":"Cluster merge map (run scripts/merge-seo-clusters.ts --map after approval): <the JSON>","cxRisk":"low"}'
 ```
 
-Never repoint refs or archive clusters yourself. Do not file a merge map that re-covers families
-already named in an earlier map that has not yet been executed — and "not yet executed" includes a
-map that was **`approved` but never run**, not only one still `proposed`. Execution is a manual
-`scripts/merge-seo-clusters.ts --map` step with no cron or owner routine behind it, so an approved
-map can sit unexecuted indefinitely (as of 2026-08-16 both #100 and #3600 were approved and still
-unrun); filing a fresh map over the same slugs just accumulates rows that can never reach a terminal
-state. Instead emit a one-line report note naming the pending maps (e.g.
-`merge backlog pending execution (#100, #3600)`) and reserve any new map for genuinely new families
-whose slugs do not overlap the pending ones. One `step` event (`phase:'clusters'`).
+Never repoint refs or archive clusters yourself outside the script. Never file a merge map that
+re-covers families already named in a map that is still `proposed` (not yet owner-approved) —
+reserve any new map for genuinely new families whose slugs do not overlap. One `step` event
+(`phase:'clusters'`) naming what was executed (if anything) and what was newly proposed (if
+anything).
 
 ## Step 4b: Trend review (adopt / skip / expire, before planning)
 
