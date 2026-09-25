@@ -69,7 +69,9 @@ describe('gateHeroBuffer', () => {
     const callVision = vi.fn(async () => CLEAN_VERDICT)
     const verdict = await gateHeroBuffer(FAKE_PNG_BYTES, { callVision })
     expect(verdict.pass).toBe(true)
-    expect(callVision).toHaveBeenCalledTimes(1)
+    // Ticket #11468: a clean read on all three exposure checks triggers a
+    // second, independent confirmation call before the gate trusts it.
+    expect(callVision).toHaveBeenCalledTimes(2)
     // Called with the buffer's own base64 data (media-type sniffed from its
     // real magic bytes, ticket: Atlas-sourced JPEG candidates 400ing against
     // a hardcoded image/png declaration), not a placeholder or a url.
@@ -151,7 +153,9 @@ describe('heroVisionDeps / remoteVisionCallVision (ticket #8989)', () => {
     const verdict = await gateHeroBuffer(Buffer.from('fake-png-bytes'), { callVision: remoteVisionCallVision() })
     expect(verdict.pass).toBe(true)
     expect(verdict.checkCompleted).toBe(true)
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    // Ticket #11468: a clean exposure read triggers a second, independent
+    // confirmation call (also over the remote path here), before trusting it.
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
   it('route-unreachable path fails closed on a transport error, never a silent pass', async () => {
