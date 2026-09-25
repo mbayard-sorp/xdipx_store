@@ -395,6 +395,32 @@ export const socialAssetAdjudications = pgTable('social_asset_adjudications', {
 }))
 
 /**
+ * Owner feedback on library images (migration 104, ticket #11551). A heart
+ * ('up') or thumbs-down ('down') per asset with fixed reason chips
+ * (`app/lib/social-asset-feedback-reasons.ts`) and an optional note. One live
+ * verdict per asset, upserted on change.
+ *
+ * OWNER-WRITE ONLY (`admin.socials.library.tsx` and
+ * `admin.socials.library.$assetId.tsx`, requireAdmin). Never written by an
+ * agent or a team-token route, or the signal trains on itself. Read via
+ * `POST /api/team/social-asset-feedback` so the social routine can load the
+ * owner's taste at run start.
+ */
+export const socialAssetFeedback = pgTable('social_asset_feedback', {
+  id:        serial('id').primaryKey(),
+  assetId:   integer('asset_id').notNull(),
+  /** 'up' (heart) | 'down' (thumbs-down). */
+  verdict:   varchar('verdict', { length: 8 }).notNull(),
+  reasons:   jsonb('reasons').$type<string[]>().notNull().default([]),
+  note:      text('note'),
+  ratedBy:   varchar('rated_by', { length: 60 }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }),
+}, t => ({
+  assetIdx: uniqueIndex('idx_social_asset_feedback_asset').on(t.assetId),
+}))
+
+/**
  * Ordered slides of a carousel draft (migration 084). `social_posts.media_urls`
  * stays the publish-time snapshot derived from these rows, so the publish job
  * and the platform adapters never read this table. `url` is denormalised from
