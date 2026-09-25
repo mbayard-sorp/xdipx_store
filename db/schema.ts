@@ -1903,7 +1903,13 @@ export const videoJobs = pgTable('video_jobs', {
   // Serialized video program (migration 086). episodeId back-references the
   // video_episodes row this job renders (plain integer, no FK: the FK lives on
   // video_episodes.video_job_id to avoid a circular pair).
-  episodeId:         integer('episode_id'),
+  episodeId:             integer('episode_id'),
+  // Owner override for the post-render vision gate (migration 102, ticket
+  // #11150). Set by releaseFlaggedVideoJob when the owner releases a job
+  // parked at awaiting_final_review; advancePoster reads it to skip
+  // re-running the gate (which would just re-park on the same pixels) and
+  // clears it once the job moves past the poster stage.
+  visionGateOverrideAt:  timestamp('vision_gate_override_at', { withTimezone: true }),
   createdAt:         timestamp('created_at').notNull().defaultNow(),
   updatedAt:         timestamp('updated_at').notNull().defaultNow(),
   completedAt:       timestamp('completed_at'),

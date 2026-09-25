@@ -124,11 +124,12 @@ export function digestFingerprint(
   parkedVideoFrames: { count: number } | null | undefined,
   parkedVideoRenders: { count: number } | null | undefined,
   pendingVideoPitches?: { count: number; batchMarker: string | null } | null,
+  parkedVideoFlagged?: { count: number } | null,
 ): string {
   const pitch = pendingVideoPitches && pendingVideoPitches.count > 0
     ? `${pendingVideoPitches.count}@${pendingVideoPitches.batchMarker ?? ''}`
     : ''
-  return `${queueFingerprint}|video:${parkedVideoFrames?.count ?? 0}/${parkedVideoRenders?.count ?? 0}|pitch:${pitch}`
+  return `${queueFingerprint}|video:${parkedVideoFrames?.count ?? 0}/${parkedVideoRenders?.count ?? 0}/${parkedVideoFlagged?.count ?? 0}|pitch:${pitch}`
 }
 
 export function shouldSendDigest(input: {
@@ -824,6 +825,13 @@ export interface NeedsMikeFacts {
    * off does not release a cut that is already parked. `null` on a read error.
    */
   parkedVideoRenders?: { count: number; oldestDays: number | null } | null
+  /**
+   * Jobs parked at awaiting_final_review by the post-render vision gate
+   * (ticket #11150): only the owner's release/fail in /admin/video-studio/render
+   * moves them. Never returns null on the valve (the gate is a hard safety
+   * check, not a spend valve), only on a read error.
+   */
+  parkedVideoFlagged?: { count: number; oldestDays: number | null } | null
 }
 
 /**
@@ -861,17 +869,22 @@ export function renderNeedsMikeSection(f: NeedsMikeFacts): string {
   for (const c of (f.adCampaigns ?? []).slice(0, 5)) {
     items.push(`Ad campaign #${c.id} &ldquo;${esc(clip(c.name, 60))}&rdquo; (${esc(c.platform)}) approved ${c.ageDays}d ago and never launched, only you can create it in-platform: <a href="https://xdipx.com/admin/ad-studio" style="color:#c2410c;">/admin/ad-studio</a>`)
   }
-  // One video line for both gates: frames awaiting a pick, final cuts
-  // awaiting approval. Either count alone is enough to list it.
+  // One video line for all three gates: frames awaiting a pick, final cuts
+  // awaiting approval, jobs flagged by the post-render vision gate. Any count
+  // alone is enough to list it. The flagged clause only appends when nonzero
+  // so the frames/cuts wording stays byte-identical to before #11150.
   const frameCount = f.parkedVideoFrames?.count ?? 0
   const cutCount = f.parkedVideoRenders?.count ?? 0
-  if (frameCount > 0 || cutCount > 0) {
+  const flaggedCount = f.parkedVideoFlagged?.count ?? 0
+  if (frameCount > 0 || cutCount > 0 || flaggedCount > 0) {
     const ages = [
       frameCount > 0 ? f.parkedVideoFrames?.oldestDays : null,
       cutCount > 0 ? f.parkedVideoRenders?.oldestDays : null,
+      flaggedCount > 0 ? f.parkedVideoFlagged?.oldestDays : null,
     ].filter((d): d is number => d != null)
     const oldest = ages.length ? ` (oldest ${Math.max(...ages)}d)` : ''
-    items.push(`Video: ${frameCount} ${frameCount === 1 ? 'frame' : 'frames'} and ${cutCount} final ${cutCount === 1 ? 'cut' : 'cuts'} awaiting you${oldest}, only you can approve them: <a href="https://xdipx.com/admin/video-studio/render" style="color:#c2410c;">/admin/video-studio</a>`)
+    const flaggedPart = flaggedCount > 0 ? `, ${flaggedCount} flagged by the vision gate` : ''
+    items.push(`Video: ${frameCount} ${frameCount === 1 ? 'frame' : 'frames'} and ${cutCount} final ${cutCount === 1 ? 'cut' : 'cuts'} awaiting you${flaggedPart}${oldest}, only you can approve them: <a href="https://xdipx.com/admin/video-studio/render" style="color:#c2410c;">/admin/video-studio</a>`)
   }
   if (items.length === 0) {
     return `<p style="margin:0;color:${GOOD};">Nothing on this list today.</p>`
@@ -1430,6 +1443,32 @@ export async function gatherParkedVideoRenders(): Promise<{ count: number; oldes
   }
 }
 
+/**
+ * Jobs parked at `awaiting_final_review` by the post-render vision gate
+ * (ticket #11150). Like the render sweep this does NOT gate on a valve: the
+ * gate is a hard safety check, not a spend control, so there is no "off"
+ * state that would auto-advance a parked job. Oldest age is from
+ * `updated_at`, the moment advancePoster parked it, matching the render
+ * sweep's convention.
+ */
+export async function gatherParkedVideoFlagged(): Promise<{ count: number; oldestDays: number | null } | null> {
+  try {
+    const res = await db.execute(sql`
+      SELECT COUNT(*)::int AS n,
+             EXTRACT(epoch FROM now() - MIN(updated_at))::float8 / 86400 AS oldest_days
+        FROM video_jobs
+       WHERE status = 'awaiting_final_review'`)
+    const row = (res.rows ?? [])[0] as Record<string, unknown> | undefined
+    return {
+      count: Number(row?.['n'] ?? 0),
+      oldestDays: row?.['oldest_days'] == null ? null : Math.round(Number(row['oldest_days'])),
+    }
+  } catch (err) {
+    console.warn('[owner-digest] parked video-flagged sweep failed:', String(err).slice(0, 200))
+    return null
+  }
+}
+
 async function gatherEscalations(): Promise<EscalationFacts> {
   const out: EscalationFacts = { protectedPrs: [], exhausted: [] }
   try {
@@ -1597,7 +1636,7 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
     return null
   })
 
-  const [shipped, homepageNow, ticketMetrics, escalations, ownerQueue, opsWatch, reconciliation, loopHealth, staleOwnerRows, adCampaignQueue, parkedVideoFrames, parkedVideoRenders] =
+  const [shipped, homepageNow, ticketMetrics, escalations, ownerQueue, opsWatch, reconciliation, loopHealth, staleOwnerRows, adCampaignQueue, parkedVideoFrames, parkedVideoRenders, parkedVideoFlagged] =
     await Promise.all([
       gatherShipped(),
       gatherHomepageNow(),
@@ -1635,6 +1674,7 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
       gatherAdCampaignQueue(),
       gatherParkedVideoFrames(),
       gatherParkedVideoRenders(),
+      gatherParkedVideoFlagged(),
     ])
   const needsOwner = escalations.protectedPrs.length + escalations.exhausted.length
   // One note-aware source for blocked rows, shared by the Needs Mike list and
@@ -1654,6 +1694,7 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
     adCampaigns: adCampaignQueue,
     parkedVideoFrames,
     parkedVideoRenders,
+    parkedVideoFlagged,
   }
 
   // ── Compose ───────────────────────────────────────────────────────────────
@@ -1811,7 +1852,7 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
   // trivial next to the gathering already done, and deciding here means the
   // decision sees the same queue the email would have carried rather than a
   // second, possibly different, read.
-  const fp = unified ? digestFingerprint(unified.fingerprint, parkedVideoFrames, parkedVideoRenders, needsMike.pendingVideoPitches) : null
+  const fp = unified ? digestFingerprint(unified.fingerprint, parkedVideoFrames, parkedVideoRenders, needsMike.pendingVideoPitches, parkedVideoFlagged) : null
   if (unified && fp) {
     const lastFingerprint = await kvGet<string>(QUEUE_FINGERPRINT_KEY).catch(() => null)
     const decision = shouldSendDigest({

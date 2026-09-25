@@ -33,6 +33,8 @@ import {
   rejectVideoJob,
   approveRenderedVideo,
   rejectRenderedVideo,
+  releaseFlaggedVideoJob,
+  failFlaggedVideoJob,
   regenerateVideoJob,
   fanOutVideoToSocialDrafts,
   recordVideoMetrics,
@@ -217,6 +219,16 @@ export async function action({ request }: ActionFunctionArgs) {
         if (!reason) return Response.json({ error: 'Say why: the reason goes on the episode for the writers room' }, { status: 400 })
         const result = await rejectRenderedVideo(jobRowId, reason, user?.email ?? 'owner')
         return Response.json({ ok: true, ...result })
+      }
+      case 'release-flagged': {
+        await releaseFlaggedVideoJob(jobRowId)
+        return Response.json({ ok: true })
+      }
+      case 'fail-flagged': {
+        const reason = String(form.get('reason') ?? '').trim()
+        if (!reason) return Response.json({ error: 'Say why: the reason is recorded on the job' }, { status: 400 })
+        await failFlaggedVideoJob(jobRowId, reason)
+        return Response.json({ ok: true })
       }
       case 'regenerate': {
         const result = await regenerateVideoJob(jobRowId, String(form.get('feedback') ?? ''))
@@ -415,6 +427,7 @@ export default function VideoStudioPage() {
 
   const parked = rows.filter(r => r.status === 'awaiting_frame_approval')
   const finalCuts = rows.filter(r => r.status === 'awaiting_render_approval')
+  const flagged = rows.filter(r => r.status === 'awaiting_final_review')
   const inFlight = rows.filter(r => ACTIVE.has(r.status))
   const ready = rows.filter(r => r.status === 'done' && r.stage === 'done')
   const failed = rows.filter(r => r.status === 'failed')
@@ -444,8 +457,9 @@ export default function VideoStudioPage() {
       </div>
 
       {/* Stat row */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-6">
         <Stat label="Final cut awaiting you" value={finalCuts.length} accent={finalCuts.length > 0} />
+        <Stat label="Flagged by the vision gate" value={flagged.length} accent={flagged.length > 0} />
         <Stat label="Awaiting frame pick" value={parked.length} accent={parked.length > 0} />
         <Stat label="Generating" value={inFlight.length} accent={false} />
         <Stat label="Ready to review" value={ready.length} accent={ready.length > 0} />
@@ -460,6 +474,18 @@ export default function VideoStudioPage() {
         <section className="space-y-4">
           <h2 className="font-display text-lg text-ink">Awaiting your approval: final cut</h2>
           {finalCuts.map(job => <FinalCutCard key={job.id} job={job} busy={busy} />)}
+        </section>
+      )}
+
+      {/* ── Flagged by the post-render vision gate ──────────────────────── */}
+      {flagged.length > 0 && (
+        <section className="space-y-4">
+          <h2 className="font-display text-lg text-ink">Flagged for your review</h2>
+          <p className="text-xs text-ink-3">
+            The post-render vision gate parked these instead of failing them outright — a false
+            positive here must not burn the render fee. Release to let it continue, or fail it.
+          </p>
+          {flagged.map(job => <FlaggedCard key={job.id} job={job} busy={busy} />)}
         </section>
       )}
 
@@ -858,6 +884,62 @@ function FinalCutCard({ job, busy }: { job: Row; busy: boolean }) {
             />
             <button type="submit" disabled={busy} className="rounded-full border border-line px-4 py-2 text-sm text-ink-3 hover:text-coral disabled:opacity-40">
               Reject cut
+            </button>
+          </Form>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * A job the post-render vision gate parked at `awaiting_final_review`
+ * (ticket #11150). Mobile-first, same shape as FinalCutCard: player, the
+ * gate's notes, then release/fail stacked; side by side from md up.
+ */
+function FlaggedCard({ job, busy }: { job: Row; busy: boolean }) {
+  return (
+    <div className="rounded-[22px] border border-coral bg-paper-2 p-4">
+      <JobHeader job={job} />
+      <p className="mt-1 text-xs text-ink-3">
+        Rendered and flagged. ${Number(job.costUsd).toFixed(2)} spent.
+      </p>
+      {job.error && <p className="mt-2 text-xs text-coral">{job.error.slice(0, 400)}</p>}
+      <div className="mt-3 flex flex-col gap-4 md:flex-row">
+        <div className="w-full md:w-56">
+          {job.finalUrl ? (
+            <video
+              src={job.finalUrl}
+              poster={job.posterUrl ?? undefined}
+              controls
+              playsInline
+              preload="metadata"
+              className="w-full rounded-lg border border-line bg-ink"
+            />
+          ) : (
+            <p className="text-sm text-coral">Final video missing on this job.</p>
+          )}
+        </div>
+        <div className="flex-1 space-y-3">
+          <Form method="post">
+            <input type="hidden" name="intent" value="release-flagged" />
+            <input type="hidden" name="jobRowId" value={job.id} />
+            <button type="submit" disabled={busy} className="w-full rounded-full bg-coral px-5 py-2 text-sm text-paper disabled:opacity-40 md:w-auto">
+              Release · continue past the gate
+            </button>
+          </Form>
+          <Form method="post" className="flex flex-col gap-2 md:flex-row md:items-start">
+            <input type="hidden" name="intent" value="fail-flagged" />
+            <input type="hidden" name="jobRowId" value={job.id} />
+            <textarea
+              name="reason"
+              required
+              rows={2}
+              placeholder="Why not? (required; recorded on the job)"
+              className="flex-1 rounded-lg border border-line bg-paper px-3 py-2 text-sm"
+            />
+            <button type="submit" disabled={busy} className="rounded-full border border-line px-4 py-2 text-sm text-ink-3 hover:text-coral disabled:opacity-40">
+              Fail job
             </button>
           </Form>
         </div>

@@ -87,7 +87,7 @@ import {
 } from '~/lib/team-keys'
 import { getPipelineSetting } from '~/lib/feed-processor.server'
 import { extractPoster, extractFrames, applyWatermark, probeDurationSeconds, muxAudio, stripAudio, renderAspectMaster, concatAndNormalize, extractLastFrame, type AspectMaster } from '~/lib/video-assembly.server'
-import { gateVideoFrames } from '~/lib/video-frame-gate.server'
+import { gateVideoFrames, type VideoFrameGateResult } from '~/lib/video-frame-gate.server'
 import type { VisionVerdict } from '~/lib/social-vision-gate.server'
 import { concatWithAudio, runPostPass, buildEndCard } from '~/lib/video-postpass.server'
 import {
@@ -2240,6 +2240,33 @@ async function recordPosterVisionVerdict(posterUrl: string, verdict: VisionVerdi
   }
 }
 
+/**
+ * Synthetic pass verdict for a job the owner released from
+ * `awaiting_final_review` (ticket #11150). Not a real read: the owner looked
+ * at the parked frames and disagreed with the gate, so this pass does not
+ * re-run gateVideoFrames on the same pixels (which would just reproduce the
+ * identical verdict and re-park it). `checkCompleted: false` on purpose —
+ * nothing here judged an image — so any caller that keys billing off it
+ * treats this the same as a check that never ran.
+ */
+function ownerOverrideGateResult(): VideoFrameGateResult {
+  const now = new Date().toISOString()
+  const verdict: VisionVerdict = {
+    pass: true,
+    checks: null,
+    notes: 'owner override: released from awaiting_final_review, post-render vision gate not re-run',
+    checkedAt: now,
+    checkCompleted: false,
+    legibleText: null,
+  }
+  return {
+    pass: true,
+    notes: verdict.notes,
+    frameVerdicts: [verdict],
+    movementVerdict: { pass: true, notes: 'not run: owner override', checkCompleted: false },
+  }
+}
+
 async function advancePoster(job: VideoJobRow): Promise<AdvanceOutcome> {
   if (!job.finalAssetId) throw new Error('No final asset for poster extraction')
   const [finalAsset] = await db.select().from(mediaAssets).where(eq(mediaAssets.id, job.finalAssetId)).limit(1)
@@ -2256,8 +2283,12 @@ async function advancePoster(job: VideoJobRow): Promise<AdvanceOutcome> {
   // before any of this tick's Blob writes or the terminal 'done' transition.
   // A FAIL parks the job for owner review rather than failing it outright: a
   // false positive on a licensed on-skin frame must not burn the render fee.
-  const sampled = await extractFrames(video, 2, 10)
-  const gateResult = await gateVideoFrames([...sampled, { atSeconds: 1, buffer: poster }])
+  // Skipped when the owner has already released this exact job once
+  // (visionGateOverrideAt set, ticket #11150) — see ownerOverrideGateResult.
+  const overridden = job.visionGateOverrideAt != null
+  const gateResult = overridden
+    ? ownerOverrideGateResult()
+    : await gateVideoFrames([...(await extractFrames(video, 2, 10)), { atSeconds: 1, buffer: poster }])
   if (!gateResult.pass) {
     console.error(`[video-pipeline] job ${job.jobId} failed the post-render vision gate, parking for owner review: ${gateResult.notes}`)
     await touch(job, {
@@ -2318,6 +2349,10 @@ async function advancePoster(job: VideoJobRow): Promise<AdvanceOutcome> {
     status: parkForReview ? AWAITING_RENDER_APPROVAL : 'done',
     posterAssetId: posterRow?.id ?? null,
     completedAt: new Date(),
+    // The override is consumed once: clear it so a later regenerate/retake
+    // (a NEW job, but belt-and-suspenders if this row is ever reused) runs
+    // the gate fresh.
+    visionGateOverrideAt: null,
   })
   console.log(`[video-pipeline] job ${job.jobId} ${parkForReview ? 'rendered, parked for final-cut approval' : 'complete'} (${duration.toFixed(1)}s, $${Number(job.costUsd).toFixed(2)})`)
   return parkForReview ? 'parked' : 'done'
@@ -2456,6 +2491,40 @@ export async function rejectRenderedVideo(jobRowId: number, reason: string, reje
   if (episodeId == null) return { episodeReleased: false, episodeId: null }
   const episodeReleased = await markEpisodeRenderRejected(episodeId, `job ${job.jobId}: ${why}`, rejectedBy)
   return { episodeReleased, episodeId }
+}
+
+/**
+ * Owner releases a job the post-render vision gate flagged (ticket #11150):
+ * awaiting_final_review -> running. Sets visionGateOverrideAt so the next
+ * poller tick's advancePoster does not re-run the gate on the same pixels —
+ * the owner already looked at the frames named in the parked notes and
+ * disagrees with the verdict. Conditional write, same double-click guard as
+ * approveRenderedVideo: a job no longer parked throws instead of silently
+ * no-op-ing.
+ */
+export async function releaseFlaggedVideoJob(jobRowId: number): Promise<void> {
+  const updated = await db.update(videoJobs)
+    .set({ status: 'running', visionGateOverrideAt: new Date(), error: null, updatedAt: new Date() })
+    .where(and(eq(videoJobs.id, jobRowId), eq(videoJobs.status, 'awaiting_final_review')))
+    .returning({ id: videoJobs.id })
+  if (!updated.length) throw new Error('Job is not awaiting final review')
+  await kvDel(KV_KEYS.videoPollerIdle)
+}
+
+/**
+ * Owner fails a job the post-render vision gate flagged. A reason is
+ * REQUIRED, same rule as rejectRenderedVideo: a silent fail teaches nothing.
+ * Terminal — the job goes to 'failed' and is never picked up by the poller
+ * again.
+ */
+export async function failFlaggedVideoJob(jobRowId: number, reason: string): Promise<void> {
+  const why = reason.trim()
+  if (!why) throw new Error('A reason is required to fail a flagged job')
+  const updated = await db.update(videoJobs)
+    .set({ status: 'failed', stage: 'failed', error: `Flagged by the post-render vision gate, failed by owner: ${why}`.slice(0, 2000), updatedAt: new Date() })
+    .where(and(eq(videoJobs.id, jobRowId), eq(videoJobs.status, 'awaiting_final_review')))
+    .returning({ id: videoJobs.id })
+  if (!updated.length) throw new Error('Job is not awaiting final review')
 }
 
 /** Re-run a finished/failed job as a NEW job with owner feedback appended. */

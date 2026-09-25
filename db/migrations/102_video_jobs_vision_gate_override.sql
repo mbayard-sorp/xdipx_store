@@ -1,0 +1,23 @@
+-- 101_video_jobs_vision_gate_override.sql
+-- Owner release for a job the post-render vision gate flagged (ticket #11150).
+--
+-- video_jobs.status = 'awaiting_final_review' had no owner surface at all:
+-- admin.video-studio.render.tsx partitions those rows out of every section
+-- and no intent releases or fails them, so a false-positive gate hit parked a
+-- paid render forever with no way back except a direct DB edit.
+--
+-- vision_gate_override_at records when the owner released a flagged job.
+-- advancePoster (video-pipeline.server.ts) reads it on the next poller tick
+-- to skip re-running the gate on the same rendered pixels (which would just
+-- reproduce the identical verdict and re-park it) and clears it once the job
+-- moves past the poster stage, so a later genuine regenerate/retake still
+-- runs the gate fresh.
+--
+-- FULLY ADDITIVE: ADD COLUMN IF NOT EXISTS only. No DROP, no RENAME, no ALTER
+-- TYPE, no DML. Merges on the ordinary release-engine lane once
+-- migration-dry-run is green.
+--
+-- Apply: DATABASE_URL=<prod> npx tsx scripts/apply-migrations.ts --from 101
+-- Idempotent: safe to re-run.
+
+ALTER TABLE video_jobs ADD COLUMN IF NOT EXISTS vision_gate_override_at timestamptz;
