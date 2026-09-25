@@ -84,6 +84,10 @@ vi.mock('./pricing-engine-v2.server', () => ({
   computeDiscontinuedPrice: () => ({ sell: 10, compareAt: null, marginBefore: 0.5, marginAfter: 0.5 }),
   applyVelocityModifier: (c: unknown) => c,
   enforceMapFloor: (sell: number) => sell,
+  roundUpPsychological: (n: number) => n,
+  ABSOLUTE_PRICE_FLOOR_DEFAULT: 2.99,
+  DEFAULT_CLEARANCE_LADDER: [[30, 0.15], [60, 0.25], [90, 0.35], [10_000, 0.5]],
+  parseClearanceLadder: () => null,
 }))
 
 // One page per call, so the walk's page boundaries are observable.
