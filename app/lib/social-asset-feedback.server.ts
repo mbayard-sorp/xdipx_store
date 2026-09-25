@@ -112,8 +112,8 @@ export interface FeedbackListItem {
   url: string
   provider: string | null
   model: string | null
-  // TODO(#11548): add providerRequestId once social_media_assets carries the
-  // provider_request_id column. It does not exist in db/schema.ts yet.
+  /** Provider generation id (#11548), the handle the owner quotes back. */
+  providerRequestId: string | null
   prompt: string | null
   negativePrompt: string | null
   castSlugs: string[]
@@ -151,6 +151,7 @@ export async function listAssetFeedback(opts: ListFeedbackOptions = {}): Promise
       url: socialMediaAssets.url,
       provider: socialMediaAssets.provider,
       model: socialMediaAssets.model,
+      providerRequestId: socialMediaAssets.providerRequestId,
       prompt: socialMediaAssets.prompt,
       negativePrompt: socialMediaAssets.negativePrompt,
       castSlugs: socialMediaAssets.castSlugs,
@@ -170,6 +171,7 @@ export async function listAssetFeedback(opts: ListFeedbackOptions = {}): Promise
     url: r.url,
     provider: r.provider ?? null,
     model: r.model ?? null,
+    providerRequestId: r.providerRequestId ?? null,
     prompt: r.prompt ?? null,
     negativePrompt: r.negativePrompt ?? null,
     castSlugs: r.castSlugs ?? [],

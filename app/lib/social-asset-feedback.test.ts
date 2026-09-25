@@ -135,12 +135,12 @@ describe('list and summary shape', () => {
     state.joinRows = [{
       assetId: 9, verdict: 'up', reasons: ['more-like-this'], note: null,
       createdAt: new Date('2026-09-25T01:00:00Z'), updatedAt: null,
-      url: 'https://cdn/x.jpg', provider: 'fal', model: 'flux', prompt: 'p', negativePrompt: null,
+      url: 'https://cdn/x.jpg', provider: 'fal', model: 'flux', providerRequestId: 'abc123def456', prompt: 'p', negativePrompt: null,
       castSlugs: null, productHandle: 'h', tags: ['crop:box'], generationBatchId: 'b1', isPicked: false, postId: null,
     }]
     const items = await listAssetFeedback({ limit: 10 })
     expect(items[0]).toEqual({
-      assetId: 9, url: 'https://cdn/x.jpg', provider: 'fal', model: 'flux', prompt: 'p', negativePrompt: null,
+      assetId: 9, url: 'https://cdn/x.jpg', provider: 'fal', model: 'flux', providerRequestId: 'abc123def456', prompt: 'p', negativePrompt: null,
       castSlugs: [], productHandle: 'h', tags: ['crop:box'], generationBatchId: 'b1', isPicked: false, postId: null,
       verdict: 'up', reasons: ['more-like-this'], note: null, ratedAt: '2026-09-25T01:00:00.000Z',
     })
