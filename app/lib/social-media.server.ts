@@ -479,6 +479,15 @@ export interface GenerateCastCompositeResult {
    * on the row regardless of whether this response ever arrives.
    */
   generationBatchId?: string
+  /**
+   * One entry per billed candidate that did NOT survive to `urls` (ticket
+   * #11463): `costs` can be populated while `urls` is empty (a rehost fetch
+   * failure, a crop-to-zone refusal, or — most often on a bodyscape prompt —
+   * a vision-gate rejection), and a caller reading only `urls.length === 0`
+   * has no way to tell that apart from "nothing was even attempted". Absent
+   * or empty when nothing was dropped.
+   */
+  dropReasons?: string[]
 }
 
 /**
@@ -511,9 +520,11 @@ export async function tagIncompleteVisionVerdict(assetId: number | null | undefi
  * vision gate ever sees it, so the gate judges the pixels that would ship,
  * not the ones that would not.
  *
- * Returns `null` when the crop pass refuses the candidate (uncroppable,
- * zone-miss, or a model/transport failure): the caller must drop the
- * candidate exactly like a rehost or vision-gate failure (billed, unshipped).
+ * Returns `{ rejected: true, reason }` when the crop pass refuses the
+ * candidate (uncroppable, zone-miss, or a model/transport failure): the
+ * caller must drop the candidate exactly like a rehost or vision-gate
+ * failure (billed, unshipped), and the reason is what lets a billed-but-empty
+ * result be diagnosed after the fact instead of just logged (ticket #11463).
  * A wide/medium crop, or an axis-free frame, passes the original buffer
  * through untouched — the pass is additive, never a requirement.
  */
@@ -521,7 +532,7 @@ async function maybeCropToZone(
   buffer: Buffer,
   sceneAxes: SceneAxes | undefined,
   aspectRatio: SocialAspect,
-): Promise<{ buffer: Buffer; tag?: string } | null> {
+): Promise<{ buffer: Buffer; tag?: string } | { rejected: true; reason: string }> {
   const cropScale = sceneAxes?.cropScale
   const bodyZone = sceneAxes?.bodyZone
   if (cropScale !== 'close' && cropScale !== 'macro') return { buffer }
@@ -533,8 +544,9 @@ async function maybeCropToZone(
   const { cropImageToZone, formatCropBoxTag } = await import('./social-crop-to-zone.server')
   const result = await cropImageToZone({ data: buffer, mediaType: 'image/jpeg' }, { bodyZone, aspectRatio })
   if (!result.cropped || !result.buffer) {
+    const reason = `crop_rejected:${result.reason ?? 'unknown'}`
     console.error(`[social-media] crop-to-zone rejected candidate (${result.reason}): ${result.notes}`)
-    return null
+    return { rejected: true, reason }
   }
   return { buffer: result.buffer, ...(result.box ? { tag: formatCropBoxTag(result.box) } : {}) }
 }
@@ -542,7 +554,7 @@ async function maybeCropToZone(
 /** One composeSceneFrame call, rehosted, ingested, and vision-gated per candidate. */
 async function generateCastCompositeBatch(
   opts: GenerateCastCompositeOpts,
-): Promise<Required<Pick<GenerateCastCompositeResult, 'urls' | 'filenames' | 'costs' | 'requestIds' | 'assetIds' | 'generationBatchId'>> & Pick<GenerateCastCompositeResult, 'plateRequestId'>> {
+): Promise<Required<Pick<GenerateCastCompositeResult, 'urls' | 'filenames' | 'costs' | 'requestIds' | 'assetIds' | 'generationBatchId' | 'dropReasons'>> & Pick<GenerateCastCompositeResult, 'plateRequestId'>> {
   const { composeSceneFrame } = await import('./fal-video.server')
   const { runVisionGate, recordVisionVerdict } = await import('./social-vision-gate.server')
 
@@ -569,6 +581,10 @@ async function generateCastCompositeBatch(
   const filenames: string[] = []
   const requestIds: (string | undefined)[] = []
   const assetIds: (number | null)[] = []
+  // One entry per billed candidate that did not survive (ticket #11463), so a
+  // caller with `urls: []` and populated `costs` can tell WHY rather than
+  // reading it as an unexplained success.
+  const dropReasons: string[] = []
   const generationBatchId = crypto.randomUUID()
   const scaledPrompt = withProductScale(opts.prompt, opts.scale)
   // Ticket #10560: the fallback flags ride alongside the scene axes so the
@@ -592,13 +608,19 @@ async function generateCastCompositeBatch(
     // spend and the image cap count at generation time, not upload time (#887).
     try {
       const res = await fetch(falUrl)
-      if (!res.ok) continue
+      if (!res.ok) {
+        dropReasons.push(`rehost_fetch_failed:${res.status}`)
+        continue
+      }
       const fetchedBuffer = Buffer.from(await res.arrayBuffer())
       // Crop-to-zone (#10999), before rehost and before the vision gate: a
       // refusal here (uncroppable/zone-miss/model error) drops the candidate
       // exactly like a rehost or vision-gate failure below, still billed.
       const cropOutcome = await maybeCropToZone(fetchedBuffer, opts.sceneAxes, opts.aspectRatio ?? '4:5')
-      if (!cropOutcome) continue
+      if ('rejected' in cropOutcome) {
+        dropReasons.push(cropOutcome.reason)
+        continue
+      }
       const buffer: Buffer = cropOutcome.buffer
       const { url, fileId } = await uploadMoodImageToShopifyFilesWithId(buffer, filename)
       // Library dual-write (#4937): the buffer is already in hand, so no
@@ -635,7 +657,10 @@ async function generateCastCompositeBatch(
       const verdict = await runVisionGate(url)
       if (asset?.id != null) await recordVisionVerdict(asset.id, verdict)
       await tagIncompleteVisionVerdict(asset?.id, verdict)
-      if (!verdict.pass) continue
+      if (!verdict.pass) {
+        dropReasons.push(`vision_gate_fail:${verdict.checkCompleted ? (verdict.notes || 'unspecified') : 'incomplete_verdict'}`)
+        continue
+      }
       urls.push(url)
       filenames.push(filename)
       assetIds.push(asset?.id ?? null)
@@ -643,6 +668,8 @@ async function generateCastCompositeBatch(
       // vision-gate failure above skips both this filename and its request id).
       requestIds.push(frame.requestIds[i])
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      dropReasons.push(`rehost_error:${message}`)
       console.error(`[social-media] cast candidate rehost failed (billed, dropped): ${filename}`, err)
     }
   }
@@ -654,6 +681,7 @@ async function generateCastCompositeBatch(
     requestIds,
     assetIds,
     generationBatchId,
+    dropReasons,
     ...(frame.plateRequestId ? { plateRequestId: frame.plateRequestId } : {}),
   }
 }
@@ -707,7 +735,11 @@ export async function generateCastComposite(
   }
 
   const second = await generateCastCompositeBatch(opts)
-  return { ...second, costs: [...first.costs, ...second.costs] }
+  return {
+    ...second,
+    costs: [...first.costs, ...second.costs],
+    dropReasons: [...first.dropReasons, ...second.dropReasons],
+  }
 }
 
 export interface GenerateSocialImageOpts {
@@ -843,7 +875,7 @@ export async function generateAndUploadSocialImage(
           opts.sceneAxes,
           opts.aspect ?? socialAspectFromImageSize(opts.imageSize),
         )
-        if (!cropOutcome) return null
+        if ('rejected' in cropOutcome) return null
         const buffer = cropOutcome.buffer
         const { url, fileId } = await uploadMoodImageToShopifyFilesWithId(buffer, filename)
         // Library dual-write (#4937), non-fatal, buffer already in hand.

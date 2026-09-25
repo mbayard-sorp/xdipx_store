@@ -11,6 +11,11 @@
  *          plus bodyReferenceMissing?/warning?/productImageFellBack? (#10336, #10341)
  *          plus derivedLengthInches?/derivedScaleCue? when `handle` resolves to a
  *          product carrying `xdipx.specifications` (#10981)
+ *          plus ok:false/reason when every candidate across both attempts was
+ *          billed (`costs` populated) and dropped (`urls` empty) — a rehost
+ *          fetch failure, a crop-to-zone refusal, or a vision-gate rejection.
+ *          HTTP status stays 200 (spend already happened; `costs` still needs
+ *          to reach the caller), so check the body, not just the status (#11463)
  *
  * THE SCENE AXES, on both ops (tickets #10479/#10480): bodyZone, contactMode,
  * cropScale and sceneLocation, each optional, each validated against the
@@ -298,6 +303,33 @@ export async function action({ request }: ActionFunctionArgs) {
         })
       }
 
+      // Ticket #11463: every candidate across both attempts was billed and
+      // dropped (a rehost fetch failure, a crop-to-zone refusal, or a
+      // vision-gate rejection — the reproduced case), so this is a reportable
+      // failure, not a success with nothing to show. `framesBilled > 0`
+      // matters: a genuinely empty (unbilled) result stays a plain 200, same
+      // as before this ticket.
+      const billedButEmpty = result.urls.length === 0 && framesBilled > 0
+      const dropReason = billedButEmpty
+        ? (result.dropReasons?.length ? result.dropReasons.join('; ') : 'billed candidate(s) dropped for an unrecorded reason')
+        : undefined
+      if (billedButEmpty) {
+        const summary = `[social-image:cast] ${handle}: billed ${framesBilled} candidate(s), shipped 0 — ${dropReason}`
+        console.error(`[social-image] ${summary}`)
+        if (runId != null) {
+          try {
+            await recordEvent({ runId, eventType: 'error', summary, agentRole: 'social-media-manager' })
+          } catch (err) {
+            console.error('[social-image] recordEvent failed (non-fatal):', err)
+          }
+        }
+        try {
+          Sentry.captureMessage(summary, 'warning')
+        } catch (err) {
+          console.error('[social-image] Sentry.captureMessage failed (non-fatal):', err)
+        }
+      }
+
       // Ticket #10560: the run is not blocked on a missing body reference or
       // a product-image fallback (a route cannot refuse without killing a
       // whole scheduled run), and the response field below was the ONLY
@@ -332,6 +364,13 @@ export async function action({ request }: ActionFunctionArgs) {
       // see it, so it rides back on the response too.
       return Response.json({
         ...result,
+        // Ticket #11463: `ok:false` + `reason` on the billed-but-empty path,
+        // so a caller that checks the response body (not just the HTTP
+        // status, which stays 200 — the spend already happened and `costs`
+        // still needs to reach the caller) cannot mistake this for success.
+        // Absent entirely on the ordinary success path, matching every
+        // existing caller's shape.
+        ...(billedButEmpty ? { ok: false, reason: dropReason } : {}),
         ...(bodyReferenceMissing ? { bodyReferenceMissing: true } : {}),
         ...(warning ? { warning } : {}),
         ...(productImageFellBack ? { productImageFellBack: true } : {}),
