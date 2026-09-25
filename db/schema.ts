@@ -1728,9 +1728,13 @@ export const mediaAssets = pgTable('media_assets', {
   costUsd:         decimal('cost_usd', { precision: 10, scale: 5 }).notNull().default('0'),
   sourceModel:     varchar('source_model', { length: 64 }),
   videoJobId:      integer('video_job_id').references((): AnyPgColumn => videoJobs.id, { onDelete: 'set null' }),
+  // Provider request id (Atlas/fal/Wavespeed) of the call that produced this
+  // asset, migration 105 (ticket #11552). Null for derived assets (ffmpeg).
+  providerRequestId: varchar('provider_request_id', { length: 64 }),
   createdAt:       timestamp('created_at').notNull().defaultNow(),
 }, t => ({
   jobIdx: index('idx_media_assets_job').on(t.videoJobId),
+  providerRequestIdx: index('idx_media_assets_provider_request_id').on(t.providerRequestId),
 }))
 
 /** One spoken word with real start/end seconds from ElevenLabs with-timestamps. */
