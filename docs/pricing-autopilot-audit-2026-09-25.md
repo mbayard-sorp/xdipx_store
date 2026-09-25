@@ -136,10 +136,40 @@ Each is small enough to ship on its own and each one removes a class of manual w
 
 Items 1–3 are a day of work and clear the backlog. Items 4–5 make it hands-off. Item 6 is the competitive feature. Items 7–8 are hygiene the others make safe.
 
+## 7. Catalog sync sweep (2026-09-25, read-only)
+
+Method: one Shopify bulk-operation export of every product and variant (no per-page API cost, finished in about 20 seconds, no throttling), compared in memory against the Nalpac main feed (18,316 rows) and sale feed (919 rows) fetched once. Both Shopify locations (Nalpac, Entrenue) are active. Per-variant output stayed outside the repo; only the counts are recorded here. The same shape is the right way to build the recurring sweep in §5 item 5: bulk export, never paged reads.
+
+| What | Count | Of |
+|---|---|---|
+| Variants exported | 8,246 | 5,541 products (8,038 ACTIVE, 196 ARCHIVED, 12 DRAFT) |
+| Unit cost matches feed list wholesale | 7,548 | 8,246 |
+| Unit cost **below** feed list wholesale | 696 | 685 of them ACTIVE; 409 carry a "30/40/50/75% Off Sale" tag in the feed, and the unit cost is exactly that percentage off list. The Nalpac app is writing the account's real sale cost, so Nalpac sales already flow into our prices. The other 276 have no sale tag today and may be holding a cost from a sale that ended; only 2 variants ever show a unit cost **above** list, so the app may not raise cost when a sale ends. Needs a check against a Nalpac invoice. |
+| `wholesale_cost` metafield stale vs feed | 986 | harmless today (engine reads unit cost first); delete or refresh it |
+| `original_price` (MSRP) metafield stale vs feed | 982 | 597 below today's MSRP, 385 above |
+| Strike-through shown above Nalpac's current MSRP | 259 | ACTIVE variants; e.g. SKU 74051 strikes $24.99, feed MSRP $18.58 |
+| `map_price` metafield stale vs feed | 353 | matters only for the two MAP brands |
+| **Lovense / Playground priced below MAP** | **4** | all four typed "Discontinued" (so the engine ignores MAP) while Nalpac still carries them in stock (57 to 148 units) and does not flag them discontinued. SKUs 93484, 89719, 93752, 90004. |
+| Shopify quantity matches feed quantity | 8,097 | 8,246; inventory sync is healthy |
+| ACTIVE with zero stock | 1,338 | 940 out of stock at Nalpac but still in the feed; 395 gone from the feed entirely; 10 in stock at Nalpac but zero in Shopify |
+| Not in either feed | 537 | 393 ACTIVE (388 at zero stock, 5 with stock), 144 ARCHIVED (77 still show stock) |
+| Feed rows the discontinued regex flags | 1 | "Boundless AC/DC Dong", a false positive on the `\bDC\b` token. **Nalpac does not mark discontinued products in the feed; they simply disappear from it.** |
+| Product type "Discontinued", ACTIVE, still in the feed | 1,062 | 1,040 with stock. The import code never assigns this type (it skips flagged products instead), so it came from outside the pipeline. It is not a discontinued signal, yet it is what routes 1,501 variants to the clearance ladder and lifts MAP on them. |
+| Variants without the `nalpac_sku` metafield | 13 | never priced by the batch |
+| Priced below cost | 1 | |
+| ACTIVE margin under 25% / 25-40% / 40-50% / 50%+ | 68 / 2,649 / 5,274 / 40 | |
+
+What this changes in the plan:
+
+- **Discontinued must be defined as "absent from the Nalpac main and sale feeds"** (with a short grace period, say 3 consecutive daily feeds, so a one-day feed hiccup does not trigger it), not as the product type and not as the regex. §5 item 5 should write `discontinued_at` from that absence and clear it if the SKU reappears.
+- **The 1,062 "Discontinued"-typed products Nalpac still sells are misfiled.** They need their real product type back (the derivation in `product-type-derive.ts` can supply it from the feed category) so they leave the clearance ladder and, for the four MAP-brand items, MAP applies again.
+- The 388 ACTIVE variants that are gone from the feed and at zero stock are the first batch the new archive rule (§6, decided) would take down.
+- The sweep should run daily as a bulk export and write one row per drift class to the pricing digest, so this never has to be rediscovered by hand.
+
 ## 6. Decisions only the owner can make
 
 1. **Launch-price backfill.** For the ~8,000 products already live, is "today's price at rollout" acceptable as the launch price, or should the badge start only for products published after item 6 ships? Recommendation: today's price; it is a price we genuinely charged.
-2. **Archive rule for discontinued stock.** Archive at zero stock on both sides (recommended), or keep archiving on the feed flag as today?
+2. **Archive rule for discontinued stock.** DECIDED 2026-09-25 (owner): archive only when the product is discontinued **and** stock is zero in every Shopify location. A discontinued product with stock stays live on the clearance ladder.
 3. **Digest threshold.** What size of daily price move deserves a line in the digest? Recommendation: 25%, plus every error.
 
 Everything else in §5 is team-executable under the existing merge policy; the rule values themselves stay the owner's lever.
