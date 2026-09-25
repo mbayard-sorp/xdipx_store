@@ -93,25 +93,20 @@ For every claimed clip, before any payload is built, confirm the product can shi
 handle is on the row (`productPlacements[0].handle`; `productHandle` once the PLANNED Phase 2 field
 lands).
 
-1. **Shopify availability, via the store's own product read.** `GET https://xdipx.com/products/<handle>`.
-   A 404 means the product is unpublished or archived in Shopify. On a 200, read the Product JSON-LD
-   `offers`. Offers are **per variant** (each `InStock` only when that variant is
-   `availableForSale` with `quantityAvailable > 0`, from Shopify via `app/lib/shopify.server.ts`),
-   so the product passes if **any** Offer is `https://schema.org/InStock` and fails if none is. A 5xx
-   is not an answer: treat the product as unverified and fail it. The PDP sits behind the storefront
-   edge cache (`s-maxage=60`, stale-while-revalidate up to 600 s, `app/lib/cache-headers.ts`), so
-   the read can be up to about ten minutes stale; note that in the retro.
+1. **Shopify availability, via `POST /api/team/video-job {op:'stock-check', handle}`.** An uncached
+   Storefront read through `app/lib/shopify.server.ts`'s `getProductStockCheck`, so this check is
+   never behind the PDP's edge cache. `found:false` means the product is unpublished or archived in
+   Shopify; on `found:true`, the product passes if `availableForSale` is `true` (any variant
+   `availableForSale` with `quantityAvailable > 0`) and fails otherwise. A thrown/5xx response from
+   the op is not an answer: treat the product as unverified and fail it. The response also carries
+   `nalpac: {qty, refreshedAt} | null` (looked up by the product's `xdipx.nalpac_sku` metafield
+   against `nalpac_price_history`) — use it as the live cross-check for item 2 below when present,
+   and fall back to the shortlist when it is `null` (no `nalpac_sku` on the product).
 2. **Nalpac stock, as the shortlist recorded it.** When a shortlist exists
    (`metricsJson.videoShortlist`), find the handle and read its `stockCheckedAt`; record that age in
    the retro. A shortlist that exists and omits the handle fails the clip. When no shortlist exists,
    mark the clip `nalpac_unverified` in the retro and proceed on the Shopify read alone. This routine
    cannot read the feed live.
-
-Follow-up ticket (file once as `kind:'code'`, `dedupeKey:'video:stock-check-op'`): "Add
-`POST /api/team/video-job {op:'stock-check', handle}` returning `{availableForSale, totalInventory}`
-read through `app/lib/shopify.server.ts`, team-token auth, read-only, no cache, so the render
-routine checks stock without scraping the PDP's cached JSON-LD. DONE WHEN the op is on main and
-listed in the route header."
 
 **A product that fails either check is not rendered.** Release its claim
 (`episode-release`, reason `out_of_stock` or `stock_unverified`) and claim the batch alternate
