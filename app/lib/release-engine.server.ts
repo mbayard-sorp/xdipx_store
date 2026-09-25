@@ -55,6 +55,7 @@ import {
   classifyChangedFiles,
   createRevertBranch,
   getChecksForRef,
+  getJobVerdictsForSha,
   getPullRequest,
   githubRequest,
   isGithubConfigured,
@@ -147,6 +148,15 @@ export const MIGRATION_DRY_RUN_CHECK = 'migration-dry-run'
  * either does not silently turn the gate into "no check reported, proceed".
  */
 export const ALLOWLIST_CHECK_NAMES: readonly string[] = ['allowlist', 'agent-allowlist']
+
+/**
+ * Every job name the merge gate ever reads out of `facts.checks`. Passed to
+ * `getJobVerdictsForSha` so the Actions-API path (ticket #11396) can resolve
+ * all three without depending on the `Checks` permission at all; `allowlist`
+ * only ever reports on `agents/**` branches, so it is simply absent (not an
+ * error) on every `ticket/*` PR that asks for it too.
+ */
+const REQUIRED_JOB_NAMES: readonly string[] = [REQUIRED_CHECK, MIGRATION_DRY_RUN_CHECK, ...ALLOWLIST_CHECK_NAMES]
 
 /**
  * The OWNER's manual opt-out. Applied by a person, never by this module.
@@ -1370,8 +1380,21 @@ export async function runSelfCheck(opts: { force?: boolean } = {}): Promise<Self
   if (!ref.ok) {
     problems.push(`cannot read refs/heads/${branch}: ${ref.error}`)
   } else {
+    // Checks (getChecksForRef) needs the `Checks` permission, which GitHub
+    // does not grant to fine-grained PATs at all (ticket #11396). Try the
+    // Actions-API path too before failing the self-check: gatherFacts below
+    // can run on Actions alone, so a token that can read Actions but not
+    // Checks can still do the engine's job and must not be reported as
+    // config-broken.
     const checks = await getChecksForRef(ref.data.object.sha, 'release-engine')
-    if (!checks.ok) problems.push(`the token cannot read check runs: ${checks.error}`)
+    if (!checks.ok) {
+      const viaActions = await getJobVerdictsForSha(ref.data.object.sha, [REQUIRED_CHECK], 'release-engine')
+      if (!viaActions.ok) {
+        problems.push(
+          `the token cannot read check runs (Checks API: ${checks.error}; Actions API: ${viaActions.error})`,
+        )
+      }
+    }
   }
 
   if (problems.length === 0) {
@@ -1859,13 +1882,30 @@ async function gatherFacts(
     f.previousFilename ? [f.filename, f.previousFilename] : [f.filename],
   )
 
+  // Actions is the primary source (ticket #11396): it is a normal grantable
+  // fine-grained permission, unlike `Checks`, which fine-grained PATs cannot
+  // hold at all. getChecksForRef still runs and fills in anything Actions did
+  // not resolve (a check name outside REQUIRED_JOB_NAMES, or a job Actions
+  // could not find yet) whenever the token happens to be able to read it, so
+  // a classic PAT or GitHub App token loses no coverage.
+  const actionsRes = await getJobVerdictsForSha(pr.headSha, REQUIRED_JOB_NAMES, 'release-engine')
   const checksRes = await getChecksForRef(pr.headSha, 'release-engine')
-  if (!checksRes.ok) {
-    console.warn(`${LOG} cannot read checks for PR #${pr.number}, skipping: ${checksRes.error}`)
+  if (!actionsRes.ok && !checksRes.ok) {
+    console.warn(
+      `${LOG} cannot read checks for PR #${pr.number}, skipping `
+      + `(Actions: ${actionsRes.error}; Checks: ${checksRes.error})`,
+    )
     return null
   }
   const checks: Record<string, string | null> = {}
-  for (const c of checksRes.data.checks) checks[c.name] = c.status === 'completed' ? c.conclusion : null
+  if (actionsRes.ok) {
+    for (const [name, verdict] of Object.entries(actionsRes.data)) checks[name] = verdict.conclusion
+  }
+  if (checksRes.ok) {
+    for (const c of checksRes.data.checks) {
+      if (!(c.name in checks)) checks[c.name] = c.status === 'completed' ? c.conclusion : null
+    }
+  }
 
   // A migration-only PR whose SQL is provably additive rides the ordinary lane
   // instead of waiting on the owner, because the build-time apply step will run
