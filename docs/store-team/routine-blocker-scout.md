@@ -53,6 +53,30 @@ Each of these is a known hiding place. Details and probe choices are in the agen
 | Tracker "Asks for the owner" unanswered | Program drift | none |
 | Migration file on main, table/column absent from the DB | Migrations are applied by hand here, so this is the most common silent blocker | `table_exists`, `column_exists` |
 
+## Step 2.5 — Release-path faults are priority 1, never `blocked`
+
+A fault on the release path does not degrade one lane, it stops every lane's throughput for as
+long as it is down, so it is filed and ranked differently from an ordinary lane failure (owner
+ruling, 2026-09-24, ticket #11383, filed after a 22-hour release-engine outage sat at `blocked`
+priority 2 behind four unrelated P1 rows while 12 green PRs sat stranded and every merge in that
+window happened by the owner's own hand instead).
+
+1. **The named surfaces.** `/cron/release-engine`, `/cron/main-ci-watch`, the `check` job in
+   `.github/workflows/ci.yml`, GitHub Actions runner provisioning, and
+   `.github/workflows/agent-allowlist.yml`.
+2. **Priority 1, regardless of the generic cron-alarm severity score.** A blocker whose failing
+   surface is on the list above is filed at priority 1 even when the ordinary cron-liveness rules
+   would score it lower. State the rationale inline on the row: these surfaces do not degrade one
+   lane, they stop every lane, so their cost is the whole estate's throughput for as long as they
+   are down.
+3. **Never left at ticket status `blocked`.** `blocked` is a parking lot nothing surfaces to the
+   owner. A release-path fault stays `approved` with an owner blocker attached instead, so it
+   reaches the 13:30 email rather than waiting for someone to think to look in the blocked queue.
+4. **Cross-reference concurrent release-path faults.** When two release-path faults are open at
+   once, the blocker detail for each names the other and says plainly that fixing one alone
+   changes nothing. This is the standard to preserve, not rewrite: both #230 and #231 did it
+   correctly on 2026-09-24.
+
 ## Step 3 — Mine yesterday's conversations
 
 The part nothing else does. Full method and the trigger-phrase vocabulary are in the agent
