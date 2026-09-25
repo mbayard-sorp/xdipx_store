@@ -74,11 +74,23 @@ export async function action({ request }: ActionFunctionArgs) {
       return Response.json({ ok: false, error: `Shopify update failed: ${msg}` }, { status: 500 })
     }
 
+    // Recompute marginAfter from the price actually applied — for edit-approve
+    // this differs from the queued newSell the row was computed against, and
+    // leaving the stale value would show the human's override at the wrong
+    // (often negative/zero) margin in the audit log and /admin/pricing.
+    const appliedSellNum = parseFloat(sellPrice)
+    const cost = row.newCost != null ? parseFloat(row.newCost) : null
+    const marginAfter =
+      cost != null && appliedSellNum > 0
+        ? String(Math.round(((appliedSellNum - cost) / appliedSellNum) * 10000) / 10000)
+        : row.marginAfter
+
     await db
       .update(pricingAuditLog)
       .set({
         status: 'applied',
         newSell: sellPrice,
+        marginAfter,
         rationale: `${row.rationale ?? ''} [approved by ${actingAs}${actionType === 'edit-approve' ? ` at $${parseFloat(sellPrice).toFixed(2)}` : ''}]`.trim(),
       })
       .where(eq(pricingAuditLog.id, auditId))

@@ -45,7 +45,21 @@ const cropPhoto = vi.hoisted(() => (
 ) => ((cropScale === 'macro' || cropScale === 'close') && m.bodyReferencePhotoUrl ? m.bodyReferencePhotoUrl : m.photoUrl))
 vi.mock('~/lib/sanity.server', () => ({ getApprovedCastMembers: vi.fn().mockResolvedValue([]), presenterPhotoUrlForCrop: cropPhoto }))
 vi.mock('~/lib/feed-processor.server', () => ({ getPipelineSetting: vi.fn().mockResolvedValue(null) }))
-vi.mock('~/lib/db.server', () => ({ db: { select: () => ({ from: () => ({ where: () => Promise.resolve([]) }) }) } }))
+// `.where()` resolves directly (the 'list' op's socialPosts fanout query) AND
+// exposes `.limit()` (the stock-check op's nalpac_price_history lookup) — both
+// call shapes are used by this route, so the stub supports either.
+const dbRows = vi.hoisted(() => ({ current: [] as unknown[] }))
+vi.mock('~/lib/db.server', () => ({
+  db: {
+    select: () => ({
+      from: () => ({
+        where: () => Object.assign(Promise.resolve(dbRows.current), { limit: () => Promise.resolve(dbRows.current) }),
+      }),
+    }),
+  },
+}))
+const stockCheckMock = vi.hoisted(() => vi.fn())
+vi.mock('~/lib/shopify.server', () => ({ getProductStockCheck: stockCheckMock }))
 vi.mock('~/lib/api-error.server', () => ({
   apiError: (_scope: string, err: unknown) =>
     Response.json({ error: err instanceof Error ? err.message : 'failed' }, { status: 500 }),
@@ -87,6 +101,8 @@ beforeEach(() => {
     jobs: [{ jobId: 'j1', estCostUsd: 0.47, axes: { hook: 'Hook one' } }],
   })
   enqueueMock.mockResolvedValue({ jobId: 'j1', estCostUsd: 0.47 })
+  dbRows.current = []
+  stockCheckMock.mockReset()
 })
 
 describe('enqueue-set', () => {
@@ -294,6 +310,63 @@ describe('production mode', () => {
     const res = await post({ ...single, mode: 'b-roll', scriptJson: talkingScript })
     expect(res.status).toBe(400)
     expect(await res.text()).toMatch(/talking\|voiceover/)
+  })
+})
+
+/**
+ * stock-check (ticket #11154): the Thursday render routine's Step 3 stock
+ * re-check used to scrape the cached PDP JSON-LD (up to ~10 minutes stale).
+ * This op reads Shopify directly (getProductStockCheck bypasses `cached()`)
+ * and cross-references the Nalpac feed quantity by nalpac_sku.
+ */
+describe('stock-check', () => {
+  it('rejects a missing handle', async () => {
+    const res = await post({ op: 'stock-check' })
+    expect(res.status).toBe(400)
+    expect(stockCheckMock).not.toHaveBeenCalled()
+  })
+
+  it('returns found:false for a product Shopify does not have', async () => {
+    stockCheckMock.mockResolvedValue(null)
+    const res = await post({ op: 'stock-check', handle: 'gone-for-real' })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ found: false, handle: 'gone-for-real' })
+  })
+
+  it('reports availability, inventory, and the Nalpac quantity by nalpac_sku', async () => {
+    stockCheckMock.mockResolvedValue({
+      handle: 'satin-wand',
+      availableForSale: true,
+      totalInventory: 12,
+      nalpacSku: 'AB123',
+      variants: [{ id: 'gid://shopify/ProductVariant/1', title: 'Default', availableForSale: true, quantityAvailable: 12 }],
+    })
+    const observedAt = new Date('2026-09-24T08:00:00.000Z')
+    dbRows.current = [{ qty: 40, observedAt }]
+    const res = await post({ op: 'stock-check', handle: 'satin-wand' })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({
+      found: true,
+      handle: 'satin-wand',
+      availableForSale: true,
+      totalInventory: 12,
+      variants: [{ id: 'gid://shopify/ProductVariant/1', title: 'Default', availableForSale: true, quantityAvailable: 12 }],
+      nalpac: { qty: 40, refreshedAt: observedAt.toISOString() },
+    })
+    expect(stockCheckMock).toHaveBeenCalledWith('satin-wand')
+  })
+
+  it('returns nalpac:null when the product carries no nalpac_sku', async () => {
+    stockCheckMock.mockResolvedValue({
+      handle: 'no-sku-product',
+      availableForSale: false,
+      totalInventory: 0,
+      nalpacSku: null,
+      variants: [],
+    })
+    const res = await post({ op: 'stock-check', handle: 'no-sku-product' })
+    const json = await res.json() as { nalpac: unknown }
+    expect(json.nalpac).toBeNull()
   })
 })
 

@@ -276,7 +276,7 @@ export interface OpenLoop { loopKey: string; openedByEpisode: number; question: 
  * open-loop ledger: every opens_loop_key on a rendering-or-beyond episode that
  * no later episode's pays_off_loop_key closes.
  */
-export async function listEpisodes(opts: { seriesSlug?: string; status?: string; limit?: number } = {}): Promise<{
+export async function listEpisodes(opts: { seriesSlug?: string; status?: string; limit?: number; batchId?: string; isReserve?: boolean } = {}): Promise<{
   series: VideoSeriesRow[]
   episodes: VideoEpisodeRow[]
   openLoops: OpenLoop[]
@@ -288,9 +288,14 @@ export async function listEpisodes(opts: { seriesSlug?: string; status?: string;
   const seriesIds = series.map(s => s.id)
   if (opts.seriesSlug && seriesIds.length === 0) return { series: [], episodes: [], openLoops: [] }
 
+  // batchId + isReserve (ticket #11152): how the render routine finds a
+  // failed slot's batch alternate — `{status: 'approved', batchId, isReserve:
+  // true}` — before claiming it by id via the new claimNextEpisode({episodeId}).
   const conds = [
     seriesIds.length ? inArray(videoEpisodes.seriesId, seriesIds) : undefined,
     opts.status ? eq(videoEpisodes.productionStatus, opts.status) : undefined,
+    opts.batchId ? eq(videoEpisodes.batchId, opts.batchId) : undefined,
+    opts.isReserve != null ? eq(videoEpisodes.isReserve, opts.isReserve) : undefined,
   ].filter((c): c is NonNullable<typeof c> => !!c)
   const episodes = await db.select().from(videoEpisodes)
     .where(conds.length ? and(...conds) : undefined)
@@ -761,8 +766,26 @@ export async function listOwnerScriptEdits(opts: { episodeId?: number; limit?: n
  * (a null slot counts as ready), else the approved evergreen reserve, else
  * null. Stamps render_started_at + production_status 'rendering' so a second
  * claim in the same window cannot double-render.
+ *
+ * `episodeId` (ticket #11152) targets one specific row instead of the
+ * oldest-first search — the render routine's way to claim a slot's batch
+ * alternate once it has found that row's id via `listEpisodes({status:
+ * 'approved', batchId, isReserve: true})`. Same guard as the untargeted path
+ * (only an `approved` row is claimable, same rendering stamp), so a row
+ * already claimed or never approved returns null exactly like an exhausted
+ * queue does; the caller (the route) is what turns that into a 409 instead of
+ * a 404, since "no such approved row" reads differently for an explicit ask
+ * than for an empty queue. Replaces the interim 6-call hold-and-release loop
+ * in routine-video-render.md's Step 3.
  */
-export async function claimNextEpisode(): Promise<VideoEpisodeRow | null> {
+export async function claimNextEpisode(opts: { episodeId?: number } = {}): Promise<VideoEpisodeRow | null> {
+  if (opts.episodeId != null) {
+    const updated = await db.update(videoEpisodes)
+      .set({ productionStatus: 'rendering', renderStartedAt: new Date(), updatedAt: new Date() })
+      .where(and(eq(videoEpisodes.id, opts.episodeId), eq(videoEpisodes.productionStatus, 'approved')))
+      .returning()
+    return updated[0] ?? null
+  }
   const now = new Date()
   const pick = async (reserve: boolean) => {
     const conds = [
