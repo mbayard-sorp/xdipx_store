@@ -430,6 +430,89 @@ describe('runVisionGateOnImage', () => {
   })
 })
 
+// Ticket #11468, P0. Owner found two production verdicts that read pass:true
+// on nippleOccluded/genitaliaAbsent while `notes` confidently described a
+// frame that did not match the actual pixels (asset 675: "no nipples...
+// visible" against a visible nipple; asset 698: "wearing underwear" against
+// a bare hip). A single hallucinated read graded against its own description
+// is exactly what one model call cannot self-catch, so a clean exposure read
+// now requires a second, independent call to agree before `pass:true` ships.
+describe('exposure-check confirmation pass (ticket #11468)', () => {
+  it('does not call a second time when the first read already fails an exposure check (no false-pass risk to confirm)', async () => {
+    const callVision = vi.fn(async () => NIPPLE_FAIL_RESPONSE)
+    const verdict = await runVisionGateOnImage({ data: 'ZmFrZQ==', mediaType: 'image/jpeg' }, { callVision })
+    expect(callVision).toHaveBeenCalledTimes(1)
+    expect(verdict.pass).toBe(false)
+  })
+
+  it('confirms a clean read and passes when both independent calls agree', async () => {
+    const callVision = vi.fn(async () => CLEAN_RESPONSE)
+    const verdict = await runVisionGateOnImage({ data: 'ZmFrZQ==', mediaType: 'image/jpeg' }, { callVision })
+    expect(callVision).toHaveBeenCalledTimes(2)
+    expect(verdict.pass).toBe(true)
+  })
+
+  it('fails closed on nippleOccluded when the confirmation call disagrees with a clean first read', async () => {
+    const callVision = vi.fn()
+      .mockResolvedValueOnce(CLEAN_RESPONSE)
+      .mockResolvedValueOnce({ ...CLEAN_RESPONSE, checks: { ...CLEAN_RESPONSE.checks, nippleOccluded: 'fail' }, notes: 'visible nipple, left breast, partially shadowed' })
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const verdict = await runVisionGateOnImage({ data: 'ZmFrZQ==', mediaType: 'image/jpeg' }, { callVision })
+
+    expect(callVision).toHaveBeenCalledTimes(2)
+    expect(verdict.pass).toBe(false)
+    expect(verdict.checkCompleted).toBe(true)
+    expect(verdict.checks!.nippleOccluded).toBe('fail')
+    // Unrelated checks are untouched by a disagreement scoped to exposure.
+    expect(verdict.checks!.handAnatomy).toBe('pass')
+    expect(verdict.notes).toContain('visible nipple, left breast')
+    expect(verdict.notes).toContain('clean, nothing anomalous')
+    errorSpy.mockRestore()
+  })
+
+  it('fails closed on multiple exposure checks when the confirmation call disagrees on more than one', async () => {
+    const callVision = vi.fn()
+      .mockResolvedValueOnce(CLEAN_RESPONSE)
+      .mockResolvedValueOnce({
+        ...CLEAN_RESPONSE,
+        checks: { ...CLEAN_RESPONSE.checks, nippleOccluded: 'fail', genitaliaAbsent: 'fail' },
+        notes: 'bare chest and exposed genitalia',
+      })
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const verdict = await runVisionGateOnImage({ data: 'ZmFrZQ==', mediaType: 'image/jpeg' }, { callVision })
+
+    expect(verdict.pass).toBe(false)
+    expect(verdict.checks!.nippleOccluded).toBe('fail')
+    expect(verdict.checks!.genitaliaAbsent).toBe('fail')
+    expect(verdict.checks!.anusNotVisible).toBe('pass')
+  })
+
+  it('fails closed when the confirmation call itself cannot produce a verdict, rather than trusting the single first read', async () => {
+    const callVision = vi.fn()
+      .mockResolvedValueOnce(CLEAN_RESPONSE)
+      .mockRejectedValue(new Error('anthropic 529'))
+
+    const verdict = await runVisionGateOnImage({ data: 'ZmFrZQ==', mediaType: 'image/jpeg' }, { callVision })
+
+    expect(verdict.pass).toBe(false)
+    expect(verdict.checkCompleted).toBe(true)
+    expect(verdict.checks!.nippleOccluded).toBe('fail')
+    expect(verdict.checks!.genitaliaAbsent).toBe('fail')
+    expect(verdict.checks!.anusNotVisible).toBe('fail')
+    expect(verdict.notes).toContain('could not complete')
+  })
+
+  it('does not run a confirmation pass on the licensed plug-along-the-cleft frame when both reads agree', async () => {
+    const callVision = vi.fn(async () => LICENSED_PLUG_FRAME_RESPONSE)
+    const verdict = await runVisionGateOnImage({ data: 'ZmFrZQ==', mediaType: 'image/jpeg' }, { callVision })
+    expect(callVision).toHaveBeenCalledTimes(2)
+    expect(verdict.pass).toBe(true)
+    expect(verdict.checks!.anusNotVisible).toBe('pass')
+  })
+})
+
 // Ticket #10990/#11004. A prose reply from the model is a formatting slip,
 // not a real refusal, and must not read as a genuine anatomy fail.
 describe('JSON parse failure retry', () => {
@@ -442,9 +525,15 @@ describe('JSON parse failure retry', () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     const verdict = await runVisionGateOnImage({ data: 'ZmFrZQ==', mediaType: 'image/jpeg' }, { callVision })
 
-    expect(callVision).toHaveBeenCalledTimes(2)
+    // CLEAN_RESPONSE passes all three exposure checks, so the independent
+    // confirmation pass (ticket #11468) runs too — a second full
+    // getOneVerdict, itself subject to the same parse-failure retry this mock
+    // always triggers on a non-strict call: 2 calls for the first read, 2 more
+    // for the confirmation read.
+    expect(callVision).toHaveBeenCalledTimes(4)
     expect(callVision).toHaveBeenNthCalledWith(1, 'ZmFrZQ==', 'image/jpeg')
     expect(callVision).toHaveBeenNthCalledWith(2, 'ZmFrZQ==', 'image/jpeg', { strict: true })
+    expect(callVision).toHaveBeenNthCalledWith(4, 'ZmFrZQ==', 'image/jpeg', { strict: true })
     expect(verdict.pass).toBe(true)
     expect(verdict.checkCompleted).toBe(true)
     // Part (c) of the fix: the raw model text is logged, not swallowed.

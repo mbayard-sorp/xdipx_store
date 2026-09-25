@@ -309,17 +309,19 @@ function resolve(deps?: VisionGateDeps): Required<VisionGateDeps> {
 }
 
 /**
- * Run the vision gate against an already-decoded image (base64 data plus its
- * media type). Shared core for `runVisionGate` (url-based, fetches first) and
- * any caller that already holds the image bytes in memory, e.g. a local
- * generation buffer that has not been uploaded anywhere yet (the Notebook
- * hero path, gen-notebook-art.ts). Never throws, same fail-closed contract.
+ * The three checks that together implement the owner's 2026-09-20 nudity
+ * definition (ticket #11468). These are the ones a single confident-but-wrong
+ * model read can turn into an account-banning false pass, so they are the
+ * ones a second independent read has to confirm before `pass:true` reaches a
+ * caller — see `confirmExposureChecks`.
  */
-export async function runVisionGateOnImage(
+export const EXPOSURE_CHECK_NAMES: readonly VisionCheckName[] = ['nippleOccluded', 'genitaliaAbsent', 'anusNotVisible']
+
+/** One model call, parsed into a verdict, with the existing JSON-parse-failure retry. Never throws. */
+async function getOneVerdict(
   image: { data: string; mediaType: string },
-  deps?: VisionGateDeps,
+  d: Required<VisionGateDeps>,
 ): Promise<VisionVerdict> {
-  const d = resolve(deps)
   try {
     const parsed = await d.callVision(image.data, image.mediaType)
     if (!isValidVerdictShape(parsed)) {
@@ -359,6 +361,86 @@ export async function runVisionGateOnImage(
     const message = err instanceof Error ? err.message : String(err)
     return failClosedVerdict(`Vision gate check could not complete: ${message}`)
   }
+}
+
+/**
+ * Confirm a clean exposure read with a second, independent model call before
+ * trusting it (ticket #11468, P0).
+ *
+ * Incident: two verdicts pulled directly from production both read
+ * `pass:true` on `nippleOccluded`/`genitaliaAbsent` while describing a frame
+ * that did not match the actual pixels (asset 675: "no nipples... visible"
+ * against a frame with a plainly visible nipple; asset 698: "wearing
+ * underwear" against a bare hip with a linen throw). In both cases the model
+ * produced a specific, confident, factually WRONG description and graded
+ * against that description rather than the image — a single hallucinated
+ * read is exactly what one model call cannot catch on its own, because
+ * `notes` and `checks` come from the same pass and agree with each other by
+ * construction.
+ *
+ * A second, independently-sampled call (fresh context, no memory of the
+ * first call's answer) is unlikely to hallucinate the identical specific
+ * error twice, so REQUIRING the two to agree on the three checks the owner's
+ * nudity definition turns on converts one confident mistake into two
+ * mistakes that have to coincide. Only runs when the first read is already
+ * clean on all three (the risky case — a first-pass FAIL already fails
+ * closed correctly and costs nothing extra to confirm), so this doubles
+ * model spend only on the images that would otherwise ship. On disagreement,
+ * or when the confirmation call itself cannot produce a valid verdict, this
+ * fails closed: the two disagreeing checks flip to `'fail'`, `pass` becomes
+ * `false`, and `notes` carries both reads so a human reviewing the block can
+ * see exactly what the two calls disagreed about.
+ */
+async function confirmExposureChecks(
+  image: { data: string; mediaType: string },
+  first: VisionVerdict,
+  d: Required<VisionGateDeps>,
+): Promise<VisionVerdict> {
+  if (!first.checkCompleted || !first.checks) return first
+  const allClean = EXPOSURE_CHECK_NAMES.every((name) => first.checks![name] === 'pass')
+  if (!allClean) return first
+
+  const second = await getOneVerdict(image, d)
+  if (!second.checkCompleted || !second.checks) {
+    return {
+      ...first,
+      pass: false,
+      checks: { ...first.checks, ...Object.fromEntries(EXPOSURE_CHECK_NAMES.map((n) => [n, 'fail' as const])) },
+      notes: `Exposure confirmation pass could not complete (${second.notes}); failing closed rather than trusting a single read. First read: ${first.notes}`,
+    }
+  }
+
+  const disagreements = EXPOSURE_CHECK_NAMES.filter((name) => second.checks![name] !== first.checks![name])
+  if (disagreements.length === 0) return first
+
+  console.error('[social-vision-gate] exposure confirmation pass disagreed with the first read; failing closed', {
+    disagreements, firstChecks: first.checks, secondChecks: second.checks,
+  })
+  return {
+    ...first,
+    pass: false,
+    checks: {
+      ...first.checks,
+      ...Object.fromEntries(disagreements.map((n) => [n, 'fail' as const])),
+    },
+    notes: `Exposure confirmation disagreement on ${disagreements.join(', ')}; failing closed. First read: "${first.notes}" Second read: "${second.notes}"`,
+  }
+}
+
+/**
+ * Run the vision gate against an already-decoded image (base64 data plus its
+ * media type). Shared core for `runVisionGate` (url-based, fetches first) and
+ * any caller that already holds the image bytes in memory, e.g. a local
+ * generation buffer that has not been uploaded anywhere yet (the Notebook
+ * hero path, gen-notebook-art.ts). Never throws, same fail-closed contract.
+ */
+export async function runVisionGateOnImage(
+  image: { data: string; mediaType: string },
+  deps?: VisionGateDeps,
+): Promise<VisionVerdict> {
+  const d = resolve(deps)
+  const first = await getOneVerdict(image, d)
+  return confirmExposureChecks(image, first, d)
 }
 
 /**
