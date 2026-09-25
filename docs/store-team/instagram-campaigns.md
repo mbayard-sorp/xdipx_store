@@ -774,6 +774,28 @@ object could physically be where it is. So the §3.2c gravity rule is the reject
 the defect nameable; it is not by itself the fix. A render that silently changes the briefed pose,
 contact plane or body zone is the same defect class as a floating product.
 
+**Why the render disobeys, and what §3.2c's gravity rule cannot yet deliver on its own.** An
+owner-directed test on 2026-09-25 found the mechanism. Every cast `bodyReferencePhoto` is a single
+static plate — seated upright and square to the camera, arms hanging straight at the sides, knees
+and thighs pressed together
+(`scripts/generate-cast-body-references.ts`) — and the cast composite path EDITS that fixed pose.
+So a frame needing a gripping hand asks the editor to invent arm geometry the plate does not
+contain, and adhesion becomes the path of least resistance by construction. A test frame briefed
+with an emphatic, explicit grip instruction came back with no hand in frame at all and the product
+pushed off the left edge, unsupported: emphatic prompting made it worse, not better. This
+retro-explains both exemplars above. Row 304's flat open palm is the reference plate's own flat palm
+surviving the edit. Row 308's shin placement is the plate's angled-down leg, the only leg surface
+available.
+
+**Therefore, until the hand-reference work in ticket #11464 lands, the gravity rule's hand-grip and
+horizontal-plane answers are aspirational rather than reliably renderable, and a brief must not be
+marked compliant merely because it says "gripped" or "resting on a horizontal plane."** Compliance
+is judged on the returned image, every time. When a held frame cannot be rendered with a credible
+grip after two attempts, do not ship the adhered version and do not quietly fall back to a clothed
+non-campaign post (the retreat §3.6's related discussion already diagnosed as the wrong rescue). Say
+so in the run summary and let the frame be missing. A missing frame is visible; an adhered one is
+not.
+
 ### 3.3 Carousel arc: six slides
 
 The previously filed four-slide reveal shape (metaphor → cast reaction → product reveal →
