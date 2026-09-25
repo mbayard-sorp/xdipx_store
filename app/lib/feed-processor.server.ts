@@ -330,22 +330,166 @@ export interface DiscontinuedSweepResult {
  * scoring half is gone and only the sweep remains. `scoreProduct` is still
  * exported for the product-manager chat tools.
  */
+export interface DiscontinuedStateSweep {
+  /** Carried (imported, unarchived) SKUs checked against the feeds. */
+  carried:        number
+  /** SKUs now in the discontinued state (absent past grace, or feed-flagged). */
+  discontinued:   number
+  /** Absent SKUs still inside the grace window. */
+  pendingAbsence: number
+  /** `xdipx.discontinued_at` written this run (first time for that SKU). */
+  marked:         number
+  /** Discontinued SKUs archived this run (zero stock in every location). */
+  archived:       number
+  /** Discontinued SKUs kept live because stock remains (clearance ladder). */
+  keptWithStock:  number
+  /** SKUs back in the feed; their discontinued_at was cleared. */
+  returned:       number
+  graceDays:      number
+  errors:         Array<{ sku: string; message: string }>
+}
+
+const KV_ABSENCE_LEDGER   = 'pricing:feed-absence-ledger'
+const KV_DISCONTINUED_SET = 'pricing:discontinued-written'
+const DISCONTINUED_GRACE_SETTING = 'discontinued_grace_days'
+
+/**
+ * Nightly discontinued sweep (owner direction 2026-09-25).
+ *
+ * Old behavior: archive any carried product the feed's discontinued regex
+ * matched, stock or no stock. Two problems: Nalpac does not flag discontinued
+ * products (the regex matched 1 row of 18,316, a false positive), so real
+ * discontinuations were never caught; and archiving hid sellable stock that
+ * the clearance ladder exists to sell down.
+ *
+ * New behavior, in order:
+ *   1. A carried SKU absent from every Nalpac feed for `discontinued_grace_days`
+ *      consecutive nightly checks (default 3) is discontinued as of the first
+ *      missed day. A feed-flagged row is discontinued immediately.
+ *   2. Discontinued -> write `xdipx.discontinued_at` once (the v2 engine routes
+ *      the product to the discontinued group's rules and starts the ladder).
+ *   3. Archive only when the product is discontinued AND every variant has
+ *      zero inventory across all Shopify locations. Stock stays on sale.
+ *   4. A SKU back in the feed has its discontinued_at cleared.
+ */
 export async function runDiscontinuedSweep(): Promise<{
   discontinuedSkus: string[]
   discontinuedSweep: DiscontinuedSweepResult
+  state: DiscontinuedStateSweep
 }> {
-  const products = await fetchNalpacFeed()
+  const { fetchAllNalpacFeeds } = await import('./nalpac-feeds.server')
+  const { classifyFeedAbsence, DISCONTINUED_GRACE_DAYS_DEFAULT } = await import('./discontinued-state')
+  const { adminGraphQL, updateProductMetafield } = await import('./shopify.server')
 
-  const discontinuedSkus = products.filter(isDiscontinued).map(p => p.SKU)
+  const feeds = await fetchAllNalpacFeeds()
+  if (feeds.errors.length > 0) {
+    console.warn('[feed-processor] discontinued sweep: feed errors', feeds.errors)
+  }
+  const present = new Set(feeds.snapshots.keys())
+  const flagged = new Set<string>()
+  for (const [sku, snap] of feeds.snapshots) {
+    const row = snap.raw.mainRow ?? snap.raw.saleRow
+    if (row && isDiscontinued(row as { 'Sub-Category'?: string; 'Product Title'?: string; 'Product Description'?: string })) flagged.add(sku)
+  }
 
-  const discontinuedSweep = await archiveDiscontinuedProducts(discontinuedSkus)
+  const graceRaw = await getPipelineSetting(DISCONTINUED_GRACE_SETTING)
+  const graceDays = Math.max(1, Math.min(30, parseInt(graceRaw ?? '', 10) || DISCONTINUED_GRACE_DAYS_DEFAULT))
+
+  const carriedRows = await db
+    .select({ sku: dealHistory.sku, productId: dealHistory.shopifyProductId, status: dealHistory.status })
+    .from(dealHistory)
+  const productBySku = new Map<string, string>()
+  for (const r of carriedRows) {
+    if (r.status !== 'archived' && r.productId) productBySku.set(r.sku, r.productId)
+  }
+  const carried = [...productBySku.keys()]
+
+  // A main-feed outage must not read as "everything discontinued". If the
+  // feeds returned nothing usable, leave the ledger alone and do nothing.
+  if (present.size === 0) {
+    console.warn('[feed-processor] discontinued sweep: no feed rows; skipping')
+    const empty: DiscontinuedStateSweep = { carried: carried.length, discontinued: 0, pendingAbsence: 0, marked: 0, archived: 0, keptWithStock: 0, returned: 0, graceDays, errors: [{ sku: '*', message: 'no feed rows' }] }
+    return { discontinuedSkus: [], discontinuedSweep: { flagged: 0, archived: 0, alreadyArchived: 0, notImported: 0, errors: [] }, state: empty }
+  }
+
+  const ledger = (await kvGet<Record<string, string>>(KV_ABSENCE_LEDGER)) ?? {}
+  const written = new Set((await kvGet<string[]>(KV_DISCONTINUED_SET)) ?? [])
+  const today = new Date().toISOString().slice(0, 10)
+
+  const cls = classifyFeedAbsence({ carried, present, flagged, ledger, today, graceDays })
+  await kvSet(KV_ABSENCE_LEDGER, cls.ledger)
+
+  const state: DiscontinuedStateSweep = {
+    carried: carried.length, discontinued: cls.discontinued.length, pendingAbsence: cls.pending,
+    marked: 0, archived: 0, keptWithStock: 0, returned: 0, graceDays, errors: [],
+  }
+
+  // 2. Mark the state on Shopify (once per SKU).
+  for (const { sku, since } of cls.discontinued) {
+    if (written.has(sku)) continue
+    const productId = productBySku.get(sku)!
+    try {
+      await updateProductMetafield(productId, 'discontinued_at', since, 'date')
+      written.add(sku)
+      state.marked++
+    } catch (err) {
+      state.errors.push({ sku, message: `discontinued_at write: ${err instanceof Error ? err.message : String(err)}` })
+    }
+  }
+
+  // 4. Back in the feed: clear the state.
+  for (const sku of cls.returned) {
+    if (!written.has(sku)) continue
+    const productId = productBySku.get(sku)!
+    try {
+      await adminGraphQL(`
+        mutation ClearDiscontinued($m: [MetafieldIdentifierInput!]!) {
+          metafieldsDelete(metafields: $m) { userErrors { message } }
+        }`, { m: [{ ownerId: `gid://shopify/Product/${productId.replace('gid://shopify/Product/', '')}`, namespace: 'xdipx', key: 'discontinued_at' }] })
+      written.delete(sku)
+      state.returned++
+    } catch (err) {
+      state.errors.push({ sku, message: `discontinued_at clear: ${err instanceof Error ? err.message : String(err)}` })
+    }
+  }
+  await kvSet(KV_DISCONTINUED_SET, [...written])
+
+  // 3. Archive only at zero stock in every location. Inventory read in
+  // batches of 50 products per call.
+  const zeroStockSkus: string[] = []
+  const disc = cls.discontinued.map(d => d.sku)
+  for (let i = 0; i < disc.length; i += 50) {
+    const batch = disc.slice(i, i + 50)
+    const ids = batch.map(sku => `gid://shopify/Product/${productBySku.get(sku)!.replace('gid://shopify/Product/', '')}`)
+    try {
+      const data = await adminGraphQL<{ nodes: Array<{ id: string; status: string; variants: { nodes: Array<{ inventoryQuantity: number | null }> } } | null> }>(`
+        query DiscontinuedStock($ids: [ID!]!) {
+          nodes(ids: $ids) { ... on Product { id status variants(first: 50) { nodes { inventoryQuantity } } } }
+        }`, { ids })
+      data.nodes.forEach((node, idx) => {
+        const sku = batch[idx]!
+        if (!node) return
+        if (node.status === 'ARCHIVED') return
+        const totalQty = node.variants.nodes.reduce((sum, v) => sum + Math.max(0, v.inventoryQuantity ?? 0), 0)
+        if (totalQty === 0) zeroStockSkus.push(sku)
+        else state.keptWithStock++
+      })
+    } catch (err) {
+      state.errors.push({ sku: batch.join(','), message: `stock read: ${err instanceof Error ? err.message : String(err)}` })
+    }
+  }
+
+  const discontinuedSweep = await archiveDiscontinuedProducts(zeroStockSkus)
+  state.archived = discontinuedSweep.archived
+  state.errors.push(...discontinuedSweep.errors)
+
   console.info(
-    `[feed-processor] discontinued sweep: ${discontinuedSweep.flagged} flagged, ` +
-    `${discontinuedSweep.archived} archived, ${discontinuedSweep.alreadyArchived} already-archived, ` +
-    `${discontinuedSweep.notImported} not-imported, ${discontinuedSweep.errors.length} errors`,
+    `[feed-processor] discontinued sweep: carried=${state.carried} discontinued=${state.discontinued} ` +
+    `(grace ${graceDays}d, ${state.pendingAbsence} still in grace) marked=${state.marked} ` +
+    `archived=${state.archived} kept-with-stock=${state.keptWithStock} returned=${state.returned} errors=${state.errors.length}`,
   )
 
-  return { discontinuedSkus, discontinuedSweep }
+  return { discontinuedSkus: disc, discontinuedSweep, state }
 }
 
 /**

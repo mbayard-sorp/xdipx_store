@@ -13,27 +13,102 @@ import {
   computeDiscontinuedPrice,
   applyVelocityModifier,
   enforceMapFloor,
+  roundUpPsychological,
+  ABSOLUTE_PRICE_FLOOR_DEFAULT,
+  DEFAULT_CLEARANCE_LADDER,
+  parseClearanceLadder,
 } from './pricing-engine-v2.server'
+import type { ClearanceLadder } from './pricing-engine-v2.server'
 import {
   resolvePricingConfig,
   buildRationale,
 } from './pricing-rules.server'
 import { getGroupForProductType } from './pricing-rules.server'
 import { computeVelocityBucket } from './pricing-velocity.server'
-import { updateVariantPricing, normalizeMetafieldKey } from './shopify.server'
+import { updateVariantPricing, normalizeMetafieldKey, setVariantLaunchPrice } from './shopify.server'
 import type { VelocityBucket } from './pricing-engine-v2.server'
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-export type ApprovalMode = 'aggressive' | 'balanced' | 'conservative' | 'review_all'
+/**
+ * `autopilot` (owner direction 2026-09-25): the configured rules are the
+ * approval. No change ever waits in a queue; the only hard stops are the
+ * margin floor and MAP, and both are clamps the engine applies before the
+ * write, so a rule violation is impossible by construction. The daily digest
+ * email (server/cron.pricing-batch-recompute.ts) replaces the pending list.
+ */
+export type ApprovalMode = 'aggressive' | 'balanced' | 'conservative' | 'review_all' | 'autopilot'
 
 export const DEFAULT_MODE_THRESHOLD: Record<ApprovalMode, number> = {
   aggressive:   0.10,
   balanced:     0.05,
   conservative: 0.02,
   review_all:   0,
+  // Never consulted (autopilot skips the delta gate); 1 = "any size" for
+  // anything that reads the table generically.
+  autopilot:    1,
+}
+
+/** pipeline_settings key: 'true' restores MSRP as a sell-price ceiling. Default off. */
+export const MSRP_CEILING_SETTING_KEY = 'pricing_msrp_ceiling_enabled'
+
+/**
+ * pipeline_settings key: minimum |price delta| (fraction) for a change to be
+ * listed in the autopilot daily digest. Default 0.25.
+ */
+export const DIGEST_MIN_DELTA_SETTING_KEY = 'pricing_digest_min_delta_pct'
+export const DIGEST_MIN_DELTA_DEFAULT = 0.25
+
+/**
+ * Whether MSRP caps the sell price this run. Off unless the valve is 'true'
+ * (owner direction 2026-09-25: MSRP is irrelevant except as a strike-through;
+ * only Lovense/Playground MAP binds). Read once per run.
+ */
+export async function getMsrpCeilingEnabled(): Promise<boolean> {
+  try {
+    const rows = await db
+      .select({ value: pipelineSettings.value })
+      .from(pipelineSettings)
+      .where(eq(pipelineSettings.key, MSRP_CEILING_SETTING_KEY))
+      .limit(1)
+    return rows[0]?.value === 'true'
+  } catch {
+    return false
+  }
+}
+
+/** pipeline_settings key: JSON [[days, pct], ...] clearance markdown steps. */
+export const CLEARANCE_LADDER_SETTING_KEY = 'pricing_clearance_ladder'
+
+export async function getClearanceLadder(): Promise<ClearanceLadder> {
+  try {
+    const rows = await db
+      .select({ value: pipelineSettings.value })
+      .from(pipelineSettings)
+      .where(eq(pipelineSettings.key, CLEARANCE_LADDER_SETTING_KEY))
+      .limit(1)
+    return parseClearanceLadder(rows[0]?.value) ?? DEFAULT_CLEARANCE_LADDER
+  } catch {
+    return DEFAULT_CLEARANCE_LADDER
+  }
+}
+
+/** The product type whose rule row is the discontinued (clearance) group. */
+export const DISCONTINUED_PRODUCT_TYPE = 'Discontinued'
+
+export async function getDigestMinDelta(): Promise<number> {
+  try {
+    const rows = await db
+      .select({ value: pipelineSettings.value })
+      .from(pipelineSettings)
+      .where(eq(pipelineSettings.key, DIGEST_MIN_DELTA_SETTING_KEY))
+      .limit(1)
+    const n = parseFloat(rows[0]?.value ?? '')
+    if (isFinite(n) && n >= 0 && n <= 1) return n
+  } catch { /* fall through */ }
+  return DIGEST_MIN_DELTA_DEFAULT
 }
 
 // Back-compat alias used by the pure decideStatus default + dry-run fallback.
@@ -66,6 +141,7 @@ export async function getModeThresholds(): Promise<Record<ApprovalMode, number>>
     // fall through to defaults
   }
   merged.review_all = 0
+  merged.autopilot  = 1
   return merged
 }
 
@@ -101,11 +177,18 @@ export function decideStatus(p: DecideStatusParams): AuditStatus {
     return 'skipped_no_change'
   }
 
-  if (marginAfter < marginFloor) return p.msrpBelowFloor ? 'pending' : 'rejected'
+  // Autopilot never queues. A floor breach can only reach here with the MSRP
+  // ceiling valve on (msrpBelowFloor); rejecting it is the honest outcome, and
+  // the digest lists rejects, so it is still seen. Below-floor and below-MAP
+  // stay hard stops in every mode.
+  if (marginAfter < marginFloor) {
+    return p.msrpBelowFloor && mode !== 'autopilot' ? 'pending' : 'rejected'
+  }
 
   const mapApplies = mapBehavior !== 'ignore_map' && map != null
   if (mapApplies && newPrice < map!) return 'rejected'
 
+  if (mode === 'autopilot') return 'auto_applied'
   if (mode === 'review_all') return 'pending'
 
   const threshold = p.threshold ?? MODE_THRESHOLD[mode]
@@ -130,7 +213,7 @@ async function getApprovalMode(): Promise<ApprovalMode> {
       .where(eq(pipelineSettings.key, 'pricing_approval_mode'))
       .limit(1)
     const val = rows[0]?.value
-    if (val === 'aggressive' || val === 'balanced' || val === 'conservative' || val === 'review_all') return val
+    if (val === 'aggressive' || val === 'balanced' || val === 'conservative' || val === 'review_all' || val === 'autopilot') return val
   } catch {
     // fall through
   }
@@ -263,6 +346,10 @@ interface RunContext {
   thresholds: Record<ApprovalMode, number>
   /** Vendors whose MAP the engine honors; every other brand ignores MAP. */
   mapBrands:  string[]
+  /** Whether MSRP caps the sell price (pricing_msrp_ceiling_enabled). */
+  msrpCeiling: boolean
+  /** Clearance markdown steps for discontinued items. */
+  ladder: ClearanceLadder
 }
 
 // Minimal variant/product data the compute core needs. Matches both the
@@ -273,6 +360,8 @@ interface VariantInput {
   price:          number
   compareAtPrice: number | null
   unitCost:       number | null
+  /** xdipx.launch_price; null until recorded. */
+  launchPrice?:   number | null
 }
 
 interface ProductInput {
@@ -296,7 +385,7 @@ async function recomputeFromData(
   ctx: RunContext,
 ): Promise<RecomputeVariantResult> {
   const { variantId } = variant
-  const { trigger, mode, thresholds, mapBrands } = ctx
+  const { trigger, mode, thresholds, mapBrands, msrpCeiling, ladder } = ctx
 
   // Prefer Shopify's native variant Cost per item (inventoryItem.unitCost).
   // Fall back to the legacy xdipx.wholesale_cost product metafield only if unset.
@@ -304,17 +393,35 @@ async function recomputeFromData(
   // MAP is a per-brand contractual floor (owner rule 2026-08-29): honor the
   // feed's MAP only for the MAP brands. Every other vendor resolves MAP to null
   // so it prices off the markup rules instead of being held at MAP/MSRP.
-  const map         = mapAppliesToVendor(product.vendor, mapBrands)
-    ? product.metafields.mapPrice
-    : null
   const msrp        = product.metafields.originalPrice
   const oldSell     = variant.price
   const oldCompare  = variant.compareAtPrice
   const productType = product.productType
   const sku         = variant.sku
 
-  const cfg   = await resolvePricingConfig(productType)
-  const group = await getGroupForProductType(productType)
+  // Discontinued is a STATE, not a product type (owner direction 2026-09-25).
+  // `xdipx.discontinued_at` is written by the nightly sweep the first day a
+  // carried SKU has been absent from every Nalpac feed past the grace period.
+  // A product in that state prices off the discontinued group's rules whatever
+  // its product type says, and MAP no longer binds it. The legacy type-based
+  // routing is kept for anything still typed "Discontinued".
+  const discontinuedAt   = product.metafields.discontinuedAt ?? null
+  const discontinuedByState = discontinuedAt != null
+  const ruleType = discontinuedByState ? DISCONTINUED_PRODUCT_TYPE : productType
+
+  const cfg   = await resolvePricingConfig(ruleType)
+  const group = await getGroupForProductType(ruleType)
+
+  const isDiscontinued = discontinuedByState || group?.usesClearanceLadder === true || productType === DISCONTINUED_PRODUCT_TYPE
+
+  // MAP is a per-brand contractual floor (owner rule 2026-08-29): honor the
+  // feed's MAP only for the MAP brands, and never for a discontinued item
+  // (owner direction 2026-09-25: discontinued Lovense/Playground may clear
+  // below MAP). Every other case resolves MAP to null so it prices off the
+  // markup rules instead of being held at MAP/MSRP.
+  const map         = !isDiscontinued && mapAppliesToVendor(product.vendor, mapBrands)
+    ? product.metafields.mapPrice
+    : null
 
   let velocityBucket: VelocityBucket | undefined
   let effectiveCfg = cfg
@@ -327,34 +434,32 @@ async function recomputeFromData(
     effectiveCfg = { ...shifted, groupId: cfg.groupId, subGroupId: cfg.subGroupId }
   }
 
-  const isDiscontinued = group?.usesClearanceLadder === true || productType === 'Discontinued'
-
   let newSell:    number | null = null
   let newCompare: number | null = null
   let daysDisc:   number | undefined
+  let clearancePct: number | undefined
   let msrpBelowFloor = false
 
   if (isDiscontinued) {
-    const discontinuedAt = product.metafields.discontinuedAt ?? null
     daysDisc = discontinuedAt
       ? Math.max(0, Math.floor((Date.now() - discontinuedAt.getTime()) / 86_400_000))
       : 0
-    const result = computeDiscontinuedPrice({ cost, msrp, daysDiscontinued: daysDisc, cfg: effectiveCfg })
+    clearancePct = (ladder.find(([maxDays]) => daysDisc! <= maxDays) ?? ladder[ladder.length - 1])?.[1]
+    const result = computeDiscontinuedPrice({ cost, msrp, daysDiscontinued: daysDisc, cfg: effectiveCfg, msrpCeiling, ladder, launchPrice: variant.launchPrice ?? null })
     if (result) { newSell = result.sell; newCompare = result.compare_at }
   } else {
-    const result = computePrice({ cost, map, msrp, cfg: effectiveCfg })
+    const result = computePrice({ cost, map, msrp, cfg: effectiveCfg, msrpCeiling, launchPrice: variant.launchPrice ?? null })
     if (result) {
       newSell = result.sell
       newCompare = result.compare_at
       msrpBelowFloor = result.msrpBelowFloor
-      // Absolute price floor: queue instead of auto-applying prices below the floor
+      // Absolute price floor. This used to return 'pending' before any audit
+      // row was written, so a cheap accessory was never priced and never
+      // queued, silently, forever. Price it at the floor instead and let
+      // decideStatus judge the change like any other.
       if (result.belowAbsoluteFloor) {
-        return {
-          status: 'pending',
-          auditId: null,
-          applied: false,
-          error: `sell price $${result.sell.toFixed(2)} is below absolute floor`,
-        }
+        newSell = roundUpPsychological(ABSOLUTE_PRICE_FLOOR_DEFAULT)
+        if (newCompare != null && newCompare <= newSell) newCompare = null
       }
     }
   }
@@ -391,6 +496,7 @@ async function recomputeFromData(
     msrpBelowFloor,
     ...(velocityBucket !== undefined ? { velocityBucket }             : {}),
     ...(daysDisc       !== undefined ? { daysDisc }                  : {}),
+    ...(clearancePct   !== undefined ? { clearancePct }              : {}),
     ...(map            != null       ? { map }                       : {}),
     ...(msrp           != null       ? { msrp }                      : {}),
     ...(deltaPct       != null       ? { deltaPct }                  : {}),
@@ -431,6 +537,22 @@ async function recomputeFromData(
     auditFailed = true
   }
 
+  // One open decision per variant. Every daily pass used to write a fresh
+  // 'pending' row for a variant that was already waiting, so 117 variants had
+  // become 2,450 rows by 2026-09-25 and the prune could never touch them. The
+  // newest row is the live one; older pending rows for the same variant are
+  // closed as rejected (prunable) with a pointer to their successor.
+  if (auditId != null) {
+    try {
+      await db
+        .update(pricingAuditLog)
+        .set({ status: 'rejected', rationale: sql`'Superseded by audit #' || ${String(auditId)} || ': ' || coalesce(${pricingAuditLog.rationale}, '')` })
+        .where(sql`${pricingAuditLog.variantId} = ${variantId} AND ${pricingAuditLog.status} = 'pending' AND ${pricingAuditLog.id} <> ${auditId}`)
+    } catch (err) {
+      console.error('[pricing-apply-v2] supersede of older pending rows failed (ignored):', err)
+    }
+  }
+
   let applied = false
   let applyError: string | undefined
 
@@ -467,6 +589,22 @@ async function recomputeFromData(
     }
   }
 
+  // Launch price (owner direction 2026-09-25). Recorded whatever the
+  // compare-at strategy says, so the anchor is already genuine by the time a
+  // group switches to launch_price. First sight: the price the variant is
+  // live at after this run (a price we actually charge). Later: raised only
+  // when the engine itself prices above it, so a strike-through can never sit
+  // below the current price and never grows on its own. Never set from MSRP.
+  try {
+    const liveSell = applied ? newSell : oldSell
+    const recorded = variant.launchPrice ?? null
+    if (recorded == null || (applied && newSell > recorded + 0.005)) {
+      await setVariantLaunchPrice(variantId, liveSell)
+    }
+  } catch (err) {
+    console.warn(`[pricing-apply-v2] launch_price write failed for ${sku} (ignored):`, err)
+  }
+
   return {
     status,
     auditId,
@@ -496,6 +634,7 @@ export async function recomputeVariant(
           price: string
           compareAtPrice: string | null
           inventoryItem: { unitCost: { amount: string } | null } | null
+          launchPrice: { value: string } | null
           product: {
             id: string
             handle: string
@@ -508,6 +647,7 @@ export async function recomputeVariant(
       }>(
         `query V($id:ID!){productVariant(id:$id){id sku title price compareAtPrice
           inventoryItem{unitCost{amount}}
+          launchPrice: metafield(namespace:"xdipx",key:"launch_price"){value}
           product{id handle title vendor productType
             metafields(keys:["xdipx.nalpac_sku","xdipx.wholesale_cost","xdipx.map_price","xdipx.original_price","xdipx.map_restricted","xdipx.discontinued_at"],first:10){nodes{namespace key value}}}}}`,
         { id: variantId },
@@ -541,17 +681,20 @@ export async function recomputeVariant(
       price:          parseFloat(data.price),
       compareAtPrice: data.compareAtPrice != null ? parseFloat(data.compareAtPrice) : null,
       unitCost:       data.inventoryItem?.unitCost?.amount != null ? parseFloat(data.inventoryItem.unitCost.amount) : null,
+      launchPrice:    data.launchPrice?.value ? parseFloat(data.launchPrice.value) : null,
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     return { status: 'skipped_no_change', auditId: null, applied: false, error: `shopify fetch: ${msg}` }
   }
 
-  const mode       = await getApprovalMode()
-  const thresholds = await getModeThresholds()
-  const mapBrands  = await getMapBrands()
+  const mode        = await getApprovalMode()
+  const thresholds  = await getModeThresholds()
+  const mapBrands   = await getMapBrands()
+  const msrpCeiling = await getMsrpCeilingEnabled()
+  const ladder      = await getClearanceLadder()
 
-  return recomputeFromData(product, variant, { trigger, mode, thresholds, mapBrands })
+  return recomputeFromData(product, variant, { trigger, mode, thresholds, mapBrands, msrpCeiling, ladder })
 }
 
 
@@ -617,6 +760,8 @@ export async function dryRunRuleChange(opts: {
   const mode = await getApprovalMode()
   const thresholds = await getModeThresholds()
   const mapBrands = await getMapBrands()
+  const msrpCeiling = await getMsrpCeilingEnabled()
+  const ladder = await getClearanceLadder()
 
   const result: DryRunResult = {
     totalAffected: 0,
@@ -642,10 +787,12 @@ export async function dryRunRuleChange(opts: {
 
       try {
         const productType = (product as { productType?: string | null }).productType ?? null
-        const group = await getGroupForProductType(productType)
+        const discontinuedAt = product.metafields.discontinuedAt ?? null
+        const ruleType = discontinuedAt != null ? DISCONTINUED_PRODUCT_TYPE : productType
+        const group = await getGroupForProductType(ruleType)
 
         // Build base config from resolver, then patch with overrides.
-        const base = await resolvePricingConfig(productType)
+        const base = await resolvePricingConfig(ruleType)
         let cfg = { ...base }
 
         // Apply overrides narrowest-to-broadest (product_type > sub_group > group > global)
@@ -653,7 +800,7 @@ export async function dryRunRuleChange(opts: {
           'global:global',
           group?.groupId ? `group:${group.groupId}` : null,
           group?.subGroupId ? `sub_group:${group.subGroupId}` : null,
-          productType ? `product_type:${productType}` : null,
+          ruleType ? `product_type:${ruleType}` : null,
         ].filter(Boolean) as string[]
 
         for (const key of scopeKeys) {
@@ -664,30 +811,29 @@ export async function dryRunRuleChange(opts: {
         // Prefer Shopify's native variant Cost per item (inventoryItem.unitCost).
         // Fall back to the legacy xdipx.wholesale_cost product metafield only if unset.
         const cost = variant.unitCost ?? product.metafields.wholesaleCost
-        // MAP is brand-scoped (owner rule 2026-08-29): non-MAP brands ignore MAP.
+        const isDiscontinued = discontinuedAt != null || group?.usesClearanceLadder === true || productType === DISCONTINUED_PRODUCT_TYPE
+        // MAP is brand-scoped (owner rule 2026-08-29) and lifted for discontinued items.
         const vendor = (product as { vendor?: string | null }).vendor ?? null
-        const map = mapAppliesToVendor(vendor, mapBrands) ? product.metafields.mapPrice : null
+        const map = !isDiscontinued && mapAppliesToVendor(vendor, mapBrands) ? product.metafields.mapPrice : null
         const msrp = product.metafields.originalPrice
         const oldSell = variant.price
 
         if (cost == null) continue
 
-        const isDiscontinued = group?.usesClearanceLadder === true || productType === 'Discontinued'
         let newSell: number | null = null
 
         if (isDiscontinued) {
-          const discontinuedAt = product.metafields.discontinuedAt ?? null
           const daysDiscontinued = discontinuedAt
             ? Math.max(0, Math.floor((Date.now() - discontinuedAt.getTime()) / 86_400_000))
             : 0
-          const r = computeDiscontinuedPrice({ cost, msrp, daysDiscontinued, cfg })
+          const r = computeDiscontinuedPrice({ cost, msrp, daysDiscontinued, cfg, msrpCeiling, ladder })
           if (r) newSell = r.sell
         } else {
-          const r = computePrice({ cost, map, msrp, cfg })
+          const r = computePrice({ cost, map, msrp, cfg, msrpCeiling })
           if (r) {
             newSell = r.sell
-            // Treat below-floor results as "will queue" in dry-run
-            if (r.belowAbsoluteFloor) { newSell = null }
+            // Mirrors recomputeFromData: below the absolute floor prices AT the floor.
+            if (r.belowAbsoluteFloor) newSell = roundUpPsychological(ABSOLUTE_PRICE_FLOOR_DEFAULT)
           }
         }
 
@@ -710,7 +856,7 @@ export async function dryRunRuleChange(opts: {
         } else {
           const threshold = thresholds[mode]
           const deltaPct = oldSell > 0 ? Math.abs(newSell - oldSell) / oldSell : 1
-          if (mode === 'review_all' || deltaPct > threshold) {
+          if (mode !== 'autopilot' && (mode === 'review_all' || deltaPct > threshold)) {
             result.willQueue++
           } else {
             result.withinThreshold++
@@ -918,10 +1064,12 @@ export async function recomputeCatalog(opts: {
   // data so the only per-variant Shopify call is the apply mutation.
   // (Refetching every variant + settings per variant blew past the 300s
   // serverless limit on manual runs.)
-  const mode       = await getApprovalMode()
-  const thresholds = await getModeThresholds()
-  const mapBrands  = await getMapBrands()
-  const ctx: RunContext = { trigger: opts.trigger, mode, thresholds, mapBrands }
+  const mode        = await getApprovalMode()
+  const thresholds  = await getModeThresholds()
+  const mapBrands   = await getMapBrands()
+  const msrpCeiling = await getMsrpCeilingEnabled()
+  const ladder      = await getClearanceLadder()
+  const ctx: RunContext = { trigger: opts.trigger, mode, thresholds, mapBrands, msrpCeiling, ladder }
 
   for (;;) {
     // Budget is checked at the page boundary, before fetching more work.
@@ -969,6 +1117,73 @@ export async function recomputeCatalog(opts: {
 
   counts.durationMs = now() - startedAt
   return counts
+}
+
+// ---------------------------------------------------------------------------
+// Autopilot daily digest
+// ---------------------------------------------------------------------------
+
+export interface PricingDigestRow {
+  sku:        string | null
+  productType: string | null
+  oldSell:    number
+  newSell:    number
+  deltaPct:   number
+  marginAfter: number | null
+  status:     string
+  rationale:  string | null
+}
+
+export interface PricingDigest {
+  day:         string
+  applied:     number
+  rejected:    number
+  errors:      number
+  /** Applied changes whose |delta| >= minDelta, largest first. */
+  bigMoves:    PricingDigestRow[]
+  /** Every rejected row (a floor or MAP hard stop) and every apply error. */
+  problems:    PricingDigestRow[]
+}
+
+/**
+ * What the owner reads instead of an approval queue. One call per completed
+ * batch day: every applied change over the digest threshold, plus every
+ * reject and apply error, so nothing the engine did is invisible.
+ */
+export async function getPricingDigest(day: string, minDelta: number): Promise<PricingDigest> {
+  const rows = await db.execute(sql`
+    SELECT sku, product_type, old_sell::float AS old_sell, new_sell::float AS new_sell,
+           margin_after::float AS margin_after, status, rationale
+      FROM pricing_audit_log
+     WHERE occurred_at::date = ${day}::date
+       AND trigger IN ('batch', 'batch_continuation', 'batch_catchup', 'webhook')
+       AND status IN ('auto_applied', 'applied', 'rejected', 'pending')
+  `)
+  const digest: PricingDigest = { day, applied: 0, rejected: 0, errors: 0, bigMoves: [], problems: [] }
+  for (const raw of rows.rows as Array<Record<string, unknown>>) {
+    const oldSell = Number(raw['old_sell'] ?? 0)
+    const newSell = Number(raw['new_sell'] ?? 0)
+    const rationale = (raw['rationale'] as string | null) ?? null
+    const row: PricingDigestRow = {
+      sku:         (raw['sku'] as string | null) ?? null,
+      productType: (raw['product_type'] as string | null) ?? null,
+      oldSell,
+      newSell,
+      deltaPct:    oldSell > 0 ? (newSell - oldSell) / oldSell : 1,
+      marginAfter: raw['margin_after'] == null ? null : Number(raw['margin_after']),
+      status:      String(raw['status']),
+      rationale,
+    }
+    const isApplyError = row.status === 'pending' && (rationale ?? '').includes('[apply error:')
+    if (row.status === 'rejected') { digest.rejected++; digest.problems.push(row) }
+    else if (isApplyError) { digest.errors++; digest.problems.push(row) }
+    else if (row.status === 'auto_applied' || row.status === 'applied') {
+      digest.applied++
+      if (Math.abs(row.deltaPct) >= minDelta) digest.bigMoves.push(row)
+    }
+  }
+  digest.bigMoves.sort((a, b) => Math.abs(b.deltaPct) - Math.abs(a.deltaPct))
+  return digest
 }
 
 // ---------------------------------------------------------------------------

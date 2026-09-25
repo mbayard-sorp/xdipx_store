@@ -233,6 +233,8 @@ export interface RationaleParams {
   trigger:        string
   velocityBucket?: VelocityBucket
   daysDisc?:      number
+  /** Markdown fraction the ladder picked for daysDisc (owner-editable ladder). */
+  clearancePct?:  number
   mapHeld:        boolean
   marginAfter:    number | null
   map?:           number | null
@@ -253,9 +255,11 @@ export function buildRationale(p: RationaleParams): string {
 
   // Discontinued clearance ladder.
   if (p.daysDisc != null) {
-    const tier = p.daysDisc <= 30 ? '15%' :
-                 p.daysDisc <= 60 ? '25%' :
-                 p.daysDisc <= 90 ? '35%' : '50%'
+    const tier = p.clearancePct != null
+      ? `${Math.round(p.clearancePct * 100)}%`
+      : p.daysDisc <= 30 ? '15%' :
+        p.daysDisc <= 60 ? '25%' :
+        p.daysDisc <= 90 ? '35%' : '50%'
     const sell = p.newSell != null ? `$${p.newSell.toFixed(2)}` : '?'
     return `Discontinued day ${p.daysDisc} -> clearance tier ${tier} off cost-based target -> ${sell}.`
   }

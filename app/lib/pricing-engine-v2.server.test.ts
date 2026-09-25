@@ -7,6 +7,8 @@ import {
   roundPsychological,
   roundUpPsychological,
   ABSOLUTE_PRICE_FLOOR_DEFAULT,
+  parseClearanceLadder,
+  compareAtFor,
   type PricingConfig,
 } from './pricing-engine-v2.server'
 
@@ -660,5 +662,117 @@ describe('roundUpPsychological', () => {
     for (const n of [1.01, 4.5, 9.999, 23.53, 100.0]) {
       expect(roundUpPsychological(n)).toBeGreaterThanOrEqual(n)
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// MSRP ceiling valve (pricing_msrp_ceiling_enabled, default off)
+// ---------------------------------------------------------------------------
+
+describe('computePrice — msrpCeiling=false', () => {
+  const cfg = {
+    target_margin_pct: 0.45,
+    margin_floor_pct: 0.30,
+    map_behavior: 'at_map' as const,
+    compare_at_strategy: 'msrp' as const,
+    velocity_modifier_enabled: false,
+  }
+
+  it('ignores an MSRP below the floor-satisfying price and never sets msrpBelowFloor', () => {
+    // cost 45, stored MSRP 20 (the SKU 70983 case): with the ceiling on this
+    // pins sell at 19.99 and queues forever; with it off it prices off cost.
+    const r = computePrice({ cost: 45, map: null, msrp: 20, cfg, msrpCeiling: false })
+    expect(r).not.toBeNull()
+    expect(r!.sell).toBeGreaterThanOrEqual(45 / 0.7)
+    expect(r!.msrpBelowFloor).toBe(false)
+    expect(r!.compare_at).toBeNull() // MSRP below sell: no strike-through
+  })
+
+  it('still uses MSRP as the compare-at strike-through when it sits above the sell price', () => {
+    const r = computePrice({ cost: 10, map: null, msrp: 40, cfg, msrpCeiling: false })
+    expect(r!.sell).toBeLessThan(40)
+    expect(r!.compare_at).toBe(40)
+  })
+
+  it('default (ceiling on) is unchanged: MSRP still caps the sell price', () => {
+    const r = computePrice({ cost: 45, map: null, msrp: 20, cfg })
+    expect(r!.sell).toBeLessThanOrEqual(20)
+    expect(r!.msrpBelowFloor).toBe(true)
+  })
+})
+
+describe('computeDiscontinuedPrice — msrpCeiling=false', () => {
+  const cfg = { target_margin_pct: 0.5, margin_floor_pct: 0.3 }
+
+  it('does not cap the clearance price at a stale MSRP but keeps it as compare-at when higher', () => {
+    const free = computeDiscontinuedPrice({ cost: 45, msrp: 20, daysDiscontinued: 0, cfg, msrpCeiling: false })
+    expect(free!.sell).toBeGreaterThanOrEqual(45 / 0.7)
+    expect(free!.compare_at).toBeNull()
+    const high = computeDiscontinuedPrice({ cost: 10, msrp: 60, daysDiscontinued: 0, cfg, msrpCeiling: false })
+    expect(high!.compare_at).toBe(60)
+  })
+})
+
+describe('clearance ladder (owner-editable)', () => {
+  const cfg = { target_margin_pct: 0.5, margin_floor_pct: 0.3 }
+
+  it('parseClearanceLadder accepts [[days, pct]] and sorts + caps it', () => {
+    const l = parseClearanceLadder('[[60,0.25],[30,0.15]]')!
+    expect(l.map(s => s[0])).toEqual([30, 60, 10_000])
+    expect(l[2]![1]).toBe(0.25)
+  })
+
+  it('parseClearanceLadder rejects malformed input', () => {
+    expect(parseClearanceLadder('')).toBeNull()
+    expect(parseClearanceLadder('nope')).toBeNull()
+    expect(parseClearanceLadder('[]')).toBeNull()
+    expect(parseClearanceLadder('[[30,1.5]]')).toBeNull()
+    expect(parseClearanceLadder('[[-1,0.1]]')).toBeNull()
+  })
+
+  it('computeDiscontinuedPrice uses the supplied ladder step for the age', () => {
+    const ladder = parseClearanceLadder('[[10,0.10],[20,0.40]]')!
+    const day5  = computeDiscontinuedPrice({ cost: 10, msrp: 100, daysDiscontinued: 5,  cfg, ladder, msrpCeiling: false })!
+    const day15 = computeDiscontinuedPrice({ cost: 10, msrp: 100, daysDiscontinued: 15, cfg, ladder, msrpCeiling: false })!
+    const day99 = computeDiscontinuedPrice({ cost: 10, msrp: 100, daysDiscontinued: 99, cfg, ladder, msrpCeiling: false })!
+    // target 20 -> 10% off = 18 -> 17.99 ; 40% off = 12 -> 11.99 ; beyond last step stays at last pct
+    expect(day5.sell).toBe(17.99)
+    expect(day15.sell).toBe(14.99) // 12 rounds to 11.99 but floor 10/0.7=14.29 -> 14.99
+    expect(day99.sell).toBe(day15.sell)
+  })
+})
+
+describe('compare-at under compare_at_strategy=launch_price', () => {
+  const cfg = {
+    target_margin_pct: 0.45,
+    margin_floor_pct: 0.30,
+    map_behavior: 'at_map' as const,
+    compare_at_strategy: 'launch_price' as const,
+    velocity_modifier_enabled: false,
+  }
+
+  it('compareAtFor strikes the launch price only when the saving clears the badge floor', () => {
+    expect(compareAtFor({ strategy: 'launch_price', sell: 89.99, msrp: 120, launchPrice: 100 })).toBe(100)
+    expect(compareAtFor({ strategy: 'launch_price', sell: 94.99, msrp: 120, launchPrice: 100 })).toBeNull()
+    expect(compareAtFor({ strategy: 'launch_price', sell: 30, msrp: 120, launchPrice: null })).toBeNull()
+    expect(compareAtFor({ strategy: 'msrp', sell: 30, msrp: 120, launchPrice: 100 })).toBe(120)
+    expect(compareAtFor({ strategy: 'none', sell: 30, msrp: 120, launchPrice: 100 })).toBeNull()
+  })
+
+  it('computePrice never uses MSRP as the strike under launch_price', () => {
+    // cost 15 -> target 27.27 -> 26.99; launched at 100: 73% off launch, MSRP ignored
+    const r = computePrice({ cost: 15, map: null, msrp: 120, cfg, msrpCeiling: false, launchPrice: 100 })!
+    expect(r.sell).toBe(26.99)
+    expect(r.compare_at).toBe(100)
+    const fresh = computePrice({ cost: 15, map: null, msrp: 120, cfg, msrpCeiling: false, launchPrice: null })!
+    expect(fresh.compare_at).toBeNull()
+  })
+
+  it('computeDiscontinuedPrice honors launch_price when the rules ask for it, MSRP otherwise', () => {
+    const base = { cost: 10, msrp: 60, daysDiscontinued: 0, msrpCeiling: false, launchPrice: 40 }
+    const lp = computeDiscontinuedPrice({ ...base, cfg: { target_margin_pct: 0.5, margin_floor_pct: 0.3, compare_at_strategy: 'launch_price' } })!
+    const ms = computeDiscontinuedPrice({ ...base, cfg: { target_margin_pct: 0.5, margin_floor_pct: 0.3 } })!
+    expect(lp.compare_at).toBe(40)
+    expect(ms.compare_at).toBe(60)
   })
 })

@@ -3,7 +3,34 @@
 // until cutover.
 
 export type MapBehavior = 'at_map' | 'above_map_only' | 'ignore_map'
-export type CompareAtStrategy = 'msrp' | 'none'
+/**
+ * What the strike-through anchors on. `launch_price` (owner direction
+ * 2026-09-25): the price the variant first went live at on xdipx, a price we
+ * actually charged, so a cost drop reads as "X% off $100" instead of a
+ * manufacturer's MSRP we never verified. `msrp` is the legacy anchor.
+ */
+export type CompareAtStrategy = 'msrp' | 'launch_price' | 'none'
+
+/** Below this saving the launch-price strike-through is not shown (aligns with the badge floor). */
+export const LAUNCH_BADGE_MIN_PCT = 0.10
+
+/** Pure: the compare-at for a sell price under a strategy, or null for no strike. */
+export function compareAtFor(params: {
+  strategy: CompareAtStrategy
+  sell: number
+  msrp: number | null
+  launchPrice: number | null | undefined
+  minPct?: number
+}): number | null {
+  const { strategy, sell, msrp } = params
+  const minPct = params.minPct ?? LAUNCH_BADGE_MIN_PCT
+  if (strategy === 'launch_price') {
+    const lp = params.launchPrice ?? null
+    return lp != null && lp > 0 && sell <= lp * (1 - minPct) + 1e-9 ? lp : null
+  }
+  if (strategy === 'msrp') return msrp != null && sell < msrp ? msrp : null
+  return null
+}
 export type VelocityBucket = 'top' | 'normal' | 'slow' | 'dead'
 
 export interface PricingConfig {
@@ -116,9 +143,24 @@ export function computePrice(params: {
   msrp:               number | null
   cfg:                PricingConfig
   absolutePriceFloor?: number
+  /** xdipx.launch_price for the variant; consulted under compare_at_strategy=launch_price. */
+  launchPrice?:       number | null
+  /**
+   * Whether MSRP caps the sell price. Off by default in production via the
+   * `pricing_msrp_ceiling_enabled` valve (owner direction 2026-09-25: MSRP is
+   * irrelevant to pricing; only Lovense/Playground MAP binds). When off, MSRP
+   * still supplies the compare-at strike-through where the strategy asks for
+   * it, but never pulls the sell price down and can never produce
+   * `msrpBelowFloor`. Defaults to true here so pure callers and existing tests
+   * keep the historical formula.
+   */
+  msrpCeiling?:       boolean
 }): PriceResult & { belowAbsoluteFloor: boolean; msrpBelowFloor: boolean } | null {
-  const { cost, map, msrp, cfg } = params
+  const { cost, map, cfg } = params
   const absolutePriceFloor = params.absolutePriceFloor ?? ABSOLUTE_PRICE_FLOOR_DEFAULT
+  // With the ceiling off, treat MSRP as absent for every sell-price step below;
+  // it is re-read only for compare_at.
+  const msrp = params.msrpCeiling === false ? null : params.msrp
 
   if (cost == null) return null
 
@@ -181,10 +223,7 @@ export function computePrice(params: {
     sell = cfg.map_behavior === 'above_map_only' ? round2(map + 0.01) : round2(map)
   }
 
-  const compare_at =
-    cfg.compare_at_strategy === 'msrp' && msrp != null && sell < msrp
-      ? msrp
-      : null
+  const compare_at = compareAtFor({ strategy: cfg.compare_at_strategy, sell, msrp: params.msrp, launchPrice: params.launchPrice })
 
   return { sell, compare_at, belowAbsoluteFloor: sell < absolutePriceFloor, msrpBelowFloor }
 }
@@ -193,12 +232,42 @@ export function computePrice(params: {
 // Discontinued clearance ladder (spec ss2.3)
 // ---------------------------------------------------------------------------
 
-const CLEARANCE_LADDER: Array<[number, number]> = [
+/** [maxDaysDiscontinued, markdownFraction] steps, ascending by days. */
+export type ClearanceLadder = ReadonlyArray<readonly [number, number]>
+
+export const DEFAULT_CLEARANCE_LADDER: ClearanceLadder = [
   [30,    0.15],
   [60,    0.25],
   [90,    0.35],
   [10_000, 0.50],
 ]
+
+/**
+ * Parse an owner-edited ladder (pipeline_settings `pricing_clearance_ladder`,
+ * JSON `[[days, pct], ...]`). Returns null on anything malformed so the caller
+ * falls back to the default instead of pricing off garbage. Steps are sorted
+ * by days; a final catch-all step is appended when the last one is finite.
+ */
+export function parseClearanceLadder(raw: string | null | undefined): ClearanceLadder | null {
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed) || parsed.length === 0) return null
+    const steps: Array<[number, number]> = []
+    for (const step of parsed) {
+      if (!Array.isArray(step) || step.length !== 2) return null
+      const days = Number(step[0]); const pct = Number(step[1])
+      if (!Number.isFinite(days) || days < 0 || !Number.isFinite(pct) || pct < 0 || pct >= 1) return null
+      steps.push([Math.floor(days), pct])
+    }
+    steps.sort((a, b) => a[0] - b[0])
+    const last = steps[steps.length - 1]!
+    if (last[0] < 10_000) steps.push([10_000, last[1]])
+    return steps
+  } catch {
+    return null
+  }
+}
 
 /**
  * Compute sell price for a discontinued item using age-based markdown.
@@ -217,14 +286,22 @@ export function computeDiscontinuedPrice(params: {
   cost:             number | null
   msrp:             number | null
   daysDiscontinued: number
-  cfg:              Pick<PricingConfig, 'target_margin_pct' | 'margin_floor_pct'>
+  cfg:              Pick<PricingConfig, 'target_margin_pct' | 'margin_floor_pct'> & Partial<Pick<PricingConfig, 'compare_at_strategy'>>
+  /** See computePrice. When false, MSRP is compare-at only, never a cap. */
+  msrpCeiling?:     boolean
+  /** Owner-edited markdown steps; defaults to DEFAULT_CLEARANCE_LADDER. */
+  ladder?:          ClearanceLadder
+  /** xdipx.launch_price for the variant; consulted under compare_at_strategy=launch_price. */
+  launchPrice?:     number | null
 }): PriceResult | null {
-  const { cost, msrp, daysDiscontinued, cfg } = params
+  const { cost, daysDiscontinued, cfg } = params
+  const msrp = params.msrpCeiling === false ? null : params.msrp
+  const ladder = params.ladder ?? DEFAULT_CLEARANCE_LADDER
 
   if (cost == null) return null
 
-  const entry = CLEARANCE_LADDER.find(([maxDays]) => daysDiscontinued <= maxDays)
-  const discountPct = entry ? entry[1] : 0.50
+  const entry = ladder.find(([maxDays]) => daysDiscontinued <= maxDays)
+  const discountPct = entry ? entry[1] : ladder[ladder.length - 1]?.[1] ?? 0.50
 
   // Cost-based anchor: the cost-plus-target price, marked down by the age-based
   // clearance percentage, never below the cost-based margin floor.
@@ -245,6 +322,10 @@ export function computeDiscontinuedPrice(params: {
   let rounded = roundPsychological(sell)
   if (rounded < floor) rounded = roundUpPsychological(floor)
 
-  const compare_at = msrp != null && rounded < msrp ? msrp : null
+  // Clearance historically always struck MSRP; keep that for 'msrp' and
+  // 'none' (a discontinued item always shows its reference price), and anchor
+  // on the launch price when the rules ask for it.
+  const strategy: CompareAtStrategy = cfg.compare_at_strategy === 'launch_price' ? 'launch_price' : 'msrp'
+  const compare_at = compareAtFor({ strategy, sell: rounded, msrp: params.msrp, launchPrice: params.launchPrice })
   return { sell: rounded, compare_at }
 }

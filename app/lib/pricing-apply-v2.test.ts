@@ -213,3 +213,27 @@ describe('mapAppliesToVendor', () => {
     expect(mapAppliesToVendor('Lovense Toys', brands)).toBe(false)
   })
 })
+
+describe('decideStatus — autopilot (owner direction 2026-09-25)', () => {
+  const base = { map: null, mapBehavior: 'at_map', marginFloor: 0.25, mode: 'autopilot' as const }
+
+  it('never returns pending for a large delta', () => {
+    expect(decideStatus({ ...base, oldPrice: 100, newPrice: 30, marginAfter: 0.4 })).toBe('auto_applied')
+  })
+
+  it('never returns pending when there is no old price', () => {
+    expect(decideStatus({ ...base, oldPrice: null, newPrice: 30, marginAfter: 0.4 })).toBe('auto_applied')
+  })
+
+  it('still hard-stops a margin-floor breach as rejected, even when MSRP caused it', () => {
+    expect(decideStatus({ ...base, oldPrice: 20, newPrice: 19, marginAfter: 0.1, msrpBelowFloor: true })).toBe('rejected')
+  })
+
+  it('still hard-stops a below-MAP price for a MAP brand', () => {
+    expect(decideStatus({ ...base, map: 129, oldPrice: 92.99, newPrice: 92.99 + 1, marginAfter: 0.4 })).toBe('rejected')
+  })
+
+  it('still skips a no-op', () => {
+    expect(decideStatus({ ...base, oldPrice: 30, newPrice: 30.004, marginAfter: 0.4 })).toBe('skipped_no_change')
+  })
+})
