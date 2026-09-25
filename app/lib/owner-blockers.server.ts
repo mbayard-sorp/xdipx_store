@@ -479,7 +479,23 @@ export async function fileBlocker(input: BlockerInput): Promise<FileBlockerResul
   }
   const source = (BLOCKER_SOURCES as readonly string[]).includes(input.source ?? '')
     ? input.source! : 'agent'
-  const priority = Math.min(Math.max(Math.round(Number(input.priority ?? 3)) || 3, 1), 5)
+  // Priority is MEASURED (newest-wins on re-file) like title/detail, but it is
+  // optional input against a DB column that is NOT NULL with a default of 3
+  // (db/schema.ts). Coercing an omitted priority to 3 before it reaches the
+  // insert, the way this used to read, makes an omission indistinguishable
+  // from an explicit 3 once it round-trips through EXCLUDED, so a bare
+  // `COALESCE(EXCLUDED.priority, owner_blockers.priority)` can never see an
+  // omission and always overwrites. rawPriority stays null exactly when the
+  // caller omits the field, and is bound directly below rather than through
+  // EXCLUDED: COALESCE(rawPriority, 3) for a brand-new row's NOT NULL insert
+  // value, and COALESCE(rawPriority, owner_blockers.priority) on conflict, so
+  // an omitted priority can never clobber a hand-set one and a supplied one
+  // always wins. See ticket #11385: blocker #50 was priority 1 for six days of
+  // re-observation because this same "newest wins, omission does not clobber"
+  // discipline had not yet been applied to priority at all.
+  const rawPriority = input.priority == null
+    ? null
+    : Math.min(Math.max(Math.round(Number(input.priority)) || 3, 1), 5)
   const probe = isProbe(input.verifyProbe) ? input.verifyProbe : null
 
   // Read the prior status first. The upsert below cannot report it: RETURNING
@@ -496,7 +512,7 @@ export async function fileBlocker(input: BlockerInput): Promise<FileBlockerResul
       source, source_ref, evidence, verify_probe, verify_arg, override_no_probe_reason
     ) VALUES (
       ${dedupeKey}, ${title}, ${clamp(input.detail, 4000)}, ${clamp(input.unblocks, 2000)},
-      ${clamp(input.whereToGo, 1000)}, ${category}, ${priority},
+      ${clamp(input.whereToGo, 1000)}, ${category}, COALESCE(${rawPriority}, 3),
       ${source}, ${clamp(input.sourceRef, 500)}, ${evidence},
       ${probe}, ${clamp(input.verifyArg, 200)}, ${overrideNoProbeReason}
     )
@@ -523,6 +539,12 @@ export async function fileBlocker(input: BlockerInput): Promise<FileBlockerResul
       -- filing recorded. Newest-wins, but only when there is a newest.
       title        = COALESCE(EXCLUDED.title, owner_blockers.title),
       detail       = COALESCE(EXCLUDED.detail, owner_blockers.detail),
+      -- Not EXCLUDED.priority: see rawPriority above. EXCLUDED.priority is
+      -- never null (the column is NOT NULL), so a bare COALESCE against it
+      -- would overwrite the stored priority on every single re-file, omitted
+      -- or not. rawPriority is bound straight from the caller's raw input and
+      -- stays null on omission, so this only overwrites when one was supplied.
+      priority     = COALESCE(${rawPriority}, owner_blockers.priority),
       -- AUTHORED-ONCE fields keep filling gaps only. These are written by a
       -- human or by a registry, not measured, and evidence in particular is
       -- the verbatim justification titleClaimsConfirmed exists to require: no
