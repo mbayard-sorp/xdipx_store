@@ -103,6 +103,14 @@ vi.mock('~/lib/github.server', async (importOriginal) => {
     getPullRequest: vi.fn(),
     listPullRequestFiles: vi.fn(),
     getChecksForRef: vi.fn(),
+    // Defaults to "no Actions verdicts", so gatherFacts falls through entirely
+    // to the getChecksForRef mock above, exactly as every test in this file
+    // already expects. The real getJobVerdictsForSha is unit-tested against a
+    // stubbed fetch in github.server.test.ts; routing it through the real
+    // implementation here would make it fall through to the module's own
+    // unmocked githubRequest -> real fetch, same as the migration content
+    // read below, and collide with that call's single-use Response mock.
+    getJobVerdictsForSha: vi.fn(async () => ({ ok: true, status: 200, data: {} })),
     addLabels: vi.fn(async () => ({ ok: true, status: 200, data: [] })),
     removeLabels: vi.fn(async () => ({ ok: true, status: 200, data: [] })),
     markPullRequestReadyForReview: vi.fn(async () => ({ ok: true, status: 200, data: {} })),

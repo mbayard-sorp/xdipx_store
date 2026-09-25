@@ -612,6 +612,109 @@ export async function listWorkflowRunsForSha(
   }
 }
 
+interface RawWorkflowJob {
+  id: number
+  run_id: number
+  name: string
+  status: string
+  conclusion: string | null
+  runner_id: number | null
+  steps?: Array<{ name: string; status: string; conclusion: string | null }>
+}
+
+/** One job's verdict, as read from the Actions API rather than the Checks API. */
+export interface JobVerdict {
+  jobId: number
+  runId: number
+  status: string
+  /** `null` while pending, and forced to `'cancelled'` for a job GitHub marked
+   *  completed without ever assigning it a runner (see `getJobVerdictsForSha`). */
+  conclusion: string | null
+}
+
+/**
+ * Jobs GitHub ran for one workflow run, straight from the Actions API.
+ *
+ * `getChecksForRef` needs the `Checks` repository permission, which GitHub
+ * does not offer to fine-grained PATs at all (only a classic PAT or a GitHub
+ * App token can read it). `Actions` is a normal, grantable fine-grained
+ * permission and reports the same job-level conclusions, so this is the
+ * permission-safe path to the same fact.
+ */
+export async function listJobsForRun(
+  runId: number,
+  context = 'github',
+): Promise<GithubResult<RawWorkflowJob[]>> {
+  if (!Number.isInteger(runId) || runId <= 0) return err(0, 'listJobsForRun called without a run id')
+  const res = await githubRequest<{ jobs: RawWorkflowJob[] }>(
+    `/repos/{owner}/{repo}/actions/runs/${runId}/jobs?per_page=100`,
+    { context },
+  )
+  if (!res.ok) return res
+  return { ok: true, status: res.status, data: res.data.jobs ?? [] }
+}
+
+/**
+ * Resolve named jobs' verdicts for a head sha via the Actions API.
+ *
+ * Only names present in `jobNames` are returned; a name with no matching job
+ * across any run for this sha is simply absent from the result (the caller's
+ * `checkState`/`checkConclusion` already treat a missing key as "absent", the
+ * same as an unreported check).
+ *
+ * Picks the newest run per *workflow* (highest run id) and ignores the rest,
+ * so a superseded run GitHub cancelled because a later push (or a recycled
+ * PR) re-triggered the same concurrency group is never read as a verdict —
+ * matching ci.yml's `cancel-in-progress` behaviour. This falls out of "newest
+ * wins" without needing to special-case the cancellation itself.
+ *
+ * A job GitHub marks `completed` without ever assigning it a runner (`steps`
+ * empty and `runner_id` null or `0`, the 2026-09-24 runner-provisioning class,
+ * ticket #11380) reports no real signal: no step, not even checkout, ever
+ * ran. That is forced to `'cancelled'` here regardless of GitHub's own
+ * reported conclusion, so it can never read as a green merge and always
+ * routes through the caller's existing no-verdict retry path (which already
+ * treats `'cancelled'` as "re-run, do not merge, do not fail permanently").
+ */
+export async function getJobVerdictsForSha(
+  sha: string,
+  jobNames: readonly string[],
+  context = 'github',
+): Promise<GithubResult<Record<string, JobVerdict>>> {
+  if (!sha) return err(0, 'getJobVerdictsForSha called without a sha')
+  const wanted = new Set(jobNames)
+  if (wanted.size === 0) return { ok: true, status: 200, data: {} }
+
+  const runs = await listWorkflowRunsForSha(sha, context)
+  if (!runs.ok) return runs
+
+  const newestPerWorkflow = new Map<string, { id: number; name: string }>()
+  for (const r of runs.data) {
+    const prev = newestPerWorkflow.get(r.name)
+    if (!prev || r.id > prev.id) newestPerWorkflow.set(r.name, { id: r.id, name: r.name })
+  }
+
+  const result: Record<string, JobVerdict> = {}
+  for (const run of newestPerWorkflow.values()) {
+    const jobs = await listJobsForRun(run.id, context)
+    if (!jobs.ok) {
+      console.warn(`[${context}] could not read jobs for run ${run.id} (${run.name}): ${jobs.error}`)
+      continue
+    }
+    for (const job of jobs.data) {
+      if (!wanted.has(job.name) || job.name in result) continue
+      const neverAssigned = (job.runner_id === null || job.runner_id === 0) && (job.steps ?? []).length === 0
+      const conclusion = job.status !== 'completed'
+        ? null
+        : neverAssigned
+          ? 'cancelled'
+          : job.conclusion
+      result[job.name] = { jobId: job.id, runId: run.id, status: job.status, conclusion }
+    }
+  }
+  return { ok: true, status: 200, data: result }
+}
+
 /**
  * Re-run only the failed jobs of a workflow run.
  *
