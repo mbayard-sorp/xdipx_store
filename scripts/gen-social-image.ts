@@ -381,7 +381,10 @@ async function main() {
   // cast slug goes through composeSceneFrame instead, which takes both
   // references.
   if (usingCastComposite) {
-    const result = await callSocialImageRoute<GenerateCastCompositeResult>({
+    // ok:false/reason (ticket #11463) is a route-response-only shape, added
+    // by POST /api/team/social-image when every billed candidate across both
+    // attempts was dropped; generateCastComposite() itself never sets it.
+    const result = await callSocialImageRoute<GenerateCastCompositeResult & { ok?: false; reason?: string }>({
       op: 'cast',
       prompt,
       handle,
@@ -410,6 +413,18 @@ async function main() {
     // Spend is now logged server-side by POST /api/team/social-image itself
     // (#8032) — one row per surviving candidate, a remainder row for any
     // billed-but-dropped candidate, and any stage-1 plate. Nothing to post here.
+
+    // Ticket #11463: the route stays HTTP 200 on this path (spend already
+    // happened; `stages`/`costs` below still has to reach the caller), so
+    // `ok:false` in the body is the only signal. Print and exit non-zero
+    // exactly like the HTTP-error path above, rather than logging an
+    // `assets: []` manifest that reads as "ran, found nothing to post" —
+    // this ran, spent money, and produced nothing, which is a failure the
+    // routine's run summary must say plainly, not infer from a count of zero.
+    if (result.ok === false) {
+      console.log(JSON.stringify({ error: true, reason: result.reason ?? 'cast_composite_billed_empty', stages: result.costs }))
+      process.exit(1)
+    }
 
     console.log(JSON.stringify({
       assets: result.urls.map((url, i) => ({

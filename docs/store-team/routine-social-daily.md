@@ -1820,6 +1820,14 @@ carrying a bare Nalpac/Shopify SKU packshot — shipping either is drafting into
   cleared the gate, so the path is proven in production, not just present. Runs kept reading the
   stale caveat and reaching for the weaker form; if a cast composite genuinely fails, say what failed
   in the run summary rather than citing a dependency that no longer exists.
+- **A cast composite that spent money and shipped nothing exits 1, not 0** (ticket #11463). When
+  every candidate across both attempts is billed (a real generation happened) and dropped (a rehost
+  fetch failure, a crop-to-zone refusal, or — most often on a bodyscape prompt — a vision-gate
+  rejection), the script prints `{"error":true,"reason":"..."}` and exits non-zero instead of the
+  ordinary `{"assets":[...]}` manifest. Treat that exactly like any other step failure: name the
+  `reason` in the run summary, do not retry the identical prompt blind, and do not read an empty
+  `assets` array from a *successful* (exit 0) call as "nothing to post" without checking for this —
+  that combination used to report success with nothing to show and no way to tell why.
 - **Generate the campaign key-art set at kickoff, not one image per draft-day** (Step 2a): the
   campaign pool comes from `docs/store-team/instagram-campaigns.md` §3.4b, so a campaign produces its
   reusable set once rather than a fresh one-off per caption.

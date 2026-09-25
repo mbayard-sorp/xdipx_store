@@ -415,3 +415,109 @@ describe('hasCastCompositeBudgetLeft (#11009)', () => {
     expect(hasCastCompositeBudgetLeft(1_000, 1_001)).toBe(false)
   })
 })
+
+// Ticket #11463: POST /api/team/social-image {op:'cast'} was reproduced
+// returning HTTP 200 with `urls: []` while `costs` showed two billed
+// generations (4 billed across two calls, 0 images, 0 asset rows) — a real
+// spend with no way to tell whether anything was even attempted. The most
+// likely cause is a legitimate vision-gate rejection on a bodyscape prompt,
+// which must be REPORTED as a refusal, not silently read as success.
+describe('generateCastComposite: billed-but-dropped candidates are named, not silent (#11463)', () => {
+  const CAST_OPTS = {
+    prompt: 'a scene', handle: 'romp-2-0', mood: 'warm', date: '2026-09-25',
+    presenterImageUrl: 'https://x/presenter.jpg',
+    productImageUrl: 'https://x/product.jpg',
+    scale: 'palm' as const,
+  }
+
+  afterEach(() => {
+    vi.doUnmock('./fal-video.server')
+    vi.doUnmock('./social-vision-gate.server')
+    vi.doUnmock('./shopify.server')
+    vi.doUnmock('./social-asset-library.server')
+    vi.restoreAllMocks()
+    vi.resetModules()
+  })
+
+  it('names a vision-gate rejection in dropReasons when a billed candidate never ships', async () => {
+    const composeSceneFrame = vi.fn(async () => ({
+      urls: ['https://fal/candidate.jpg'], requestIds: ['req-1'], costKey: 'atlas/seedream-4.5-edit',
+    }))
+    vi.doMock('./fal-video.server', () => ({ composeSceneFrame }))
+    vi.doMock('./shopify.server', () => ({
+      uploadMoodImageToShopifyFilesWithId: vi.fn(async () => ({ url: 'https://cdn/rehosted.jpg', fileId: 'gid://shopify/MediaImage/1' })),
+    }))
+    vi.doMock('./social-asset-library.server', () => ({
+      tryIngestSocialAsset: vi.fn(async () => ({ id: 900 })),
+    }))
+    const recordVisionVerdict = vi.fn(async () => {})
+    vi.doMock('./social-vision-gate.server', () => ({
+      runVisionGate: vi.fn(async () => ({
+        pass: false, checks: null, notes: 'nudity: genitalia visible', checkedAt: '2026-09-25T00:00:00.000Z',
+        checkCompleted: true, legibleText: '',
+      })),
+      recordVisionVerdict,
+    }))
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array([1, 2, 3]), { status: 200 })))
+    vi.resetModules()
+
+    const { generateCastComposite } = await import('./social-media.server')
+    const result = await generateCastComposite(CAST_OPTS)
+
+    // The reproduced bug: billed twice (two-attempt regeneration, both empty),
+    // zero images shipped.
+    expect(result.urls).toEqual([])
+    expect(result.costs).toEqual([
+      { costKey: 'atlas/seedream-4.5-edit', count: 1 },
+      { costKey: 'atlas/seedream-4.5-edit', count: 1 },
+    ])
+    // The fix: WHY is now on the result, once per dropped candidate.
+    expect(result.dropReasons).toEqual([
+      'vision_gate_fail:nudity: genitalia visible',
+      'vision_gate_fail:nudity: genitalia visible',
+    ])
+  })
+
+  it('names a rehost fetch failure distinctly from a vision-gate rejection', async () => {
+    const composeSceneFrame = vi.fn(async () => ({
+      urls: ['https://fal/candidate.jpg'], requestIds: ['req-1'], costKey: 'fal/flux-2-edit',
+    }))
+    vi.doMock('./fal-video.server', () => ({ composeSceneFrame }))
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('gone', { status: 410 })))
+    vi.resetModules()
+
+    const { generateCastComposite } = await import('./social-media.server')
+    const result = await generateCastComposite(CAST_OPTS)
+
+    expect(result.urls).toEqual([])
+    expect(result.dropReasons).toEqual(['rehost_fetch_failed:410', 'rehost_fetch_failed:410'])
+  })
+
+  it('leaves dropReasons empty when candidates ship normally', async () => {
+    const composeSceneFrame = vi.fn(async () => ({
+      urls: ['https://fal/candidate.jpg'], requestIds: ['req-1'], costKey: 'atlas/seedream-4.5-edit',
+    }))
+    vi.doMock('./fal-video.server', () => ({ composeSceneFrame }))
+    vi.doMock('./shopify.server', () => ({
+      uploadMoodImageToShopifyFilesWithId: vi.fn(async () => ({ url: 'https://cdn/rehosted.jpg', fileId: 'gid://shopify/MediaImage/1' })),
+    }))
+    vi.doMock('./social-asset-library.server', () => ({
+      tryIngestSocialAsset: vi.fn(async () => ({ id: 901 })),
+    }))
+    vi.doMock('./social-vision-gate.server', () => ({
+      runVisionGate: vi.fn(async () => ({
+        pass: true, checks: null, notes: '', checkedAt: '2026-09-25T00:00:00.000Z',
+        checkCompleted: true, legibleText: '',
+      })),
+      recordVisionVerdict: vi.fn(async () => {}),
+    }))
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array([1, 2, 3]), { status: 200 })))
+    vi.resetModules()
+
+    const { generateCastComposite } = await import('./social-media.server')
+    const result = await generateCastComposite(CAST_OPTS)
+
+    expect(result.urls).toEqual(['https://cdn/rehosted.jpg'])
+    expect(result.dropReasons).toEqual([])
+  })
+})
