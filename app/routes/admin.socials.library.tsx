@@ -21,6 +21,7 @@ import {
   addAssetTags, archiveAssets, listLibraryAssets, parseLibraryFilters, removeAssetTag, unarchiveAssets,
 } from '~/lib/social-studio.server'
 import { LibraryGrid, LIBRARY_PAGE, type LibraryAsset } from '~/components/admin/social/LibraryGrid'
+import { getFeedbackForAssets, handleFeedbackIntent } from '~/lib/social-asset-feedback.server'
 import { useStudioShortcuts } from '~/components/admin/social/use-shortcuts'
 import { ArchiveIcon, CloseIcon, PlusIcon, SearchIcon, TagIcon, UndoIcon, UploadIcon } from '~/components/admin/social/icons'
 
@@ -29,7 +30,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url)
   const filters = parseLibraryFilters(url)
   const page = await listLibraryAssets(filters)
+  const feedback = await getFeedbackForAssets(page.assets.map(a => a.id))
   return {
+    feedback,
+    groupByBatch: url.searchParams.get('group') === 'batch',
     filters,
     assets: page.assets as unknown as LibraryAsset[],
     nextBefore: page.nextBefore,
@@ -42,6 +46,11 @@ export async function action({ request }: ActionFunctionArgs) {
   await requireAdmin(request)
   const form = await request.formData()
   const intent = form.get('intent')
+  // #11551: owner heart / thumbs-down. requireAdmin above; never a team-token path.
+  if (intent === 'feedback') {
+    const admin = await getAdminUser(request)
+    return handleFeedbackIntent(Number(form.get('assetId')), form, admin?.email || 'owner')
+  }
   if (intent === 'tag-add') {
     const ids = String(form.get('assetIds') ?? '').split(',').map(Number).filter(n => Number.isInteger(n) && n > 0)
     const tag = String(form.get('tag') ?? '')
@@ -74,10 +83,11 @@ export async function action({ request }: ActionFunctionArgs) {
   return { ok: false, error: 'Unknown intent' }
 }
 
+const FEEDBACK_LABELS: Record<string, string> = { loved: 'Loved ♥', rejected: 'Rejected', unrated: 'Unrated' }
 const SOURCE_LABELS: Record<string, string> = { generated: 'Generated', upload: 'Uploaded', video_poster: 'Video poster' }
 
 export default function SocialsLibrary() {
-  const { filters, assets, nextBefore, facets } = useLoaderData<typeof loader>()
+  const { filters, assets, nextBefore, facets, feedback, groupByBatch } = useLoaderData<typeof loader>()
   const [params, setParams] = useSearchParams()
   const navigate = useNavigate()
   const [selected, setSelected] = useState<Set<number>>(new Set())
@@ -123,6 +133,7 @@ export default function SocialsLibrary() {
     filters.source && { key: 'source', label: SOURCE_LABELS[filters.source] ?? filters.source },
     filters.picked != null && { key: 'picked', label: filters.picked ? 'picked' : 'not picked' },
     filters.archived && { key: 'archived', label: 'Archived' },
+    filters.feedback && { key: 'feedback', label: FEEDBACK_LABELS[filters.feedback] ?? filters.feedback },
   ].filter(Boolean) as Array<{ key: string; label: string }>
 
   return (
@@ -142,7 +153,7 @@ export default function SocialsLibrary() {
               className="w-full min-h-11 rounded-xl border border-line bg-paper pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-coral/30"
             />
           </div>
-          {['tag', 'product', 'cast', 'archetype', 'source', 'picked', 'archived'].map(k => (
+          {['tag', 'product', 'cast', 'archetype', 'source', 'picked', 'archived', 'feedback', 'group'].map(k => (
             params.get(k) ? <input key={k} type="hidden" name={k} value={params.get(k) ?? ''} /> : null
           ))}
           <button type="submit" className="min-h-11 px-4 rounded-full border border-line bg-paper text-sm font-medium text-ink hover:border-ink-4">Search</button>
@@ -174,6 +185,15 @@ export default function SocialsLibrary() {
           <FilterSelect label="Archetype" value={filters.archetype} options={facets.archetypes} onChange={v => setFilter('archetype', v)} />
           <FilterSelect label="Source" value={filters.source} options={facets.sources} labels={SOURCE_LABELS} onChange={v => setFilter('source', v)} />
           <FilterSelect label="Picked" value={filters.picked == null ? null : filters.picked ? '1' : '0'} options={['1', '0']} labels={{ '1': 'Picked', '0': 'Not picked' }} onChange={v => setFilter('picked', v)} />
+          <FilterSelect label="Feedback" value={filters.feedback ?? null} options={['loved', 'rejected', 'unrated']} labels={FEEDBACK_LABELS} onChange={v => setFilter('feedback', v)} />
+          <button
+            type="button"
+            onClick={() => setFilter('group', groupByBatch ? null : 'batch')}
+            aria-pressed={groupByBatch}
+            className={`shrink-0 inline-flex items-center gap-1 min-h-9 px-2.5 rounded-full border text-xs font-mono ${groupByBatch ? 'border-coral bg-coral-soft text-ink' : 'border-line bg-paper text-ink-3 hover:border-ink-4'}`}
+          >
+            Group by batch
+          </button>
           <button
             type="button"
             onClick={() => setFilter('archived', filters.archived ? null : '1')}
@@ -235,6 +255,9 @@ export default function SocialsLibrary() {
             selected={selected}
             onToggle={toggle}
             onOpen={id => navigate(`/admin/socials/library/${id}?${params.toString()}`)}
+            feedback={feedback}
+            feedbackAction="/admin/socials/library"
+            groupByBatch={groupByBatch}
           />
           <div className="flex items-center justify-between">
             <span className="font-mono text-[11px] text-ink-4 tabular-nums">{assets.length} shown{nextBefore ? `, ${LIBRARY_PAGE} per page` : ''}</span>
