@@ -264,6 +264,24 @@ export const socialPosts = pgTable('social_posts', {
   // routine can compute the two variety windows from one list call instead of
   // re-deriving rotation by reading captions.
   sceneLocation:   varchar('scene_location', { length: 80 }),
+  // Scene variety tracking, part 2 (migration 099, ticket #10269). sceneLocation
+  // above shipped in migration 093 but was never threaded through the draft op
+  // by any caller, so it sat null on every row and the §3.8 location window
+  // could only be guessed from caption prose. These three are the sibling
+  // fields the on-skin campaign's variety windows (ticket #10267) need to be
+  // checkable the same way. All nullable, no backfill.
+  bodyZone:        varchar('body_zone', { length: 40 }),
+  contactMode:     varchar('contact_mode', { length: 20 }),
+  cropScale:       varchar('crop_scale', { length: 10 }),
+  // Pairing-presence self-check reason (migration 100, ticket #10560). The
+  // deterministic pairing-missing check (social-publish-gate.server.ts) has
+  // accepted `pairingNoneReason` since it was written, but nothing wrote it:
+  // no column existed, so no caller could persist a drafter's "no lube
+  // pairing applies here" judgment from draft time through to gate time,
+  // which forced an awkward lube-naming workaround into every pairing-
+  // required toy post regardless of whether one actually fit. Nullable, no
+  // backfill: absent means "no reason recorded", never "cleared".
+  pairingNoneReason: text('pairing_none_reason'),
   // Publish-gate raw-judgment cache (migration 097, ticket #8452). Caches the
   // last runPublishGateCheck() vision-judgment result keyed by a content hash
   // of exactly what was judged, so a second call against an unchanged row
@@ -341,6 +359,36 @@ export const socialMediaAssets = pgTable('social_media_assets', {
   postIdx:     index('idx_social_media_assets_post').on(t.postId),
   urlIdx:      index('idx_social_media_assets_url').on(t.url),
   archivedIdx: index('idx_social_media_assets_archived_at').on(t.archivedAt),
+}))
+
+/**
+ * Owner-scoped media-asset adjudications (migration 100, ticket #10503). The
+ * publish gate's subjective findings (age-read, exposure-read) are an agent
+ * judgment re-run fresh on every post that reuses an asset, so a
+ * false-positive the owner has already ruled on keeps re-BLOCKing. One row
+ * per asset url: the specific findings the owner is clearing, why, and who.
+ *
+ * OWNER-WRITE ONLY (`admin.socials.library.$assetId.tsx`, requireAdmin) —
+ * never written by an agent or a team-token route, or the gate becomes
+ * self-clearing. Read via `POST /api/team/social-asset-adjudication` so the
+ * social-drafts routine can hand it to the social-publish-gate subagent as
+ * context before that subagent judges a post reusing this asset. Does not
+ * touch and is never consulted by the deterministic FACT checks
+ * (`runDeterministicPublishChecks`), which run unconditionally regardless.
+ */
+export const socialAssetAdjudications = pgTable('social_asset_adjudications', {
+  id:                 serial('id').primaryKey(),
+  /** Bare url (query string stripped), same convention as social_media_assets lookups. */
+  assetUrl:           text('asset_url').notNull(),
+  /** Short finding labels/snippets the owner is clearing for this asset, e.g. 'age-ambiguity'. */
+  overriddenFindings: jsonb('overridden_findings').$type<string[]>().notNull().default([]),
+  /** The owner's reasoning, shown back to whoever reads the adjudication. */
+  note:               text('note'),
+  adjudicatedBy:      varchar('adjudicated_by', { length: 60 }).notNull(),
+  createdAt:          timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt:          timestamp('updated_at', { withTimezone: true }),
+}, t => ({
+  urlIdx: uniqueIndex('idx_social_asset_adjudications_url').on(t.assetUrl),
 }))
 
 /**
@@ -1744,6 +1792,17 @@ export interface VideoSceneSpec {
    * speaks; only `presenter`'s voice/line renders for this scene.
    */
   coPresenters?: string[]
+  /**
+   * How tight the shot is (ticket #10484), same vocabulary as the social
+   * stills path (`CROP_SCALES` in app/lib/social-cast-reference.server.ts).
+   * 'macro' and 'close' are the on-skin register: the frame carries no face,
+   * so identity has to anchor to the cast member's neck-down
+   * `bodyReferencePhoto` rather than the portrait `referencePhoto`, and
+   * validateScenes REFUSES the enqueue when the resolved presenter has no
+   * body reference. Absent, 'medium' and 'wide' all resolve the portrait,
+   * which is what every scene did before this field existed.
+   */
+  cropScale?: 'macro' | 'close' | 'medium' | 'wide'
 }
 
 /**
@@ -1795,6 +1854,8 @@ export interface VideoScriptJson {
   talkingHead?: boolean
   /** Scene-kit slug (team-keys SCENE_KIT). Avatar/talking-head jobs with a sceneSlug automatically reuse the latest approved frame from a prior same-presenter job for that scene; first use composes fresh. */
   sceneSlug?: string
+  /** Single-scene equivalent of VideoSceneSpec.cropScale (ticket #10484): 'macro'/'close' resolve the presenter's bodyReferencePhoto and are refused at enqueue when there is none. */
+  cropScale?: 'macro' | 'close' | 'medium' | 'wide'
   /** media_assets id of an already-approved scene frame to REUSE instead of composing, as an explicit override of the sceneSlug lookup (avatar/talking-head jobs only, same presenter; skips composition and re-approval since recomposition causes identity drift). */
   reuseFrameAssetId?: number
   captions?: Record<string, string>       // platform -> caption text
@@ -1822,7 +1883,7 @@ export const videoJobs = pgTable('video_jobs', {
   modelTier:         varchar('model_tier', { length: 16 }).notNull(),                // VideoModelId
   targetPlatforms:   jsonb('target_platforms').$type<string[]>().notNull().default([]),
   stage:             varchar('stage', { length: 16 }).notNull().default('scene_frame'), // scene_frame|clip|lipsync|assembly|poster|done|failed
-  status:            varchar('status', { length: 24 }).notNull().default('queued'),  // queued|running|awaiting_provider|awaiting_frame_approval|applying|done|failed
+  status:            varchar('status', { length: 24 }).notNull().default('queued'),  // queued|running|awaiting_provider|awaiting_frame_approval|applying|awaiting_render_approval|awaiting_final_review|done|failed
   providerRequestIds: jsonb('provider_request_ids').$type<Record<string, { requestId: string; statusUrl: string; responseUrl: string }>>().notNull().default({}),
   sceneFrameAssetId: integer('scene_frame_asset_id').references(() => mediaAssets.id, { onDelete: 'set null' }),
   // Multi-scene jobs (Phase 3, migration 084). Both null for every existing
@@ -1841,14 +1902,8 @@ export const videoJobs = pgTable('video_jobs', {
   runId:             integer('run_id').references(() => homepageTeamRuns.id, { onDelete: 'set null' }),
   // Serialized video program (migration 086). episodeId back-references the
   // video_episodes row this job renders (plain integer, no FK: the FK lives on
-  // video_episodes.video_job_id to avoid a circular pair). The runpod columns
-  // are the per-video off-confirmation (ticket #5717): probeJson is ALWAYS
-  // written by the terminal probe; confirmedAt only when both the serverless
-  // endpoint and the pods list read zero. A failed read is "could not ask",
-  // never a false all-clear.
-  episodeId:             integer('episode_id'),
-  runpodIdleConfirmedAt: timestamp('runpod_idle_confirmed_at', { withTimezone: true }),
-  runpodIdleProbeJson:   jsonb('runpod_idle_probe_json').$type<RunpodIdleProbe>(),
+  // video_episodes.video_job_id to avoid a circular pair).
+  episodeId:         integer('episode_id'),
   createdAt:         timestamp('created_at').notNull().defaultNow(),
   updatedAt:         timestamp('updated_at').notNull().defaultNow(),
   completedAt:       timestamp('completed_at'),
@@ -1862,22 +1917,6 @@ export const videoJobs = pgTable('video_jobs', {
 }))
 
 // ─── Serialized video program (migration 086, all-hands 2026-08-26) ──────────
-
-/**
- * Result of the terminal RunPod idle probe (ticket #5717). `clear` is true
- * ONLY when both surfaces were successfully read AND both are zero; a thrown
- * read lands in `couldNotAsk` and is never conflated with clear:false.
- */
-export interface RunpodIdleProbe {
-  checkedAt: string
-  endpoint: {
-    workers: { idle: number; initializing: number; ready: number; running: number; throttled: number; unhealthy: number; active: number }
-    jobs: { inQueue: number; inProgress: number }
-  } | null
-  pods: { id: string; name: string; hoursRunning: number; costPerHour: number }[] | null
-  clear: boolean
-  couldNotAsk: string[]
-}
 
 /**
  * One product placement inside an episode. The role and mentionType
@@ -1899,13 +1938,23 @@ export interface VideoEpisodeReviewNote {
    * Owner decisions, plus machine-written entries: 'released' when a claimed
    * episode was handed back unrendered, 'render_failed' when its job died at
    * the provider (ticket #5726), 'edited' when the owner saved a script edit
-   * via editEpisodeScript (ticket #7558). None of the three is an owner
-   * decision and none can be written through decideEpisode.
+   * via editEpisodeScript (ticket #7558), 'revised' when the video room
+   * saved a revision via the episode-revise op, and 'line_note' when the owner
+   * left a note on one spoken line in the script reader (carries field and
+   * lineIdx). None of these is an owner decision and none can be written
+   * through decideEpisode.
+   * 'render_rejected' IS an owner decision, but on the final cut, not the
+   * script: written by markEpisodeRenderRejected when the owner rejects a cut
+   * parked at the render gate, never through decideEpisode.
    */
-  decision: 'approved' | 'needs_changes' | 'rejected' | 'released' | 'render_failed' | 'edited'
+  decision: 'approved' | 'needs_changes' | 'rejected' | 'released' | 'render_failed' | 'render_rejected' | 'edited' | 'revised' | 'line_note'
   tags?: string[]
   note?: string
   by?: string
+  /** line_note only: the spoken surface (LINE_NOTE_FIELDS in app/lib/video-episodes.ts). */
+  field?: string
+  /** line_note only: index into scenes/beats, 0 for a single-line field. */
+  lineIdx?: number
 }
 
 /**

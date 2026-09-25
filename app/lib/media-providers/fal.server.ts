@@ -43,6 +43,7 @@ export const falVideoProvider: VideoProvider = {
     }
     return submitVideoRequest(modelId, input)
   },
+  ownsHandle: (handle: VideoQueueHandle) => handle.statusUrl.startsWith('https://queue.fal.run/'),
   status: (handle: VideoQueueHandle) => getVideoRequestStatus(handle),
   result: (handle: VideoQueueHandle) => getVideoRequestResult(handle),
 }

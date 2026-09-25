@@ -10,8 +10,7 @@ compound; this file is where they stop evaporating.
 - After every run, append prompts that produced keepers to the surface's **Keepers** list (with
   the placed asset URL as the thumbnail reference) and add failed patterns to **Rejects**.
 - All scaffolds inherit `docs/design-doctrine.md` §4: real product via `--ref-image` wherever a
-  product is featured or linked; bright/high-key light; v3 palette; nothing a premium lingerie
-  campaign could not run.
+  product is featured or linked; bright/high-key light; v3 palette. For exposure, the imagery ceiling is `docs/store-team/instagram-campaigns.md` §3.2a with the on-skin treatment of §3.2c (owner direction 2026-09-20, "On-skin extends to all areas of the site"), pointed at and never restated; its stop list and the nudity definition (visible nipples, labia, penis, or anus) still bind.
 - **Provider note (2026-08-15, PR #692):** stills are Atlas-primary via `generateImage()` (Atlas
   `seedream-v4.5`/`seedream-v4.5/edit`, then fal, then Imagen); `docs/media-model-routing.md` is
   the single routing source, do not restate routing here. The fal-specific lore in this file
@@ -84,9 +83,11 @@ Scaffold (always with `--ref-image`):
 
 Scaffold — product tiles use `--ref-image`; human-context tiles may use `--no-ref` with reason:
 
-> {Close crop of hands | silk fabric against skin | lingerie detail on a body}, warm natural
-> daylight, {coral | plum} color accent in the styling, editorial fashion photography, playful
-> tension, tasteful crop (no exposed genitalia, no nipples), premium lingerie campaign energy
+> {Close crop of hands | silk fabric against skin | product resting on bare skin on a body},
+> warm natural daylight, {coral | plum} color accent in the styling, editorial fashion
+> photography, playful tension, tasteful crop (no visible nipples, labia, penis, or anus)
+
+(Exposure on this scaffold: the imagery ceiling is `docs/store-team/instagram-campaigns.md` §3.2a with the on-skin treatment of §3.2c (owner direction 2026-09-20, "On-skin extends to all areas of the site"), pointed at and never restated; its stop list and the nudity definition (visible nipples, labia, penis, or anus) still bind.)
 
 **Keepers:**
 
@@ -323,14 +324,15 @@ property, never all of them; the packshot is the third resort, never the second.
     gel droplet on the paper catching the side light. Warm directional daylight, soft falloff, no
     hands, no bodies, no bed, no banned domestic-metaphor object anywhere in frame →
     `image-00cb6d3dc42164d678c6d5557389f66a47df5b00-2304x1728-jpg`.
-  - **Prompt-record correction worth knowing (applies to every §0-P and §0-H run).**
-    `gen-notebook-art.ts --upload` does not accept `--prompt`, so the `imagePrompt` it writes on
-    upload is the surface's generic **default** prompt, not the prompt that actually produced the
-    keeper. `check-hero-embed-match.ts` still passes, because it only tests for a non-empty prompt
-    and for hero/embed coupling, so this fails silently and leaves the post's stored prompt unable
-    to explain its own image on a retro. Run 574 patched `blogPost.imagePrompt` back to the real
-    composed prompt with `sanity-content-cli.ts patch` immediately after upload. Do the same until
-    `--upload` learns `--prompt`.
+  - **Prompt-record correction, fixed as of ticket #10682 (applies to every §0-P and §0-H run).**
+    `gen-notebook-art.ts --upload` used to silently accept a missing `--prompt` and write the
+    surface's generic **default** prompt instead of the prompt that actually produced the keeper.
+    `check-hero-embed-match.ts` still passed, because it only tests for a non-empty prompt and for
+    hero/embed coupling, so this failed silently and left the post's stored prompt unable to
+    explain its own image on a retro. Run 574 patched `blogPost.imagePrompt` back to the real
+    composed prompt with `sanity-content-cli.ts patch` immediately after upload. `--upload` now
+    REFUSES to run without an explicit `--prompt` (loud CLI error) instead of substituting the
+    default, so always repeat the same `--prompt` used at generation time on the upload call.
   - **Composition note for future §0-P lubricant heroes:** a single sheer fabric sweep plus one
     gel droplet reads as sensory anticipation at the charter's visual 6-7 without any body in
     frame, and the droplet does the work the packaging shot cannot: it says what is inside the
@@ -443,6 +445,80 @@ property, never all of them; the packshot is the third resort, never the second.
   bottle hero:** manual bbox detect → whiteness-ramp chroma-key → offset composite on a paper→tint
   gradient with a flat contact shadow. No `sharp .extract()`-only crop; that is what produced the
   halo on the first attempt.
+
+- Nova 2 Rechargeable Flexible Silicone Rabbit Vibrator
+  (`we-vibe-nova-2-rechargeable-flexible-silicone-rabbit-vibrator`), `guides` category, sincere
+  staging, no accent prop, post `what-makes-a-great-g-spot-rabbit-vibrator` (media-manager run,
+  content run 1037). Thesis: a rabbit vibrator has to be right about two places at once, and the
+  flex of the outer clitoral arm decides whether the inner G-spot arm stays on target — article
+  is about curve, arm flex, and motor frequency. Chosen over the post's other two embeds
+  (`je-joue-hera-...`, `femmefunn-klio-...`) because "Flexible" is in this product's own name,
+  making the thesis's central word a real, faithful product attribute rather than an invented
+  one. **Ref-image note:** this product's only Shopify photo (`74971.jpg`) is a box-plus-device
+  composite: a closed purple carton with printed copy ("WE-VIBE", "nova", "CONSTANT CONTACT.
+  NON-STOP PLEASURE.") beside an open pink gift box with the real device inside — no second,
+  packaging-free Shopify image exists for this product (unlike the WINX/Magic Wand/ROMP Glow
+  precedents above, which all had a clean alternate photo to fall back to). Per the Womanizer
+  Blend precedent, cropped the reference with `sharp().extract()` down to a tight region of just
+  the physical device lying in the open box's white foam (skipping both the closed carton's
+  printed panel and the open box's printed instructions panel on the right), uploaded the crop to
+  a scratch Sanity asset for a public `--ref-image` URL — zero readable text anywhere in the
+  crop, device shape/color/ribbing/button row all legible. One round, 2 candidates via Atlas
+  `seedream-4.5-edit` (Atlas primary, landscape_4_3, ref-image path), prompt hardened up front
+  with the Magic Wand/Tantus precedent's "flat, pale, uniform coral-soft (#FFE6DD)," "no
+  gradient, no vignette, no dim corners," "evenly lit throughout" language (guides category,
+  matching the Magic Wand precedent's accent) — no retry needed, both candidates passed the vision
+  gate. Candidate 2 kept over candidate 1: candidate 1 stood the product dead upright and roughly
+  centered with only moderate space on either side; candidate 2 staged the product leaning at a
+  dynamic diagonal (an instability/P5 interest property) offset to the right two-thirds, both the
+  outer curved arm and the ribbed inner shaft crisply legible and faithful to the reference, one
+  crisp warm shadow, and a generous unbroken left-half negative space for the headline. Diagonal
+  lean read as more thesis-relevant than the upright candidate — it visually reads as the product
+  mid-flex rather than a static specimen shot →
+  `image-ba622c5855131e683bdb094caf575b97cf2116d8-2304x1728-jpg`. **Precedent:** for a
+  single-Shopify-image product where that one photo is a box-plus-device composite with no clean
+  alternate to swap in, the Womanizer Blend `sharp().extract()` crop-down-to-device technique
+  works from either half of a "closed box / open gift box with device" composite shot, not just a
+  device-printed-on-the-box-face composite — crop to the smallest rectangle containing only the
+  physical device against foam/paper, accepting a little packaging-color bleed in the crop's
+  corners as long as zero printed text survives the crop.
+
+  **Correction (same run, post-upload): `check-hero-embed-match.ts` flagged the upload above.**
+  The kept prompt's own wording — "deep magenta-**pink** silicone" — collided with an unrelated,
+  non-embedded catalog product, `femmefunn-ultra-bullet-massager-rechargeable-silicone-vibrator-pink`
+  ("...Bullet Massager Pink"), whose title reduces to the single distinctive token `pink` once
+  `blog-hero-embed-audit.ts`'s GENERIC_TOKENS strips rechargeable/silicone/bullet/massager/vibrator
+  — the exact "ILY"-entry failure class above (an incidental color/material word in hero copy
+  corroborating or, here, directly supplying a short distinctive token of an unrelated SKU).
+  `magenta` alone is not a catalog product's distinctive token and is safe; the compound
+  `magenta-pink` is what tripped it. **Fix applied at source, not by hand-patching `imagePrompt`**
+  (ticket #2750's whole point is that the stored prompt must be the one that actually generated
+  the image): changed the one phrase to "deep magenta silicone" (nothing else in the prompt
+  touched) and regenerated. **First regeneration round** (2 candidates, same settings) reproduced
+  the preferred dynamic-diagonal composition on candidate 2, but a manual zoom into its control-
+  button strip found light-colored garbled lettering baked into the silicone — genuine invented
+  text (the negative prompt's own "no text, no words, no letters" failing to hold on that one
+  candidate) — a doctrine §4 point-4 hard fail, so it was rejected despite matching the preferred
+  composition; candidate 1 that round was textually clean but reverted to the flatter, centered
+  pose already passed over once. Rather than upload either, drew a **second regeneration round**
+  from the identical unchanged prompt (no further prompt edits, per the caller's explicit
+  instruction to touch nothing else) — candidate 2 of that round reproduced the dynamic-lean
+  composition (mirrored: offset left, generous right-half negative space) with a clean, legible-
+  text-free base/seam under a zoom check, and its own vision-gate `legibleText` field came back
+  empty. Kept and uploaded that one → `image-7d2fb61f3b396b4843878287e12daa902c07cf33-2304x1728-jpg`
+  (supersedes the asset ref logged above, which is no longer the live hero). `check-hero-embed-
+  match.ts --slug what-makes-a-great-g-spot-rabbit-vibrator` now exits 0. Two extra generation
+  rounds (4 candidates total, 2 billable per round) cost an additional $0.144. **Precedent:** color
+  words are the recurring source of these false positives (see the ILY entry above) — before
+  finalizing hero copy, mentally check any color/material adjective against whether it is, on its
+  own, a short (<6 char) distinctive token of some *other* catalog product, not just whether it
+  describes the embedded one accurately. Separately: a code-enforced anatomy PASS and a clean
+  `legibleText` field are not a substitute for a manual zoom into small high-detail regions (button
+  strips, control seams) — the anatomy gate does not check for invented text/lettering as a defect
+  class on its own on every candidate the same way it checks limbs; the model can and does bake in
+  garbled text on a product's control surface even when the overall gate verdict passes, so treat
+  the vision gate's `legibleText` field as one more thing to actually read, not just check for
+  non-empty.
 
 ### §0-H human scaffold
 

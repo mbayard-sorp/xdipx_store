@@ -126,7 +126,7 @@ describe('findNearDuplicate', () => {
   })
 
   it('returns null when nothing is close', () => {
-    expect(findNearDuplicate('runpod-endpoint-missing', live)).toBeNull()
+    expect(findNearDuplicate('atlas-endpoint-missing', live)).toBeNull()
   })
 
   it('ignores the row that already owns the identical key', () => {

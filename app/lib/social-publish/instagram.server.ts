@@ -101,73 +101,34 @@ export function describeInstagramApiError(error: MetaError): string {
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
 /**
- * Tag placement for a single-product tag: bottom-center, off the product
- * hero's usual center framing. Meta requires x/y (0.0-1.0) on photo tags.
- */
-const TAG_X = 0.5
-const TAG_Y = 0.9
-
-/**
- * Resolve a Shopify handle to a taggable Meta catalog product id (#3744).
+ * Instagram product tagging (#3744) — REMOVED, ticket #10732, policy not a
+ * bug. This used to call `/{igId}/available_catalog_product_search` to
+ * resolve a Shopify handle to a taggable Meta catalog product id. That edge
+ * does not exist: the real one is `GET /{ig-user-id}/catalog_product_search`,
+ * which requires a `catalog_id` this store has never had. Even corrected, it
+ * needs an approved Instagram Shop in Business Manager, a product catalog,
+ * and `instagram_shopping_tag_products` + `catalog_management` with a
+ * verified business — none of which this account has ever set up. And none
+ * of it is approvable: Meta's commerce policy prohibits promoting the
+ * buying, selling, or trading of adult products across Shops on Facebook and
+ * Instagram (facebook.com/policies_center/commerce/adult_products,
+ * help.instagram.com/1627591223954487). A sexual-wellness catalog cannot
+ * pass Shop review, so this call could never succeed regardless of how the
+ * edge name or scopes were fixed. It shipped a malformed call from day one
+ * (evidence: cron_runs.result on the 2026-09-22 04:00 UTC tick, IG row 293,
+ * "Tried accessing nonexisting field (available_catalog_product_search)"),
+ * which the #3744 degrade path swallowed into every publish, leaking a raw
+ * Graph error into the run log on every single post. Untagged publishing was
+ * always the actual outcome; this removal just stops attempting and logging
+ * the impossible call. Do not re-add product tagging without an explicit
+ * owner decision that a real, policy-compliant path exists.
  *
- * `available_catalog_product_search` returns only products eligible for
- * tagging on this account, which is exactly the "tag only Shops-APPROVED
- * products" rule: a rejected product simply never comes back. The call also
- * doubles as the in-run scope check the ticket asks for — a token without
- * `instagram_shopping_tag_products` fails here, and the caller degrades to
- * an untagged publish with the reason.
- *
- * The search is by name (the handle with hyphens as spaces), because the
- * endpoint has no retailer-id filter. A miss means "no approved match", which
- * is indistinguishable from "not approved yet" and treated the same way:
- * publish untagged, say why.
+ * `PublishInput.productTagHandle` (`./types.ts`) is intentionally left in
+ * place for callers to keep passing — `resolvePostProductHandle`'s other
+ * callers (the gate stamp in `social-publish-job.server.ts`,
+ * `admin.socials.queue.tsx`) still want the resolved handle for reasons
+ * unrelated to tagging, and this adapter simply never reads the field now.
  */
-export async function findTaggableCatalogProduct(
-  handle: string,
-): Promise<{ ok: true; productId: string; name: string } | { ok: false; detail: string }> {
-  const token = process.env['IG_GRAPH_ACCESS_TOKEN']?.trim()
-  const igId = process.env['IG_BUSINESS_ACCOUNT_ID']?.trim()
-  if (!token || !igId) return { ok: false, detail: 'Instagram keys are not configured' }
-
-  const q = handle.trim().replace(/-/g, ' ')
-  if (!q) return { ok: false, detail: 'Empty product handle' }
-
-  const res = await igRequest(`/${igId}/available_catalog_product_search`, {
-    method: 'GET',
-    params: { q },
-    token,
-  })
-  if (!res.ok) return { ok: false, detail: describeInstagramApiError(res.error) }
-
-  const first = (res.data['data'] as Array<Record<string, unknown>> | undefined)?.[0]
-  const productId = first?.['product_id'] != null ? String(first['product_id']) : ''
-  if (!productId) {
-    return { ok: false, detail: `No Shops-approved catalog match for "${handle}"; the post publishes untagged.` }
-  }
-  return { ok: true, productId, name: String(first?.['name'] ?? '') }
-}
-
-/**
- * Create a container with a product tag, degrading to untagged on ANY tag
- * failure (#3744). The tag is additive; the post is the point. `tagNote`
- * carries the degrade reason up to the publish result and the run log.
- */
-async function createContainerWithOptionalTag(
-  igId: string,
-  params: Record<string, string>,
-  tagParams: Record<string, string> | null,
-  token: string,
-): Promise<{ ok: true; id: string; tagNote?: string } | { ok: false; detail: string }> {
-  if (tagParams) {
-    const tagged = await createContainer(igId, { ...params, ...tagParams }, token)
-    if (tagged.ok) return tagged
-    console.warn(`[instagram] product tag degraded to untagged publish: ${tagged.detail}`)
-    const untagged = await createContainer(igId, params, token)
-    if (!untagged.ok) return untagged
-    return { ok: true, id: untagged.id, tagNote: `Product tag failed, published untagged: ${tagged.detail}` }
-  }
-  return createContainer(igId, params, token)
-}
 
 /** Create one media container; returns its id or an error detail. */
 async function createContainer(
@@ -253,30 +214,10 @@ export const instagramPublisher: SocialPublisher = {
     // an absent value publishes exactly as before.
     const altText = input.altText?.trim().slice(0, ALT_TEXT_MAX) || undefined
 
-    // Product tag (#3744): resolve the gate stamp's handle to a taggable
-    // catalog product. Feed photos and carousels only; Reels are out of
-    // scope. A tag is additive and never changes what passes the gate, so
-    // every tag failure degrades to an untagged publish with the reason in
-    // the result's `note`, never to a failed publish.
-    let tagParams: Record<string, string> | null = null
-    let tagNote: string | undefined
-    if (input.productTagHandle && input.media.kind !== 'video') {
-      const match = await findTaggableCatalogProduct(input.productTagHandle)
-      if (match.ok) {
-        tagParams = {
-          product_tags: JSON.stringify([{ product_id: match.productId, x: TAG_X, y: TAG_Y }]),
-        }
-      } else {
-        tagNote = match.detail
-        console.warn(`[instagram] product tag skipped: ${match.detail}`)
-      }
-    }
-
     // Carousel: an item container per slide (image_url + is_carousel_item, no
     // caption), each polled to FINISHED, then one parent CAROUSEL container
     // (media_type=CAROUSEL, children=comma-joined ids, caption) published as a
     // single post. Any item that ERRORs fails the whole post terminally.
-    // Product tags live on child containers, so the tag rides the first slide.
     if (input.media.kind === 'carousel') {
       const urls = input.media.imageUrls.slice(0, CAROUSEL_MAX_ITEMS)
       if (urls.length < CAROUSEL_MIN_ITEMS) {
@@ -289,21 +230,18 @@ export const instagramPublisher: SocialPublisher = {
 
       const childIds: string[] = []
       for (const [index, url] of urls.entries()) {
-        const item = await createContainerWithOptionalTag(
+        const item = await createContainer(
           igId,
           {
             image_url: url,
             is_carousel_item: 'true',
-            // Alt text on the first slide only (mirrors the product tag's
-            // "rides the first slide" convention above); IG renders one
-            // accessibility description for the whole carousel post.
+            // Alt text on the first slide only; IG renders one accessibility
+            // description for the whole carousel post.
             ...(index === 0 && altText ? { alt_text: altText } : {}),
           },
-          index === 0 ? tagParams : null,
           token,
         )
         if (!item.ok) return { ok: false, reason: 'error', detail: item.detail }
-        if (item.tagNote) tagNote = item.tagNote
         const ingested = await pollUntilFinished(item.id, token)
         if (!ingested.ok) return { ok: false, reason: 'error', detail: ingested.detail }
         childIds.push(item.id)
@@ -319,7 +257,7 @@ export const instagramPublisher: SocialPublisher = {
       if (!ingested.ok) return { ok: false, reason: 'error', detail: ingested.detail }
       const published = await publishContainer(igId, parent.id, token)
       if (!published.ok) return { ok: false, reason: 'error', detail: published.detail }
-      return { ok: true, externalPostId: published.id, ...(tagNote ? { note: tagNote } : {}) }
+      return { ok: true, externalPostId: published.id }
     }
 
     // Single image or Reels: one container, one poll, one publish.
@@ -333,14 +271,13 @@ export const instagramPublisher: SocialPublisher = {
             ...(input.media.posterUrl ? { cover_url: input.media.posterUrl } : {}),
           }
 
-    const created = await createContainerWithOptionalTag(igId, params, tagParams, token)
+    const created = await createContainer(igId, params, token)
     if (!created.ok) return { ok: false, reason: 'error', detail: created.detail }
-    if (created.tagNote) tagNote = created.tagNote
     const ingested = await pollUntilFinished(created.id, token)
     if (!ingested.ok) return { ok: false, reason: 'error', detail: ingested.detail }
     const published = await publishContainer(igId, created.id, token)
     if (!published.ok) return { ok: false, reason: 'error', detail: published.detail }
-    return { ok: true, externalPostId: published.id, ...(tagNote ? { note: tagNote } : {}) }
+    return { ok: true, externalPostId: published.id }
   },
 }
 

@@ -232,11 +232,52 @@ export async function tryIngestSocialAsset(
   }
 }
 
+/**
+ * Resolve `{id, url}` rows for a set of media urls (query strings ignored).
+ * Ticket #10511: the re-gate path needs the asset id a mediaUrls entry maps
+ * to, not merely whether one exists (`isLibraryMember`) or a picked-flag
+ * side effect (`tryMarkPickedByUrls`), so this is the bare lookup those two
+ * both already build on.
+ */
+export async function findLibraryAssetsByUrls(
+  urls: readonly string[] | null | undefined,
+  deps?: SocialAssetLibraryDeps,
+): Promise<{ id: number; url: string }[]> {
+  const bare = (urls ?? []).map(stripUrlQuery).filter(Boolean)
+  if (bare.length === 0) return []
+  return resolve(deps).findIdsByUrls(bare)
+}
+
 /** True when a `social_media_assets` row indexes this url (query string ignored). */
 export async function isLibraryMember(url: string, deps?: SocialAssetLibraryDeps): Promise<boolean> {
   const bare = stripUrlQuery(url)
   if (!bare) return false
   return resolve(deps).findByUrl(bare)
+}
+
+/**
+ * `created_at` of the `social_media_assets` row indexing this url, or null
+ * when no row exists or the lookup fails (ticket #10337: the publish gate's
+ * vision-verdict carve-out is date scoped, and "unknown age" must be
+ * distinguishable from "old").
+ */
+export async function getAssetCreatedAtByUrl(url: string): Promise<Date | null> {
+  const bare = stripUrlQuery(url)
+  if (!bare) return null
+  try {
+    const { db } = await import('./db.server')
+    const rows = await db
+      .select({ createdAt: socialMediaAssets.createdAt })
+      .from(socialMediaAssets)
+      .where(sql`split_part(split_part(${socialMediaAssets.url}, '?', 1), '#', 1) = ${bare}`)
+      .orderBy(socialMediaAssets.id)
+      .limit(1)
+    const value = rows[0]?.createdAt
+    return value ? new Date(value) : null
+  } catch (err) {
+    console.error(`[social-library] asset created_at lookup failed: ${url}`, err)
+    return null
+  }
 }
 
 /**

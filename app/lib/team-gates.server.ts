@@ -51,6 +51,7 @@ import { SONNET } from './models.server'
 import { EMMA_VOICE_SOCIAL, EMMA_VOICE_LINKEDIN } from './emma-voice.server'
 import { runDeterministicPublishChecks, type GatePlatform, type GateFinding } from './social-publish-gate.server'
 import { stripUrlQuery } from './social-asset-library.server'
+import { getAssetAdjudication, type AssetAdjudicationRow } from './social-asset-adjudication.server'
 import { SOCIAL_PLATFORMS } from './team-keys'
 import { getProductHandleById, getProductByHandle } from './shopify.server'
 import { logApiTokens } from './token-log.server'
@@ -190,6 +191,14 @@ export async function runVoiceGateCheck(input: VoiceGateInput): Promise<VoiceGat
   const msg = await client.messages.create({
     model: SONNET,
     max_tokens: 512,
+    // Pinned at 0 (ticket #10560), mirroring the publish gate's own fix
+    // (#7896): this call ran at the SDK default temperature, and the same
+    // caption re-judged minutes apart produced four different objections to
+    // one construction and REVISEd a licensed lube-pairing mention four
+    // different ways across ~16 round trips on the LELO SONA / orgasm-gap
+    // post (run 981). A charter compliance verdict is a fail-closed judgment
+    // task, not one where call-to-call variety is a feature.
+    temperature: 0,
     system: cacheableSystem(system),
     messages: [{ role: 'user', content: buildVoiceGateUserContent({ text, platform }) }],
   })
@@ -409,6 +418,57 @@ export function describeAssetReusePrecedent(precedent: AssetReusePrecedent | nul
   )
 }
 
+/** One asset's owner adjudication, paired with the bare url it applies to. */
+export interface AssetAdjudicationGrounding {
+  url: string
+  overriddenFindings: string[]
+  note: string | null
+}
+
+/**
+ * Owner adjudications for this post's media (ticket #10503), one lookup per
+ * url. Best-effort: a lookup failure is treated as "no adjudication on file"
+ * rather than failing the whole gate call, the same fail-open-to-fresh-judgment
+ * contract `findAssetReusePrecedent` already uses for its own DB read.
+ */
+async function getMediaAdjudications(mediaUrls: readonly string[]): Promise<AssetAdjudicationGrounding[]> {
+  const out: AssetAdjudicationGrounding[] = []
+  for (const url of mediaUrls) {
+    try {
+      const row: AssetAdjudicationRow | null = await getAssetAdjudication(url)
+      if (row) out.push({ url, overriddenFindings: row.overriddenFindings ?? [], note: row.note })
+    } catch (err) {
+      console.error(`[publish-gate] asset-adjudication lookup failed for ${url} (treating as none on file):`, err)
+    }
+  }
+  return out
+}
+
+/**
+ * The user-turn text block grounding the model in any owner adjudication on
+ * this post's media (ticket #10503), or '' when there are none. Mirrors
+ * `describeAssetReusePrecedent`'s shape: named ground truth for the specific
+ * findings it covers, not a licence to skip judging anything else. Unlike
+ * that precedent (which requires an exact PASS from a posted row), an
+ * adjudication is an explicit owner ruling and can apply even to an asset
+ * that has never passed the gate on its own.
+ */
+export function describeAssetAdjudications(adjudications: readonly AssetAdjudicationGrounding[]): string {
+  if (adjudications.length === 0) return ''
+  const rows = adjudications.map(a => {
+    const findings = a.overriddenFindings.map(f => `  - ${f}`).join('\n')
+    return `Asset ${a.url}:\n${findings}${a.note ? `\n  owner note: ${a.note}` : ''}`
+  }).join('\n')
+  return (
+    'OWNER ADJUDICATION ON FILE for one or more of this post\'s images. The store owner has personally reviewed ' +
+    'the specific findings named below for the exact asset(s) listed and ruled them false positives. Do not ' +
+    're-raise a listed finding for its named asset unless you can point to something categorically different from ' +
+    'what the owner already reviewed (a materially different crop, a different frame, visible new content). Every ' +
+    'other check on this image, and every check on any OTHER image in this post, still applies in full — this is a ' +
+    'narrow, asset-and-finding-scoped exception, never a general pass:\n' + rows
+  )
+}
+
 export const PUBLISH_GATE_SYSTEM = `You are the independent pre-publish gate for one xdipx.com social post, standing
 in for social-publish-gate where no subagent can be spawned. You are adversarial by design: find
 the reason this should not ship, not confirmation that it is fine. You do not know why the drafter
@@ -537,7 +597,15 @@ async function callPublishGateModel(
 ): Promise<ReturnType<typeof parsePublishGateModelOutput>> {
   const msg = await client.messages.create({
     model: SONNET,
-    max_tokens: 2048,
+    // Raised from 2048 (ticket #10560): a `referencePackshotUrl` call (#9770)
+    // grounds product-identity judgment against a second real photo, and the
+    // extra comparison reasoning pushed the same postId to a max_tokens
+    // truncation twice in a row (run 981, ad hoc session) even after the
+    // #9153 preamble-only retry below, because the cutoff landed mid-object
+    // rather than in the preamble; omitting referencePackshotUrl resolved it
+    // cleanly on the identical caption. 3072 gives that longer reasoning path
+    // room without changing the floor for the common case.
+    max_tokens: 3072,
     // Pinned at 0 (ticket #7896): the same caption against the same
     // precedent set must return the same verdict. Rows #182/#185 showed the
     // opposite at the SDK default temperature — identical input, three
@@ -564,26 +632,35 @@ async function callPublishGateModel(
         `(${msg.usage.output_tokens} output tokens); the JSON may be truncated ` +
         'and will fail-closed to BLOCK if so',
     )
-    // #9153: post 246 (run 850) hit this twice in a row with byte-identical
-    // truncated output on both calls — expected at temperature 0, since a
-    // blind identical retry gives the model no new information and just
-    // spends the same budget on the same prose again. When the whole budget
-    // went to unstructured reasoning before ever reaching the JSON object
-    // (no `{` anywhere in the raw text), retry once with an explicit
-    // instruction to drop the preamble, which changes the input enough to
-    // have a real chance at a different, complete answer. A response that
-    // already started the object and was cut mid-way is a sizing problem,
-    // not a prompt-adherence one, so it is left to fail closed as before.
-    if (!isRetry && respondedWithPreambleOnly(block.text)) {
-      console.error(`[publish-gate] post ${postId}: max_tokens spent entirely on prose before any JSON; retrying once with a skip-the-preamble instruction`)
+    // #9153, widened by #10560: post 246 (run 850) hit this twice in a row
+    // with byte-identical truncated output on both calls — expected at
+    // temperature 0, since a blind identical retry gives the model no new
+    // information and just spends the same budget on the same prose again.
+    // Retrying once with an explicit skip-the-preamble, be-concise
+    // instruction changes the input enough to have a real chance at a
+    // different, complete answer. That used to be gated on the whole budget
+    // going to unstructured reasoning before ever reaching a `{` at all, on
+    // the theory that a response which already started the object and was
+    // cut mid-way is purely a sizing problem the same instruction cannot
+    // help. Ticket #10560's incident (a `referencePackshotUrl` call, run 981)
+    // showed that theory wrong: the cutoff landed mid-object, not in a bare
+    // preamble, and the SAME concise-JSON-only instruction — which also
+    // shortens the notes/findings prose that caused the overrun — is exactly
+    // as likely to fit inside the (now larger, see max_tokens above) budget.
+    // So retry once regardless of which shape the cutoff took; the preamble
+    // check now only picks the log wording.
+    if (!isRetry) {
+      const shape = respondedWithPreambleOnly(block.text) ? 'entirely on prose before any JSON' : 'mid-object, after the JSON had started'
+      console.error(`[publish-gate] post ${postId}: max_tokens spent ${shape}; retrying once with a concise-JSON-only instruction`)
       const retryContent: Anthropic.ContentBlockParam[] = [
         ...content,
         {
           type: 'text',
           text:
-            'Your previous response ran out of tokens before reaching the JSON object. Do not explain your ' +
-            'reasoning in prose first. Respond now with ONLY the JSON object described above, starting with ' +
-            'the { character as the very first character of your response.',
+            'Your previous response was cut off by the token limit before producing one complete, valid ' +
+            'JSON object. Respond now with ONLY that JSON object, as concisely as possible (short notes, no ' +
+            'prose before or after it), starting with the { character as the very first character of your ' +
+            'response.',
         },
       ]
       return callPublishGateModel(postId, retryContent, true)
@@ -671,6 +748,19 @@ export async function runPublishGateCheck(
       reviewStatus: socialPosts.reviewStatus,
       shopifyProductId: socialPosts.shopifyProductId,
       lastPublishGateCheckJson: socialPosts.lastPublishGateCheckJson,
+      // #10476: the vision-verdict carve-out needs a date to age an
+      // un-verdicted asset by, and the poster frame is a second image the
+      // grid renders that mediaUrls does not carry.
+      createdAt: socialPosts.createdAt,
+      posterUrl: socialPosts.posterUrl,
+      // #10560: the pairing-presence self-check reason, read fresh off the
+      // row so a value recorded at draft or rework time reaches the
+      // deterministic pairing-missing check here too.
+      pairingNoneReason: socialPosts.pairingNoneReason,
+      // ADR-015, ticket #10730: the cast drafted into this frame, read fresh
+      // off the row so a recast via the admin CastPicker reaches the
+      // deterministic cast-target-mismatch check here too.
+      castSlugs: socialPosts.castSlugs,
     })
     .from(socialPosts)
     .where(eq(socialPosts.id, postId))
@@ -708,6 +798,10 @@ export async function runPublishGateCheck(
     productHandle,
     altText: post.altText,
     recentCaptions,
+    postCreatedAt: post.createdAt ?? null,
+    posterUrl: post.posterUrl ?? null,
+    pairingNoneReason: post.pairingNoneReason ?? null,
+    castSlugs: post.castSlugs ?? [],
   })
 
   const deterministicFindings: PublishGateFinding[] = deterministic.findings.map(toStoredFinding)
@@ -788,6 +882,17 @@ export async function runPublishGateCheck(
     )
   }
 
+  // Owner adjudications (ticket #10503): a false-positive the owner has
+  // already ruled on for a specific asset, independent of whether that asset
+  // has ever posted or passed on its own (unlike the precedent above).
+  const adjudications = await getMediaAdjudications(media)
+  if (adjudications.length) {
+    console.error(
+      `[publish-gate] post ${postId}: found owner adjudication(s) for ${adjudications.length} asset(s), ` +
+        `grounding ${adjudications.reduce((n, a) => n + a.overriddenFindings.length, 0)} finding(s)`,
+    )
+  }
+
   const content = buildPublishGateUserContent({
     platform,
     tweetText: post.tweetText,
@@ -799,6 +904,7 @@ export async function runPublishGateCheck(
     mediaUrls: media,
     packshotUrl,
     assetPrecedentBlock: describeAssetReusePrecedent(assetPrecedent),
+    adjudicationBlock: describeAssetAdjudications(adjudications),
   })
 
   let modelResult = await callPublishGateModel(postId, content)
@@ -1012,6 +1118,8 @@ export function buildPublishGateUserContent(input: {
   packshotUrl: string | null
   /** Asset-reuse grounding block (ticket #8976), or '' when there is no precedent. */
   assetPrecedentBlock?: string
+  /** Owner-adjudication grounding block (ticket #10503), or '' when there is none on file. */
+  adjudicationBlock?: string
 }): Anthropic.ContentBlockParam[] {
   const packshotNote = input.featuresProduct
     ? input.packshotUrl
@@ -1035,6 +1143,7 @@ export function buildPublishGateUserContent(input: {
         `${input.featuresProduct ? '' : `${input.registerPrecedentsBlock}\n\n`}` +
         `${packshotNote ? `${packshotNote}\n\n` : ''}` +
         `${input.assetPrecedentBlock ? `${input.assetPrecedentBlock}\n\n` : ''}` +
+        `${input.adjudicationBlock ? `${input.adjudicationBlock}\n\n` : ''}` +
         `${input.mediaUrls.length} generated candidate image(s) follow${input.packshotUrl ? ' after the packshot' : ''}.`,
     },
     ...(input.packshotUrl

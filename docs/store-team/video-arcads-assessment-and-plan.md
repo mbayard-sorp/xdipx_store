@@ -98,8 +98,9 @@ existing owner-gated valves by policy.
 1. **Cost.** Arcads is ~$11/video with a $110/month floor. Our pipeline lands $1.80-$5.20/video
    on fal.ai retail rates, with reused scene frames zeroing the frame cost of every variant after
    the first (`estimateJobCostUsd` zeroes frame cost when `reuseFrame` is set).
-2. **Category risk.** Arcads is built for mainstream DTC ad creative. Our survival rules (no
-   product-on-body, most-revealing-frame judgment, register caps per platform, AI-content labels)
+2. **Category risk.** Arcads is built for mainstream DTC ad creative. Our survival rules (the §3.2a/§3.2c
+   imagery ceiling holding on every frame per `social-video-viral-checklist.md` P2, register caps
+   per platform, AI-content labels)
    are enforced by our own voice gate and frame gate; a third-party tool enforces none of that and
    its ToS may not welcome the category at all.
 3. **Brand.** Emma is the asset. An actor library is a liability for a one-persona brand; our

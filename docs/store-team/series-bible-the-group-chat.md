@@ -1,13 +1,15 @@
 # Series Bible: The Group Chat (working title)
 
+> Shelved for season 1 of the product-talk program (owner decision 2026-09-23). Cast, standing sets and voices carry over unchanged into docs/store-team/video-clip-rules.md (lands with this change) and docs/store-team/video-realism-recipe.md. The four ledger episodes move to `shelved`. Nothing here binds a video run until the owner reopens the show. §4 and §9 stay the pointer for the daily still story line per instagram-campaigns.md §3.2c.
+
 > Canon and rules for xdipx's serialized video program. This document is the show. It changes
 > deliberately, by PR through the improvement bus (kind `instructions`), never mid-run. Mutable
 > per-episode state (arc beats, open loops, decisions) lives in the `video_episodes` ledger, not
 > here; anything here that would need a daily write is in the wrong place.
 >
 > Owner approvals that bind this file: shoppers-not-owners (2026-08-26), 2 episodes/week during
-> learn mode, fal for images only with all video and lipsync on the RunPod Wan worker, X video
-> manual only, and (2026-09-04) a register-9 plain spoken track with the cast written as real
+> learn mode, fal for images only with all video and lipsync on the owned video provider
+> (Atlas Cloud since ADR-016, 2026-09-23), X video manual only, and (2026-09-04) a register-9 plain spoken track with the cast written as real
 > people who may name and want sensation, the only hard product line being that no character
 > claims to have tested or tried a specific product. The working title stands until the owner
 > renames it.
@@ -143,12 +145,19 @@ charter's fresh-language rule applies to structure as much as to words.
   scene carries its own spoken-seconds figure, and the sum across every speaker in the scene is
   what binds the scene total against the enqueue's overrun check. A silent-capable cast member
   present in the scene contributes zero to the sum.
-- Register: spoken lines 6-7 on Instagram and YouTube, 5 on TikTok. Captions per the social
+- Register: **the posted spoken track of this show runs at 9, plain, with acts nameable** (charter
+  amendment 2026-09-04, owner direction; the owner posts it manually and accepts the platform risk).
+  The 6-7 on Instagram and YouTube and 5 on TikTok remain the default caps for every other script
+  and they no longer bind this show. Name them as the default they are, not as this show's ceiling. Captions per the social
   addendum (Instagram 9 by implication, engagement close, never a description of the picture).
   Every episode also ships the site-hosted register-9 cut: same audio, register-9 written
   treatment for /social and the PDP hero. Full multi-voice dialogue between cast members is
   permitted in this site-hosted register-9 cut, because it is written rather than spoken and
   therefore costs nothing to render, even on the current single-speaker tier.
+- **Imagery, no divergence.** This show carries the same ceiling as every other surface:
+  `instagram-campaigns.md` §3.2a with the on-skin treatment of §3.2c (owner answer to blocker #192,
+  2026-09-20). The bible does not restate it. Because this is video, `social-video-viral-checklist.md`
+  P2's motion clause binds on top of it: the ceiling holds on every frame, not the opening one.
 - Talking renders on the RunPod worker's audio-driven tier once live (bake-off:
   Wan2.2-S2V vs InfiniteTalk vs LongCat-Video-Avatar; see `video-worker-runpod.md`). Until it
   is live, episodes are voiceover-carried b-roll with no on-camera mouths, and the room writes

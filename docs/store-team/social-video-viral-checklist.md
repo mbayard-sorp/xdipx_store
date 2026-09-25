@@ -1,5 +1,7 @@
 # Social Video Viral Checklist (38 rules, PASS/FAIL)
 
+> Superseded for season 1 by docs/store-team/video-clip-rules.md (lands with this change) (owner decision 2026-09-23). script-doctor and emma-empathy-reviewer gate product-talk clips on that file, not this one. Kept on disk for the shelved serialized program.
+
 > **Provenance note (read first):** the content strategist's original formula memo was lost; it
 > lived only in a session scratchpad and was never committed. This file is a **reconstruction**
 > from the surviving synthesis in `docs/store-team/social-video-strategy-DRAFT.md` §3. Five rules
@@ -72,8 +74,26 @@ charter's invented-testimonial ban wearing a rule number).
   charter amendment 2026-09-04: that show's spoken track runs at 9, plain, with acts nameable; the
   owner posts it manually and accepts the platform risk. These caps remain the default for every
   other script.)
-- **P2.** Judge by the most revealing frame: no product-on-body, no simulated use, wardrobe safe
-  in every frame, and the AI-generated label is always on.
+- **P2.** The imagery ceiling for video is `docs/store-team/instagram-campaigns.md` §3.2a with the
+  on-skin treatment of §3.2c (owner answer to blocker #192, 2026-09-20: on-skin frames may appear
+  in video). This rule does not restate it; read it there. What P2 adds, and owns as the only copy
+  in the repo, is the **motion clause**: a clip is judged on its most revealing frame, so §3.2a and
+  §3.2c must hold on **every frame of every scene**, not on the seed frame and not on average. A
+  composition that sits at the ceiling when still and crosses it when something moves fails P2 even
+  though the opening frame passes. The AI-generated label is always on. Motion-specific render
+  constraints live in `docs/store-team/routine-video-render.md` §Motion safety and are the
+  producer's to enforce at enqueue.
+
+**Why the motion clause is the only thing video carries that stills do not.** The old ban ("video
+stays wardrobe-safe while stills do not") gave two reasons. The owner's answer to #192 overrules
+the policy conclusion. The engineering reason survives it: a still is one sample, a five-second
+clip at 24fps is 120, and the classifier samples densely while a human reviewer samples sparsely.
+So the ceiling did not move, the sampling rate did, and that is what P2 now says. An on-skin frame
+sits **at** the ceiling by construction (§3.2b's ceiling-on-skin is a bare contact zone in
+implied-nude territory), and a composition that starts at the ceiling has nowhere to drift but
+through it. **On-skin belongs on b-roll cutaways and never on the talking tier**: a talking-head
+frame carries no product at all, and an on-skin frame is by definition a product-contact frame, so
+an on-skin talking head is a contradiction in the doctrine before it is a safety question.
 - **P3.** Audio and caption hygiene: no trending audio with flagged lyrics ever (instrumentals
   and trending formats are fine); explicit nouns allowed in caption prose per platform caps but
   never in hashtags or bio.

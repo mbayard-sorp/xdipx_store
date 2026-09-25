@@ -392,6 +392,23 @@ export interface CastMember {
    * than substitute the IVR or Emma voice.
    */
   voiceId: string | null
+  /**
+   * Neck-down reference for a macro/close on-skin crop with no face in it
+   * (ticket #10270, migration-free Sanity extension). Null until the owner
+   * approves one; the on-skin generation path falls back to photoUrl (the
+   * portrait referencePhoto) when this is null, exactly like editorialPhotoUrl
+   * falling back to photoUrl above.
+   */
+  bodyReferencePhotoUrl: string | null
+  /** Plain skin-tone description for a brief to state rather than a model to invent. */
+  skinToneNote: string | null
+  /**
+   * ADR-015, ticket #10730 — 'masculine' | 'feminine', which xdipx.cast_target
+   * products this presenter may be shown alone with. Null until the
+   * castMemberCastingFields backfill has run for this member. Production/
+   * casting metadata only, never surfaced storefront-side.
+   */
+  bodyPresentation: 'masculine' | 'feminine' | null
 }
 
 export async function getApprovedCastMembers(): Promise<CastMember[]> {
@@ -413,7 +430,10 @@ export async function getApprovedCastMembers(): Promise<CastMember[]> {
         description,
         emotionTags,
         "editorialPhotoUrl": editorialPhoto.asset->url,
-        voiceId
+        voiceId,
+        "bodyReferencePhotoUrl": bodyReferencePhoto.asset->url,
+        skinToneNote,
+        bodyPresentation
       }`,
     )
     return (raw ?? [])
@@ -432,11 +452,37 @@ export async function getApprovedCastMembers(): Promise<CastMember[]> {
         emotionTags:  Array.isArray(m.emotionTags) ? m.emotionTags : [],
         editorialPhotoUrl: m.editorialPhotoUrl ?? null,
         voiceId:      m.voiceId ?? null,
+        bodyReferencePhotoUrl: m.bodyReferencePhotoUrl ?? null,
+        skinToneNote: m.skinToneNote ?? null,
+        bodyPresentation: m.bodyPresentation === 'masculine' || m.bodyPresentation === 'feminine'
+          ? m.bodyPresentation
+          : null,
       }))
   } catch (err) {
     console.error('[sanity] getApprovedCastMembers error:', err)
     return []
   }
+}
+
+/**
+ * Which reference photo the on-skin generation path should pass as the
+ * presenter reference (ticket #10270). A macro or close crop carries no face
+ * to anchor identity to a portrait, so it needs the neck-down body reference;
+ * a medium or wide crop still shows enough of the person that the portrait
+ * reference is correct, matching what the pipeline already does today. Falls
+ * back to the portrait reference whenever no body reference exists yet (the
+ * owner has not approved one) or the crop scale is anything else, including
+ * absent — never returns null, so a caller never has to special-case "no
+ * presenter photo" on top of "no body reference yet".
+ */
+export function presenterPhotoUrlForCrop(
+  member: Pick<CastMember, 'photoUrl' | 'bodyReferencePhotoUrl'>,
+  cropScale: string | null | undefined,
+): string {
+  if ((cropScale === 'macro' || cropScale === 'close') && member.bodyReferencePhotoUrl) {
+    return member.bodyReferencePhotoUrl
+  }
+  return member.photoUrl
 }
 
 // v2 redesign — Emma presets for Ask Emma rail

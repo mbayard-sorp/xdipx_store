@@ -5,7 +5,11 @@
 // below are drawn from real rows rather than invented: the generated assets are
 // the ones on live posts 24 and 25, and the packshots are the ones sitting on
 // pending drafts 22, 26 and 30 right now.
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
+
+const mockAddAssetTags = vi.fn(async (_ids: number[], _tag: string) => 1)
+vi.mock('./social-studio.server', () => ({ addAssetTags: mockAddAssetTags }))
+
 import {
   buildSocialAssetFilename,
   isGeneratedSocialAsset,
@@ -18,7 +22,9 @@ import {
   withProductScale,
   scaleCueFromLengthInches,
   lengthInchesFromSpecifications,
+  tagIncompleteVisionVerdict,
 } from './social-media.server'
+import type { VisionVerdict } from './social-vision-gate.server'
 
 const CDN = 'https://cdn.shopify.com/s/files/1/0761/6872/4651/files'
 
@@ -264,5 +270,85 @@ describe('scale from real dimensions (ticket #2761)', () => {
       expect(cue).toContain(`${L} inches`)
       expect(cue).toMatch(/hand|palm|wrist|finger|elbow/)
     }
+  })
+
+  // Ticket #10981. Row 285: a Womanizer Beauty rendered ~2x real size on a
+  // forearm because the cue was always phrased against a hand that is not in
+  // frame on an on-skin, no-hand composite.
+  describe('bodyZone: forearm (ticket #10981)', () => {
+    it('anchors against the forearm, not the hand, when bodyZone is forearm', () => {
+      const cue = scaleCueFromLengthInches(3.5, 'forearm')
+      expect(cue).toContain('3.5 inches')
+      expect(cue).toContain('forearm')
+      expect(cue).not.toMatch(/hand|palm|wrist|finger/)
+    })
+
+    it('reads compact for a product about as long as the forearm is wide', () => {
+      const cue = scaleCueFromLengthInches(2.6, 'forearm')
+      expect(cue).toContain('compact against the arm')
+    })
+
+    it('reads oversized-warning for a product several times the forearm width', () => {
+      const cue = scaleCueFromLengthInches(7, 'forearm')
+      expect(cue).toContain('several times longer')
+      expect(cue).toContain('rather than enlarged to fill the frame')
+    })
+
+    it('falls back to the hand-relative cue for a null/undefined/other bodyZone', () => {
+      expect(scaleCueFromLengthInches(4.7)).toContain('two thirds')
+      expect(scaleCueFromLengthInches(4.7, null)).toContain('two thirds')
+      expect(scaleCueFromLengthInches(4.7, 'hip-hollow')).toContain('two thirds')
+    })
+  })
+})
+
+// Ticket #10990: a vision-gate verdict that never reached a real judgment
+// (checkCompleted:false) is tagged so a human or a rerun can find it again,
+// distinct from a genuine anatomy/exposure reject.
+describe('tagIncompleteVisionVerdict', () => {
+  const incomplete: VisionVerdict = {
+    pass: false,
+    checks: null,
+    notes: 'could not parse',
+    checkedAt: '2026-09-23T00:00:00.000Z',
+    checkCompleted: false,
+    legibleText: null,
+  }
+
+  const completedFail: VisionVerdict = {
+    pass: false,
+    checks: {
+      limbCount: 'fail', handAnatomy: 'pass', faceBodyIntegrity: 'pass', extraOrMergedLimbs: 'pass',
+      nippleOccluded: 'pass', genitaliaAbsent: 'pass', anusNotVisible: 'pass', adultUnambiguous: 'pass',
+    },
+    notes: 'three arms',
+    checkedAt: '2026-09-23T00:00:00.000Z',
+    checkCompleted: true,
+    legibleText: '',
+  }
+
+  it('tags an asset whose verdict never completed', async () => {
+    mockAddAssetTags.mockClear()
+    await tagIncompleteVisionVerdict(42, incomplete)
+    expect(mockAddAssetTags).toHaveBeenCalledWith([42], 'vision-incomplete')
+  })
+
+  it('does not tag a genuine, completed reject', async () => {
+    mockAddAssetTags.mockClear()
+    await tagIncompleteVisionVerdict(42, completedFail)
+    expect(mockAddAssetTags).not.toHaveBeenCalled()
+  })
+
+  it('does nothing when there is no asset id', async () => {
+    mockAddAssetTags.mockClear()
+    await tagIncompleteVisionVerdict(null, incomplete)
+    await tagIncompleteVisionVerdict(undefined, incomplete)
+    expect(mockAddAssetTags).not.toHaveBeenCalled()
+  })
+
+  it('never throws when tagging fails (non-fatal)', async () => {
+    mockAddAssetTags.mockClear()
+    mockAddAssetTags.mockImplementationOnce(async () => { throw new Error('neon down') })
+    await expect(tagIncompleteVisionVerdict(42, incomplete)).resolves.toBeUndefined()
   })
 })

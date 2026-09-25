@@ -252,6 +252,20 @@ describe('Nº 03 anchor grid default heading — no fabricated proof (ticket #46
     expect(emphasisParts(ANCHOR_GRID_DEFAULT_HEADING, ANCHOR_GRID_DEFAULT_EMPHASIS)).not.toBeNull()
   })
 
+  it('the emphasis phrase is exactly ONE word (design-doctrine section 2)', () => {
+    // Doctrine section 2 is absolute: "Exactly one emphasized word per
+    // headline... Never two `.em` words in one heading." The test above only
+    // checked that the emphasis phrase EXISTS in the heading, which is why
+    // 'chosen with care' shipped and rendered three italic plum words in one
+    // <em> on the live homepage, measured by design-critic in run 1034.
+    expect(ANCHOR_GRID_DEFAULT_EMPHASIS.trim().split(/\s+/)).toHaveLength(1)
+  })
+
+  it('the retired emphasis would have tripped the one-word rule', () => {
+    // Guards the guard, same shape as the proof-claim matcher below.
+    expect('chosen with care'.trim().split(/\s+/).length).toBeGreaterThan(1)
+  })
+
   it('the retired strings would have tripped the proof-claim matcher', () => {
     // Guards the guard: the exact copy this ticket removed must still be caught,
     // so the matcher cannot rot into a no-op that passes anything.

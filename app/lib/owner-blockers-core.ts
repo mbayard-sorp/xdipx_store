@@ -124,13 +124,6 @@ export const PROBE_DESCRIPTIONS: Record<string, (arg: string) => string> = {
     a === 'all'
       ? 'every expected Shopify webhook topic is registered'
       : `Shopify webhook ${a} is registered`,
-  /* Arg is unused. Clears itself the moment no RunPod pod (the hourly-billed
-   * machine product, not the scale-to-zero Serverless endpoint) is RUNNING. */
-  runpod_no_pods: () => 'no RunPod pod is left running',
-  /* Arg is unused. Clears itself once the video render endpoint has scaled to
-   * zero active workers with an empty queue (idle Flex slots bill nothing and
-   * do not count). The pods probe above cannot see the endpoint at all. */
-  runpod_endpoint_idle: () => 'the RunPod video endpoint has scaled to zero active workers',
   /* Arg is a platform (`instagram`, `x`). Clears itself once that platform has
    * no approved draft left sitting past OVERDUE_AFTER_MS, whether the backlog
    * drained because the owner reopened a valve or because the rows were

@@ -5,6 +5,8 @@ Status: **Accepted 2026-08-15** (owner direction, all-hands: Atlas Cloud is the
 PRIMARY still-image provider — beyond the spike's "additive" framing. fal remains
 video, background removal, and the still-image fallback. See Decision outcome below.)
 Author: rr7-engineer (SPIKE #2018); decision owner: tech-architect (superseded by owner direction)
+Video half superseded 2026-09-23 by ADR-016 (Atlas Cloud is the video provider;
+InfiniteTalk closed the audio-driven parity gap recorded below).
 
 ## Context
 

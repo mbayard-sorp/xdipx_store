@@ -146,16 +146,6 @@ export const INTEGRATIONS: readonly Integration[] = [
     moneyPath: false,
     whereToGo: 'Twilio Console > Account > API keys & tokens',
   },
-  {
-    key: 'runpod',
-    label: 'RunPod',
-    envVars: ['RUNPOD_API_KEY'],
-    required: false,
-    ownerTeam: 'video',
-    breaks: 'Video rendering, and the hourly stray-pod watch that stops an idle GPU billing by the hour.',
-    moneyPath: false,
-    whereToGo: 'RunPod console > Settings > API Keys',
-  },
 ]
 
 const BY_KEY = new Map(INTEGRATIONS.map(i => [i.key, i]))

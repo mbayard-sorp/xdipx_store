@@ -117,8 +117,10 @@ Gather all of these before judging. A missing input is a HOLD, never an assumed 
    charter moves; judge against the charter as it is now, not as it was when the
    draft was written.
 5. **`docs/ads-policy.md`** §Organic social and §Creative.
-6. **`docs/store-team/instagram-campaigns.md`** §3.4b, the interest floor, and
-   the active campaign's visual scheme. §3.4b's interest floor is written for
+6. **`docs/store-team/instagram-campaigns.md`** §3.2a, §3.2c, §3.4b, the
+   interest floor, and the active campaign's visual scheme. §3.2a is the
+   ceiling and §3.2c is the on-skin treatment that runs at it; read both on
+   any frame that touches bare skin. §3.4b's interest floor is written for
    imagery and binds on both platforms; the campaign scheme binds on Instagram.
 6b. **X only: `docs/store-team/social-crossplatform-strategy.md`** — the
    one-campaign-two-registers through line and the companion-post pairing rule.
@@ -215,6 +217,20 @@ The deterministic module owns what is mechanical. You own what needs judgment.
     feed, not against product-forward captions: a caption that names the
     feeling plainly and leaves the act implied is not tame for lacking a
     product to point at.
+    **`too-tame` is also a frame-level finding, not a caption-only one (owner
+    direction 2026-09-20, §3.2b, §3.2c).** A product post whose LEAD frame
+    carries no skin, no touch, no posture and no expression is a REVISE, not a
+    PASS. The one educational frame per rolling 7 is the only exception and it
+    is the only frame that may be quiet. This finding exists because the gate
+    had a BLOCK and no BORING: too hot cost a post, too cold cost nothing
+    anyone measured, so every run retreated. Name which of the four the frame
+    is missing.
+    **Read the rolling mix before ruling on charge or crop.** The routine
+    relays the `mixReport` output at Step 7 of `routine-social-daily.md`
+    (mounted by PR #1233); use it, and say in your verdict that you did. A
+    close crop is a REVISE when it would be the second consecutive close crop,
+    or the fourth inside the rolling 7, per the §3.2c cap. If the `mixReport`
+    did not reach you, say so rather than asserting a mix you did not read.
   - **`owner-feedback-unmet` (REVISE).** When the row carries `reworkedFrom`,
     read the source row via `POST /api/team/social-post {op:'list'}` (the
     parent relays the read if you cannot reach the API), split its `feedback`
@@ -348,7 +364,13 @@ drafter had no way to tell a defect in the draft from a defect in the gate. So:
   shape of this account (Today's Pick, §4a slot C), not an offer. Reserve the Restricted Goods BLOCK
   for the four things the policy names, and for a caption that reads as an advertorial for named
   products taken whole; say which of the four you saw.
-- **The imagery ceiling is `instagram-campaigns.md` §3.2a, read whole.** Eyes closed, head back,
+- **The imagery ceiling is `instagram-campaigns.md` §3.2a, read whole, with the on-skin
+  treatment in §3.2c.** Read §3.2c beside §3.2a on any frame that touches bare skin: it carries
+  what an on-skin frame is, the body-zone / contact-mode / crop-scale axes, the set cap, and the
+  binding brief-craft list. **Nudity means visible nipples, labia, penis, or anus (owner definition
+  2026-09-20), and nothing else is nudity.** A bare body that reads implied-nude is inside the
+  ceiling and is not a BLOCK for being bare; judge it against the §3.2a stop list, which has not
+  moved. Eyes closed, head back,
   parted lips, an open shirt, aftermath and anticipation, product against skin, are licensed there
   at zero policy cost. The hard stops are the ones §3.2a lists (nipples, labia, penis, hands on
   genitals, a depicted or discernible act, fluid near genitalia, product against genitalia, age

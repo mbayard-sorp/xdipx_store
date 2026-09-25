@@ -69,6 +69,21 @@ const h = vi.hoisted(() => {
   return { state, db }
 })
 
+/** The verdict pin's one GitHub read (ticket #10502/#10671). A FIFO of
+ *  results so a test can make the first attempt fail and the second succeed. */
+const gh = vi.hoisted(() => {
+  const state = { results: [] as unknown[], calls: [] as unknown[][] }
+  return {
+    state,
+    getPullRequest: async (...args: unknown[]) => {
+      state.calls.push(args)
+      return state.results.shift() ?? { ok: false, status: 500, error: 'no result queued' }
+    },
+  }
+})
+
+vi.mock('~/lib/github.server', () => ({ getPullRequest: gh.getPullRequest }))
+
 vi.mock('~/lib/db.server', () => ({ db: h.db }))
 vi.mock('~/lib/kv.server', () => ({
   cached: async (_k: string, _t: number, fn: () => unknown) => fn(),
@@ -112,6 +127,7 @@ import {
   REKIND_TO_KINDS,
   RUN_CLOSE_ACTORS,
   RUN_CLOSE_KINDS,
+  VERDICT_PIN_NOTE_PREFIX,
   type TicketActor,
   type TicketStatus,
 } from '~/lib/team.server'
@@ -125,6 +141,8 @@ beforeEach(() => {
   h.state.conflictTargets = []
   h.state.insertResults = []
   h.state.execute = null
+  gh.state.results = []
+  gh.state.calls = []
 })
 
 const ACTORS: TicketActor[] = [
@@ -134,7 +152,7 @@ const ACTORS: TicketActor[] = [
 
 /**
  * Every triple the design permits when a code ticket is held by rr7-engineer
- * and the call is a PLAIN transition (no reconcile declaration). The four
+ * and the call is a PLAIN transition (no reconcile declaration). The
  * out-of-band `-> applied` reconcile edges are deliberately absent: they are
  * `outOfBandReconcileOnly` in the map, so a plain call cannot see them.
  */
@@ -164,20 +182,25 @@ const ALLOWED_FOR_CODE_TICKET: Array<[TicketStatus, TicketStatus, TicketActor[]]
 ]
 
 /**
- * The fence on the out-of-band merged-PR reconcile edges. These four triples,
- * and ONLY these four, open up when the caller carries the reconcile
+ * The fence on the out-of-band merged-PR reconcile edges. These six triples,
+ * and ONLY these six, open up when the caller carries the reconcile
  * declaration (`viaOutOfBandReconcile` in TransitionOpts, or an enclosing
  * `runWithOutOfBandReconcile`). The declaration is an in-process signal the
  * team HTTP API does not forward, so at the map level a plain `system`
  * transition, from any present or future call site, cannot close an
- * approved/blocked/pr_open/in_review ticket; the sweeps that HAVE asked GitHub
+ * live ticket in any status; the sweeps that HAVE asked GitHub
  * and seen `merged: true` are the only callers that can.
  *
  * Why the edges exist at all: a hand-merged PR strands its ticket wherever it
  * stood (tickets #120/#423 in approved with PRs #436/#429 merged, #455
- * blocked with PR #508 merged, #291/#323/#441 in pr_open/in_review).
+ * blocked with PR #508 merged, #291/#323/#441 in pr_open/in_review). #10342
+ * added `proposed` and `in_progress` for the same reason: #10269 sat approved
+ * with PR #1227 merged, and the statuses left out were simply more places for
+ * a merged PR's ticket to be stranded.
  */
 const RECONCILE_ONLY_EDGES: Array<[TicketStatus, TicketStatus, TicketActor[]]> = [
+  ['proposed',    'applied', ['system']],
+  ['in_progress', 'applied', ['system']],
   ['approved',  'applied', ['system']],
   ['pr_open',   'applied', ['system']],
   ['in_review', 'applied', ['system']],
@@ -210,9 +233,9 @@ describe('ALLOWED transition matrix', () => {
   })
 
   // The fence, proven exhaustively: the reconcile declaration adds exactly the
-  // four RECONCILE_ONLY_EDGES to the plain matrix and nothing else, so it
-  // cannot be used as a skeleton key for any other edge or actor.
-  it('unlocks exactly the four reconcile edges under the reconcile declaration', () => {
+  // RECONCILE_ONLY_EDGES to the plain matrix and nothing else, so it cannot be
+  // used as a skeleton key for any other edge or actor.
+  it('unlocks exactly the reconcile edges under the reconcile declaration', () => {
     const ctx = { assignee: 'agent:rr7-engineer', kind: 'code', viaOutOfBandReconcile: true }
     const wrong: string[] = []
     for (const from of TICKET_STATUSES) {
@@ -1765,5 +1788,116 @@ describe('listConditions target_team semantics', () => {
       expect(params.filter(x => x === 'product')).toHaveLength(2)
       expect(text).not.toContain("'product'")
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The verdict pin (ticket #10502, hardened by #10671)
+// ---------------------------------------------------------------------------
+
+describe('transitionSuggestion: pinning the QA verdict to a commit', () => {
+  const PR_LINK = 'https://github.com/mbayard-sorp/xdipx_store/pull/1261'
+  const HEAD = 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2'
+
+  /** The pin block's own select for the row's most recent `pr` link, queued
+   *  after the ticket row seedTicket() queues. */
+  function seedPrLink(ref: string | null = PR_LINK) {
+    h.state.selects.push(ref === null ? [] : [{ ref }])
+  }
+
+  function linkWrites(): Array<{ kind: string; ref: string; state: string }> {
+    return h.state.inserts.flatMap(v => (Array.isArray(v) ? v : [v])) as Array<{
+      kind: string; ref: string; state: string
+    }>
+  }
+
+  it('records the head sha as a commit link when the PR reads cleanly', async () => {
+    seedTicket({ status: 'in_review' })
+    seedPrLink()
+    gh.state.results.push({ ok: true, status: 200, data: { headSha: HEAD } })
+    await transitionSuggestion(42, 'verified', 'agent:qa-reviewer')
+    expect(gh.state.calls).toHaveLength(1)
+    expect(linkWrites()).toContainEqual({ suggestionId: 42, kind: 'commit', ref: HEAD, state: 'verified' })
+  })
+
+  // #10671(b): the live suspect for 6 missing pins in 12 verifications is a
+  // transient read, so one retry should absorb it.
+  it('retries the PR read once, and a second attempt that succeeds still pins', async () => {
+    seedTicket({ status: 'in_review' })
+    seedPrLink()
+    gh.state.results.push({ ok: false, status: 502, error: 'bad gateway' })
+    gh.state.results.push({ ok: true, status: 200, data: { headSha: HEAD } })
+    await transitionSuggestion(42, 'verified', 'agent:qa-reviewer')
+    expect(gh.state.calls).toHaveLength(2)
+    const links = linkWrites()
+    expect(links).toContainEqual({ suggestionId: 42, kind: 'commit', ref: HEAD, state: 'verified' })
+    expect(links.some(l => l.kind === 'note' && l.ref.startsWith(VERDICT_PIN_NOTE_PREFIX))).toBe(false)
+  })
+
+  // #10671(a): a row that could not be pinned must SAY so. Before this the
+  // write logged a console.warn, which handleError swallows in this estate, so
+  // a failed pin was indistinguishable from a row that was never pinnable.
+  it('writes a short note-kind link when both attempts fail, and does not pin', async () => {
+    seedTicket({ status: 'in_review' })
+    seedPrLink()
+    gh.state.results.push({ ok: false, status: 502, error: 'bad gateway' })
+    gh.state.results.push({ ok: false, status: 502, error: 'bad gateway' })
+    await transitionSuggestion(42, 'verified', 'agent:qa-reviewer')
+    expect(gh.state.calls).toHaveLength(2)
+    const links = linkWrites()
+    expect(links.some(l => l.kind === 'commit')).toBe(false)
+    const note = links.find(l => l.kind === 'note' && l.ref.startsWith(VERDICT_PIN_NOTE_PREFIX))
+    expect(note).toBeDefined()
+    expect(note!.ref).toContain('1261')
+    expect(note!.state).toBe('verified')
+    // Ticket #10506: a long ref overflows the unique index's btree entry and
+    // 500s AFTER the status write has already committed.
+    expect(note!.ref.length).toBeLessThanOrEqual(180)
+  })
+
+  it('truncates a very long failure reason rather than writing an oversized ref', async () => {
+    seedTicket({ status: 'in_review' })
+    seedPrLink()
+    const long = { ok: false, status: 500, error: 'x'.repeat(4000) }
+    gh.state.results.push(long, long)
+    await transitionSuggestion(42, 'verified', 'agent:qa-reviewer')
+    const note = linkWrites().find(l => l.kind === 'note' && l.ref.startsWith(VERDICT_PIN_NOTE_PREFIX))
+    expect(note!.ref.length).toBeLessThanOrEqual(180)
+  })
+
+  it('says so when the pr link carries no usable PR number', async () => {
+    seedTicket({ status: 'in_review' })
+    seedPrLink('https://example.com/not-a-pr')
+    await transitionSuggestion(42, 'verified', 'agent:qa-reviewer')
+    expect(gh.state.calls).toHaveLength(0)
+    const links = linkWrites()
+    expect(links.some(l => l.kind === 'note' && l.ref.startsWith(VERDICT_PIN_NOTE_PREFIX))).toBe(true)
+  })
+
+  // A row with no PR link was never eligible for a pin. Annotating that would
+  // make the note meaningless, which is the whole point of writing one.
+  it('writes no note at all when the ticket has no pr link', async () => {
+    seedTicket({ status: 'in_review' })
+    seedPrLink(null)
+    await transitionSuggestion(42, 'verified', 'agent:qa-reviewer')
+    expect(gh.state.calls).toHaveLength(0)
+    expect(linkWrites().some(l => l.kind === 'note' && l.ref.startsWith(VERDICT_PIN_NOTE_PREFIX))).toBe(false)
+  })
+
+  // Explicit non-goal of #10671: QA's verdict is real even when GitHub is
+  // unreachable, so a pin failure must never fail the verification itself.
+  it('never fails the verification when the pin cannot be written', async () => {
+    seedTicket({ status: 'in_review' })
+    seedPrLink()
+    gh.state.results.push({ ok: false, status: 502, error: 'bad gateway' })
+    gh.state.results.push({ ok: false, status: 502, error: 'bad gateway' })
+    expect(await status(transitionSuggestion(42, 'verified', 'agent:qa-reviewer'))).toBe(200)
+    expect(h.state.patches[0]!['status']).toBe('verified')
+  })
+
+  it('pins nothing on a transition that is not to verified', async () => {
+    seedTicket({ status: 'in_progress' })
+    await transitionSuggestion(42, 'pr_open', 'agent:rr7-engineer')
+    expect(gh.state.calls).toHaveLength(0)
   })
 })

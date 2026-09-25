@@ -35,6 +35,10 @@ const POST = {
   isVideo: false,
   caption: 'a caption',
   mediaUrls: ['https://cdn.shopify.com/s/files/1/social-thing.jpg'],
+  // Required since ticket #10476. The value is the row's created_at; these
+  // cases are not about the vision-verdict age carve-out, so a fixed recent
+  // date keeps them saying exactly what they said before.
+  postCreatedAt: '2026-09-18T00:00:00.000Z',
 }
 
 // An always-on valve reader. Used where the valve is not what is under test.
@@ -84,7 +88,13 @@ describe('decideManualPublish', () => {
   it('runs the checks against the post the owner is actually publishing', async () => {
     const runChecks = clean()
     await decideManualPublish(
-      { ...POST, platform: 'x', caption: 'the real caption', productHandle: 'lace-set' },
+      {
+        ...POST,
+        platform: 'x',
+        caption: 'the real caption',
+        productHandle: 'lace-set',
+        posterUrl: 'https://blob.vercel-storage.com/video/job-8812/poster.jpg',
+      },
       valveAlwaysOn,
       { runChecks },
     )
@@ -93,6 +103,13 @@ describe('decideManualPublish', () => {
       mediaUrls: POST.mediaUrls,
       platform: 'x',
       productHandle: 'lace-set',
+      // Ticket #10476. Typecheck proves these two are SUPPLIED, since
+      // postCreatedAt is required on the gate input, but nothing proved they
+      // are supplied from the ROW rather than hardcoded or dropped on the
+      // way through. The whole bug was a value that existed and never
+      // arrived, so the forwarding is what has to be pinned.
+      postCreatedAt: POST.postCreatedAt,
+      posterUrl: 'https://blob.vercel-storage.com/video/job-8812/poster.jpg',
     }))
   })
 

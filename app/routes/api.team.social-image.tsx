@@ -2,11 +2,25 @@
  * POST /api/team/social-image — server-side social image generation + rehost.
  *
  *   { op: 'generate', prompt, handle, archetype, mood, date, slide?,
- *     refImageUrl?, imageSize?, only?, caller?, runId? }
+ *     refImageUrl?, imageSize?, only?, caller?, runId?, + the scene axes }
  *       -> GenerateSocialImageResult { url, filename, provider, model }
- *   { op: 'cast', prompt, handle, mood, date, slide?, presenterImageUrl,
- *     productImageUrl, extraImageUrls?, scale, count?, caller?, runId? }
+ *   { op: 'cast', prompt, handle, mood, date, slide?, presenterImageUrl?,
+ *     castSlug?, castSlugs?, productImageUrl?, extraImageUrls?, scale,
+ *     count?, caller?, runId?, + the scene axes }
  *       -> GenerateCastCompositeResult { urls, filenames, costs, requestIds, plateRequestId? }
+ *          plus bodyReferenceMissing?/warning?/productImageFellBack? (#10336, #10341)
+ *          plus derivedLengthInches?/derivedScaleCue? when `handle` resolves to a
+ *          product carrying `xdipx.specifications` (#10981)
+ *
+ * THE SCENE AXES, on both ops (tickets #10479/#10480): bodyZone, contactMode,
+ * cropScale and sceneLocation, each optional, each validated against the
+ * single-source vocabulary in `app/lib/social-scene-vocab.ts` and stamped
+ * onto the `social_media_assets` row as `axis:<key>=<value>` tags at ingest.
+ * This route is where those choices are MADE, so this is where they are
+ * persisted; `api.team.social-post`'s draft op resolves them back from the
+ * asset by media URL rather than asking the drafting agent to restate them.
+ * Two documentation-only attempts at the restate-them version (migrations 093
+ * and 099) produced 0 populated rows out of 281.
  *
  * Why this route exists (ticket #4133). Image generation rehosts the result to
  * Shopify Files (`uploadMoodImageToShopifyFiles` -> `adminGraphQL`), which needs
@@ -37,10 +51,12 @@
  */
 
 import type { ActionFunctionArgs } from 'react-router'
-import { assertTeamAuth, gate } from '~/lib/team.server'
+import { assertTeamAuth, gate, recordEvent } from '~/lib/team.server'
 import { SOCIAL_ARCHETYPES, type SocialArchetype } from '~/lib/social-media.server'
 import { apiError } from '~/lib/api-error.server'
 import { logImageCost } from '~/lib/token-log.server'
+import { parseSceneAxes, requireSceneAxesForGeneration } from '~/lib/social-scene-vocab'
+import { Sentry } from '~/lib/sentry.server'
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 const ONLY_VALUES = ['atlas', 'fal', 'imagen'] as const
@@ -88,10 +104,36 @@ export async function action({ request }: ActionFunctionArgs) {
     const slide = num(b['slide'])
     const caller = str(b['caller']) ?? 'social-media-manager'
 
+    // The scene axes (ticket #10479/#10480). This is where they are CHOSEN,
+    // so this is where they are validated and persisted: every value present
+    // is checked against the single-source vocabulary in
+    // `social-scene-vocab.ts` and stamped onto the library row at ingest, and
+    // the draft op resolves them back by URL rather than asking the drafter
+    // to restate them. Refusing here is cheap and correct (pre-spend, one
+    // retry); refusing at draft time would strand an already-billed frame,
+    // which is why that path backfills instead.
+    const parsedAxes = parseSceneAxes(b)
+    if (!parsedAxes.ok) return new Response(parsedAxes.error, { status: 400 })
+    const sceneAxes = parsedAxes.axes
+
+    // Required, not merely validated-if-present (ticket #10501). This route
+    // is a direct team-token surface, so the CLI's own requirement
+    // (scripts/gen-social-image.ts) is not enough by itself: a caller could
+    // hit this route directly and route around it, leaving the asset
+    // untagged the same way the routine's Step 5 template did before this
+    // ticket. Refusing here is pre-spend (before `gate()` below) and costs
+    // exactly one retry.
+    const axesRequired = requireSceneAxesForGeneration(sceneAxes)
+    if (!axesRequired.ok) return new Response(`Bad Request: ${axesRequired.error}`, { status: 400 })
+
+    // Ticket #10560: captured once and reused below for the run-event sink,
+    // rather than re-reading `b['runId']` a second time.
+    const runId = num(b['runId'])
+
     // Money gate: generation spends real dollars, so gate before generating,
     // exactly like api.team.video-job's enqueue ops. The CLI already gates too;
     // this closes the hole a direct team-token call would otherwise open.
-    const gateResult = await gate('social', num(b['runId']))
+    const gateResult = await gate('social', runId)
     if (!gateResult.ok) {
       return Response.json({ error: 'gated', reason: gateResult.reason, gate: gateResult }, { status: 403 })
     }
@@ -106,10 +148,93 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     if (op === 'cast') {
-      const presenterImageUrl = str(b['presenterImageUrl'])
-      const productImageUrl = str(b['productImageUrl'])
+      let presenterImageUrl = str(b['presenterImageUrl'])
+      let castPrompt = prompt
+      let bodyReferenceMissing = false
+      let warning: string | undefined
       const scale = str(b['scale'])
-      if (!presenterImageUrl) return new Response('Bad Request: presenterImageUrl required', { status: 400 })
+
+      // Presenter reference selection (ticket #10336). Same decision the CLI
+      // makes since PR #1233, shared through social-cast-reference.server:
+      // the crop scale picks the reference, and skinToneNote is stated in the
+      // prompt rather than left for the model to invent. Both were dead code
+      // on this route, which passed the portrait unconditionally.
+      const castSlug = str(b['castSlug'])
+      // Already enum-checked against the shared vocabulary above; `CropScale`
+      // and the report's crop sets are both derived from that same list, so
+      // this can no longer drift from what the report classifies on.
+      const cropScale = sceneAxes.cropScale
+      if (castSlug) {
+        const { getApprovedCastMembers } = await import('~/lib/sanity.server')
+        const { resolveCastReference } = await import('~/lib/social-cast-reference.server')
+        const roster = await getApprovedCastMembers()
+        // Never read an empty roster as "there are none": an unauthenticated
+        // read of this dataset returned 1 of 8 once and the false zero reached
+        // three binding documents.
+        if (!roster.length) {
+          return new Response('Bad Request: no approved cast members returned (check SANITY_API_TOKEN)', { status: 400 })
+        }
+        const member = roster.find(m => m.slug === castSlug)
+        if (!member) {
+          return new Response(`Bad Request: castSlug "${castSlug}" is not an approved cast member`, { status: 400 })
+        }
+        const resolved = resolveCastReference({ member, cropScale, prompt })
+        presenterImageUrl = resolved.presenterImageUrl
+        castPrompt = resolved.prompt
+        bodyReferenceMissing = resolved.bodyReferenceMissing
+        warning = resolved.warning
+      }
+
+      // Product reference (ticket #10341). featuredMedia is sometimes the
+      // retail carton, so when the caller gives a handle instead of a URL,
+      // walk the media list for a bare-product frame.
+      let productImageUrl = str(b['productImageUrl'])
+      let productImageFellBack = false
+      // Real-dimension scale cue (ticket #10981). Root cause of the
+      // product-size-plausibility blocks (row 285, a Womanizer Beauty
+      // rendered ~2x real size on a forearm): this route asked the caller
+      // for a free-text `scale` and never consulted the real numbers already
+      // sitting in Shopify (`xdipx.specifications`), so a composite with no
+      // hand in frame had nothing to anchor it. Derived whenever a handle is
+      // present, independent of whether the caller also supplied an explicit
+      // productImageUrl, because the size problem exists either way.
+      let derivedScaleCue: string | undefined
+      let derivedLengthInches: number | undefined
+      if (handle) {
+        const { getProductByHandle, pickBareProductImage } = await import('~/lib/shopify.server')
+        const product = await getProductByHandle(handle)
+        if (!productImageUrl && product) {
+          const picked = pickBareProductImage(product.images ?? [])
+          if (picked.url) {
+            productImageUrl = picked.url
+            productImageFellBack = picked.fellBack
+          }
+        }
+        // `Product` (app/types/index.ts) does not declare `specifications` in
+        // its type even though `nodeToProduct` populates it from
+        // `xdipx.specifications` when present; same cast precedent already
+        // used to read this field off this same function's result in
+        // scripts/generate-slate-2026-08-24.ts.
+        const specs = (product as unknown as { specifications?: string[] } | null)?.specifications
+        if (specs?.length) {
+          const { lengthInchesFromSpecifications, scaleCueFromLengthInches } = await import('~/lib/social-media.server')
+          const inches = lengthInchesFromSpecifications(specs)
+          if (inches != null) {
+            derivedLengthInches = inches
+            derivedScaleCue = scaleCueFromLengthInches(inches, sceneAxes.bodyZone ?? null)
+          }
+        }
+      }
+      // Prepended, not appended: the trailing negative-prompt block is what
+      // this composite tends to end on, same reasoning as `withProductScale`.
+      // The caller's own `scale` (below) still applies on top of this via
+      // `withProductScale` inside `generateCastComposite` — this is an
+      // additive anchor, not a replacement for it.
+      if (derivedScaleCue) {
+        castPrompt = `${derivedScaleCue} ${castPrompt}`
+      }
+
+      if (!presenterImageUrl) return new Response('Bad Request: presenterImageUrl or castSlug required', { status: 400 })
       if (!productImageUrl) return new Response('Bad Request: productImageUrl required', { status: 400 })
       if (!scale) return new Response('Bad Request: scale required', { status: 400 })
       const extraImageUrls = Array.isArray(b['extraImageUrls'])
@@ -125,8 +250,12 @@ export async function action({ request }: ActionFunctionArgs) {
         : undefined
 
       const { generateCastComposite } = await import('~/lib/social-media.server')
+      const castSlugs = Array.isArray(b['castSlugs'])
+        ? (b['castSlugs'] as unknown[]).filter((v): v is string => typeof v === 'string' && v.length > 0)
+        : castSlug ? [castSlug] : []
+
       const result = await generateCastComposite({
-        prompt,
+        prompt: castPrompt,
         handle,
         mood,
         date,
@@ -134,10 +263,14 @@ export async function action({ request }: ActionFunctionArgs) {
         productImageUrl,
         scale,
         caller,
+        ...(castSlugs.length ? { castSlugs } : {}),
+        ...(Object.keys(sceneAxes).length ? { sceneAxes } : {}),
         ...(slide ? { slide } : {}),
         ...(count ? { count } : {}),
         ...(extraImageUrls?.length ? { extraImageUrls } : {}),
         ...(aspectRatio ? { aspectRatio } : {}),
+        ...(bodyReferenceMissing ? { bodyReferenceMissing: true } : {}),
+        ...(productImageFellBack ? { productImageFellBack: true } : {}),
       })
 
       // Log spend for every billed frame (mirrors what the CLI used to do in
@@ -165,7 +298,48 @@ export async function action({ request }: ActionFunctionArgs) {
         })
       }
 
-      return Response.json(result)
+      // Ticket #10560: the run is not blocked on a missing body reference or
+      // a product-image fallback (a route cannot refuse without killing a
+      // whole scheduled run), and the response field below was the ONLY
+      // place either condition landed — nothing read it. Record it on the
+      // caller's run timeline (readable at /admin/homepage-team) and to
+      // Sentry, so it is visible without depending on a caller that echoes
+      // and reads its own response. Both writes are non-fatal, matching
+      // `tryIngestSocialAsset`'s contract: telemetry must never fail an
+      // already-billed generation.
+      if (bodyReferenceMissing || productImageFellBack) {
+        const parts = [
+          ...(warning ? [warning] : []),
+          ...(productImageFellBack ? ['Fell back to a packaging/retail-box frame; no bare-product image was available.'] : []),
+        ]
+        const summary = `[social-image:cast] ${handle}: ${parts.join(' ')}`
+        if (runId != null) {
+          try {
+            await recordEvent({ runId, eventType: 'error', summary, agentRole: 'social-media-manager' })
+          } catch (err) {
+            console.error('[social-image] recordEvent failed (non-fatal):', err)
+          }
+        }
+        try {
+          Sentry.captureMessage(summary, 'warning')
+        } catch (err) {
+          console.error('[social-image] Sentry.captureMessage failed (non-fatal):', err)
+        }
+      }
+
+      // The run is not blocked on a missing body reference (a route cannot
+      // refuse without killing a whole scheduled run), but the routine has to
+      // see it, so it rides back on the response too.
+      return Response.json({
+        ...result,
+        ...(bodyReferenceMissing ? { bodyReferenceMissing: true } : {}),
+        ...(warning ? { warning } : {}),
+        ...(productImageFellBack ? { productImageFellBack: true } : {}),
+        // Ticket #10981: echoed so the run summary can quote what anchored
+        // the prompt, and so a caller can assert against it in a test.
+        ...(derivedLengthInches != null ? { derivedLengthInches } : {}),
+        ...(derivedScaleCue ? { derivedScaleCue } : {}),
+      })
     }
 
     // op === 'generate'
@@ -192,6 +366,7 @@ export async function action({ request }: ActionFunctionArgs) {
       date,
       caller,
       logCost: true,
+      ...(Object.keys(sceneAxes).length ? { sceneAxes } : {}),
       ...(slide ? { slide } : {}),
       ...(refImageUrl ? { refImageUrl } : {}),
       ...(imageSize ? { imageSize } : {}),

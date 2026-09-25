@@ -3,7 +3,8 @@
  *   { mode: 'single', prompt, postId?, assetId?, productHandle?, refImageUrl?,
  *     aspect?: '4:5'|'16:9'|'9:16'|'1:1', archetype? }
  *   { mode: 'cast', prompt, castSlug, refImageUrl (product photo), postId?,
- *     assetId?, productHandle?, aspect?: '4:5'|'16:9', scale?, count? }
+ *     assetId?, productHandle?, aspect?: '4:5'|'16:9', scale?, count?,
+ *     cropScale?: 'macro'|'close'|'medium'|'wide' }
  *   -> { ok, urls: string[], assetIds?: number[], provider?, model? }
  *
  * Owner-initiated regeneration from the Social Studio (Library drawer "Edit
@@ -26,6 +27,7 @@ import { requireAdmin } from '~/lib/session.server'
 import { gate } from '~/lib/team.server'
 import { SOCIAL_ARCHETYPES, isProductScale, type SocialArchetype } from '~/lib/social-media.server'
 import { getApprovedCastMembers } from '~/lib/sanity.server'
+import { isCropScale, resolveCastReference } from '~/lib/social-cast-reference.server'
 import { apiError } from '~/lib/api-error.server'
 
 const ASPECTS = ['4:5', '16:9', '9:16', '1:1'] as const
@@ -106,26 +108,46 @@ export async function action({ request }: ActionFunctionArgs) {
       const scale = scaleRaw && isProductScale(scaleRaw) ? scaleRaw : 'handheld'
       const countRaw = Number(b['count'])
       const count = Number.isInteger(countRaw) && countRaw >= 1 && countRaw <= 4 ? countRaw : 2
+
+      // Presenter reference selection (ticket #10336). This route passed
+      // `member.photoUrl` unconditionally, so a close or macro crop was
+      // anchored to a portrait and the model invented the body and skin tone
+      // under a named persona's name. `cropScale` now picks the reference and
+      // `skinToneNote` is stated in the prompt. Shared with the team route.
+      const cropScale = str(b['cropScale'])
+      if (cropScale && !isCropScale(cropScale)) {
+        return Response.json({ error: 'cropScale must be one of macro|close|medium|wide' }, { status: 400 })
+      }
+      const resolved = resolveCastReference({ member, cropScale, prompt })
+
       const { generateCastComposite } = await import('~/lib/social-media.server')
       const result = await generateCastComposite({
-        prompt,
+        prompt: resolved.prompt,
         handle,
         mood: 'owner',
         date,
-        presenterImageUrl: member.photoUrl,
+        presenterImageUrl: resolved.presenterImageUrl,
         productImageUrl: refImageUrl,
         extraImageUrls: [refImageUrl],
+        castSlugs: [castSlug],
         scale,
         count,
         aspectRatio: aspect === '16:9' ? '16:9' : '4:5',
         caller,
+        // Ticket #10560: tags the ingested asset row so the condition is
+        // countable in the library, the same as the scheduled team route.
+        ...(resolved.bodyReferenceMissing ? { bodyReferenceMissing: true } : {}),
       })
       const assetIds = (result as { assetIds?: number[] }).assetIds
+      // Generation is not blocked on a missing body reference, but the Studio
+      // has to see it rather than ship an invented body silently.
       return Response.json({
         ok: true,
         urls: result.urls,
         ...(assetIds ? { assetIds } : {}),
         costs: result.costs,
+        ...(resolved.bodyReferenceMissing ? { bodyReferenceMissing: true } : {}),
+        ...(resolved.warning ? { warning: resolved.warning } : {}),
       })
     }
 

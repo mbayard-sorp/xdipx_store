@@ -277,6 +277,10 @@ export interface Deal {
   audienceTags?:           string[]
   mattersTags?:            string[]
   productTypeDial?:        ProductTypeDial
+  /** ADR-015, ticket #10730 — one of male | female | universal, either the
+   *  explicit xdipx.cast_target override or the enrich-time derived default.
+   *  Production/casting metadata only; never customer-facing. */
+  castTarget?:             string
   /** @deprecated Use sensationDialV2 — read-fallback only. */
   sensationDial?:          SensationDial
   sensationDialV2?:        SensationDialV2
@@ -449,6 +453,10 @@ export interface VaultDeal {
   specifications?: string[]
   /** xdipx.product_type_dial */
   productTypeDial?: string | null
+  /** xdipx.cast_target — ticket #10731: the GMC feed's gender field derives
+   *  from this (imagery-casting fact, not a merchandising axis) since
+   *  audience_tags never carries a for-him/for-her value. */
+  castTarget?: string | null
   /** xdipx.original_price (already mapped to msrp but kept raw for feed) */
   originalPrice?: string | null
   /** xdipx.map_price — minimum advertised price; 0/absent means no MAP constraint */

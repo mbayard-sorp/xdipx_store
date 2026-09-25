@@ -5,7 +5,7 @@
 // an agent's PASS surviving a deterministic block, a product handle failing to
 // reach publish time, a PASS that says nothing, and a verdict landing on a row
 // that was not waiting for one.
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import {
   parsePublishGateVerdict,
   applyPublishGateVerdict,
@@ -176,7 +176,11 @@ const verdict = (over: Record<string, unknown> = {}) => {
 }
 
 describe('applyPublishGateVerdict', () => {
-  const inStock = { gateDeps: { getAvailability: async () => true } }
+  // ADR-015 / ticket #10730: default to 'universal' (always passes, no cast
+  // required) so these pre-existing cases keep testing exactly what they
+  // always tested; the cast-target gate has its own dedicated tests in
+  // social-publish-gate.server.test.ts.
+  const inStock = { gateDeps: { getAvailability: async () => true, getCastTarget: async () => 'universal' } }
 
   it('approves a clean PASS and stamps the verdict onto the row', async () => {
     const { repo, writes } = fakeRepo(row())
@@ -184,6 +188,71 @@ describe('applyPublishGateVerdict', () => {
     expect(r).toEqual({ ok: true, reviewStatus: 'approved' })
     expect(writes[0]?.reviewStatus).toBe('approved')
     expect(parseGateStamp(writes[0]?.feedback)?.verdict).toBe('PASS')
+  })
+
+  // ── The durable product link is backfilled from the gate's handle ──────────
+  // The stock guard skips a row whose shopify_product_id is null and the mix
+  // report counts it as product-free, and the drafting routine never sent the
+  // column, so the approved write fills it from the handle the PASS asserted.
+
+  it('backfills shopify_product_id from the PASS handle when the row has none', async () => {
+    const { repo, writes } = fakeRepo(row({ shopifyProductId: null }))
+    const resolved: string[] = []
+    const r = await applyPublishGateVerdict(
+      7,
+      verdict({ featuresProduct: true, productHandle: 'dame-aer' }),
+      {
+        repo, ...inStock,
+        resolveProductIdByHandle: async (h) => { resolved.push(h); return 'gid://shopify/Product/4242' },
+      },
+    )
+    expect(r).toEqual({ ok: true, reviewStatus: 'approved' })
+    expect(resolved).toEqual(['dame-aer'])
+    expect(writes[0]?.shopifyProductId).toBe('gid://shopify/Product/4242')
+    expect(writes[0]?.reviewStatus).toBe('approved')
+  })
+
+  it('leaves an existing shopify_product_id alone: the drafter is the source of truth', async () => {
+    const { repo, writes } = fakeRepo(row({ shopifyProductId: 'gid://shopify/Product/1' }))
+    const resolve = vi.fn(async () => 'gid://shopify/Product/999')
+    await applyPublishGateVerdict(
+      7, verdict({ featuresProduct: true, productHandle: 'dame-aer' }),
+      { repo, ...inStock, resolveProductIdByHandle: resolve },
+    )
+    expect(resolve).not.toHaveBeenCalled()
+    expect(writes[0]).not.toHaveProperty('shopifyProductId')
+  })
+
+  it('does not resolve or write a product id when the PASS says the post features no product', async () => {
+    const { repo, writes } = fakeRepo(row())
+    const resolve = vi.fn(async () => 'gid://shopify/Product/999')
+    await applyPublishGateVerdict(7, verdict(), { repo, ...inStock, resolveProductIdByHandle: resolve })
+    expect(resolve).not.toHaveBeenCalled()
+    expect(writes[0]).not.toHaveProperty('shopifyProductId')
+  })
+
+  it('still approves when the handle does not resolve or the lookup throws', async () => {
+    for (const resolve of [async () => null, async () => { throw new Error('storefront down') }]) {
+      const { repo, writes } = fakeRepo(row())
+      const r = await applyPublishGateVerdict(
+        7, verdict({ featuresProduct: true, productHandle: 'dame-aer' }),
+        { repo, ...inStock, resolveProductIdByHandle: resolve },
+      )
+      expect(r).toEqual({ ok: true, reviewStatus: 'approved' })
+      expect(writes[0]).not.toHaveProperty('shopifyProductId')
+    }
+  })
+
+  it('does not backfill on a PASS the deterministic checks refused', async () => {
+    const { repo, writes } = fakeRepo(row())
+    const resolve = vi.fn(async () => 'gid://shopify/Product/999')
+    const r = await applyPublishGateVerdict(
+      7, verdict({ featuresProduct: true, productHandle: 'dame-aer' }),
+      { repo, gateDeps: { getAvailability: async () => false }, resolveProductIdByHandle: resolve },
+    )
+    expect(r.ok).toBe(false)
+    expect(resolve).not.toHaveBeenCalled()
+    expect(writes[0]).not.toHaveProperty('shopifyProductId')
   })
 
   // ── Phase 5 (#4913): the verdict lands in the columns, the stamp is dual-written ──
@@ -265,6 +334,29 @@ describe('applyPublishGateVerdict', () => {
     expect(parseGateStamp(writes[0]?.feedback)?.verdict).toBe('REVISE')
   })
 
+  // Ticket #10560: the deterministic re-check reads `pairingNoneReason` fresh
+  // off the row, so a reason recorded at draft/rework time is honored here,
+  // the check the agent's PASS cannot talk past.
+  it('honors a pairingNoneReason recorded on the row instead of blocking on the pairing-missing check', async () => {
+    const noReason = fakeRepo(row({ tweetText: 'a quiet night in with the LELO SONA, external sensation only' }))
+    const blocked = await applyPublishGateVerdict(
+      7, verdict({ featuresProduct: true, productHandle: 'lelo-sona' }),
+      { repo: noReason.repo, ...inStock, gateDeps: { getAvailability: async () => true, getProductTypeDial: async () => 'vibrator', getCastTarget: async () => 'universal' } },
+    )
+    expect(blocked.ok).toBe(false)
+    expect(noReason.writes[0]?.feedback).toContain('pairing-missing')
+
+    const withReason = fakeRepo(row({
+      tweetText: 'a quiet night in with the LELO SONA, external sensation only',
+      pairingNoneReason: 'external-only feature post, no internal use implied',
+    }))
+    const passed = await applyPublishGateVerdict(
+      7, verdict({ featuresProduct: true, productHandle: 'lelo-sona' }),
+      { repo: withReason.repo, ...inStock, gateDeps: { getAvailability: async () => true, getProductTypeDial: async () => 'vibrator', getCastTarget: async () => 'universal' } },
+    )
+    expect(passed).toEqual({ ok: true, reviewStatus: 'approved' })
+  })
+
   it('carries the product handle into the stamp so publish time can re-check it', async () => {
     const { repo, writes } = fakeRepo(row())
     await applyPublishGateVerdict(
@@ -302,6 +394,35 @@ describe('applyPublishGateVerdict', () => {
     const r = await applyPublishGateVerdict(7, verdict({ verdict: 'HOLD', notes: 'Novel case, not mine to self-certify.' }), { repo })
     expect(r).toEqual({ ok: true, reviewStatus: 'pending_review' })
     expect(writes[0]?.reviewStatus).toBe('pending_review')
+  })
+
+  // Ticket #10982: every BLOCK/REVISE/HOLD row landed with gate_findings = []
+  // once the agent sent no itemised findings, which reads on the dashboard as
+  // "nothing was found" on a row that was explicitly refused.
+  it('synthesises a finding from the notes when a BLOCK carries none of its own', async () => {
+    const { repo, writes } = fakeRepo(row())
+    await applyPublishGateVerdict(
+      7, verdict({ verdict: 'BLOCK', notes: 'Withholding test answered a body.' }), { repo },
+    )
+    expect(writes[0]?.gateFindings).toEqual([
+      { check: 'agent-judgment', verdict: 'block', note: 'Withholding test answered a body.' },
+    ])
+  })
+
+  it('does not synthesise a finding when the agent itemised its own', async () => {
+    const { repo, writes } = fakeRepo(row())
+    await applyPublishGateVerdict(
+      7,
+      verdict({
+        verdict: 'REVISE',
+        notes: 'Catalog-on-a-table.',
+        findings: [{ check: 'imagery-ceiling', severity: 'warn', detail: 'catalog framing' }],
+      }),
+      { repo },
+    )
+    expect(writes[0]?.gateFindings).toEqual([
+      { check: 'imagery-ceiling', verdict: 'revise', note: 'catalog framing' },
+    ])
   })
 
   it('does not skip the deterministic checks on a non-PASS', async () => {
@@ -444,6 +565,118 @@ describe('parseReworkInput (#4351)', () => {
     expect(r.ok).toBe(true)
     if (r.ok) expect(r.input.mediaUrls).toEqual([`${CDN}/a.jpg`, `${CDN}/b.jpg`])
   })
+
+  // Ticket #10339: a REVISE that swaps an on-skin frame for a different body
+  // zone or crop has to move the variety columns too, or every §3.2c rotation
+  // window keeps reading the frame that was replaced.
+  it('accepts the variety axes alongside an imagery rework', () => {
+    const r = parseReworkInput({
+      mediaUrls: [`${CDN}/reworked-lead.jpg`],
+      sceneLocation: 'bedroom, late afternoon',
+      castSlugs: ['nadia', '', 'juno '],
+      bodyZone: 'sternum',
+      contactMode: 'resting',
+      cropScale: 'medium',
+    })
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    // #10480: the location is normalized to the kebab-case convention
+    // migration 093 documents, rather than stored as free prose, because the
+    // §3.8 rotation window compares locations by equality and "bedroom, late
+    // afternoon" and "bedroom-late-afternoon" would rotate as two rooms.
+    expect(r.input.sceneLocation).toBe('bedroom-late-afternoon')
+    expect(r.input.castSlugs).toEqual(['nadia', 'juno'])
+    expect(r.input.bodyZone).toBe('sternum')
+    expect(r.input.contactMode).toBe('resting')
+    expect(r.input.cropScale).toBe('medium')
+  })
+
+  it('rejects a variety axis over its length cap, matching the draft op', () => {
+    for (const [field, len] of [['sceneLocation', 81], ['bodyZone', 41], ['contactMode', 21], ['cropScale', 11]] as const) {
+      const r = parseReworkInput({ tweetText: 'a cleaner line', [field]: 'x'.repeat(len) })
+      expect(r.ok).toBe(false)
+      if (!r.ok) expect(r.error).toContain(field)
+    }
+  })
+
+  it('reads an empty-string variety axis as absent, and rejects a non-array castSlugs', () => {
+    // #10479/#10480: an empty string is "I do not have one", which is the
+    // absent case. Refusing it would 400 a rework over a frame that is
+    // already paid for, for no information gained. An out-of-vocabulary
+    // token is still refused (see the vocabulary case below).
+    const empty = parseReworkInput({ tweetText: 'ok', bodyZone: '   ' })
+    expect(empty.ok).toBe(true)
+    if (empty.ok) expect(empty.input.bodyZone).toBeUndefined()
+    expect(parseReworkInput({ tweetText: 'ok', castSlugs: 'nadia' }).ok).toBe(false)
+  })
+
+  // #10480: the rework path validates against the same single-source
+  // vocabulary as the draft path, so a REVISE cannot introduce a token the
+  // draft would have refused.
+  it('rejects an out-of-vocabulary zone, mode or crop on the rework path too', () => {
+    for (const bad of [
+      { bodyZone: 'hip_hollow' },
+      { bodyZone: 'Hip-Hollow' },
+      { contactMode: 'held' },
+      { cropScale: 'tight' },
+    ]) {
+      const r = parseReworkInput({ tweetText: 'a cleaner line', ...bad })
+      expect(r.ok).toBe(false)
+      if (!r.ok) expect(r.error).toContain('rework.')
+    }
+  })
+
+  it('accepts the "none" sentinel for a frame that touches no bare skin', () => {
+    const r = parseReworkInput({ tweetText: 'a cleaner line', bodyZone: 'none', contactMode: 'none' })
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.input.bodyZone).toBe('none')
+  })
+
+  it('does not let a variety axis alone satisfy the must-change-something rule', () => {
+    const r = parseReworkInput({ bodyZone: 'sternum' })
+    expect(r.ok).toBe(false)
+  })
+
+  // Ticket #10560: the pairing-presence self-check reason rides along with a
+  // rework exactly like altText/imageBrief/subject above, and never satisfies
+  // the must-change-something rule on its own.
+  it('accepts pairingNoneReason alongside a copy rework', () => {
+    const r = parseReworkInput({
+      tweetText: 'a cleaner line, no lube mention needed here',
+      pairingNoneReason: 'external-only feature post, no internal use implied',
+    })
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.input.pairingNoneReason).toBe('external-only feature post, no internal use implied')
+  })
+
+  it('rejects an empty-string pairingNoneReason', () => {
+    const r = parseReworkInput({ tweetText: 'a cleaner line', pairingNoneReason: '   ' })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toContain('pairingNoneReason')
+  })
+
+  it('does not let pairingNoneReason alone satisfy the must-change-something rule', () => {
+    const r = parseReworkInput({ pairingNoneReason: 'no toy featured' })
+    expect(r.ok).toBe(false)
+  })
+})
+
+describe('reworkSocialPost writes pairingNoneReason (#10560)', () => {
+  it('carries the reason into the patch when the rework supplies one', async () => {
+    const { repo, writes } = fakeReworkRepo(row({
+      reviewStatus: 'needs_changes',
+      altText: 'a cast member enjoying a quiet solo evening in warm light',
+      feedback: '[publish-gate REVISE ...] pairing-missing',
+    }))
+    const parsed = parseReworkInput({
+      tweetText: 'a quiet night in with the LELO SONA, external sensation only',
+      pairingNoneReason: 'external-only feature post, no internal use implied',
+    })
+    if (!parsed.ok) throw new Error('fixture rejected')
+    const r = await reworkSocialPost(7, parsed.input, { repo })
+    expect(r).toEqual({ ok: true, reviewStatus: 'pending_review' })
+    expect(writes[0]?.patch.pairingNoneReason).toBe('external-only feature post, no internal use implied')
+  })
 })
 
 function fakeReworkRepo(post: PostRow | null) {
@@ -483,6 +716,37 @@ describe('reworkSocialPost (#4351)', () => {
     expect(patch.updatedAt).toBeInstanceOf(Date)
     // An imagery-only rework must NOT touch the caption (that is the #4069 trap).
     expect(patch.tweetText).toBeUndefined()
+  })
+
+  // Ticket #10339 DONE WHEN: a rework call with bodyZone 'sternum' updates the row.
+  it('writes the swapped body zone, crop, contact mode, location and cast to the row', async () => {
+    const { repo, writes } = fakeReworkRepo(row({ reviewStatus: 'needs_changes', altText: 'existing alt text on the bounced row' }))
+    const r = await reworkSocialPost(7, {
+      mediaUrls: [`${CDN}/reworked-lead.jpg`],
+      bodyZone: 'sternum',
+      cropScale: 'medium',
+      contactMode: 'resting',
+      sceneLocation: 'bedroom, late afternoon',
+      castSlugs: ['nadia'],
+    }, { repo })
+    expect(r).toEqual({ ok: true, reviewStatus: 'pending_review' })
+    const patch = writes[0]!.patch
+    expect(patch.bodyZone).toBe('sternum')
+    expect(patch.cropScale).toBe('medium')
+    expect(patch.contactMode).toBe('resting')
+    expect(patch.sceneLocation).toBe('bedroom, late afternoon')
+    expect(patch.castSlugs).toEqual(['nadia'])
+  })
+
+  it('leaves the variety columns untouched when the rework does not mention them', async () => {
+    const { repo, writes } = fakeReworkRepo(row({ reviewStatus: 'needs_changes', altText: 'existing alt text on the bounced row' }))
+    await reworkSocialPost(7, { tweetText: 'a cleaner line' }, { repo })
+    const patch = writes[0]!.patch
+    expect(patch.bodyZone).toBeUndefined()
+    expect(patch.cropScale).toBeUndefined()
+    expect(patch.contactMode).toBeUndefined()
+    expect(patch.sceneLocation).toBeUndefined()
+    expect(patch.castSlugs).toBeUndefined()
   })
 
   it('updates the caption on a copy rework', async () => {

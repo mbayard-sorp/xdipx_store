@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest'
 
 import {
   VIDEO_MODELS,
+  DEFAULT_TIER_BY_MODE,
+  modeTierMismatch,
   isVideoModelId,
+  isRetiredVideoTierId,
+  RETIRED_VIDEO_TIER_IDS,
+  tierIneligibility,
   submitVideoRequest,
   assertSceneFrameContract,
   classifyAudioPath,
@@ -155,42 +160,12 @@ describe('classifyAudioPath', () => {
   })
 })
 
-// RunPod provider, Phase 2 (Wan 2.2 14B): the clip stage in video-pipeline
-// routes these through runpod-video.server.ts instead of this file's fal
-// queue client, keyed off `provider`.
-describe('VIDEO_MODELS wan22 (RunPod provider)', () => {
-  it('registers both wan22 tiers with provider runpod and no native audio', () => {
-    for (const id of ['wan22-i2v', 'wan22-t2v'] as const) {
-      const spec = VIDEO_MODELS[id]
-      expect(spec.provider).toBe('runpod')
-      expect(spec.costKey).toBe('runpod/wan22')
-      expect(spec.nativeAudio).toBe(false)
-      expect(spec.inventsDialogue).toBeUndefined()
-      expect(spec.audioDriven).toBeUndefined()
-      expect(spec.lipsync).toBeUndefined()
-      expect(spec.allowedDurations).toEqual([5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
-      expect(spec.ratePerSecondUsd).toBeGreaterThan(0)
-    }
-  })
-
-  it('are recognized video model ids', () => {
-    expect(isVideoModelId('wan22-i2v')).toBe(true)
-    expect(isVideoModelId('wan22-t2v')).toBe(true)
-  })
-
-  it('take the same silent-tier lipsync path as kling25-pro (no invented dialogue to strip)', () => {
-    expect(classifyAudioPath(VIDEO_MODELS['wan22-i2v'], true)).toBe('overdubbed')
-    expect(classifyAudioPath(VIDEO_MODELS['wan22-i2v'], false)).toBe('native-silent')
-    expect(classifyAudioPath(VIDEO_MODELS['wan22-t2v'], true)).toBe('overdubbed')
-    expect(classifyAudioPath(VIDEO_MODELS['wan22-t2v'], false)).toBe('native-silent')
-  })
-})
-
-describe('every non-runpod model keeps provider fal-implicit (undefined)', () => {
+describe('every fal model keeps provider fal-implicit (undefined)', () => {
   it('never sets provider on a fal-queue tier', () => {
-    for (const [id, spec] of Object.entries(VIDEO_MODELS)) {
-      if (id === 'wan22-i2v' || id === 'wan22-t2v' || id === 'wan22-s2v') continue
+    for (const [, spec] of Object.entries(VIDEO_MODELS)) {
+      if (spec.provider === 'atlascloud') continue
       expect(spec.provider).toBeUndefined()
+      expect(spec.legacy).toBe(true)
     }
   })
 })
@@ -225,43 +200,133 @@ describe('assertSceneFrameContract', () => {
   })
 })
 
-describe('VIDEO_MODELS.wan22-s2v (own-worker talking tier, ticket #5714)', () => {
-  it('is an audio-driven RunPod tier with derived duration', () => {
-    const spec = VIDEO_MODELS['wan22-s2v']
-    expect(spec.provider).toBe('runpod')
-    expect(spec.audioDriven).toBe(true)
-    expect(spec.nativeAudio).toBe(true)
-    expect(spec.allowedDurations).toEqual([])
-    expect(spec.costKey).toBe('runpod/wan22-s2v')
-    expect(spec.legacy).toBeUndefined()
-  })
-
-  it('never routes through the fal queue', async () => {
-    await expect(submitVideoRequest('wan22-s2v', {
-      prompt: '', imageUrl: 'https://example.com/f.jpg', durationSeconds: 10,
-    })).rejects.toThrow(/RunPod-provider/)
-  })
-
-  // #6834, follow-up to #6585: the advertised rate this spec surfaces (read
-  // verbatim by the config op and the fal-video Labs route) must use the
-  // s2v-specific render-multiplier estimate, not the shared i2v/t2v one --
-  // sharing it under-priced s2v's advertised rate by ~1.8x while the
-  // enforcement path (estimateVideoCostUsd via costKey) was already correct.
-  it('advertises a rate distinct from the shared i2v/t2v estimate', () => {
-    const s2vRate = VIDEO_MODELS['wan22-s2v'].ratePerSecondUsd
-    const i2vRate = VIDEO_MODELS['wan22-i2v'].ratePerSecondUsd
-    const t2vRate = VIDEO_MODELS['wan22-t2v'].ratePerSecondUsd
-    expect(i2vRate).toBe(t2vRate) // i2v/t2v deliberately still share one estimator
-    expect(s2vRate).not.toBe(i2vRate)
-    expect(s2vRate).toBeGreaterThan(0)
+describe('legacy fal video tiers (owner direction 2026-08-26: fal is images only)', () => {
+  it('flags every fal video tier legacy', () => {
+    const legacy = Object.entries(VIDEO_MODELS).filter(([, s]) => s.legacy).map(([id]) => id).sort()
+    expect(legacy).toEqual(['grok', 'kling25-pro', 'omnihuman', 'seedance2', 'sync-lipsync', 'veo31', 'veo31-fast'])
   })
 })
 
-describe('legacy fal video tiers (owner direction 2026-08-26: fal is images only)', () => {
-  it('flags every fal video tier legacy and no runpod tier', () => {
-    const legacy = Object.entries(VIDEO_MODELS).filter(([, s]) => s.legacy).map(([id]) => id).sort()
-    expect(legacy).toEqual(['grok', 'kling25-pro', 'omnihuman', 'seedance2', 'sync-lipsync', 'veo31', 'veo31-fast'])
-    expect(VIDEO_MODELS['wan22-i2v'].legacy).toBeUndefined()
-    expect(VIDEO_MODELS['wan22-t2v'].legacy).toBeUndefined()
+// ADR-016 Phase 4 (2026-09-23): the RunPod tiers are deleted from the
+// registry. Historical rows still name them and must resolve to a clean
+// retired_provider refusal, never an unknown-tier error or an undefined spec.
+describe('retired RunPod tiers (ADR-016 Phase 4)', () => {
+  it('are no longer registered or selectable', () => {
+    for (const id of RETIRED_VIDEO_TIER_IDS) {
+      expect(isVideoModelId(id)).toBe(false)
+      expect(id in VIDEO_MODELS).toBe(false)
+    }
+    for (const spec of Object.values(VIDEO_MODELS)) {
+      expect(spec.costKey.startsWith('runpod/')).toBe(false)
+    }
+  })
+
+  it('refuse a historical row as retired_provider, not unknown_tier', () => {
+    for (const id of [...RETIRED_VIDEO_TIER_IDS, 'wan22-i2v-fast']) {
+      expect(isRetiredVideoTierId(id)).toBe(true)
+      const why = tierIneligibility(id)
+      expect(why?.code).toBe('retired_provider')
+      expect(why?.message).toMatch(/ADR-016/)
+      expect(why?.message).toMatch(/italk-atlas/)
+    }
+  })
+
+  it('do not swallow the live Atlas Wan tiers or a genuinely unknown id', () => {
+    expect(isRetiredVideoTierId('wan22turbo-atlas')).toBe(false)
+    expect(isRetiredVideoTierId('wan27-atlas')).toBe(false)
+    expect(tierIneligibility('not-a-tier')?.code).toBe('unknown_tier')
+  })
+})
+
+// ADR-016 (2026-09-23): the Atlas tiers, from the video bake-off capture.
+describe('VIDEO_MODELS Atlas tiers (ADR-016)', () => {
+  it('registers italk-atlas as the audio-driven talking tier with a 30 s render cap', () => {
+    const spec = VIDEO_MODELS['italk-atlas']
+    expect(spec.provider).toBe('atlascloud')
+    expect(spec.providerModel).toBe('atlascloud/infinitetalk')
+    expect(spec.costKey).toBe('atlascloud/infinitetalk')
+    expect(spec.ratePerSecondUsd).toBe(0.06)
+    expect(spec.tier).toBe('avatar')
+    expect(spec.audioDriven).toBe(true)
+    expect(spec.nativeAudio).toBe(true)
+    expect(spec.inventsDialogue).toBeUndefined()
+    // Output length = audio length, so no duration enum; the cap is per render.
+    expect(spec.allowedDurations).toEqual([])
+    expect(spec.maxRenderSeconds).toBe(30)
+  })
+
+  it('registers grok-atlas as native audio that invents its own voice, 1 to 15 s', () => {
+    const spec = VIDEO_MODELS['grok-atlas']
+    expect(spec.provider).toBe('atlascloud')
+    expect(spec.providerModel).toBe('xai/grok-imagine-video-v1.5/image-to-video')
+    expect(spec.costKey).toBe('atlascloud/grok-imagine-1.5')
+    expect(spec.ratePerSecondUsd).toBe(0.141)
+    expect(spec.nativeAudio).toBe(true)
+    expect(spec.inventsDialogue).toBe(true)
+    expect(spec.audioDriven).toBeUndefined()
+    expect(spec.allowedDurations).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
+  })
+
+  it('registers the two silent insert tiers at 5 s', () => {
+    const w27 = VIDEO_MODELS['wan27-atlas']
+    expect(w27.providerModel).toBe('alibaba/wan-2.7/image-to-video')
+    expect(w27.costKey).toBe('atlascloud/wan-2.7-i2v')
+    expect(w27.ratePerSecondUsd).toBe(0.10)
+    expect(w27.nativeAudio).toBe(false)
+    expect(w27.allowedDurations).toEqual([5])
+    const w22 = VIDEO_MODELS['wan22turbo-atlas']
+    expect(w22.providerModel).toBe('atlascloud/wan-2.2-turbo/image-to-video')
+    expect(w22.costKey).toBe('atlascloud/wan-2.2-turbo-i2v')
+    expect(w22.ratePerSecondUsd).toBe(0.02)
+    expect(w22.nativeAudio).toBe(false)
+    expect(w22.allowedDurations).toEqual([5])
+  })
+
+  it('is never legacy and never recognized as a fal-queue model', async () => {
+    for (const id of ['italk-atlas', 'grok-atlas', 'wan27-atlas', 'wan22turbo-atlas'] as const) {
+      expect(isVideoModelId(id)).toBe(true)
+      expect(VIDEO_MODELS[id].legacy).toBeUndefined()
+      await expect(submitVideoRequest(id, {
+        prompt: 'p', imageUrl: 'https://example.com/f.jpg', durationSeconds: 5, audioUrl: 'https://example.com/a.mp3',
+      })).rejects.toThrow(/atlascloud-provider model/)
+    }
+  })
+
+  it('routes audio: InfiniteTalk authored, Grok stripped or overdubbed, Wan 2.7 noise track stripped', () => {
+    expect(classifyAudioPath(VIDEO_MODELS['italk-atlas'], false)).toBe('authored')
+    expect(classifyAudioPath(VIDEO_MODELS['grok-atlas'], false)).toBe('stripped')
+    expect(classifyAudioPath(VIDEO_MODELS['grok-atlas'], true)).toBe('overdubbed')
+    // Wan 2.7 returns a -69 dB near-silent track; loudness normalization must not lift it.
+    expect(classifyAudioPath(VIDEO_MODELS['wan27-atlas'], false)).toBe('stripped')
+    expect(classifyAudioPath(VIDEO_MODELS['wan27-atlas'], true)).toBe('overdubbed')
+    expect(classifyAudioPath(VIDEO_MODELS['wan22turbo-atlas'], false)).toBe('native-silent')
+  })
+})
+
+describe('tier ids fit the column', () => {
+  it('every VideoModelId is at most 16 chars (video_jobs/video_episodes.model_tier are varchar(16))', () => {
+    // infinitetalk-atlas (18) would have failed every enqueue in Postgres,
+    // after the ceiling checks, where a db mock never sees it. Rename, never widen.
+    for (const id of Object.keys(VIDEO_MODELS)) expect(id.length, id).toBeLessThanOrEqual(16)
+  })
+})
+
+describe('production mode -> tier (owner ruling 2026-09-23)', () => {
+  it('defaults talking to InfiniteTalk and voiceover to Wan 2.7', () => {
+    expect(DEFAULT_TIER_BY_MODE).toEqual({ talking: 'italk-atlas', voiceover: 'wan27-atlas' })
+  })
+
+  it('refuses talking on a silent tier and voiceover on an on-camera performer', () => {
+    expect(modeTierMismatch('talking', 'italk-atlas')).toBeNull()
+    expect(modeTierMismatch('talking', 'wan27-atlas')).toMatch(/silent/)
+    expect(modeTierMismatch('talking', 'wan22turbo-atlas')).toMatch(/silent/)
+    expect(modeTierMismatch('voiceover', 'wan27-atlas')).toBeNull()
+    expect(modeTierMismatch('voiceover', 'wan22turbo-atlas')).toBeNull()
+    expect(modeTierMismatch('voiceover', 'italk-atlas')).toMatch(/performs the line on camera/)
+  })
+
+  it('keeps grok-atlas registered and eligible but owner-only', () => {
+    expect(VIDEO_MODELS['grok-atlas'].ownerOnly).toBe(true)
+    for (const id of ['italk-atlas', 'wan27-atlas', 'wan22turbo-atlas'] as const) expect(VIDEO_MODELS[id].ownerOnly).toBeUndefined()
   })
 })

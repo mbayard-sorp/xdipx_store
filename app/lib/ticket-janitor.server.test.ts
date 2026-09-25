@@ -368,7 +368,7 @@ describe('ROUTINE_CADENCES', () => {
       'email|email',
       'homepage|design',
       'content|content',
-      'content|manual',
+      'content|podcast',
       'content|seo-curation',
       'content|trend-scout',
       'homepage|merchandise',
@@ -720,30 +720,26 @@ describe('computeTicketLoopHealth superseded-approved scan', () => {
 // ---------------------------------------------------------------------------
 
 describe('classifyOrphanReconcile', () => {
-  const clean = { ok: true, protected: false }
-  it('applies only a merged orphan in a reconcilable status with a clean file list', () => {
+  it('applies a merged orphan in every reconcilable status', () => {
     for (const status of RECONCILABLE_ORPHAN_STATUSES) {
-      expect(classifyOrphanReconcile({ status, prOutcome: 'merged' }, clean)).toBe('apply')
+      expect(classifyOrphanReconcile({ status, prOutcome: 'merged' })).toBe('apply')
+    }
+  })
+
+  it('covers every live status the ticket loop can strand a merged PR in', () => {
+    for (const status of ['proposed', 'approved', 'in_progress', 'pr_open', 'in_review']) {
+      expect(RECONCILABLE_ORPHAN_STATUSES).toContain(status)
     }
   })
 
   it('never applies a closed-unmerged PR, whatever the status', () => {
-    for (const status of [...RECONCILABLE_ORPHAN_STATUSES, 'proposed', 'in_progress']) {
-      expect(classifyOrphanReconcile({ status, prOutcome: 'closed' }, clean)).toBe('skip-closed')
+    for (const status of [...RECONCILABLE_ORPHAN_STATUSES, 'verified']) {
+      expect(classifyOrphanReconcile({ status, prOutcome: 'closed' })).toBe('skip-closed')
     }
   })
 
   it('skips statuses outside the fenced reconcile edges', () => {
-    for (const status of ['proposed', 'in_progress', 'verified']) {
-      expect(classifyOrphanReconcile({ status, prOutcome: 'merged' }, clean)).toBe('skip-status')
-    }
-  })
-
-  it('skips protected-path PRs and unreadable file lists (unknown never classifies)', () => {
-    expect(classifyOrphanReconcile({ status: 'approved', prOutcome: 'merged' },
-      { ok: true, protected: true })).toBe('skip-protected')
-    expect(classifyOrphanReconcile({ status: 'approved', prOutcome: 'merged' },
-      { ok: false, protected: false })).toBe('skip-unknown')
+    expect(classifyOrphanReconcile({ status: 'verified', prOutcome: 'merged' })).toBe('skip-status')
   })
 })
 
@@ -802,27 +798,56 @@ describe('reconcileOrphanedTickets', () => {
     expect(reconcileScopeDepth.seenInside).toEqual([1])
   })
 
-  it('skips a merged orphan whose PR touched a protected path', async () => {
+  // #10342: ticket #10269 sat `approved` with its pr link still `open` while
+  // PR #1227 was merged on main. R-QA had bounced it as protected-path and the
+  // owner merged it by hand, and the old protected-path skip meant the janitor
+  // saw the merge every cycle and refused to record it. A merged PR is a fact,
+  // not a verdict.
+  it('applies an approved orphan whose merged PR touched a protected path (#10269)', async () => {
     resetAll()
     githubConfiguredMock.mockReturnValue(true)
     executeMock.mockResolvedValue({ rows: [
-      { id: 2071, status: 'blocked', ref: 'https://github.com/o/r/pull/800' },
+      { id: 10269, status: 'approved', ref: 'https://github.com/o/r/pull/1227' },
     ] })
     getPullRequestMock.mockResolvedValue({
-      ok: true, status: 200, data: { number: 800, merged: true, state: 'closed' },
+      ok: true, status: 200, data: { number: 1227, merged: true, state: 'closed' },
     })
     listPullRequestFilesMock.mockResolvedValue({
-      ok: true, status: 200, data: [{ filename: 'app/lib/protected-thing.server.ts' }],
+      ok: true, status: 200, data: [{ filename: 'app/lib/release-engine.server.ts' }],
     })
 
     const res = await reconcileOrphanedTickets()
 
-    expect(res.applied).toEqual([])
-    expect(res.skippedProtected).toEqual([2071])
-    expect(transitionSuggestionMock).not.toHaveBeenCalled()
+    expect(res.applied).toEqual([10269])
+    expect(res.errors).toEqual([])
+    const [id, to, actor, opts] = transitionSuggestionMock.mock.calls[0] as unknown as [
+      number, string, string, { note: string; links: Array<{ kind: string; ref: string; state: string }> },
+    ]
+    expect([id, to, actor]).toEqual([10269, 'applied', 'system'])
+    expect(opts.note).toContain('#1227')
+    expect(opts.links).toEqual([
+      { kind: 'pr', ref: 'https://github.com/o/r/pull/1227', state: 'merged' },
+    ])
+    expect(reconcileScopeDepth.seenInside).toEqual([1])
   })
 
-  it('skips when the changed-file list cannot be read: unknown never classifies as safe', async () => {
+  it('applies a merged orphan sitting at proposed or in_progress', async () => {
+    resetAll()
+    githubConfiguredMock.mockReturnValue(true)
+    executeMock.mockResolvedValue({ rows: [
+      { id: 91, status: 'proposed', ref: 'https://github.com/o/r/pull/910' },
+      { id: 92, status: 'in_progress', ref: 'https://github.com/o/r/pull/920' },
+    ] })
+    getPullRequestMock.mockImplementation(async (num: number) => ({
+      ok: true, status: 200, data: { number: num, merged: true, state: 'closed' },
+    }))
+
+    const res = await reconcileOrphanedTickets()
+
+    expect(res.applied).toEqual([91, 92])
+  })
+
+  it('no longer reads the changed-file list at all: the merge is the evidence', async () => {
     resetAll()
     githubConfiguredMock.mockReturnValue(true)
     executeMock.mockResolvedValue({ rows: [
@@ -835,8 +860,8 @@ describe('reconcileOrphanedTickets', () => {
 
     const res = await reconcileOrphanedTickets()
 
-    expect(res.applied).toEqual([])
-    expect(transitionSuggestionMock).not.toHaveBeenCalled()
+    expect(res.applied).toEqual([3])
+    expect(listPullRequestFilesMock).not.toHaveBeenCalled()
   })
 
   it('swallows the 409 race when something else moved the row first', async () => {

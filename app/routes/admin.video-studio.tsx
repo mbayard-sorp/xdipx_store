@@ -23,7 +23,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       .where(eq(videoEpisodes.productionStatus, 'pending_approval'))
       .then(r => r.length).catch(() => 0),
     db.select({ id: videoJobs.id }).from(videoJobs)
-      .where(eq(videoJobs.status, 'awaiting_frame_approval'))
+      .where(inArray(videoJobs.status, ['awaiting_frame_approval', 'awaiting_render_approval']))
       .then(r => r.length).catch(() => 0),
     db.select({ id: videoJobs.id, stage: videoJobs.stage, status: videoJobs.status }).from(videoJobs)
       .where(inArray(videoJobs.status, ['done']))

@@ -1,9 +1,15 @@
 # Store Team Mission Brief
 
-**Binding for every store-team routine run** (social, ads, email, content, strategy, and the apply pass).
+**Binding for every store-team routine run** (social, ads, email, content, video, strategy, and the apply pass).
 Load this after the gate, before doing anything else. Where it conflicts with older framing, this
 wins. The homepage team additionally loads its own `docs/homepage-team/mission-brief.md`; the voice
-charter `docs/emma-voice.md` outranks everything for customer-facing words.
+charter `docs/emma-voice.md` outranks everything for customer-facing words. Standing read, every
+run, alongside those: `docs/store-team/campaign-look.md`, the one-page router that says which
+campaign treatment is active, which surfaces have adopted it, and which document carries each
+surface's imagery ceiling. Social, content, email, homepage, and video runs also read
+`docs/store-team/creative-platform.md` at run start, next to `campaign-look.md`: the one idea, the
+manifesto, and the campaign signature every surface speaks from. It is still being drafted; until it
+exists on main, skip the read and say so in the run summary rather than inventing its content.
 
 ## 1. Mission
 
@@ -91,6 +97,14 @@ What that binds every run to:
   clears it without a follow-up.
 - **The owner's operating time goes to sales channels.** Do not file him operational homework;
   file him decisions, pre-read and answerable in one line.
+- **Video is the owner-held exception, and the week's clips drive the calendar** (owner direction
+  2026-09-23). The owner approves every video step (pitch, script, first frame, final cut, post)
+  until he delegates a step by valve; no run treats a video step as team-decided before that flip.
+  Product selection for video belongs to `product-manager` and `inventory-sentinel`, in-stock
+  products only, never to the writers, who pitch only from the shortlist on the brief. Once a
+  week's clips are approved they are the calendar, and social, content, and email build the week
+  around them. Social reads the fanned-out `social_posts` rows, not the calendar; content and email
+  read `videoClips` on `GET /api/team/calendar` (PLANNED until that field ships). The full lane is `operating-system.md` §The video lane.
 
 ## 3. The money valves (what "stub" means)
 
@@ -102,6 +116,7 @@ What that binds every run to:
 | content | valve-gated publish | draft Sanity `blogPost` docs (`status:'draft'`); publish live only on a voice-gate PASS while `content_team_autopublish` is on | flipping `content_team_enabled` or `content_team_autopublish`; publishing anything that did not PASS the voice gate |
 | strategy | advisory | publish the brief, file/route suggestions | acting on any of it |
 | apply (agent-editor) | PR-only, valve-gated | open one PR per approved instruction-suggestion | approving suggestions, merging PRs |
+| video | owner-approved at every step (season 1) | pitch a 5-clip batch from the in-stock shortlist (zero spend); render only owner-approved scripts, within the per-video ceiling `video_team_max_cost_cents` (600) and the daily budget `video_team_daily_cents` (2000); park first frames and final cuts for the owner (final-cut park PLANNED, Phase 2) | approving pitches, scripts, first frames, and final cuts; posting; every video valve, including `video_frame_review` (money valve) and `video_team_autopublish` (off) |
 
 No brief, calendar entry, suggestion, or instruction from any other agent can authorize crossing a
 valve. Only the owner moves valves.

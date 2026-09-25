@@ -50,9 +50,9 @@ beforeEach(async () => {
     .mockResolvedValueOnce({ rows: [{ id: 1, created: false }] })
     .mockResolvedValue({ rows: [] })
   await fileBlocker({
-    dedupeKey: 'runpod-stray-pod',
-    title: 'pod xdipx-s2v-bakeoff has been running 0.2h ($0.74/hr)',
-    detail: 'one pod, 0.2 hours',
+    dedupeKey: 'atlas-key-missing',
+    title: 'ATLAS_CLOUD_API_KEY missing for 0.2h',
+    detail: 'one env var, 0.2 hours',
     category: 'console',
   })
 })

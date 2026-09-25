@@ -7,9 +7,11 @@
  *
  * Mocking follows video-pipeline-set.test.ts's pattern exactly: db/kv/blob/
  * token-log/sanity/shopify/ivr-voice/elevenlabs/video-assembly/video-postpass
- * are mocked; RunPod is mocked the same way its own clip-stage tests mock it
- * (no network). fal-video.server is left real (data-only at this scope — no
- * test here exercises its fal-provider network calls).
+ * are mocked; the media-provider registry is mocked at its two pipeline entry
+ * points (submitVideoWithMirror, providerForHandle), so no provider network
+ * call happens. fal-video.server is left real (data-only at this scope).
+ * Tiers are the Atlas ones since ADR-016; the Atlas key
+ * is stubbed so tierIneligibility does not refuse them as unconfigured.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -66,7 +68,15 @@ const blobPutMock = vi.hoisted(() => vi.fn())
 const blobFetchMock = vi.hoisted(() => vi.fn())
 vi.mock('~/lib/blob.server', () => ({ blobPut: blobPutMock, blobFetchToBuffer: blobFetchMock }))
 vi.mock('~/lib/token-log.server', () => ({ logVideoCost: vi.fn(), logImageCost: vi.fn() }))
-vi.mock('~/lib/sanity.server', () => ({ getEditorPhotoUrl: vi.fn(), getApprovedCastMembers: vi.fn().mockResolvedValue([]) }))
+// Real presenterPhotoUrlForCrop semantics, not a stub (ticket #10484): the
+// video pipeline resolves a macro/close crop to the cast member's neck-down
+// bodyReferencePhoto through it, and a mock that always handed back the
+// portrait would hide exactly the bug it exists to prevent.
+const cropPhoto = vi.hoisted(() => (
+  m: { photoUrl: string; bodyReferencePhotoUrl?: string | null },
+  cropScale: string | null | undefined,
+) => ((cropScale === 'macro' || cropScale === 'close') && m.bodyReferencePhotoUrl ? m.bodyReferencePhotoUrl : m.photoUrl))
+vi.mock('~/lib/sanity.server', () => ({ getEditorPhotoUrl: vi.fn(), getApprovedCastMembers: vi.fn().mockResolvedValue([]), presenterPhotoUrlForCrop: cropPhoto }))
 vi.mock('~/lib/shopify.server', () => ({ getProductByHandle: vi.fn() }))
 vi.mock('~/lib/ivr-voice.server', () => ({ getActiveIvrVoiceId: vi.fn().mockResolvedValue('voice-1') }))
 vi.mock('~/lib/elevenlabs.server', () => ({ generateVoiceover: vi.fn(), generateVoiceoverWithTimestamps: vi.fn() }))
@@ -78,35 +88,21 @@ vi.mock('~/lib/video-assembly.server', () => ({
   muxAudio: vi.fn(),
   renderAspectMaster: vi.fn(),
   concatAndNormalize: concatMock,
-  extractLastFrame: vi.fn(),
+  extractLastFrame: extractLastFrameMock,
 }))
 vi.mock('~/lib/video-postpass.server', () => ({
   concatWithAudio: vi.fn(),
   runPostPass: vi.fn(),
   buildEndCard: vi.fn(),
 }))
-const runpodSubmitMock = vi.hoisted(() => vi.fn())
-const runpodStatusMock = vi.hoisted(() => vi.fn())
-const runpodResultMock = vi.hoisted(() => vi.fn())
-/**
- * What the DEPLOYED worker image implements. Real semantics, not a permissive
- * stub: tierIneligibility reads this, and a mock that said "every mode is
- * available" would hide exactly the trap it exists for. Default matches the
- * live endpoint (image eb2a126: i2v + t2v, no s2v); a test that needs the
- * avatar tier widens it deliberately and says so.
- */
-const workerModes = vi.hoisted(() => ({ value: ['i2v', 't2v'] as string[] }))
-vi.mock('~/lib/runpod-video.server', () => ({
-  submitRunpodVideo: runpodSubmitMock,
-  getRunpodStatus: runpodStatusMock,
-  getRunpodResult: runpodResultMock,
-  runpodVideoConfigured: vi.fn(() => true),
-  // Real semantics, not a stub: tierIneligibility reads these, and a mock that
-  // said "every mode is available" would hide exactly the trap they exist for.
-  runpodWorkerModes: () => workerModes.value,
-  runpodWorkerSupportsMode: (m: string) => workerModes.value.includes(m),
-  cancelRunpod: vi.fn(),
+const submitMock = vi.hoisted(() => vi.fn())
+const statusMock = vi.hoisted(() => vi.fn())
+const resultMock = vi.hoisted(() => vi.fn())
+vi.mock('~/lib/media-providers/registry.server', () => ({
+  submitVideoWithMirror: submitMock,
+  providerForHandle: () => ({ id: 'atlascloud', status: statusMock, result: resultMock }),
 }))
+const extractLastFrameMock = vi.hoisted(() => vi.fn())
 
 import { enqueueVideoJob, advanceInflightVideoJobs, listVideoJobs, dryRunEpisodeScript } from '~/lib/video-pipeline.server'
 import { estimateVideoCostUsd, estimateImageCostUsd } from '~/lib/model-pricing.server'
@@ -115,6 +111,8 @@ import { getApprovedCastMembers } from '~/lib/sanity.server'
 
 beforeEach(() => {
   vi.clearAllMocks()
+  vi.unstubAllGlobals()
+  vi.stubEnv('ATLAS_CLOUD_API_KEY', 'test-atlas-key')
   state.selectResults = []
   state.inserts = []
   configMock.mockResolvedValue({
@@ -135,7 +133,9 @@ const baseEnqueueArgs = {
   productHandle: 'satin-wand',
   formula: 'myth-busting',
   presenter: 'none',
-  modelTier: 'wan22-i2v' as const,
+  // grok-atlas: the Atlas tier with a 1-15 s duration range, which these
+  // validation cases need (wan27-atlas and wan22turbo-atlas are 5 s only).
+  modelTier: 'grok-atlas' as const,
   durationSeconds: 5, // ignored for multi-scene; real total is the scene sum
   targetPlatforms: ['instagram'],
 }
@@ -165,7 +165,7 @@ describe('enqueueVideoJob — multi-scene validation', () => {
   it('rejects a scene duration not in the model\'s allowedDurations', async () => {
     await expect(enqueueVideoJob({
       ...baseEnqueueArgs,
-      scriptJson: { scenes: [scene({ durationSeconds: 3 }), scene({ durationSeconds: 5 })] },
+      scriptJson: { scenes: [scene({ durationSeconds: 16 }), scene({ durationSeconds: 5 })] },
     })).rejects.toThrow(/durationSeconds must be one of/)
   })
 
@@ -203,13 +203,9 @@ describe('enqueueVideoJob — multi-scene validation', () => {
   })
 
   it('rejects the avatar tier for a multi-scene job (no per-scene motion prompt concept)', async () => {
-    // Widened so the job reaches the multi-scene check rather than being
-    // refused earlier for an unavailable worker mode — that refusal is real
-    // and covered separately, but it is not what this test is about.
-    workerModes.value = ['i2v', 't2v', 's2v']
     await expect(enqueueVideoJob({
       ...baseEnqueueArgs,
-      modelTier: 'wan22-s2v',
+      modelTier: 'italk-atlas',
       durationSeconds: 0,
       scriptJson: { scenes: [scene(), scene()] },
     })).rejects.toThrow(/avatar tier/)
@@ -265,7 +261,7 @@ describe('validateScenes — per-scene presenter/spokenLine/coPresenters (ADR-01
     })).rejects.toThrow(/coPresenters must be/)
   })
 
-  it('does not require spokenLine on a non-talking tier (wan22-i2v)', async () => {
+  it('does not require spokenLine on a non-talking tier (grok-atlas)', async () => {
     await enqueueVideoJob({
       ...baseEnqueueArgs,
       scriptJson: { scenes: [scene(), scene()] },
@@ -298,8 +294,8 @@ describe('enqueueVideoJob — multi-scene cost estimate', () => {
     const result = await enqueueVideoJob({ ...baseEnqueueArgs, scriptJson: { scenes } })
     const frameCost = estimateImageCostUsd(SCENE_PLATE_COST_KEY, 1) + estimateImageCostUsd(SCENE_FRAME_COST_KEY, 3)
     const expected = frameCost
-      + estimateVideoCostUsd('runpod/wan22', 5)
-      + estimateVideoCostUsd('runpod/wan22', 8)
+      + estimateVideoCostUsd('atlascloud/grok-imagine-1.5', 5)
+      + estimateVideoCostUsd('atlascloud/grok-imagine-1.5', 8)
     expect(result.estCostUsd).toBeCloseTo(expected, 4)
   })
 
@@ -316,7 +312,7 @@ describe('enqueueVideoJob — multi-scene cost estimate', () => {
   })
 })
 
-// ─── Clip stage: scene ordering + 'last-frame' continuity (RunPod provider) ──
+// ─── Clip stage: scene ordering + 'last-frame' continuity (provider seam) ────
 
 const multiSceneJobRow = {
   id: 9,
@@ -327,7 +323,7 @@ const multiSceneJobRow = {
   presenter: 'none',
   scriptJson: {},
   aiDisclosure: true,
-  modelTier: 'wan22-i2v',
+  modelTier: 'wan27-atlas',
   targetPlatforms: ['instagram'],
   stage: 'clip',
   status: 'queued',
@@ -347,12 +343,12 @@ const multiSceneJobRow = {
   completedAt: null,
   scenesJson: [
     { slug: 'scene-a', framePrompt: 'a', motionPrompt: 'push in on scene a', durationSeconds: 5, continuity: 'own-frame' },
-    { slug: 'scene-b', framePrompt: 'b', motionPrompt: 'pan across scene b', durationSeconds: 6, continuity: 'last-frame' },
+    { slug: 'scene-b', framePrompt: 'b', motionPrompt: 'pan across scene b', durationSeconds: 5, continuity: 'last-frame' },
   ],
   sceneStateJson: null as unknown,
 }
 
-describe('advanceClip — multi-scene, RunPod provider', () => {
+describe('advanceClip: multi-scene, through the provider seam', () => {
   it('submits scene 0 (own-frame) using its approved frame asset, keyed scene_0', async () => {
     const job = {
       ...multiSceneJobRow,
@@ -362,51 +358,45 @@ describe('advanceClip — multi-scene, RunPod provider', () => {
       [job],
       [{ id: 55, blobUrl: 'https://blob.test/scene0-frame.jpg' }],
     ]
-    runpodSubmitMock.mockResolvedValue({
-      requestId: 'rp-scene0',
-      statusUrl: 'https://api.runpod.ai/v2/ep/status/rp-scene0',
-      responseUrl: 'https://api.runpod.ai/v2/ep/status/rp-scene0',
-    })
+    submitMock.mockResolvedValue({ handle: { requestId: 'at-scene0', statusUrl: 'https://api.atlascloud.ai/api/v1/model/prediction/at-scene0', responseUrl: 'https://api.atlascloud.ai/api/v1/model/prediction/at-scene0' }, providerId: 'atlascloud' })
 
     const result = await advanceInflightVideoJobs()
 
     expect(result.failed).toBe(0)
-    expect(runpodSubmitMock).toHaveBeenCalledWith({
+    expect(submitMock).toHaveBeenCalledWith('wan27-atlas', 'atlascloud', {
       prompt: 'push in on scene a',
       imageUrl: 'https://blob.test/scene0-frame.jpg',
       durationSeconds: 5,
-      mode: 'i2v',
-      blobPathPrefix: 'video/job-multiscene/scene-0',
+      aspect: '9:16',
     })
   })
 
-  it('on scene 0 completion, records its clip + lastFrameUrl and stays in the clip stage (more scenes remain)', async () => {
+  it('on scene 0 completion, downloads + re-hosts its clip, cuts the last frame, and stays in the clip stage', async () => {
     const job = {
       ...multiSceneJobRow,
       status: 'awaiting_provider',
-      costUsd: String(estimateVideoCostUsd('runpod/wan22', 5)),
-      providerRequestIds: {
-        scene_0: { requestId: 'rp-scene0', statusUrl: 'https://api.runpod.ai/v2/ep/status/rp-scene0', responseUrl: 'https://api.runpod.ai/v2/ep/status/rp-scene0' },
-      },
+      costUsd: String(estimateVideoCostUsd('atlascloud/wan-2.7-i2v', 5)),
+      providerRequestIds: { scene_0: { requestId: 'at-scene0', statusUrl: 'https://api.atlascloud.ai/api/v1/model/prediction/at-scene0', responseUrl: 'https://api.atlascloud.ai/api/v1/model/prediction/at-scene0' } },
       sceneStateJson: [{ frameAssetId: 55, status: 'frame' }, { status: 'pending' }],
     }
     state.selectResults = [[job]]
-    runpodStatusMock.mockResolvedValue({ status: 'COMPLETED' })
-    runpodResultMock.mockResolvedValue({
-      videoUrl: 'https://blob.vercel-storage.com/video/job-multiscene/scene-0/clip.mp4',
-      lastFrameUrl: 'https://blob.vercel-storage.com/video/job-multiscene/scene-0/last.jpg',
-      renderSeconds: 5,
-      executionMs: 5000,
-    })
+    statusMock.mockResolvedValue({ status: 'COMPLETED' })
+    resultMock.mockResolvedValue({ videoUrl: 'https://atlas-media.example/scene0.mp4', contentType: 'video/mp4' })
+    const fetchMock = vi.fn(async () => new Response(new Uint8Array([1, 2, 3])))
+    vi.stubGlobal('fetch', fetchMock)
+    extractLastFrameMock.mockResolvedValue(Buffer.from('last'))
+    blobPutMock
+      .mockResolvedValueOnce({ url: 'https://blob.test/video/job-multiscene/scene-0-clip.mp4' })
+      .mockResolvedValueOnce({ url: 'https://blob.test/video/job-multiscene/scene-0-lastframe.jpg' })
 
     const result = await advanceInflightVideoJobs()
 
     expect(result.failed).toBe(0)
+    expect(fetchMock).toHaveBeenCalledWith('https://atlas-media.example/scene0.mp4')
     const clipInsert = state.inserts.find(r => r['purpose'] === 'clip')
-    expect(clipInsert).toMatchObject({ blobUrl: 'https://blob.vercel-storage.com/video/job-multiscene/scene-0/clip.mp4' })
-    // Stage stays 'clip' (via touch's implicit set — no stage key means unchanged);
-    // status returns to 'queued' so the poller comes back for scene 1.
-    expect(runpodResultMock).toHaveBeenCalled()
+    expect(clipInsert).toMatchObject({ blobUrl: 'https://blob.test/video/job-multiscene/scene-0-clip.mp4', sourceModel: 'atlascloud/wan-2.7-i2v' })
+    // Scene 1 is last-frame continuity, so scene 0's final frame was cut.
+    expect(extractLastFrameMock).toHaveBeenCalled()
   })
 
   it('submits scene 1 (last-frame) using the PREVIOUS scene\'s lastFrameUrl, not a frame-asset lookup', async () => {
@@ -418,20 +408,15 @@ describe('advanceClip — multi-scene, RunPod provider', () => {
       ],
     }
     state.selectResults = [[job]] // no mediaAssets lookup for scene 1 — it has no frameAssetId
-    runpodSubmitMock.mockResolvedValue({
-      requestId: 'rp-scene1',
-      statusUrl: 'https://api.runpod.ai/v2/ep/status/rp-scene1',
-      responseUrl: 'https://api.runpod.ai/v2/ep/status/rp-scene1',
-    })
+    submitMock.mockResolvedValue({ handle: { ...{ requestId: 'at-scene0', statusUrl: 'https://api.atlascloud.ai/api/v1/model/prediction/at-scene0', responseUrl: 'https://api.atlascloud.ai/api/v1/model/prediction/at-scene0' }, requestId: 'at-scene1' }, providerId: 'atlascloud' })
 
     const result = await advanceInflightVideoJobs()
 
     expect(result.failed).toBe(0)
-    expect(runpodSubmitMock).toHaveBeenCalledWith(expect.objectContaining({
+    expect(submitMock).toHaveBeenCalledWith('wan27-atlas', 'atlascloud', expect.objectContaining({
       prompt: 'pan across scene b',
       imageUrl: 'https://blob.test/scene0-last.jpg',
-      durationSeconds: 6,
-      blobPathPrefix: 'video/job-multiscene/scene-1',
+      durationSeconds: 5,
     }))
   })
 
@@ -448,7 +433,7 @@ describe('advanceClip — multi-scene, RunPod provider', () => {
     const result = await advanceInflightVideoJobs()
 
     expect(result.failed).toBe(1)
-    expect(runpodSubmitMock).not.toHaveBeenCalled()
+    expect(submitMock).not.toHaveBeenCalled()
   })
 })
 
@@ -554,16 +539,17 @@ describe('enqueueVideoJob — presenter voice guard (ticket #6584)', () => {
     slug: 'maya', name: 'Maya', role: null, photoUrl: 'https://blob.test/maya.jpg', photoAlt: null,
     shortBio: null, personaNotes: null, archetype: null, ageRange: null, description: null,
     emotionTags: [] as string[], editorialPhotoUrl: null, voiceId: null as string | null,
+    bodyReferencePhotoUrl: null, skinToneNote: null,
+    bodyPresentation: null as 'masculine' | 'feminine' | null,
     ...overrides,
   })
 
   it('refuses, before any spend, to enqueue a talking friend with no voiceId assigned', async () => {
     vi.mocked(getApprovedCastMembers).mockResolvedValueOnce([castMember({ voiceId: null })])
-    workerModes.value = ['i2v', 't2v', 's2v']
     await expect(enqueueVideoJob({
       ...baseEnqueueArgs,
       presenter: 'friend:maya',
-      modelTier: 'wan22-s2v',
+      modelTier: 'italk-atlas',
       scriptJson: { presenterLine: 'This one is my favorite.', talkingHead: true },
     })).rejects.toThrow(/no voiceId assigned/i)
     expect(state.inserts).toHaveLength(0)
@@ -571,26 +557,58 @@ describe('enqueueVideoJob — presenter voice guard (ticket #6584)', () => {
 
   it('enqueues once the talking friend has a voiceId assigned in Sanity', async () => {
     vi.mocked(getApprovedCastMembers).mockResolvedValueOnce([castMember({ voiceId: 'maya-voice-1' })])
-    workerModes.value = ['i2v', 't2v', 's2v']
     const result = await enqueueVideoJob({
       ...baseEnqueueArgs,
       presenter: 'friend:maya',
-      modelTier: 'wan22-s2v',
+      modelTier: 'italk-atlas',
       scriptJson: { presenterLine: 'This one is my favorite.', talkingHead: true },
     })
     expect(result.jobId).toBeTruthy()
     expect(state.inserts).toHaveLength(1)
   })
 
+  // Voiceover mode (owner ruling 2026-09-23): the voiceover is spoken in the
+  // cast voice, so it is gated at enqueue exactly like a talking tier.
+  const { modelTier: _tier, ...noTier } = baseEnqueueArgs
+  const voScript = { framePrompt: 'the wand on linen', motionPrompt: 'she turns the wand slowly', voiceover: 'This is the mini wand.' }
+
+  it("mode 'voiceover' with no tier enqueues on wan27-atlas in the cast voice", async () => {
+    vi.mocked(getApprovedCastMembers).mockResolvedValueOnce([castMember({ voiceId: 'maya-voice-1' })])
+    const result = await enqueueVideoJob({ ...noTier, presenter: 'friend:maya', mode: 'voiceover', durationSeconds: 5, scriptJson: voScript })
+    expect(result.jobId).toBeTruthy()
+    expect(state.inserts[0]!['modelTier']).toBe('wan27-atlas')
+  })
+
+  it("refuses a voiceover for a friend with no voiceId, before any spend", async () => {
+    vi.mocked(getApprovedCastMembers).mockResolvedValueOnce([castMember({ voiceId: null })])
+    await expect(enqueueVideoJob({ ...noTier, presenter: 'friend:maya', mode: 'voiceover', durationSeconds: 5, scriptJson: voScript }))
+      .rejects.toThrow(/no voiceId assigned/i)
+    expect(state.inserts).toHaveLength(0)
+  })
+
+  it("refuses mode 'voiceover' with no voiceover line, and a mode that contradicts the named tier", async () => {
+    await expect(enqueueVideoJob({ ...noTier, mode: 'voiceover', durationSeconds: 5, scriptJson: { framePrompt: 'a', motionPrompt: 'b' } }))
+      .rejects.toThrow(/requires scriptJson\.voiceover/)
+    await expect(enqueueVideoJob({ ...noTier, mode: 'talking', modelTier: 'wan27-atlas', durationSeconds: 5, scriptJson: voScript }))
+      .rejects.toThrow(/wan27-atlas is silent/)
+    expect(state.inserts).toHaveLength(0)
+  })
+
+  it("mode 'talking' with no tier defaults to italk-atlas", async () => {
+    vi.mocked(getApprovedCastMembers).mockResolvedValueOnce([castMember({ voiceId: 'maya-voice-1' })])
+    await enqueueVideoJob({ ...noTier, presenter: 'friend:maya', mode: 'talking', durationSeconds: 0, scriptJson: { presenterLine: 'This one is my favorite.', talkingHead: true } })
+    expect(state.inserts[0]!['modelTier']).toBe('italk-atlas')
+  })
+
   it('does not gate a silent tier (no presenter voice ever spoken)', async () => {
-    // wan22-i2v is neither audioDriven nor lipsync, so a friend with no
+    // grok-atlas is neither audioDriven nor lipsync, so a friend with no
     // voiceId still enqueues — nothing about this tier ever calls TTS for
     // the presenter's line.
     vi.mocked(getApprovedCastMembers).mockResolvedValueOnce([castMember({ voiceId: null })])
     const result = await enqueueVideoJob({
       ...baseEnqueueArgs,
       presenter: 'friend:maya',
-      modelTier: 'wan22-i2v',
+      modelTier: 'grok-atlas',
       scriptJson: { scenes: [scene(), scene()] },
     })
     expect(result.jobId).toBeTruthy()

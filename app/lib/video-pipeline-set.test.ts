@@ -14,6 +14,8 @@ const state = {
   inserts: [] as Array<Record<string, unknown>>,
   /** Every db.update(...).set(...) payload, so a test can assert WHY a job failed. */
   updates: [] as Array<Record<string, unknown>>,
+  /** Rows a conditional update's .returning() pretends to have matched. */
+  updateReturns: [{ id: 1 }] as Array<{ id: number }>,
 }
 
 vi.mock('~/lib/db.server', () => {
@@ -38,7 +40,13 @@ vi.mock('~/lib/db.server', () => {
       update: () => ({
         set: (v: Record<string, unknown>) => {
           state.updates.push(v)
-          return { where: () => Promise.resolve() }
+          return {
+            where: () => {
+              const p = Promise.resolve() as Promise<unknown> & { returning?: () => Promise<unknown> }
+              p.returning = () => Promise.resolve(state.updateReturns)
+              return p
+            },
+          }
         },
       }),
     },
@@ -55,15 +63,31 @@ const configMock = vi.hoisted(() => vi.fn())
 // daily budget.
 const spendMock = vi.hoisted(() => vi.fn(async () => 0))
 vi.mock('~/lib/team.server', () => ({ getTeamConfig: configMock, getTodaySpendCents: spendMock }))
-vi.mock('~/lib/feed-processor.server', () => ({ getPipelineSetting: vi.fn().mockResolvedValue(null) }))
+const settingMock = vi.hoisted(() => vi.fn(async (_key: string): Promise<string | null> => null))
+vi.mock('~/lib/feed-processor.server', () => ({ getPipelineSetting: settingMock }))
+const gateFramesMock = vi.hoisted(() => vi.fn())
+vi.mock('~/lib/video-frame-gate.server', () => ({ gateVideoFrames: gateFramesMock }))
+const episodeMocks = vi.hoisted(() => ({
+  reapStaleEpisodeClaims: vi.fn(async () => 0),
+  markEpisodeRenderFailed: vi.fn(async () => true),
+  markEpisodeRenderRejected: vi.fn(async () => true),
+  episodeForJob: vi.fn(async (): Promise<{ id: number } | null> => null),
+}))
+vi.mock('~/lib/video-episodes.server', () => episodeMocks)
 vi.mock('~/lib/blob.server', () => ({ blobPut: vi.fn(), blobFetchToBuffer: vi.fn() }))
 vi.mock('~/lib/token-log.server', () => ({ logVideoCost: vi.fn(), logImageCost: vi.fn() }))
-vi.mock('~/lib/sanity.server', () => ({ getEditorPhotoUrl: vi.fn(), getApprovedCastMembers: vi.fn().mockResolvedValue([]) }))
+// Real presenterPhotoUrlForCrop semantics, not a stub (ticket #10484).
+const cropPhoto = vi.hoisted(() => (
+  m: { photoUrl: string; bodyReferencePhotoUrl?: string | null },
+  cropScale: string | null | undefined,
+) => ((cropScale === 'macro' || cropScale === 'close') && m.bodyReferencePhotoUrl ? m.bodyReferencePhotoUrl : m.photoUrl))
+vi.mock('~/lib/sanity.server', () => ({ getEditorPhotoUrl: vi.fn(), getApprovedCastMembers: vi.fn().mockResolvedValue([]), presenterPhotoUrlForCrop: cropPhoto }))
 vi.mock('~/lib/shopify.server', () => ({ getProductByHandle: vi.fn() }))
 vi.mock('~/lib/ivr-voice.server', () => ({ getActiveIvrVoiceId: vi.fn().mockResolvedValue('voice-1') }))
 vi.mock('~/lib/elevenlabs.server', () => ({ generateVoiceover: vi.fn(), generateVoiceoverWithTimestamps: vi.fn() }))
 vi.mock('~/lib/video-assembly.server', () => ({
   extractPoster: vi.fn(),
+  extractFrames: vi.fn(async () => []),
   applyWatermark: vi.fn(),
   probeDurationSeconds: vi.fn(),
   muxAudio: vi.fn(),
@@ -74,43 +98,20 @@ vi.mock('~/lib/video-postpass.server', () => ({
   runPostPass: vi.fn(),
   buildEndCard: vi.fn(),
 }))
-const runpodSubmitMock = vi.hoisted(() => vi.fn())
-const runpodStatusMock = vi.hoisted(() => vi.fn())
-const runpodResultMock = vi.hoisted(() => vi.fn())
-const runpodCancelMock = vi.hoisted(() => vi.fn())
-/**
- * What the DEPLOYED worker image implements. Real semantics, not a permissive
- * stub: tierIneligibility reads this, and a mock that said "every mode is
- * available" would hide exactly the trap it exists for. Default matches the
- * live endpoint (image eb2a126: i2v + t2v, no s2v); a test that needs the
- * avatar tier widens it deliberately and says so.
- */
-const workerModes = vi.hoisted(() => ({ value: ['i2v', 't2v'] as string[] }))
-vi.mock('~/lib/runpod-video.server', () => ({
-  submitRunpodVideo: runpodSubmitMock,
-  getRunpodStatus: runpodStatusMock,
-  getRunpodResult: runpodResultMock,
-  runpodVideoConfigured: vi.fn(() => true),
-  // Real semantics, not a stub: tierIneligibility reads these, and a mock that
-  // said "every mode is available" would hide exactly the trap they exist for.
-  runpodWorkerModes: () => workerModes.value,
-  runpodWorkerSupportsMode: (m: string) => workerModes.value.includes(m),
-  cancelRunpod: runpodCancelMock,
-}))
 
 import { enqueueVideoJobSet, estimateJobCostUsd, advanceInflightVideoJobs } from '~/lib/video-pipeline.server'
 import { estimateAvatarSpeechSeconds } from '~/lib/avatar-script'
 import { logVideoCost } from '~/lib/token-log.server'
 import { blobPut, blobFetchToBuffer } from '~/lib/blob.server'
-import { computeRunpodActualCostUsd, estimateVideoCostUsd } from '~/lib/model-pricing.server'
-import { rejectVideoJob } from '~/lib/video-pipeline.server'
+import { INFLIGHT_VIDEO_STATUSES, approveRenderedVideo, rejectRenderedVideo, fanOutVideoToSocialDrafts } from '~/lib/video-pipeline.server'
+import { extractPoster, probeDurationSeconds } from '~/lib/video-assembly.server'
 
 const baseArgs = {
   productHandle: 'satin-wand',
   formula: 'myth-busting',
   presenter: 'none',
   baseScriptJson: { framePrompt: 'archetype B', motionPrompt: 'slow push', voiceover: '{{hook}}' },
-  modelTier: 'wan22-i2v' as const,
+  modelTier: 'wan27-atlas' as const,
   durationSeconds: 5,
   targetPlatforms: ['instagram'],
   hooks: ['Hook one', 'Hook two', 'Hook three'],
@@ -118,9 +119,13 @@ const baseArgs = {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  // Atlas tiers are refused as provider_not_configured without the key (ADR-016).
+  vi.stubEnv('ATLAS_CLOUD_API_KEY', 'test-atlas-key')
   state.selectResults = []
   state.inserts = []
   state.updates = []
+  state.updateReturns = [{ id: 1 }]
+  settingMock.mockImplementation(async () => null)
   configMock.mockResolvedValue({
     team: 'video', enabled: true, dailyCents: 2000, maxRunsPerDay: 1,
     autoApproveSuggestions: false, maxCostCents: 600, maxVariantsPerSet: 4,
@@ -136,7 +141,7 @@ describe('enqueueVideoJobSet', () => {
     expect(groupIds.size).toBe(1)
     expect([...groupIds][0]).toBe(result.variantGroupId)
     expect(state.inserts.map(r => (r['variantAxes'] as { hook: string }).hook)).toEqual(['Hook one', 'Hook two', 'Hook three'])
-    const perJob = estimateJobCostUsd('wan22-i2v', 5, { reuseFrame: false })
+    const perJob = estimateJobCostUsd('wan27-atlas', 5, { reuseFrame: false })
     expect(result.totalEstCostUsd).toBeCloseTo(perJob * 3, 4)
   })
 
@@ -158,12 +163,18 @@ describe('enqueueVideoJobSet', () => {
     expect(state.inserts).toHaveLength(0)
   })
 
+  it('refuses a stored retired default tier with the retirement named, never swapping in a paid tier', async () => {
+    // ADR-016 blocker 226: production's video_default_model_tier may still read
+    // a deleted RunPod id until the owner resets it.
+    settingMock.mockImplementation(async (key: string) => (key === 'video_default_model_tier' ? 'wan22-i2v' : null))
+    const { modelTier: _omit, ...noTier } = baseArgs
+    await expect(enqueueVideoJobSet(noTier)).rejects.toThrow(/RunPod worker, which is retired/)
+    expect(state.inserts).toHaveLength(0)
+  })
+
   it('zeroes the frame cost for variants whose scene already has an approved frame', async () => {
-    // The avatar path needs an avatar tier, and the only one left is the
-    // RunPod s2v tier — omnihuman is retired with the rest of fal video. Widen
-    // the worker's declared modes for this test only; the point under test is
-    // the frame-cost arithmetic, not tier eligibility.
-    workerModes.value = ['i2v', 't2v', 's2v']
+    // The avatar path needs an avatar tier: InfiniteTalk on Atlas since
+    // ADR-016 (omnihuman is retired with fal video).
     const line = 'Short spoken line about {{hook}}.'
     // One findReusableSceneFrame lookup per variant (set estimate); the
     // enqueue itself does not re-query in this path.
@@ -171,14 +182,14 @@ describe('enqueueVideoJobSet', () => {
     const result = await enqueueVideoJobSet({
       ...baseArgs,
       presenter: 'emma',
-      modelTier: 'wan22-s2v',
+      modelTier: 'italk-atlas',
       durationSeconds: 0,
       hooks: ['now', 'later'],
       baseScriptJson: { presenterLine: line, talkingHead: true, sceneSlug: 'couch-cozy', framePrompt: 'C' },
     })
     const expected = ['now', 'later'].reduce((sum, hook) => {
       const speech = estimateAvatarSpeechSeconds(line.split('{{hook}}').join(hook))
-      return sum + estimateJobCostUsd('wan22-s2v', 0, { speechSeconds: speech, reuseFrame: true })
+      return sum + estimateJobCostUsd('italk-atlas', 0, { speechSeconds: speech, reuseFrame: true })
     }, 0)
     expect(result.totalEstCostUsd).toBeCloseTo(expected, 4)
     expect(state.inserts).toHaveLength(2)
@@ -197,10 +208,11 @@ describe('estimateJobCostUsd — Grok Imagine tier (ticket #3991)', () => {
   })
 })
 
-// RunPod provider branch in the clip stage (video-provider Phase 2, Wan 2.2
-// 14B). Fal's own clip path is untouched (byte-for-byte); these tests only
-// exercise the new `spec.provider === 'runpod'` fork.
-describe('advanceClip — RunPod provider (wan22-i2v)', () => {
+// Historical RunPod rows after ADR-016 Phase 4 (2026-09-23). The wan22 tiers
+// are deleted from VIDEO_MODELS; a row that still names one fails with the
+// retired_provider message, never a TypeError from an undefined spec. The
+// Atlas submit -> poll -> re-host flow is covered in video-pipeline-atlas.test.ts.
+describe('advanceJob: historical RunPod rows (retired, ADR-016)', () => {
   const baseJobRow = {
     id: 7,
     jobId: 'job-wan22',
@@ -230,85 +242,21 @@ describe('advanceClip — RunPod provider (wan22-i2v)', () => {
     completedAt: null,
   }
 
-  it('submits with mode i2v and the frame URL, and accrues the ESTIMATE without logging it (no api_token_log row at submit)', async () => {
+  it('fails a queued wan22 clip with the retirement named', async () => {
     state.selectResults = [
       [baseJobRow],                                          // advanceInflightVideoJobs' job-rows query
       [{ id: 55, blobUrl: 'https://blob.test/frame.jpg' }],   // scene-frame asset lookup
     ]
-    runpodSubmitMock.mockResolvedValue({
-      requestId: 'rp-1',
-      statusUrl: 'https://api.runpod.ai/v2/ep/status/rp-1',
-      responseUrl: 'https://api.runpod.ai/v2/ep/status/rp-1',
-    })
 
     const result = await advanceInflightVideoJobs()
 
-    expect(result.failed).toBe(0)
-    expect(result.advanced).toBe(1)
-    expect(runpodSubmitMock).toHaveBeenCalledWith({
-      prompt: 'slow push toward the product',
-      imageUrl: 'https://blob.test/frame.jpg',
-      durationSeconds: 8,
-      mode: 'i2v',
-      blobPathPrefix: 'video/job-wan22',
-    })
-    // Estimate accrues to the job row (ceiling enforcement) but never lands in
-    // api_token_log — only the ACTUAL cost does, once the job completes.
+    expect(result.failed).toBe(1)
+    expect(state.updates.map(u => String(u['error'] ?? '')).join(' ')).toMatch(/RunPod worker, which is retired/)
+    expect(state.updates.map(u => String(u['error'] ?? '')).join(' ')).not.toMatch(/TypeError|undefined/)
     expect(logVideoCost).not.toHaveBeenCalled()
-    // Never touches the fal queue client's blob round-trip.
-    expect(blobPut).not.toHaveBeenCalled()
-    expect(blobFetchToBuffer).not.toHaveBeenCalled()
   })
 
-  it('on COMPLETED, records the mediaAssets clip row with blobUrl = the worker videoUrl (no download/re-upload), and replaces the estimate with the actual cost', async () => {
-    const awaitingRow = {
-      ...baseJobRow,
-      status: 'awaiting_provider',
-      costUsd: String(estimateVideoCostUsd('runpod/wan22', 8)), // what submit accrued
-      providerRequestIds: {
-        clip: { requestId: 'rp-1', statusUrl: 'https://api.runpod.ai/v2/ep/status/rp-1', responseUrl: 'https://api.runpod.ai/v2/ep/status/rp-1' },
-      },
-    }
-    state.selectResults = [[awaitingRow]] // only the job-rows query; no frame lookup on poll
-    runpodStatusMock.mockResolvedValue({ status: 'COMPLETED' })
-    runpodResultMock.mockResolvedValue({
-      videoUrl: 'https://blob.vercel-storage.com/video/job-wan22/clip.mp4',
-      renderSeconds: 300,
-      executionMs: 300000,
-    })
-
-    const result = await advanceInflightVideoJobs()
-
-    expect(result.failed).toBe(0)
-    expect(result.advanced).toBe(1)
-    expect(blobPut).not.toHaveBeenCalled()
-    expect(blobFetchToBuffer).not.toHaveBeenCalled()
-
-    const clipInsert = state.inserts.find(r => r['purpose'] === 'clip')
-    expect(clipInsert).toMatchObject({
-      kind: 'video',
-      purpose: 'clip',
-      blobUrl: 'https://blob.vercel-storage.com/video/job-wan22/clip.mp4',
-      contentType: 'video/mp4',
-      sourceModel: 'runpod/wan22',
-    })
-    const actualCost = computeRunpodActualCostUsd(300000)
-    expect(clipInsert?.['costUsd']).toBe(String(actualCost))
-    expect(logVideoCost).toHaveBeenCalledWith(expect.objectContaining({
-      feature: 'video-clip',
-      model: 'runpod/wan22',
-      seconds: 8,
-      actualCostUsd: actualCost,
-    }))
-  })
-
-  /**
-   * Orphan cancellation (ticket #5728). A RunPod request outlives the row that
-   * submitted it: nothing reads the output of a terminal job, but the GPU
-   * keeps billing to completion or to the 1800s execution timeout. cancelRunpod
-   * existed from the start and was called from nowhere.
-   */
-  it('cancels the in-flight runpod request when the job fails, and records what it burned', async () => {
+  it('fails an in-flight wan22 row rather than polling a retired worker forever', async () => {
     const awaitingRow = {
       ...baseJobRow,
       status: 'awaiting_provider',
@@ -317,93 +265,12 @@ describe('advanceClip — RunPod provider (wan22-i2v)', () => {
       },
     }
     state.selectResults = [[awaitingRow]]
-    // COMPLETED, then a result the pipeline cannot use -> advanceJob throws.
-    runpodStatusMock.mockResolvedValue({ status: 'COMPLETED', executionMs: 210_000 })
-    runpodResultMock.mockRejectedValue(new Error('runpod result missing output.videoUrl'))
 
     const result = await advanceInflightVideoJobs()
 
     expect(result.failed).toBe(1)
-    expect(runpodCancelMock).toHaveBeenCalledWith(expect.objectContaining({ requestId: 'rp-1' }))
-    expect(logVideoCost).toHaveBeenCalledWith(expect.objectContaining({
-      refId: 'job-wan22#clip#cancelled',
-      actualCostUsd: computeRunpodActualCostUsd(210_000),
-    }))
-  })
-
-  it('cancels every sibling part, which is the avatar multi-part leak', async () => {
-    const awaitingRow = {
-      ...baseJobRow,
-      status: 'awaiting_provider',
-      providerRequestIds: {
-        avatar_0: { requestId: 'rp-a', statusUrl: 'https://api.runpod.ai/v2/ep/status/rp-a', responseUrl: 'https://api.runpod.ai/v2/ep/status/rp-a' },
-        avatar_1: { requestId: 'rp-b', statusUrl: 'https://api.runpod.ai/v2/ep/status/rp-b', responseUrl: 'https://api.runpod.ai/v2/ep/status/rp-b' },
-        // Non-handle bookkeeping keys share this column and must be skipped.
-        avatar_billed_seconds: 30,
-        assembly_attempts: 2,
-      } as never,
-    }
-    state.selectResults = [[awaitingRow]]
-    runpodStatusMock.mockResolvedValue({ status: 'FAILED', executionMs: 5_000 })
-
-    await advanceInflightVideoJobs()
-
-    expect(runpodCancelMock).toHaveBeenCalledTimes(2)
-    expect(runpodCancelMock.mock.calls.map(c => (c[0] as { requestId: string }).requestId).sort()).toEqual(['rp-a', 'rp-b'])
-  })
-
-  it('leaves a fal handle alone (fal video is retired and its cancel semantics differ)', async () => {
-    const awaitingRow = {
-      ...baseJobRow,
-      status: 'awaiting_provider',
-      providerRequestIds: {
-        clip: { requestId: 'fal-1', statusUrl: 'https://queue.fal.run/some/model/requests/fal-1', responseUrl: 'https://queue.fal.run/some/model/requests/fal-1' },
-      },
-    }
-    state.selectResults = [[awaitingRow]]
-    runpodStatusMock.mockRejectedValue(new Error('boom'))
-
-    await advanceInflightVideoJobs()
-
-    expect(runpodCancelMock).not.toHaveBeenCalled()
-  })
-
-  it('a failing cancel never masks the error that led there', async () => {
-    const awaitingRow = {
-      ...baseJobRow,
-      status: 'awaiting_provider',
-      providerRequestIds: {
-        clip: { requestId: 'rp-1', statusUrl: 'https://api.runpod.ai/v2/ep/status/rp-1', responseUrl: 'https://api.runpod.ai/v2/ep/status/rp-1' },
-      },
-    }
-    state.selectResults = [[awaitingRow]]
-    runpodStatusMock.mockResolvedValue({ status: 'FAILED', executionMs: 1_000 })
-    runpodCancelMock.mockRejectedValue(new Error('already terminal on runpod side'))
-
-    const result = await advanceInflightVideoJobs()
-
-    // Still a clean single failure, not a thrown poller pass.
-    expect(result.failed).toBe(1)
-  })
-
-  it('rejectVideoJob cancels what is still rendering (prod job 4 took exactly this path)', async () => {
-    const awaitingRow = {
-      ...baseJobRow,
-      status: 'awaiting_provider',
-      providerRequestIds: {
-        clip: { requestId: 'rp-9', statusUrl: 'https://api.runpod.ai/v2/ep/status/rp-9', responseUrl: 'https://api.runpod.ai/v2/ep/status/rp-9' },
-      },
-    }
-    state.selectResults = [[awaitingRow]]
-    runpodStatusMock.mockResolvedValue({ status: 'IN_PROGRESS', executionMs: 42_000 })
-
-    await rejectVideoJob(7, 'not the read I wanted')
-
-    expect(runpodCancelMock).toHaveBeenCalledWith(expect.objectContaining({ requestId: 'rp-9' }))
-    expect(logVideoCost).toHaveBeenCalledWith(expect.objectContaining({
-      refId: 'job-wan22#clip#cancelled',
-      actualCostUsd: computeRunpodActualCostUsd(42_000),
-    }))
+    expect(state.updates.map(u => String(u['error'] ?? '')).join(' ')).toMatch(/RunPod worker, which is retired/)
+    expect(state.inserts.filter(r => r['purpose'] === 'clip')).toHaveLength(0)
   })
 
   /**
@@ -419,6 +286,7 @@ describe('advanceClip — RunPod provider (wan22-i2v)', () => {
    */
   const frameJob = (costUsd: string) => ({
     ...baseJobRow,
+    modelTier: 'wan27-atlas',
     stage: 'scene_frame',
     status: 'queued',
     sceneFrameAssetId: null,
@@ -445,22 +313,138 @@ describe('advanceClip — RunPod provider (wan22-i2v)', () => {
     expect(state.updates.map(u => String(u['error'] ?? '')).join(' ')).not.toMatch(/per-video ceiling/)
   })
 
-  it('waits (does not insert or log) while the runpod job is still in progress', async () => {
-    const awaitingRow = {
-      ...baseJobRow,
-      status: 'awaiting_provider',
-      providerRequestIds: {
-        clip: { requestId: 'rp-1', statusUrl: 'https://api.runpod.ai/v2/ep/status/rp-1', responseUrl: 'https://api.runpod.ai/v2/ep/status/rp-1' },
-      },
-    }
-    state.selectResults = [[awaitingRow]]
-    runpodStatusMock.mockResolvedValue({ status: 'IN_PROGRESS' })
+})
 
+/**
+ * The render gate (Phase 2b): the poster stage parks a finished cut at
+ * awaiting_render_approval while video_render_review is ON (the default), the
+ * poller never selects it, only an owner approve releases it to 'done', and
+ * nothing fans out to social drafts until then.
+ */
+describe('render gate: awaiting_render_approval', () => {
+  const posterJob = {
+    id: 11,
+    jobId: 'job-cut',
+    productHandle: 'satin-wand',
+    shopifyProductGid: null,
+    formula: 'myth-busting',
+    presenter: 'none',
+    scriptJson: { motionPrompt: 'slow push', durationSeconds: 8 },
+    aiDisclosure: true,
+    modelTier: 'kling25-pro',
+    targetPlatforms: ['instagram'],
+    stage: 'poster',
+    status: 'queued',
+    providerRequestIds: {},
+    sceneFrameAssetId: 55,
+    finalAssetId: 90,
+    posterAssetId: null,
+    scenesJson: null,
+    sceneStateJson: null,
+    costUsd: '1.20',
+    metricsJson: null,
+    variantGroupId: null,
+    variantAxes: null,
+    error: null,
+    team: 'video',
+    runId: null,
+    episodeId: null as number | null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    completedAt: null,
+  }
+
+  function armPosterStage() {
+    state.selectResults = [
+      [posterJob],                                                  // poller's job-rows query
+      [{ id: 90, blobUrl: 'https://blob.test/video/job-cut/final.mp4' }], // final asset
+    ]
+    vi.mocked(blobFetchToBuffer).mockResolvedValue(Buffer.from('mp4'))
+    vi.mocked(extractPoster).mockResolvedValue(Buffer.from('jpg'))
+    vi.mocked(probeDurationSeconds).mockResolvedValue(8)
+    vi.mocked(blobPut).mockResolvedValue({ url: 'https://blob.test/video/job-cut/poster.jpg' } as never)
+    gateFramesMock.mockResolvedValue({ pass: true, notes: '', frameVerdicts: [{ verdict: 'pass' }] })
+  }
+
+  it('the poller never selects a parked cut', () => {
+    expect(INFLIGHT_VIDEO_STATUSES as readonly string[]).not.toContain('awaiting_render_approval')
+    expect(INFLIGHT_VIDEO_STATUSES as readonly string[]).not.toContain('awaiting_frame_approval')
+    expect('awaiting_render_approval'.length).toBeLessThanOrEqual(24) // video_jobs.status varchar(24)
+  })
+
+  const terminalWrite = () => state.updates.find(u => u['stage'] === 'done')
+
+  it('parks the finished cut instead of finishing it when the valve is unset (defaults ON)', async () => {
+    armPosterStage()
     const result = await advanceInflightVideoJobs()
-
     expect(result.failed).toBe(0)
-    expect(runpodResultMock).not.toHaveBeenCalled()
+    expect(result.parked).toBe(1)
+    expect(result.done).toBe(0)
+    expect(terminalWrite()).toMatchObject({ stage: 'done', status: 'awaiting_render_approval' })
+    expect(terminalWrite()?.['posterAssetId']).toBeDefined()
+    expect(settingMock).toHaveBeenCalledWith('video_render_review')
+  })
+
+  it('finishes straight to done when video_render_review is false', async () => {
+    armPosterStage()
+    settingMock.mockImplementation(async (key: string) => (key === 'video_render_review' ? 'false' : null))
+    const result = await advanceInflightVideoJobs()
+    expect(result.done).toBe(1)
+    expect(result.parked).toBe(0)
+    expect(terminalWrite()).toMatchObject({ stage: 'done', status: 'done' })
+  })
+
+  it('the post-render vision gate still wins: a FAIL parks at awaiting_final_review, not the render gate', async () => {
+    armPosterStage()
+    gateFramesMock.mockResolvedValue({ pass: false, notes: 'nudity', frameVerdicts: [] })
+    await advanceInflightVideoJobs()
+    expect(state.updates.some(u => u['status'] === 'awaiting_final_review')).toBe(true)
+    expect(state.updates.some(u => u['status'] === 'awaiting_render_approval')).toBe(false)
+  })
+
+  it('approveRenderedVideo releases a parked cut to done', async () => {
+    await approveRenderedVideo(11)
+    expect(state.updates[0]).toMatchObject({ status: 'done' })
+  })
+
+  it('approveRenderedVideo throws when nothing was parked (double click, or already decided)', async () => {
+    state.updateReturns = []
+    await expect(approveRenderedVideo(11)).rejects.toThrow(/not awaiting final-cut approval/)
+  })
+
+  it('fanOutVideoToSocialDrafts refuses a parked cut, so no social draft exists before approval', async () => {
+    state.selectResults = [[{ ...posterJob, stage: 'done', status: 'awaiting_render_approval' }]]
+    await expect(fanOutVideoToSocialDrafts(11, 'mike')).rejects.toThrow(/awaiting your approval/)
     expect(state.inserts).toHaveLength(0)
-    expect(logVideoCost).not.toHaveBeenCalled()
+  })
+
+  it('rejectRenderedVideo requires a reason and writes nothing without one', async () => {
+    await expect(rejectRenderedVideo(11, '   ', 'mike')).rejects.toThrow(/reason is required/)
+    expect(state.updates).toHaveLength(0)
+  })
+
+  it('rejectRenderedVideo fails the job with the reason and hands a linked episode back', async () => {
+    state.selectResults = [[{ ...posterJob, stage: 'done', status: 'awaiting_render_approval', episodeId: 4 }]]
+    const result = await rejectRenderedVideo(11, 'hands melt at 0:04', 'mike@xdipx.com')
+    expect(state.updates[0]).toMatchObject({ status: 'failed' })
+    // stage stays 'done'; status 'failed' alone keeps it out of every list.
+    expect(state.updates[0]).not.toHaveProperty('stage')
+    expect(String(state.updates[0]?.['error'])).toMatch(/Final cut rejected by owner: hands melt/)
+    expect(episodeMocks.markEpisodeRenderRejected).toHaveBeenCalledWith(4, 'job job-cut: hands melt at 0:04', 'mike@xdipx.com')
+    expect(result).toEqual({ episodeReleased: true, episodeId: 4 })
+  })
+
+  it('rejectRenderedVideo on an unlinked job fails it and touches no episode', async () => {
+    state.selectResults = [[{ ...posterJob, stage: 'done', status: 'awaiting_render_approval' }]]
+    const result = await rejectRenderedVideo(11, 'off-brand', 'mike')
+    expect(result).toEqual({ episodeReleased: false, episodeId: null })
+    expect(episodeMocks.markEpisodeRenderRejected).not.toHaveBeenCalled()
+  })
+
+  it('rejectRenderedVideo refuses a job that is not parked (never fails a finished or approved cut)', async () => {
+    state.selectResults = [[{ ...posterJob, stage: 'done', status: 'done' }]]
+    state.updateReturns = []
+    await expect(rejectRenderedVideo(11, 'late change of heart', 'mike')).rejects.toThrow(/not awaiting final-cut approval/)
+    expect(episodeMocks.markEpisodeRenderRejected).not.toHaveBeenCalled()
   })
 })

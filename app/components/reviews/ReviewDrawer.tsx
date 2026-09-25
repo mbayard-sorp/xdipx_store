@@ -105,7 +105,7 @@ export function ReviewDrawer({ review, onClose, onUpdate }: ReviewDrawerProps) {
           <div className="flex items-start gap-3">
             <div
               className="w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-bold shrink-0"
-              style={{ background: '#7C8F78', fontFamily: 'var(--font-display)' }}
+              style={{ background: 'var(--color-sage)', fontFamily: 'var(--font-display)' }}
               aria-hidden="true"
             >
               {review.reviewerName.slice(0, 2).toUpperCase()}

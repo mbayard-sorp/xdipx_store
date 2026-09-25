@@ -31,6 +31,7 @@
 import { generateImage } from './generate-image.server'
 import { uploadMoodImageToShopifyFilesWithId } from './shopify.server'
 import { tryIngestSocialAsset } from './social-asset-library.server'
+import { NON_SKIN_SENTINEL, sceneAxisTags, type SceneAxes } from './social-scene-vocab'
 import type { VisionVerdict } from './social-vision-gate.server'
 
 /**
@@ -304,9 +305,32 @@ export const PRODUCT_SCALES = {
  *
  * Anchors assume an adult hand of roughly 7.5in wrist to fingertip and a palm
  * of roughly 4in from wrist crease to finger base.
+ *
+ * Ticket #10981: an on-skin frame with no hand in shot (a product resting
+ * against a body zone, not held) has no anchor at all when the cue is always
+ * phrased against "her hand" — row 285 rendered a Womanizer Beauty roughly 2x
+ * real size on a forearm because nothing told the model how wide a forearm
+ * is. `bodyZone` lets the cue anchor against the zone the product actually
+ * rests on instead. Only `forearm` gets a zone-relative anchor: it carries
+ * the owner's own reference measurement from that incident (~65mm/2.6in
+ * wide), and this module has no equivalent sourced measurement for the other
+ * eleven body zones, so every other zone (and no zone) falls back to the
+ * hand-relative cue below rather than ship an invented anatomical number.
  */
-export function scaleCueFromLengthInches(lengthIn: number): string {
+const FOREARM_WIDTH_INCHES = 2.6
+
+export function scaleCueFromLengthInches(lengthIn: number, bodyZone?: string | null): string {
   const L = `about ${lengthIn} inches long`
+  if (bodyZone === 'forearm') {
+    const ratio = lengthIn / FOREARM_WIDTH_INCHES
+    if (ratio <= 1.15) {
+      return `The product is ${L}: about as long as the forearm it rests against is wide (roughly ${FOREARM_WIDTH_INCHES} inches), so it reads compact against the arm, not oversized.`
+    }
+    if (ratio <= 2) {
+      return `The product is ${L}: noticeably longer than the forearm it rests against is wide (roughly ${FOREARM_WIDTH_INCHES} inches), spanning a real but modest stretch of the arm, not dominating it.`
+    }
+    return `The product is ${L}: several times longer than the forearm it rests against is wide (roughly ${FOREARM_WIDTH_INCHES} inches). Keep it visually anchored to the forearm's actual scale, extending along the arm rather than enlarged to fill the frame.`
+  }
   if (lengthIn <= 2.5) {
     return `The product is small, ${L}: it disappears almost entirely inside her closed hand.`
   }
@@ -403,6 +427,23 @@ export interface GenerateCastCompositeOpts {
   caller?: string
   /** Cast member slug(s) in the frame, recorded on the library row (#4937). */
   castSlugs?: string[]
+  /**
+   * The scene axes this frame was BRIEFED at (#10479), stamped onto the
+   * library row's `tags` so the draft can resolve them by URL instead of
+   * asking the drafter to remember them. This is the choice point: the zone,
+   * the contact mode, the crop and the location are all decided here, before
+   * a dollar is spent, and re-asserting them at draft time is a second
+   * chance to get it wrong that was taken 281 times out of 281.
+   */
+  sceneAxes?: SceneAxes
+  /**
+   * Ticket #10560: the caller's own body-reference/product-reference fallback
+   * flags, stamped onto every ingested candidate's `tags` alongside the scene
+   * axes so the condition is countable (folds into the coverage report)
+   * instead of living only in an HTTP response field nothing reads.
+   */
+  bodyReferenceMissing?: boolean
+  productImageFellBack?: boolean
 }
 
 export interface GenerateCastCompositeResult {
@@ -428,6 +469,64 @@ export interface GenerateCastCompositeResult {
    * the library write failed (non-fatal: the image still shipped).
    */
   assetIds?: (number | null)[]
+}
+
+/**
+ * Tag an asset whose vision-gate verdict never reached a real judgment (a
+ * prose reply that failed to parse even after the gate's own retry, a
+ * network error, a model-call error) as `vision-incomplete`, distinct from a
+ * genuine anatomy/exposure fail (ticket #10990). `checkCompleted: false`
+ * already drops the candidate from what the caller returns exactly like a
+ * real fail does; the tag is what lets a human or a rerun find these rows
+ * again instead of reading as ordinary rejects in the library grid. Non-fatal:
+ * a tagging failure never unwinds generation or rehosting.
+ */
+export async function tagIncompleteVisionVerdict(assetId: number | null | undefined, verdict: VisionVerdict): Promise<void> {
+  if (verdict.checkCompleted || assetId == null) return
+  try {
+    const { addAssetTags } = await import('./social-studio.server')
+    await addAssetTags([assetId], 'vision-incomplete')
+  } catch (err) {
+    console.error(`[social-media] failed to tag incomplete vision verdict on asset ${assetId}`, err)
+  }
+}
+
+/**
+ * Crop-to-zone pass (ticket #10999, "the crop is the closer"). Briefed as a
+ * close on-skin bodyscape, the two-stage compositor renders wide about half
+ * the time, and the FULL wide render is what used to reach the vision gate
+ * and fail on stop-list anatomy that a tight crop of the same render would
+ * never show. When `sceneAxes.cropScale` is `close` or `macro` and a real
+ * body zone is briefed, this crops the candidate to that zone BEFORE the
+ * vision gate ever sees it, so the gate judges the pixels that would ship,
+ * not the ones that would not.
+ *
+ * Returns `null` when the crop pass refuses the candidate (uncroppable,
+ * zone-miss, or a model/transport failure): the caller must drop the
+ * candidate exactly like a rehost or vision-gate failure (billed, unshipped).
+ * A wide/medium crop, or an axis-free frame, passes the original buffer
+ * through untouched — the pass is additive, never a requirement.
+ */
+async function maybeCropToZone(
+  buffer: Buffer,
+  sceneAxes: SceneAxes | undefined,
+  aspectRatio: SocialAspect,
+): Promise<{ buffer: Buffer; tag?: string } | null> {
+  const cropScale = sceneAxes?.cropScale
+  const bodyZone = sceneAxes?.bodyZone
+  if (cropScale !== 'close' && cropScale !== 'macro') return { buffer }
+  if (!bodyZone || bodyZone === NON_SKIN_SENTINEL) return { buffer }
+  // The crop pass only knows the two live feed shapes; any other aspect
+  // passes through uncropped rather than guessing a target ratio.
+  if (aspectRatio !== '4:5' && aspectRatio !== '16:9') return { buffer }
+
+  const { cropImageToZone, formatCropBoxTag } = await import('./social-crop-to-zone.server')
+  const result = await cropImageToZone({ data: buffer, mediaType: 'image/jpeg' }, { bodyZone, aspectRatio })
+  if (!result.cropped || !result.buffer) {
+    console.error(`[social-media] crop-to-zone rejected candidate (${result.reason}): ${result.notes}`)
+    return null
+  }
+  return { buffer: result.buffer, ...(result.box ? { tag: formatCropBoxTag(result.box) } : {}) }
 }
 
 /** One composeSceneFrame call, rehosted, ingested, and vision-gated per candidate. */
@@ -462,6 +561,14 @@ async function generateCastCompositeBatch(
   const assetIds: (number | null)[] = []
   const generationBatchId = crypto.randomUUID()
   const scaledPrompt = withProductScale(opts.prompt, opts.scale)
+  // Ticket #10560: the fallback flags ride alongside the scene axes so the
+  // condition is durable and countable per frame, not just an HTTP response
+  // field nothing downstream reads.
+  const sceneAxisTagList = [
+    ...sceneAxisTags(opts.sceneAxes ?? {}),
+    ...(opts.bodyReferenceMissing ? ['body-reference-missing'] : []),
+    ...(opts.productImageFellBack ? ['product-image-fell-back'] : []),
+  ]
   for (const [i, falUrl] of frame.urls.entries()) {
     const filename = buildSocialAssetFilename({
       handle: opts.handle,
@@ -476,12 +583,19 @@ async function generateCastCompositeBatch(
     try {
       const res = await fetch(falUrl)
       if (!res.ok) continue
-      const buffer = Buffer.from(await res.arrayBuffer())
+      const fetchedBuffer = Buffer.from(await res.arrayBuffer())
+      // Crop-to-zone (#10999), before rehost and before the vision gate: a
+      // refusal here (uncroppable/zone-miss/model error) drops the candidate
+      // exactly like a rehost or vision-gate failure below, still billed.
+      const cropOutcome = await maybeCropToZone(fetchedBuffer, opts.sceneAxes, opts.aspectRatio ?? '4:5')
+      if (!cropOutcome) continue
+      const buffer: Buffer = cropOutcome.buffer
       const { url, fileId } = await uploadMoodImageToShopifyFilesWithId(buffer, filename)
       // Library dual-write (#4937): the buffer is already in hand, so no
       // re-fetch. Non-fatal; the Shopify url is what the gate checks, so the
       // row indexes under it and carries the Sanity asset id alongside.
       // `shopifyFileId` (#5426) makes a future purge deterministic.
+      const candidateTags = [...sceneAxisTagList, ...(cropOutcome.tag ? [cropOutcome.tag] : [])]
       const asset = await tryIngestSocialAsset({
         buffer,
         filename,
@@ -499,14 +613,18 @@ async function generateCastCompositeBatch(
         isPicked: false,
         createdBy: opts.caller ?? 'social-media-manager',
         ...(opts.castSlugs?.length ? { castSlugs: opts.castSlugs } : {}),
+        ...(candidateTags.length ? { tags: candidateTags } : {}),
       })
       // Vision-gate every candidate before it can reach a draft (#6763): the
       // verdict is recorded on the row regardless of outcome (a missing
       // verdict is what makes social-publish-gate block, not a failing one
       // alone), and a failing candidate is dropped from what this function
-      // returns, exactly the same as a rehost failure above.
+      // returns, exactly the same as a rehost failure above. Runs against the
+      // CROPPED buffer's uploaded url when a crop happened (#10999), so the
+      // gate judges the pixels that would ship.
       const verdict = await runVisionGate(url)
       if (asset?.id != null) await recordVisionVerdict(asset.id, verdict)
+      await tagIncompleteVisionVerdict(asset?.id, verdict)
       if (!verdict.pass) continue
       urls.push(url)
       filenames.push(filename)
@@ -584,6 +702,12 @@ export interface GenerateSocialImageOpts {
    * is not counted twice against the social team's daily cap.
    */
   logCost?: boolean
+  /**
+   * The scene axes this frame was briefed at (#10479), stamped onto the
+   * library row's `tags` so the draft resolves them by URL. Same contract as
+   * `GenerateCastCompositeOpts.sceneAxes`.
+   */
+  sceneAxes?: SceneAxes
 }
 
 export interface GenerateSocialImageResult {
@@ -635,6 +759,7 @@ export async function generateAndUploadSocialImage(
 
   let lastProvider: GenerateSocialImageResult['provider'] = 'none'
   let lastModel = ''
+  const axisTags = sceneAxisTags(opts.sceneAxes ?? {})
   const { generateWithVisionGate, runVisionGate, recordVisionVerdict } =
     await import('./social-vision-gate.server')
 
@@ -656,8 +781,8 @@ export async function generateAndUploadSocialImage(
       lastProvider = result.provider
       lastModel = result.model
 
-      const buffer = result.buffers[0]
-      if (!buffer) return null
+      const generatedBuffer = result.buffers[0]
+      if (!generatedBuffer) return null
 
       // Rehost failure must not throw: the generation above is already billed
       // by the provider, and an exception here used to unwind the caller
@@ -665,9 +790,20 @@ export async function generateAndUploadSocialImage(
       // uncounted (#887). Returning null here (a "generation miss" to the
       // vision-gate loop) tells the caller "billed but unshipped".
       try {
+        // Crop-to-zone (#10999), before rehost and before the vision gate:
+        // see `maybeCropToZone`'s own doc comment. A refusal here is treated
+        // exactly like the rehost failure below (billed but unshipped).
+        const cropOutcome = await maybeCropToZone(
+          generatedBuffer,
+          opts.sceneAxes,
+          opts.aspect ?? socialAspectFromImageSize(opts.imageSize),
+        )
+        if (!cropOutcome) return null
+        const buffer = cropOutcome.buffer
         const { url, fileId } = await uploadMoodImageToShopifyFilesWithId(buffer, filename)
         // Library dual-write (#4937), non-fatal, buffer already in hand.
         // `shopifyFileId` (#5426) makes a future purge deterministic.
+        const candidateTags = [...axisTags, ...(cropOutcome.tag ? [cropOutcome.tag] : [])]
         const asset = await tryIngestSocialAsset({
           buffer,
           filename,
@@ -684,6 +820,7 @@ export async function generateAndUploadSocialImage(
           generationBatchId: crypto.randomUUID(),
           isPicked: false,
           createdBy: opts.caller ?? 'social-media-manager',
+          ...(candidateTags.length ? { tags: candidateTags } : {}),
         })
         return { url, assetId: asset?.id ?? null }
       } catch (err) {
@@ -692,7 +829,10 @@ export async function generateAndUploadSocialImage(
       }
     },
     runGate: (url) => runVisionGate(url),
-    recordVerdict: (assetId, verdict) => recordVisionVerdict(assetId, verdict),
+    recordVerdict: async (assetId, verdict) => {
+      await recordVisionVerdict(assetId, verdict)
+      await tagIncompleteVisionVerdict(assetId, verdict)
+    },
   })
 
   return {

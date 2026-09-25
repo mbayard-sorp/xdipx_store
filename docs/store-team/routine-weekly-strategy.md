@@ -96,7 +96,17 @@ If `ok:false`: post `{"op":"update","id":$RUN_ID,"update":{"status":"skipped","f
 
 ## Step 3 — Retro on last week's brief
 
-Directive by directive: followed? outcome? keep/adjust/drop? One `decision` event each:
+Directive by directive: followed? outcome? keep/adjust/drop? **And a fourth question (retro-verify-
+standing-premises, second occurrence 2026-09-22): is the premise still true, and what did you
+check?** A directive whose premise died reads as "followed, no outcome" under the first three
+questions alone and gets renewed unchecked — run 865 found an owner blocker whose trigger had never
+fired once after ten days open, and the very next week's run found four more false premises in a
+single pass, three of them standing directives from that same prior brief. Re-verifying the outcome
+of a directive is not the same check as re-verifying whether its premise still holds; do both. For
+any premise that is re-asserted rather than freshly re-verified, name a file, query, or probe as
+evidence. Extend the same check to every `owner_blockers` row the brief carries forward. Keep it
+bounded: verify the premises of directives and blockers this brief actually carries forward, not the
+entire historical backlog. One `decision` event each:
 
 ```bash
 curl -s -X POST "$BASE_URL/api/team/event" \
@@ -305,22 +315,56 @@ and campaign tie-ins with the marketing calendar; the daily content playbook
 (`docs/store-team/routine-content-daily.md`) tolerates a brief without a content section, so omit
 it honestly rather than padding.
 
-Include a **Video Plan** section when the video team is enabled (`video_team_enabled`), and omit it
-honestly when it is not. The Video Plan is a spend allocation, not a wish list: video generation is
-metered fal.ai spend, unlike your Max-billed reasoning. It contains: (a) the week's volume and tier
-split (e.g. "3 videos: 1 premium presenter + 2 standard"), (b) a slate table with one row per video
-(product handle, formula from the library in `.claude/agents/video-producer.md`, tier, target
-platforms, source tie-in such as the anchor blog post or calendar theme, and the metric that
-justifies the pick), and (c) the selection reasoning. Selection rubric, hard gates first: in stock,
-published, has real Shopify product photography, MAP status known, concept passes voice and
-doctrine. Then weights: hero/theme alignment 30 (the week's headliner is auto-included as the
-premium video; video commits to the headliner and does NOT chase homepage rotations), realized
-margin x order velocity 25, PDP-video-gap conversion opportunity 15, blog tie-in 15 (name the
-source post slug; its answers become the script), new-import freshness 5 (standard tier only,
-never premium), promo/calendar window fit 5. Mirror the slate into `metricsJson.videoPlan`, and in
-the retro read `video_jobs` outcomes (approval rate, cost per approved video, regen rate; owner
-metrics_json once posts go out). Approval rate under ~40% sustained is a stop-doing signal: pause
-the slate and fix the formula via an instructions suggestion before spending more.
+Include a **Campaign look** section, always, sourced from `docs/store-team/campaign-look.md` and
+never re-derived: the active treatment, the date the owner set it, the owner's own words for it in
+one short quote, and then one line per surface saying adopt, exclude, or open owner question. It is
+a restatement of the router and nothing more; if the router and your memory disagree, the router
+wins, and a surface whose status you cannot find in it is reported as unknown rather than guessed.
+
+Include a **Video Plan** section when the video program is enabled (`video_program_enabled`), and
+omit it honestly when it is not. The Video Plan is a product shortlist, not a script slate: product
+selection is the merchandising and product team's job, and the Writers Room (Tuesday 17:00 UTC,
+`series-showrunner`, `docs/store-team/routine-writers-room-weekly.md`) pitches only from what you
+publish here and never picks a product itself. Nothing in this section spends; spend starts at the
+owner's script approval.
+
+**Video shortlist sub-step (`product-manager` + `inventory-sentinel`, same `$RUN_ID`).** Ask
+`product-manager` and `inventory-sentinel` (with `nalpac-feed-analyst` for feed stock and
+`merch-calendar` for the week's theme) for 8 to 12 products. Hard gates, all required: available
+in Shopify with inventory above 3, AND in stock in the Nalpac feed; a bare-product image present;
+an enriched story present. Rank the survivors on margin, deal score, never-posted-on-social first
+(most of the catalog has zero social posts), and calendar fit. Spread the list across categories so
+every one of the seven clip formats in `docs/store-team/video-clip-rules.md` has a candidate (until
+that file is on main, use `docs/store-team/video-content-strategy-2026-09-23.md` §4.2 and say so in
+the brief), and name two alternates beyond the main list. The homepage team's Emma's pick may be
+nominated into the shortlist, so the site, the reel and the email feature the same product in the
+same week. Publish the result on the brief as `metricsJson.videoShortlist`, one object per product,
+alternates included and carrying the same full set:
+
+```
+[{handle, shopifyProductId, variantId, nalpacSku, title, format, reason, bareImageUrl,
+  imageAssetId, mapRestricted, condition, stockCheckedAt, shopifyQty, nalpacQty, alternateFor?,
+  holdBrief?}]
+```
+
+This is the shape the `product-manager` and `inventory-sentinel` definitions produce.
+`stockCheckedAt` is the ISO timestamp of the Shopify and Nalpac check; `alternateFor` names the
+handle an alternate stands in for. The Thursday render routine's claim-time stock check reads
+`shopifyQty` and `nalpacQty` plus a live Shopify availability read, and swaps to the alternate when
+the product can no longer ship. The brief route validates only `handle`, `title`, `format`,
+`reason` and `stockCheckedAt` and passes the other fields through unchanged, so a wrong value in
+them is not caught at publish: get them right here. Record one `decision` event per sub-agent with
+the count and any product dropped at a hard gate.
+
+In the retro, read last week's clips from `POST /api/team/video-episode {op:'episode-list'}`
+(`video_episodes` production statuses: how many went `pending_approval`, `approved`,
+`needs_changes`, `rejected`, `rendered`, `scheduled`, `posted`, `measured`, `failed`; the
+render-approval park is added in Phase 2 of the video program) and the `{op:'learn'}` rollup keyed
+on reach (reach keying PLANNED in Phase 2; today's rollup is saves), medians only, respecting each
+group's n and underpowered flag. A pitch batch the owner sends back as `needs_changes` two weeks
+running, or a shortlist product that went out of stock before Thursday, is a stop-doing signal: fix
+the shortlist rubric or the room's instructions via an `instructions` suggestion before the next
+batch.
 
 Include a **Social Plan** section (mandatory whenever the social team is enabled), because posting
 volume should track what is actually happening on the site and in the industry that week rather than

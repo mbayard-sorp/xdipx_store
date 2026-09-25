@@ -35,6 +35,7 @@ import {
   type DedupeScope,
 } from '~/lib/dedupe-key'
 import { cached, invalidateCache, kvDel, kvGet, kvSet, kvSetNX } from '~/lib/kv.server'
+import { getPullRequest } from '~/lib/github.server'
 import {
   teamKeys,
   teamSpendKvKey,
@@ -1908,6 +1909,13 @@ export const ALLOWED: Readonly<Record<TicketStatus, readonly TransitionRule[]>> 
     // verified reference to the replacement. See the flag's doc on
     // TransitionRule for the fence mechanics.
     { to: 'dismissed', actors: ['any-agent'], delegatedSupersessionOnly: true },
+    // Out-of-band merged-PR reconcile only (#10342). Same fence and same
+    // evidence as the `approved` edge below: only a `merged: true` read from
+    // GitHub for this ticket's own linked PR lets the reconcile walk it. An
+    // untriaged row can carry a PR link (a session files the ticket with its
+    // PR in the same breath, per ADR-008 step 3), and when that PR merges the
+    // row's work is live, so leaving it at `proposed` is drift, not a gate.
+    { to: 'applied', actors: ['system'], outOfBandReconcileOnly: true },
     OWNER_DISMISS,
   ],
   approved: [
@@ -1957,6 +1965,11 @@ export const ALLOWED: Readonly<Record<TicketStatus, readonly TransitionRule[]>> 
   ],
   in_progress: [
     { to: 'pr_open', actors: ['assignee'] },
+    // Out-of-band merged-PR reconcile only (#10342), same fence and same
+    // evidence as the `approved` edge above: GitHub itself must report the
+    // linked PR merged. A claimed ticket whose PR the owner merges by hand is
+    // otherwise stranded until its lease expires and then cycles forever.
+    { to: 'applied', actors: ['system'], outOfBandReconcileOnly: true },
     { to: 'blocked',  actors: ['assignee', 'system'] },
     // Lease expiry releases the ticket back onto the unassigned queue.
     { to: 'approved', actors: ['system'] },
@@ -2199,12 +2212,60 @@ export function isMissingConflictTarget(err: unknown): boolean {
   return false
 }
 
+/**
+ * Postgres raises "index row size ... exceeds btree version 4 maximum ..."
+ * as SQLSTATE 54000 (program_limit_exceeded) when an inserted row's entry
+ * for `uq_suggestion_links_sugg_kind_ref` (suggestion_id, kind, ref) is too
+ * large for the index, roughly 2704 bytes. Unlike 42P10 (the index itself
+ * missing), the index exists and works; the VALUE is the problem, so simply
+ * retrying without `onConflictDoNothing` (as `isMissingConflictTarget` does)
+ * does not help — the oversized value still fails on the plain insert too.
+ * Same cause-chain walk as `isMissingConflictTarget`: drizzle and the Neon
+ * driver both wrap the raw pg error and the code can sit a level deep.
+ */
+export function isOversizedIndexEntry(err: unknown): boolean {
+  let cur: unknown = err
+  for (let depth = 0; cur != null && typeof cur === 'object' && depth < 5; depth++) {
+    const rec = cur as Record<string, unknown>
+    if (rec['code'] === '54000') return true
+    if (typeof rec['message'] === 'string' && rec['message'].includes('54000')) return true
+    cur = rec['cause']
+  }
+  return false
+}
+
+/**
+ * Byte budget for a single `suggestion_links.ref` value, kept well under the
+ * ~2704-byte btree index-tuple ceiling on `uq_suggestion_links_sugg_kind_ref`
+ * (suggestion_id, kind, ref) so there is headroom left for the other two
+ * indexed columns and per-attribute/tuple overhead (ticket #10506).
+ */
+export const LINK_REF_MAX_BYTES = 2000
+
+/**
+ * Truncates `ref` to at most `maxBytes` UTF-8 bytes, backing off to a
+ * character boundary so a multi-byte trailing character is never split into
+ * an invalid byte sequence (a plain character-length clamp does not do this:
+ * multi-byte UTF-8 text can overflow the byte budget well before it hits a
+ * character count that looks safe).
+ */
+export function clampRefBytes(ref: string, maxBytes: number = LINK_REF_MAX_BYTES): string {
+  const buf = Buffer.from(ref, 'utf8')
+  if (buf.byteLength <= maxBytes) return ref
+  let end = maxBytes
+  while (end > 0 && (buf[end]! & 0xc0) === 0x80) end--
+  return `${buf.subarray(0, end).toString('utf8')}…`
+}
+
 async function addTicketLinks(id: number, links: readonly TicketLinkInput[]): Promise<void> {
   if (links.length === 0) return
   const rows = links.map(l => ({
     suggestionId: id,
     kind:         l.kind.slice(0, 12),
-    ref:          l.ref,
+    // Clamp defensively even though callers (the transition note especially)
+    // should already be clamped: this is the last line of defense against
+    // the btree index-tuple ceiling, for any link kind, not only notes.
+    ref:          clampRefBytes(l.ref),
     state:        l.state ? l.state.slice(0, 16) : null,
   }))
   try {
@@ -2216,8 +2277,22 @@ async function addTicketLinks(id: number, links: readonly TicketLinkInput[]): Pr
     // status update already committed, turning a successful transition into
     // a 500 with the note/link silently lost. Degrade to a plain insert
     // (possible duplicate row, recoverable) rather than losing the write.
-    if (!isMissingConflictTarget(err)) throw err
-    await db.insert(suggestionLinks).values(rows)
+    if (isMissingConflictTarget(err)) {
+      await db.insert(suggestionLinks).values(rows)
+      return
+    }
+    // #10506: the clamp above should make this unreachable, but a `kind` or
+    // `suggestionId` combination this function does not control could still
+    // tip an already-clamped ref over the ceiling. Clamp harder and retry
+    // once rather than rethrowing a write the caller cannot recover from.
+    if (isOversizedIndexEntry(err)) {
+      const tighter = rows.map(r => ({ ...r, ref: clampRefBytes(r.ref, Math.floor(LINK_REF_MAX_BYTES / 2)) }))
+      await db.insert(suggestionLinks).values(tighter).onConflictDoNothing({
+        target: [suggestionLinks.suggestionId, suggestionLinks.kind, suggestionLinks.ref],
+      })
+      return
+    }
+    throw err
   }
 }
 
@@ -2228,6 +2303,72 @@ async function addTicketLinks(id: number, links: readonly TicketLinkInput[]): Pr
  * still be held at 20:00), short enough that a dead agent releases the row the
  * same day. See the renewal in transitionSuggestion for why this exists at all.
  */
+export const VERDICT_PIN_RETRY_DELAY_MS = 250
+
+/** Keep the failure note short. A long `ref` overflows the btree entry on the
+ *  uq_suggestion_links_sugg_kind_ref unique index, which 500s the write AFTER
+ *  the status update has already committed (ticket #10506). */
+const VERDICT_PIN_NOTE_MAX = 180
+
+export const VERDICT_PIN_NOTE_PREFIX = 'verdict-pin-failed'
+
+function verdictPinNote(detail: string): string {
+  const note = `${VERDICT_PIN_NOTE_PREFIX}: ${detail.replace(/\s+/g, ' ').trim()}`
+  return note.length > VERDICT_PIN_NOTE_MAX ? `${note.slice(0, VERDICT_PIN_NOTE_MAX - 1)}\u2026` : note
+}
+
+/**
+ * Attempts to read the PR head sha this verification should be pinned to
+ * (ticket #10502, hardened by #10671).
+ *
+ * Returns `{ sha }` on success; `{ failure }` with a SHORT reason when a pin
+ * was EXPECTED and could not be written; `{}` when no pin was ever expected
+ * (the ticket carries no `pr` link at all, e.g. a docs or process row), which
+ * is not a failure and must not be annotated as one.
+ *
+ * Measured on production 2026-09-21: only 6 of the 12 tickets verified after
+ * #10502 deployed carried a pin, the failures interleaved with successes 19
+ * seconds apart, so the live suspect is a transient `getPullRequest` failure
+ * rather than a deploy boundary or a parsing bug. Hence the single retry.
+ */
+async function pinVerifiedCommit(id: number): Promise<{ sha?: string; failure?: string }> {
+  try {
+    const [prLink] = await db
+      .select({ ref: suggestionLinks.ref })
+      .from(suggestionLinks)
+      .where(and(eq(suggestionLinks.suggestionId, id), eq(suggestionLinks.kind, 'pr')))
+      .orderBy(desc(suggestionLinks.createdAt))
+      .limit(1)
+    // No PR link: nothing to pin, and never was. Not a failure.
+    if (!prLink) return {}
+    const prNumberMatch = /(?:\/pull\/|#)(\d{1,9})\b/.exec(prLink.ref)
+    const prNumber = prNumberMatch?.[1] ? Number(prNumberMatch[1]) : null
+    if (prNumber == null || !Number.isInteger(prNumber) || prNumber <= 0) {
+      return { failure: verdictPinNote(`no PR number in link ${prLink.ref}`) }
+    }
+    // Retry once. The failures this is chasing are transient GitHub reads, and
+    // a second attempt costs one HTTP call against a control that otherwise
+    // degrades all the way back to pre-#10502 behaviour.
+    let lastError = 'unknown error'
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const pr = await getPullRequest(prNumber, 'team-verify')
+      if (pr.ok) return { sha: pr.data.headSha }
+      lastError = String(pr.error)
+      console.warn(
+        `[team] could not read PR #${prNumber} head sha to pin ticket ${id}'s verdict `
+        + `(attempt ${attempt} of 2): ${lastError}`,
+      )
+      if (attempt < 2 && VERDICT_PIN_RETRY_DELAY_MS > 0) {
+        await new Promise(r => setTimeout(r, VERDICT_PIN_RETRY_DELAY_MS))
+      }
+    }
+    return { failure: verdictPinNote(`PR #${prNumber} read failed twice: ${lastError}`) }
+  } catch (err) {
+    console.warn(`[team] failed to pin ticket ${id}'s verified commit (non-fatal)`, err)
+    return { failure: verdictPinNote(`${err instanceof Error ? err.message : String(err)}`) }
+  }
+}
+
 export const BOUNCE_LEASE_SEC = 6 * 3600
 
 /**
@@ -2366,6 +2507,50 @@ export async function transitionSuggestion(
     if (pr) patch['applyRef'] = pr.ref
   }
 
+  const links: TicketLinkInput[] = [...(opts.links ?? [])]
+  // Pin the QA verdict to the exact commit it reviewed (ticket #10502).
+  // Before this, the release engine's merge precondition checked only the
+  // TICKET's status, never which diff earned it, so any commit pushed to
+  // the PR after verification merged with zero review. Records the PR's
+  // CURRENT head sha as a `commit` link (an existing link kind, no schema
+  // change); `release-engine.server.ts` bounces the ticket if a later push
+  // moves the head away from this recorded sha.
+  //
+  // Still best-effort on purpose (ticket #10671): a GitHub hiccup must not
+  // fail QA's verdict, because that would turn an API blip into a stalled
+  // queue. What #10671 adds is that the failure is no longer SILENT. When a
+  // pin was expected and could not be written, a short `note` link records
+  // that and why, so an unpinnable row says so instead of being
+  // indistinguishable from a row that was never eligible; and the engine
+  // fails CLOSED on an unpinned verification after VERDICT_PIN_CUTOFF.
+  if (to === 'verified') {
+    const pin = await pinVerifiedCommit(id)
+    if (pin.sha) links.push({ kind: 'commit', ref: pin.sha, state: 'verified' })
+    else if (pin.failure) links.push({ kind: 'note', ref: pin.failure, state: to })
+  }
+  if (opts.note) links.push({ kind: 'note', ref: opts.note, state: to })
+  // Honest attribution on the delegated dismissal (#3573): decided_by above
+  // records the true agent actor; this marker records that the authority was
+  // delegated by the owner and what supersession earned it — the same
+  // actor+source pattern settings_audit_log uses (migration 072).
+  if (rule.delegatedSupersessionOnly) {
+    links.push({
+      kind: 'note',
+      ref: `delegated_by=owner: '${from}' -> 'dismissed' by ${actor} via supersession ${supersessionRefText ?? ''}`.trim(),
+      state: to,
+    })
+  }
+  // Write links (notably the `note` recording WHY this transition happened)
+  // BEFORE the status update commits (ticket #10506). addTicketLinks clamps
+  // and retries defensively, but if it still fails for some unforeseen
+  // reason, writing it first means the failure surfaces as an ordinary 500
+  // with NO status change, rather than a status change whose stated reason
+  // silently vanished. The old order (status first, links second) is exactly
+  // what produced #10506: the transition committed, the note write then blew
+  // the btree index-tuple ceiling with SQLSTATE 54000, and the caller saw a
+  // 500 with no way to tell the transition had actually gone through.
+  await addTicketLinks(id, links)
+
   const guards = [eq(homepageTeamSuggestions.id, id), eq(homepageTeamSuggestions.status, from)]
   if (rule.actors.includes('assignee')) {
     guards.push(eq(homepageTeamSuggestions.assignee, actor))
@@ -2381,21 +2566,6 @@ export async function transitionSuggestion(
       { status: 409 },
     )
   }
-
-  const links: TicketLinkInput[] = [...(opts.links ?? [])]
-  if (opts.note) links.push({ kind: 'note', ref: opts.note, state: to })
-  // Honest attribution on the delegated dismissal (#3573): decided_by above
-  // records the true agent actor; this marker records that the authority was
-  // delegated by the owner and what supersession earned it — the same
-  // actor+source pattern settings_audit_log uses (migration 072).
-  if (rule.delegatedSupersessionOnly) {
-    links.push({
-      kind: 'note',
-      ref: `delegated_by=owner: '${from}' -> 'dismissed' by ${actor} via supersession ${supersessionRefText ?? ''}`.trim(),
-      state: to,
-    })
-  }
-  await addTicketLinks(id, links)
 
   return updated[0]!
 }
@@ -2709,6 +2879,18 @@ export interface DraftSocialPostInput {
   // posts legitimately carry neither).
   sceneLocation?: string | undefined
   castSlugs?: string[] | undefined
+  // Scene variety tracking, part 2 (migration 099, ticket #10269). Sibling
+  // fields to sceneLocation, same optionality: not every post is a
+  // cast/location shoot, and only the on-skin campaign's crops carry a
+  // body zone, contact mode, or crop scale at all.
+  bodyZone?: string | undefined
+  contactMode?: string | undefined
+  cropScale?: string | undefined
+  // Pairing-presence self-check reason (migration 100, ticket #10560). The
+  // explicit reason a toy-featuring draft records for why no lube pairing
+  // applies, read by the deterministic pairing-missing check at gate time.
+  // Optional: most drafts either name a pairing or feature no toy at all.
+  pairingNoneReason?: string | undefined
 }
 
 /** Review states a still-open draft can sit in before the gate or the owner
@@ -2764,8 +2946,30 @@ async function findOpenDuplicateDraft(
 export async function createDraftSocialPost(
   p: DraftSocialPostInput,
 ): Promise<{ id: number; deduped: boolean }> {
+  // Ticket #10479: the four scene axes are supplied where they are CHOSEN
+  // (image generation stamps them on the asset row) and only CONFIRMED here.
+  // Whatever the caller omitted is resolved back from the asset the media
+  // URLs point at, so a drafter that sends none of them still writes a row
+  // carrying all four. Never a 400: the frame is already billed.
+  const { resolveDraftSceneAxes, backfillPostSceneAxes } = await import('./social-scene-axes.server')
+  const axes = await resolveDraftSceneAxes(
+    {
+      bodyZone: p.bodyZone,
+      contactMode: p.contactMode,
+      cropScale: p.cropScale,
+      sceneLocation: p.sceneLocation,
+    },
+    p.mediaUrls,
+  )
+
   const existingId = await findOpenDuplicateDraft(p)
-  if (existingId != null) return { id: existingId, deduped: true }
+  if (existingId != null) {
+    // The deduped branch has to backfill too. Returning an existing row's id
+    // without touching it is what would leave that row's axes null forever
+    // even though the asset knows all four.
+    await backfillPostSceneAxes(existingId, axes)
+    return { id: existingId, deduped: true }
+  }
   const [row] = await db
     .insert(socialPosts)
     .values({
@@ -2785,8 +2989,12 @@ export async function createDraftSocialPost(
       altText:       p.altText ?? null,
       imageBrief:    p.imageBrief ?? null,
       subject:       p.subject ?? null,
-      sceneLocation: p.sceneLocation ?? null,
+      sceneLocation: axes.sceneLocation ?? null,
       castSlugs:     p.castSlugs ?? null,
+      bodyZone:      axes.bodyZone ?? null,
+      contactMode:   axes.contactMode ?? null,
+      cropScale:     axes.cropScale ?? null,
+      pairingNoneReason: p.pairingNoneReason ?? null,
     })
     .returning({ id: socialPosts.id })
   return { id: row!.id, deduped: false }

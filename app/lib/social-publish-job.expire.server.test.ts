@@ -48,8 +48,10 @@ function fakeRepo(rows: PostRow[], over: Partial<PublishRepo> = {}) {
   return { repo, calls }
 }
 
-const tick = (opts: Parameters<typeof runSocialPublishTick>[0]) =>
-  runSocialPublishTick({ removalWatch: async () => null, ...opts })
+const tick = (
+  opts: Omit<Parameters<typeof runSocialPublishTick>[0], 'isVideoEnabled'> & { isVideoEnabled?: () => Promise<boolean> },
+) =>
+  runSocialPublishTick({ removalWatch: async () => null, isVideoEnabled: async () => true, ...opts })
 const enabled = async () => true
 const cap = (n: number) => async () => n
 const publishOk = vi.fn(async () => ({ ok: true as const, externalPostId: 'ig_1' }))

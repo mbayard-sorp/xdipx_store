@@ -12,8 +12,10 @@ import {
   shingles,
   REPETITION_SHINGLE,
   isProductSellable,
+  classifyLegibleText,
+  missingVisionChecks,
 } from './social-publish-gate.server'
-import type { VisionVerdict } from './social-vision-gate.server'
+import { VISION_CHECK_NAMES, type VisionVerdict } from './social-vision-gate.server'
 
 const CDN = 'https://cdn.shopify.com/s/files/1/0761/6872/4651/files'
 const GOOD_MEDIA = [`${CDN}/social-rosales-cast-maya-20260812-1.jpg`]
@@ -26,10 +28,20 @@ const noPairingDial = async () => null
 /** Passing vision-gate verdict for tests unrelated to that check (#6763). */
 const PASSING_VERDICT: VisionVerdict = {
   pass: true,
-  checks: { limbCount: 'pass', handAnatomy: 'pass', faceBodyIntegrity: 'pass', extraOrMergedLimbs: 'pass' },
+  checks: {
+    limbCount: 'pass',
+    handAnatomy: 'pass',
+    faceBodyIntegrity: 'pass',
+    extraOrMergedLimbs: 'pass',
+    nippleOccluded: 'pass',
+    genitaliaAbsent: 'pass',
+    anusNotVisible: 'pass',
+    adultUnambiguous: 'pass',
+  },
   notes: 'test fixture: clean',
   checkedAt: '2026-08-31T00:00:00.000Z',
   checkCompleted: true,
+  legibleText: '',
 }
 
 /**
@@ -39,12 +51,31 @@ const PASSING_VERDICT: VisionVerdict = {
  * making a real database round trip through the unmocked default lookup.
  * The `describe('vision-gate verdict', ...)` block overrides `getVisionVerdict`
  * directly to exercise the check itself.
+ *
+ * `postCreatedAt` became required on the real input in ticket #10476, and is
+ * deliberately NOT required here: these cases predate it, none of them is
+ * about the age carve-out, and threading a date through all of them would say
+ * something none of them means. The default is `null`, the honest "this test
+ * has no row", and the carve-out tests below call `runChecksRaw` directly.
  */
 function runChecks(
-  input: Parameters<typeof runChecksRaw>[0],
+  input: Omit<Parameters<typeof runChecksRaw>[0], 'postCreatedAt'> & { postCreatedAt?: string | Date | null },
   deps?: Parameters<typeof runChecksRaw>[1],
 ): ReturnType<typeof runChecksRaw> {
-  return runChecksRaw(input, { getVisionVerdict: async () => PASSING_VERDICT, ...(deps ?? {}) })
+  return runChecksRaw(
+    { ...input, postCreatedAt: input.postCreatedAt ?? null },
+    {
+      getVisionVerdict: async () => PASSING_VERDICT,
+      // ADR-015 / ticket #10730: default every call site that predates the
+      // cast-target gate to 'universal' (always passes, no cast required),
+      // the same way getProductTypeDial defaults every call site that
+      // predates the pairing rule to "no dial resolved". The dedicated
+      // describe block below overrides these directly.
+      getCastTarget: async () => 'universal',
+      getCastPresentations: async () => new Map(),
+      ...(deps ?? {}),
+    },
+  )
 }
 
 /** A caption with nothing wrong with it. */
@@ -88,7 +119,7 @@ describe('imagery provenance', () => {
   it('passes a prefix-named url without consulting the library', async () => {
     let asked = 0
     const r = await runChecks(
-      { caption: CLEAN, mediaUrls: GOOD_MEDIA },
+      { caption: CLEAN, mediaUrls: GOOD_MEDIA, postCreatedAt: null },
       { isLibraryMember: async () => { asked++; return false } },
     )
     expect(checks(r)).not.toContain('image-provenance')
@@ -222,6 +253,73 @@ describe('pairing rule: a toy never travels alone (crossplatform strategy §3, t
       { getAvailability: inStock, getProductTypeDial: async () => { throw new Error('shopify down') } },
     )
     expect(checks(r)).not.toContain('pairing-missing')
+  })
+})
+
+describe('cast/product casting gate (ADR-015, ticket #10730)', () => {
+  const femaleTarget = async () => 'female'
+  const maleTarget = async () => 'male'
+  const marcusMasculine = async () => new Map([['marcus', 'masculine' as const]])
+  const mayaFeminine = async () => new Map([['marcus', 'masculine' as const], ['maya', 'feminine' as const]])
+
+  it('always passes a universal-classified product regardless of cast', async () => {
+    const r = await runChecks(
+      { caption: CLEAN, mediaUrls: GOOD_MEDIA, productHandle: 'jo-h2o-lube', castSlugs: ['marcus'] },
+      { getAvailability: inStock, getProductTypeDial: noPairingDial, getCastTarget: async () => 'universal', getCastPresentations: marcusMasculine },
+    )
+    expect(checks(r)).not.toContain('cast-target-mismatch')
+    expect(r.blocked).toBe(false)
+  })
+
+  it('DONE WHEN: blocks a male-presenting solo cast member with a female-classified product', async () => {
+    const r = await runChecks(
+      { caption: CLEAN, mediaUrls: GOOD_MEDIA, productHandle: 'le-wand-powerful-petite', castSlugs: ['marcus'] },
+      { getAvailability: inStock, getProductTypeDial: noPairingDial, getCastTarget: femaleTarget, getCastPresentations: marcusMasculine },
+    )
+    expect(checks(r)).toContain('cast-target-mismatch')
+    expect(r.blocked).toBe(true)
+  })
+
+  it('DONE WHEN: passes the same product in an other-held two-cast frame with a matching member', async () => {
+    const r = await runChecks(
+      { caption: CLEAN, mediaUrls: GOOD_MEDIA, productHandle: 'le-wand-powerful-petite', castSlugs: ['marcus', 'maya'] },
+      { getAvailability: inStock, getProductTypeDial: noPairingDial, getCastTarget: femaleTarget, getCastPresentations: mayaFeminine },
+    )
+    expect(checks(r)).not.toContain('cast-target-mismatch')
+    expect(r.blocked).toBe(false)
+  })
+
+  it('passes a solo cast member whose presentation matches', async () => {
+    const r = await runChecks(
+      { caption: CLEAN, mediaUrls: GOOD_MEDIA, productHandle: 'stroker-x', castSlugs: ['marcus'] },
+      { getAvailability: inStock, getProductTypeDial: noPairingDial, getCastTarget: maleTarget, getCastPresentations: marcusMasculine },
+    )
+    expect(checks(r)).not.toContain('cast-target-mismatch')
+  })
+
+  it('fails closed when the product carries no cast_target classification', async () => {
+    const r = await runChecks(
+      { caption: CLEAN, mediaUrls: GOOD_MEDIA, productHandle: 'unclassified-product', castSlugs: ['marcus'] },
+      { getAvailability: inStock, getProductTypeDial: noPairingDial, getCastTarget: async () => null, getCastPresentations: marcusMasculine },
+    )
+    expect(checks(r)).toContain('cast-target-mismatch')
+    expect(r.blocked).toBe(true)
+  })
+
+  it('fails closed when a non-universal product names no cast at all', async () => {
+    const r = await runChecks(
+      { caption: CLEAN, mediaUrls: GOOD_MEDIA, productHandle: 'le-wand-powerful-petite', castSlugs: [] },
+      { getAvailability: inStock, getProductTypeDial: noPairingDial, getCastTarget: femaleTarget, getCastPresentations: async () => new Map() },
+    )
+    expect(checks(r)).toContain('cast-target-mismatch')
+  })
+
+  it('does not fire for a product-free post (no productHandle)', async () => {
+    const r = await runChecks(
+      { caption: CLEAN, mediaUrls: GOOD_MEDIA, castSlugs: ['marcus'] },
+      { getAvailability: inStock, getProductTypeDial: noPairingDial, getCastTarget: femaleTarget, getCastPresentations: marcusMasculine },
+    )
+    expect(checks(r)).not.toContain('cast-target-mismatch')
   })
 })
 
@@ -741,7 +839,7 @@ describe('vision-gate verdict', () => {
 
   it('passes media carrying a recorded passing verdict', async () => {
     const r = await runChecksRaw(
-      { caption: CLEAN, mediaUrls: NON_PREFIX_MEDIA },
+      { caption: CLEAN, mediaUrls: NON_PREFIX_MEDIA, postCreatedAt: null },
       { getVisionVerdict: async () => PASSING_VERDICT, isLibraryMember },
     )
     expect(checks(r)).not.toContain('vision-verdict')
@@ -751,13 +849,23 @@ describe('vision-gate verdict', () => {
   it('blocks media carrying a recorded failing verdict', async () => {
     const failing: VisionVerdict = {
       pass: false,
-      checks: { limbCount: 'fail', handAnatomy: 'fail', faceBodyIntegrity: 'pass', extraOrMergedLimbs: 'fail' },
+      checks: {
+        limbCount: 'fail',
+        handAnatomy: 'fail',
+        faceBodyIntegrity: 'pass',
+        extraOrMergedLimbs: 'fail',
+        nippleOccluded: 'pass',
+        genitaliaAbsent: 'pass',
+        anusNotVisible: 'pass',
+        adultUnambiguous: 'pass',
+      },
       notes: 'three arms visible on the cast member',
       checkedAt: '2026-08-30T00:00:00.000Z',
       checkCompleted: true,
+      legibleText: '',
     }
     const r = await runChecksRaw(
-      { caption: CLEAN, mediaUrls: NON_PREFIX_MEDIA },
+      { caption: CLEAN, mediaUrls: NON_PREFIX_MEDIA, postCreatedAt: null },
       { getVisionVerdict: async () => failing, isLibraryMember },
     )
     expect(checks(r)).toContain('vision-verdict')
@@ -768,7 +876,7 @@ describe('vision-gate verdict', () => {
 
   it('blocks a non-prefix asset with no recorded verdict at all, not a silent skip', async () => {
     const r = await runChecksRaw(
-      { caption: CLEAN, mediaUrls: NON_PREFIX_MEDIA },
+      { caption: CLEAN, mediaUrls: NON_PREFIX_MEDIA, postCreatedAt: null },
       { getVisionVerdict: async () => null, isLibraryMember },
     )
     expect(checks(r)).toContain('vision-verdict')
@@ -784,19 +892,297 @@ describe('vision-gate verdict', () => {
     // on file is legacy art from before this check existed, the same carve-out
     // the image-provenance burn-in already grants prefix-named urls above.
     const r = await runChecksRaw(
-      { caption: CLEAN, mediaUrls: GOOD_MEDIA },
-      { getVisionVerdict: async () => null },
+      { caption: CLEAN, mediaUrls: GOOD_MEDIA, postCreatedAt: null },
+      { getVisionVerdict: async () => null, getAssetCreatedAt: async () => new Date('2026-08-12T00:00:00.000Z') },
     )
     expect(checks(r)).not.toContain('vision-verdict')
     expect(r.blocked).toBe(false)
   })
 
+  // Ticket #10337. `recordVisionVerdict` swallows its database errors and
+  // `tryIngestSocialAsset` can return null, so a prefix-named filename with no
+  // verdict is not proof of age: it is equally the signature of a write that
+  // failed on an image nothing ever looked at.
+  it('blocks a prefix-named asset with no verdict whose library row postdates the cutoff', async () => {
+    const r = await runChecksRaw(
+      { caption: CLEAN, mediaUrls: GOOD_MEDIA, postCreatedAt: null },
+      { getVisionVerdict: async () => null, getAssetCreatedAt: async () => new Date('2026-09-15T00:00:00.000Z') },
+    )
+    expect(checks(r)).toContain('vision-verdict')
+    expect(r.blocked).toBe(true)
+    const finding = r.findings.find(f => f.check === 'vision-verdict')
+    expect(finding?.detail).toContain(GOOD_MEDIA[0])
+    expect(finding?.detail).toContain('no recorded vision-gate verdict')
+  })
+
+  it('falls back to the post created_at when the asset has no library row at all', async () => {
+    const blockedResult = await runChecksRaw(
+      { caption: CLEAN, mediaUrls: GOOD_MEDIA, postCreatedAt: '2026-09-19T00:00:00.000Z' },
+      { getVisionVerdict: async () => null, getAssetCreatedAt: async () => null },
+    )
+    expect(blockedResult.blocked).toBe(true)
+
+    const legacy = await runChecksRaw(
+      { caption: CLEAN, mediaUrls: GOOD_MEDIA, postCreatedAt: '2026-08-20T00:00:00.000Z' },
+      { getVisionVerdict: async () => null, getAssetCreatedAt: async () => null },
+    )
+    expect(checks(legacy)).not.toContain('vision-verdict')
+    expect(legacy.blocked).toBe(false)
+  })
+
+  // Ticket #10476. This used to be "keeps the legacy skip when the age cannot
+  // be determined at all", and that was the hole. These checks only run on a
+  // row about to publish and a social_posts row always has a created_at, so
+  // "no date" never meant "old art"; it meant nobody passed one, or the
+  // lookup fell over. Either way nothing looked at the pixels.
+  it('blocks when the age cannot be determined at all (unchecked, not legacy)', async () => {
+    const r = await runChecksRaw(
+      { caption: CLEAN, mediaUrls: GOOD_MEDIA, postCreatedAt: null },
+      { getVisionVerdict: async () => null, getAssetCreatedAt: async () => { throw new Error('neon down') } },
+    )
+    expect(checks(r)).toContain('vision-verdict')
+    expect(r.blocked).toBe(true)
+    const detail = r.findings.find(f => f.check === 'vision-verdict')?.detail ?? ''
+    expect(detail).toContain('no date to age it by')
+    expect(detail).toContain('Unchecked, not legacy')
+  })
+
+  it('blocks a prefix-named asset with no verdict and no date supplied', async () => {
+    const r = await runChecksRaw(
+      { caption: CLEAN, mediaUrls: GOOD_MEDIA, postCreatedAt: null },
+      { getVisionVerdict: async () => null, getAssetCreatedAt: async () => null },
+    )
+    expect(r.blocked).toBe(true)
+    expect(r.findings.find(f => f.check === 'vision-verdict')?.detail).toContain('Unchecked, not legacy')
+  })
+
+  // The live exposure ticket #10476 names. `isGeneratedSocialAsset` returns
+  // true for a video final (`video/<jobId>/final*.mp4`), but video finals live
+  // in `video_assets`, never `social_media_assets`, and `runVisionGate` is
+  // never called anywhere in the video pipeline. So a reel arrives with no
+  // verdict and no library row. On the owner's Post now path, which did not
+  // thread `postCreatedAt`, that used to fall into the bare continue and
+  // publish an on-skin reel with zero pixel inspection.
+  it('blocks a video final with no verdict and no library row (the Post now path)', async () => {
+    const VIDEO_FINAL = ['https://blob.vercel-storage.com/video/job-8812/final-a7f3.mp4']
+    const r = await runChecksRaw(
+      { caption: CLEAN, mediaUrls: VIDEO_FINAL, postCreatedAt: null },
+      { getVisionVerdict: async () => null, getAssetCreatedAt: async () => null },
+    )
+    expect(checks(r)).toContain('vision-verdict')
+    expect(r.blocked).toBe(true)
+    const detail = r.findings.find(f => f.check === 'vision-verdict')?.detail ?? ''
+    expect(detail).toContain(VIDEO_FINAL[0])
+    expect(detail).toContain('Unchecked, not legacy')
+  })
+
+  // Ticket #10476 part 4: the poster frame is a second blob, not in
+  // mediaUrls, and it is the image the Instagram grid renders. Nothing walked
+  // it before.
+  describe('poster frame', () => {
+    const VIDEO_FINAL = ['https://blob.vercel-storage.com/video/job-8812/final-a7f3.mp4']
+    const POSTER = 'https://blob.vercel-storage.com/video/job-8812/poster.jpg'
+
+    it('blocks when the poster has no verdict even though the video final does', async () => {
+      const r = await runChecksRaw(
+        { caption: CLEAN, mediaUrls: VIDEO_FINAL, posterUrl: POSTER, postCreatedAt: '2026-09-19T00:00:00.000Z' },
+        {
+          getVisionVerdict: async (url: string) => (url === POSTER ? null : PASSING_VERDICT),
+          getAssetCreatedAt: async () => null,
+          isLibraryMember,
+        },
+      )
+      expect(checks(r)).toContain('vision-verdict')
+      expect(r.blocked).toBe(true)
+      expect(r.findings.find(f => f.check === 'vision-verdict')?.detail).toContain(POSTER)
+    })
+
+    it('blocks when the poster carries a failing verdict', async () => {
+      const failing: VisionVerdict = { ...PASSING_VERDICT, pass: false, notes: 'anus visible at the base of the cleft' }
+      const r = await runChecksRaw(
+        { caption: CLEAN, mediaUrls: VIDEO_FINAL, posterUrl: POSTER, postCreatedAt: '2026-09-19T00:00:00.000Z' },
+        {
+          getVisionVerdict: async (url: string) => (url === POSTER ? failing : PASSING_VERDICT),
+          isLibraryMember,
+        },
+      )
+      expect(r.blocked).toBe(true)
+      expect(r.findings.find(f => f.check === 'vision-verdict')?.detail).toContain('anus visible')
+    })
+
+    it('passes when both the final and the poster carry passing verdicts', async () => {
+      const r = await runChecksRaw(
+        { caption: CLEAN, mediaUrls: VIDEO_FINAL, posterUrl: POSTER, postCreatedAt: '2026-09-19T00:00:00.000Z' },
+        { getVisionVerdict: async () => PASSING_VERDICT, isLibraryMember },
+      )
+      expect(checks(r)).not.toContain('vision-verdict')
+      expect(r.blocked).toBe(false)
+    })
+
+    it('is a no-op on a still post, which has no poster', async () => {
+      const r = await runChecksRaw(
+        { caption: CLEAN, mediaUrls: GOOD_MEDIA, posterUrl: null, postCreatedAt: '2026-09-19T00:00:00.000Z' },
+        { getVisionVerdict: async () => PASSING_VERDICT, isLibraryMember },
+      )
+      expect(r.blocked).toBe(false)
+    })
+  })
+
   it('fails closed when the verdict lookup throws', async () => {
     const r = await runChecksRaw(
-      { caption: CLEAN, mediaUrls: NON_PREFIX_MEDIA },
+      { caption: CLEAN, mediaUrls: NON_PREFIX_MEDIA, postCreatedAt: null },
       { getVisionVerdict: async () => { throw new Error('neon down') }, isLibraryMember },
     )
     expect(checks(r)).toContain('vision-verdict')
     expect(r.blocked).toBe(true)
+  })
+
+  // Ticket #10477 follow-up, the residual QA caught. getVisionVerdictByUrl
+  // returns the stored jsonb with no shape validation and this gate used to
+  // read only `pass`, so a verdict written when the gate asked seven
+  // questions kept reading as a full pass after the eighth was added. The
+  // fix is the same move as making postCreatedAt required: do not let an
+  // unanswered question default to the safe-looking branch.
+  describe('a verdict that answers fewer checks than the gate now has', () => {
+    const sevenCheckVerdict = (): VisionVerdict => {
+      const { anusNotVisible: _anusNotVisible, ...checks } = PASSING_VERDICT.checks!
+      return { ...PASSING_VERDICT, checks: checks as VisionVerdict['checks'] }
+    }
+
+    it('blocks a stored pass:true verdict that predates anusNotVisible', async () => {
+      const r = await runChecksRaw(
+        { caption: CLEAN, mediaUrls: NON_PREFIX_MEDIA, postCreatedAt: '2026-09-19T00:00:00.000Z' },
+        { getVisionVerdict: async () => sevenCheckVerdict(), isLibraryMember },
+      )
+      expect(checks(r)).toContain('vision-verdict')
+      expect(r.blocked).toBe(true)
+    })
+
+    it('names the unanswered checks, so the reason is legible', async () => {
+      const r = await runChecksRaw(
+        { caption: CLEAN, mediaUrls: NON_PREFIX_MEDIA, postCreatedAt: '2026-09-19T00:00:00.000Z' },
+        { getVisionVerdict: async () => sevenCheckVerdict(), isLibraryMember },
+      )
+      const detail = r.findings.find(f => f.check === 'vision-verdict')?.detail ?? ''
+      expect(detail).toContain('anusNotVisible')
+      expect(detail).toContain('does not answer every check')
+    })
+
+    it('counts a key present with an unreadable value as unanswered', async () => {
+      const garbled = {
+        ...PASSING_VERDICT,
+        checks: { ...PASSING_VERDICT.checks, anusNotVisible: 'maybe' },
+      } as unknown as VisionVerdict
+      const r = await runChecksRaw(
+        { caption: CLEAN, mediaUrls: NON_PREFIX_MEDIA, postCreatedAt: '2026-09-19T00:00:00.000Z' },
+        { getVisionVerdict: async () => garbled, isLibraryMember },
+      )
+      expect(r.blocked).toBe(true)
+      expect(r.findings.find(f => f.check === 'vision-verdict')?.detail).toContain('anusNotVisible')
+    })
+
+    // The legacy carve-out exists for art with NO verdict, on the premise
+    // that the check did not exist when the art was made. A verdict that
+    // exists disproves that premise, so an old date does not buy a partial
+    // read a pass.
+    it('does not let the legacy carve-out excuse a partial verdict on an old prefix-named asset', async () => {
+      const r = await runChecksRaw(
+        { caption: CLEAN, mediaUrls: GOOD_MEDIA, postCreatedAt: '2026-08-01T00:00:00.000Z' },
+        {
+          getVisionVerdict: async () => sevenCheckVerdict(),
+          getAssetCreatedAt: async () => new Date('2026-08-01T00:00:00.000Z'),
+        },
+      )
+      expect(checks(r)).toContain('vision-verdict')
+      expect(r.blocked).toBe(true)
+    })
+
+    it('self-heals: a complete verdict passes, and completeness is read off VISION_CHECK_NAMES', async () => {
+      const r = await runChecksRaw(
+        { caption: CLEAN, mediaUrls: NON_PREFIX_MEDIA, postCreatedAt: '2026-09-19T00:00:00.000Z' },
+        { getVisionVerdict: async () => PASSING_VERDICT, isLibraryMember },
+      )
+      expect(checks(r)).not.toContain('vision-verdict')
+      expect(r.blocked).toBe(false)
+      // Every name the gate knows about is what completeness is measured
+      // against, so a check added later is covered with no edit here.
+      expect(missingVisionChecks(PASSING_VERDICT)).toEqual([])
+      expect(VISION_CHECK_NAMES.every(n => n in PASSING_VERDICT.checks!)).toBe(true)
+    })
+  })
+
+  // #10281 named seven; #10477 added anusNotVisible, so the message the
+  // drafter reads has to name eight or it re-briefs the wrong thing.
+  it('names the eight checks accurately in the no-verdict finding (#10281, #10477)', async () => {
+    const r = await runChecksRaw(
+      { caption: CLEAN, mediaUrls: NON_PREFIX_MEDIA, postCreatedAt: null },
+      { getVisionVerdict: async () => null, isLibraryMember },
+    )
+    const detail = r.findings.find(f => f.check === 'vision-verdict')?.detail ?? ''
+    expect(detail).toContain('eight')
+    expect(detail).not.toContain('all seven')
+    expect(detail).toContain('genitalia absent')
+    expect(detail).toContain('no anus visible')
+    expect(detail).toContain('nipples occluded')
+    expect(detail).toContain('adult')
+  })
+})
+
+// Ticket #10338: the vision gate transcribes legible text and leaves the
+// policy call to its caller. This is that caller, applying the three cases in
+// docs/design-doctrine.md section 4 item 4.
+describe('legible text baked into the image', () => {
+  const isLibraryMember = async () => true
+  const withText = (legibleText: string | null): VisionVerdict => ({ ...PASSING_VERDICT, legibleText })
+  const run = (legibleText: string | null) => runChecksRaw(
+    { caption: CLEAN, mediaUrls: GOOD_MEDIA, postCreatedAt: null },
+    { getVisionVerdict: async () => withText(legibleText), isLibraryMember },
+  )
+
+  it('passes a brand mark on a product we stock', async () => {
+    const r = await run('LELO')
+    expect(checks(r)).not.toContain('vision-legible-text')
+    expect(r.blocked).toBe(false)
+  })
+
+  it('passes a short product name', async () => {
+    const r = await run('Satisfyer Pro 2')
+    expect(r.blocked).toBe(false)
+  })
+
+  it('passes when the frame carries no text at all', async () => {
+    const r = await run('')
+    expect(r.blocked).toBe(false)
+  })
+
+  it('blocks packaging junk and quotes the transcription', async () => {
+    const r = await run('barcode 8 712345 678905, NET WT 3.4 FL OZ')
+    expect(checks(r)).toContain('vision-legible-text')
+    expect(r.blocked).toBe(true)
+    expect(r.findings.find(f => f.check === 'vision-legible-text')?.detail).toContain('8 712345 678905')
+  })
+
+  it('blocks an ingredient panel', async () => {
+    const r = await run('Ingredients: water, glycerin')
+    expect(r.blocked).toBe(true)
+  })
+
+  it('blocks a baked-in caption or watermark', async () => {
+    const r = await run('SHOP NOW at xdipx.com')
+    expect(checks(r)).toContain('vision-legible-text')
+    expect(r.blocked).toBe(true)
+  })
+
+  it('blocks text it cannot read as a brand mark, conservatively', async () => {
+    const r = await run('a soft evening, whatever you want it to be, in your hands')
+    expect(r.blocked).toBe(true)
+  })
+
+  it('classifies directly', () => {
+    expect(classifyLegibleText(null)).toBe('none')
+    expect(classifyLegibleText('  ')).toBe('none')
+    expect(classifyLegibleText('Womanizer')).toBe('brand-mark')
+    expect(classifyLegibleText('UPC 012345678905')).toBe('packaging')
+    expect(classifyLegibleText('@xdipx')).toBe('caption-or-watermark')
   })
 })

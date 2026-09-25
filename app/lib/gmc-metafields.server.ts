@@ -44,15 +44,35 @@ export function gmcProductCategory(productTypeDial: string | null): string {
 // ─── Gender ───────────────────────────────────────────────────────────────
 
 /**
- * Derives the GMC gender field from audience_tags.
- * Returns 'male' when only for-him, 'female' when only for-her,
- * 'unisex' otherwise (couples, both, or empty).
+ * Derives the GMC gender field from `xdipx.cast_target` (ADR-015, ticket
+ * #10731).
+ *
+ * This used to read a for-him/for-her axis out of `audience_tags`, but the
+ * live enrichment vocabulary for that field has been solo/couples/gift since
+ * the v2 redesign (`app/lib/claude.server.ts`, `emma-product-enricher.md`) —
+ * `for-him`/`for-her` values are never actually written there, so the old
+ * branch could never match. Verified live 2026-09-22 against the full active
+ * catalog (5,282 products): 0 male, 0 female, 5,282 unisex, and the distinct
+ * `audience_tags` values present catalog-wide contain no `for-him`/`for-her`
+ * at all (anniversary, bachelorette, birthday, couples, date-night,
+ * first-time, gay-couples, gift, gift-idea, housewarming, just-curious,
+ * long-distance, non-binary, queer-friendly, sapphic, self-gift, solo).
+ *
+ * `cast_target` ('male' | 'female' | 'universal') is the same underlying
+ * question — which body a product targets — asked from data that actually
+ * carries the answer, deliberately NOT a third meaning piled onto
+ * `audience_tags` (ADR-015 explicitly declined that reuse; `audience_tags`
+ * already carries one dead legacy meaning for this same purpose). This is a
+ * second, legitimate consumer of `cast_target`, which exists for imagery
+ * casting — feeding it to the GMC feed does not authorize surfacing it in
+ * collections, navigation, or SEO, where for-him/for-her stay retired.
+ *
+ * The caller in `[feed.xml].tsx` prefers a real `mm-google-shopping.gender`
+ * app metafield when one is set; this is only the fallback derivation.
  */
-export function gmcGender(audienceTags: string[]): 'male' | 'female' | 'unisex' {
-  const hasHim = audienceTags.includes('for-him')
-  const hasHer = audienceTags.includes('for-her')
-  if (hasHim && !hasHer) return 'male'
-  if (hasHer && !hasHim) return 'female'
+export function gmcGender(castTarget: string | null | undefined): 'male' | 'female' | 'unisex' {
+  if (castTarget === 'male') return 'male'
+  if (castTarget === 'female') return 'female'
   return 'unisex'
 }
 

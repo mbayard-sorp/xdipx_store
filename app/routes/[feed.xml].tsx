@@ -122,8 +122,9 @@ function toEntry(d: VaultDeal): string {
   const ageGroup = opt(d.gmcAgeGroup) || 'adult'
   const condition = 'new'
 
-  // Gender -- prefer metafield, fall back to derived
-  const genderVal = opt(d.gmcGender) || gmcGender(d.audienceTags ?? [])
+  // Gender -- prefer metafield, fall back to derived from xdipx.cast_target
+  // (ticket #10731: audience_tags never carries a for-him/for-her value)
+  const genderVal = opt(d.gmcGender) || gmcGender(d.castTarget ?? null)
 
   // Custom labels -- prefer metafields, fall back to derived
   const label0 = opt(d.gmcLabel0) || gmcCustomLabel0(opt(d.productTypeDial) || null)

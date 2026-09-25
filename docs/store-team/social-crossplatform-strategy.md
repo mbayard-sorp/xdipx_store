@@ -85,10 +85,18 @@ count; re-verify before citing, the queue moves). Strategy:
 - **Approval is not a licence** (`docs/ads-policy.md` §Meta Shops). Commerce review judges a catalog
   item; community standards judge a post. Never treat an approved product as permission to post
   something §Organic social forbids, and never exclude a rejected product from editorial posts.
-- Product tagging is live as of 2026-08-16: the owner added `instagram_shopping_tag_products`, and
-  the publisher tags the gate stamp's featured product on feed photos and carousels when it is
-  Shops-approved (`docs/ads-policy.md` §Meta Shops). Non-approved products publish untagged with
-  the reason logged. A tag is additive; it changes nothing about what passes the gate.
+- **Product tagging was never actually live, and is now permanently removed** (ticket #10732,
+  superseding the 2026-08-16 claim below). `available_catalog_product_search` is not a real Graph
+  API edge — the correct one, `catalog_product_search`, requires a `catalog_id` this store has never
+  had, so every publish attempt was malformed from day one and silently degraded to untagged while
+  leaking a raw Graph error into `cron_runs.result`. Even a corrected call could never succeed
+  regardless: Meta's commerce policy prohibits promoting the buying, selling, or trading of adult
+  products across Shops on Facebook and Instagram
+  (facebook.com/policies_center/commerce/adult_products, help.instagram.com/1627591223954487), so a
+  sexual-wellness catalog cannot pass Shop review. The tagging code path is removed from
+  `app/lib/social-publish/instagram.server.ts`; every post publishes untagged, which is correct and
+  was always the actual outcome. Do not re-add it without an explicit owner decision that a real,
+  policy-compliant path exists.
 
 ## 3. The pairing rule: a toy never travels alone
 
@@ -164,6 +172,22 @@ gate cannot see is advisory.
   being labeled per X's own rules, and `postTweet` (`app/lib/twitter.server.ts`) accepts only text
   and media ids with no sensitive-media flag. We cannot label, so we must not post anything that
   would need labeling. The ceiling remains `instagram-campaigns.md` §3.2a on both platforms.
+- **On-skin is the default on X too (owner answer 2026-09-22: "Yes, on-skin applies to x too"), and
+  the labeling constraint above is exactly what bounds it.** The standing order in
+  `instagram-campaigns.md` §3.2c now covers both surfaces. It changes the default position under the
+  ceiling; it does not move the ceiling, and the bullet above still holds in full. The thing to
+  understand is that the §3.2a stop list is now doing double duty on X: no visible nipples, labia,
+  penis or anus is not only the brand ceiling there, it is the only thing keeping our frames out of
+  label-required territory on a publisher that cannot label. An on-skin frame that honours the stop
+  list is implied-nude, not nude, and does not need a flag. One that breaks it needs a flag we
+  cannot set. So on X the stop list is a publishing constraint, not only an editorial one, and a
+  frame that is borderline against it should not be posted to X at all.
+- **There is an owner-only way to widen this, and it is not an agent's to take.** X has no per-post
+  sensitivity parameter on the v2 create-tweet endpoint that `postTweet` uses, which is why we cannot
+  label per post. X does have an ACCOUNT-level "mark media you Tweet as containing material that may
+  be sensitive" setting. Turning it on would cover the whole timeline and change who sees the posts
+  by default. That is a reach-versus-latitude tradeoff and a brand decision, so it is an owner
+  decision, it is not a valve, and no routine may ask for it as a workaround.
 - **Roster, verified 2026-08-21: eight approved cast members**, all `active`, all `approvedForUse`,
   all with a `referencePhoto`: Diego, Emma, Jade, Marcus, Maya, Priya, Sofia, Vivian (Vivian approved
   2026-08-21). Rotate across them

@@ -46,6 +46,11 @@ vi.mock('~/lib/social-engagement.server', () => ({
   captureInstagramAccount: vi.fn().mockResolvedValue({}),
   rankBySaves: (r: unknown[]) => r,
 }))
+const mixReportMock = vi.hoisted(() => vi.fn())
+vi.mock('~/lib/social-mix-report.server', () => ({
+  getSocialMixReport: mixReportMock,
+  formatSocialMixReportLines: (report: unknown) => [`[mix-report] stub for ${JSON.stringify(report)}`],
+}))
 
 import { action } from '~/routes/api.team.social-post'
 
@@ -232,6 +237,132 @@ describe('draft op, altText/imageBrief/subject pass-through (migration 084)', ()
   })
 })
 
+// Ticket #10560: the pairing-presence self-check reason threads through the
+// same way altText/imageBrief/subject do above.
+describe('draft op, pairingNoneReason pass-through (migration 100)', () => {
+  it('threads pairingNoneReason to createDraftSocialPost', async () => {
+    const res = await post({
+      op: 'draft', platform: 'instagram', tweetText: 'A fresh line about the wand', voiceGate,
+      pairingNoneReason: 'external-only feature post, no internal use implied',
+    })
+    expect(res.status).toBe(200)
+    expect(createDraftMock).toHaveBeenCalledWith(expect.objectContaining({
+      pairingNoneReason: 'external-only feature post, no internal use implied',
+    }))
+  })
+
+  it('is optional and trims, omitting a blank value', async () => {
+    const res = await post({ op: 'draft', platform: 'instagram', tweetText: 'no reason here', voiceGate, pairingNoneReason: '   ' })
+    expect(res.status).toBe(200)
+    expect(createDraftMock).toHaveBeenCalledWith(expect.objectContaining({ pairingNoneReason: undefined }))
+  })
+})
+
+// Ticket #10269: sceneLocation shipped in migration 093 and was accepted by
+// this route from day one, but no caller ever sent it, so it sat null on
+// every row. bodyZone/contactMode/cropScale (migration 099) are the sibling
+// fields for the on-skin campaign's variety windows. All four thread through
+// the same way altText/imageBrief/subject do above.
+describe('draft op, sceneLocation/bodyZone/contactMode/cropScale pass-through (migration 099)', () => {
+  it('threads sceneLocation/bodyZone/contactMode/cropScale to createDraftSocialPost', async () => {
+    const res = await post({
+      op: 'draft', platform: 'instagram', tweetText: 'A fresh line about the wand', voiceGate,
+      sceneLocation: 'bedroom-loft',
+      bodyZone: 'hip-hollow',
+      contactMode: 'resting',
+      cropScale: 'close',
+    })
+    expect(res.status).toBe(200)
+    expect(createDraftMock).toHaveBeenCalledWith(expect.objectContaining({
+      sceneLocation: 'bedroom-loft',
+      bodyZone: 'hip-hollow',
+      contactMode: 'resting',
+      cropScale: 'close',
+    }))
+  })
+
+  it('is optional: a draft with none of them omits all four', async () => {
+    const res = await post({ op: 'draft', platform: 'instagram', tweetText: 'no scene here', voiceGate })
+    expect(res.status).toBe(200)
+    // Omitted rather than explicitly undefined, because createDraftSocialPost
+    // now distinguishes the two: an absent key is the one it backfills from
+    // the asset (#10479).
+    const arg = createDraftMock.mock.calls[0]![0] as Record<string, unknown>
+    for (const key of ['sceneLocation', 'bodyZone', 'contactMode', 'cropScale']) {
+      expect(arg).not.toHaveProperty(key)
+    }
+  })
+
+  it('trims whitespace and reads an empty value as absent', async () => {
+    const res = await post({
+      op: 'draft', platform: 'instagram', tweetText: 'edge cases', voiceGate,
+      sceneLocation: '  bathroom-spa  ',
+      bodyZone: '',
+      cropScale: 'macro',
+    })
+    expect(res.status).toBe(200)
+    expect(createDraftMock).toHaveBeenCalledWith(expect.objectContaining({
+      sceneLocation: 'bathroom-spa',
+      cropScale: 'macro',
+    }))
+    // An absent axis is omitted here, not nulled: createDraftSocialPost
+    // backfills it from the asset the mediaUrls resolve to (#10479).
+    expect(createDraftMock.mock.calls[0]![0]).not.toHaveProperty('bodyZone')
+  })
+})
+
+// Ticket #10480: the axes are validated against the single-source vocabulary
+// in app/lib/social-scene-vocab.ts, not by string length. A length-only check
+// let `hip_hollow` persist and then match neither ceiling nor mid, which is a
+// typo becoming an invisible hole in the compliance report.
+describe('draft op, scene-axis vocabulary (#10480)', () => {
+  it('400s an out-of-vocabulary body zone instead of persisting it', async () => {
+    const res = await post({
+      op: 'draft', platform: 'instagram', tweetText: 'typo zone', voiceGate, bodyZone: 'hip_hollow',
+    })
+    expect(res.status).toBe(400)
+    expect(await res.text()).toMatch(/bodyZone must be one of/)
+    expect(createDraftMock).not.toHaveBeenCalled()
+  })
+
+  it('400s a Title-Case zone, the casing-drift shape of the same bug', async () => {
+    const res = await post({
+      op: 'draft', platform: 'instagram', tweetText: 'casing', voiceGate, bodyZone: 'Hip-Hollow',
+    })
+    expect(res.status).toBe(400)
+    expect(createDraftMock).not.toHaveBeenCalled()
+  })
+
+  it('400s an out-of-vocabulary crop scale', async () => {
+    const res = await post({
+      op: 'draft', platform: 'instagram', tweetText: 'tight?', voiceGate, cropScale: 'tight',
+    })
+    expect(res.status).toBe(400)
+    expect(createDraftMock).not.toHaveBeenCalled()
+  })
+
+  it('accepts the "none" sentinel the art director is told to emit for a non-skin frame', async () => {
+    const res = await post({
+      op: 'draft', platform: 'instagram', tweetText: 'no skin in this one', voiceGate,
+      bodyZone: 'none', contactMode: 'none', cropScale: 'medium', sceneLocation: 'kitchen-counter',
+    })
+    expect(res.status).toBe(200)
+    expect(createDraftMock).toHaveBeenCalledWith(expect.objectContaining({
+      bodyZone: 'none', contactMode: 'none',
+    }))
+  })
+
+  it('never 400s a draft for an OMITTED axis: the frame is already billed (#10479)', async () => {
+    const res = await post({
+      op: 'draft', platform: 'instagram', tweetText: 'agent sent no axes at all', voiceGate,
+      mediaUrls: ['https://cdn.shopify.com/files/social-cast-wand.jpg'],
+      altText: 'The wand resting on folded linen.',
+    })
+    expect(res.status).toBe(200)
+    expect(createDraftMock).toHaveBeenCalled()
+  })
+})
+
 // Ticket #5413: op:'config' used to return only autopostValve
 // (social_team_autopost), which gates nothing on the publish path. A routine
 // reading it reports posting posture backwards. platformValves must carry the
@@ -288,6 +419,25 @@ describe('rework op — wiring (#4351)', () => {
     expect(reworkMock).toHaveBeenCalledWith(61, { mediaUrls: ['https://cdn/reworked.jpg'] })
   })
 
+  // Ticket #10339: the route has to hand the variety axes to the parser, or
+  // they are silently dropped before validation ever sees them.
+  it('forwards the variety axes to parseReworkInput', async () => {
+    reworkParseMock.mockReturnValue({ ok: true, input: { bodyZone: 'sternum' } })
+    reworkMock.mockResolvedValue({ ok: true, reviewStatus: 'pending_review' })
+    await post({
+      op: 'rework', id: 61, mediaUrls: ['https://cdn/reworked.jpg'],
+      sceneLocation: 'bedroom, late afternoon', castSlugs: ['nadia'],
+      bodyZone: 'sternum', contactMode: 'resting', cropScale: 'medium',
+    })
+    expect(reworkParseMock).toHaveBeenCalledWith(expect.objectContaining({
+      sceneLocation: 'bedroom, late afternoon',
+      castSlugs: ['nadia'],
+      bodyZone: 'sternum',
+      contactMode: 'resting',
+      cropScale: 'medium',
+    }))
+  })
+
   it('relays a 409 (e.g. the row is not needs_changes) from reworkSocialPost', async () => {
     reworkParseMock.mockReturnValue({ ok: true, input: { tweetText: 'x' } })
     reworkMock.mockResolvedValue({ ok: false, status: 409, error: 'Post 61 is draft/approved, not */needs_changes.' })
@@ -307,5 +457,33 @@ describe('rework op — wiring (#4351)', () => {
     expect(reworkParseMock).toHaveBeenCalledWith(expect.objectContaining({
       altText: 'a', imageBrief: 'b', subject: 'c',
     }))
+  })
+
+  it('passes pairingNoneReason through to parseReworkInput (migration 100, ticket #10560)', async () => {
+    reworkParseMock.mockReturnValue({ ok: true, input: { tweetText: 'x', pairingNoneReason: 'external-only' } })
+    reworkMock.mockResolvedValue({ ok: true, reviewStatus: 'pending_review' })
+    const res = await post({ op: 'rework', id: 61, tweetText: 'x', pairingNoneReason: 'external-only' })
+    expect(res.status).toBe(200)
+    expect(reworkParseMock).toHaveBeenCalledWith(expect.objectContaining({ pairingNoneReason: 'external-only' }))
+  })
+})
+
+// Ticket #10271: the rolling-window mix report is a REPORT op, not a gate.
+// This route must not require a voiceGate or any of the draft-op validation;
+// it just fetches and returns the computed report.
+describe('mixReport op (ticket #10271)', () => {
+  it('returns the computed report and formatted lines', async () => {
+    mixReportMock.mockResolvedValue({
+      sampleSize: 21,
+      lines: { ceiling: { label: 'Ceiling (last 7)', detail: '1 / 7 -- BREACH', status: 'breach' } },
+      anyBreach: true,
+    })
+    const res = await post({ op: 'mixReport' })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.report.anyBreach).toBe(true)
+    expect(body.report.sampleSize).toBe(21)
+    expect(Array.isArray(body.lines)).toBe(true)
+    expect(body.lines[0]).toMatch(/^\[mix-report\]/)
   })
 })

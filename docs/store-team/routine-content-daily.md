@@ -78,12 +78,16 @@ negligible cost, and it converts a silent dead row into "gate passed at T, died 
    STOP and report.
 2. `docs/store-team/mission-brief.md` (binding); the strategy brief (`GET /api/team/brief`); it may
    carry a per-team `content` section with the week's topic slate.
-3. Calendar (`GET /api/team/calendar`) for campaign tie-ins.
+3. Calendar (`GET /api/team/calendar`) for campaign tie-ins, and its `videoClips` list for the
+   clip-expansion check in Step 3.
 4. Topic sources, in priority order: the `seoContentBrief` queue (primary — planned weekly by the
    seo-curator routine from the keyword bank), then `docs/store-team/content-plan.md` (the static
    backlog is the floor, still binding for slot themes and standing rules), then the strategy
    brief's content section. If content-plan.md is ever missing in your checkout, fall back
    gracefully and record a `step` event saying you did.
+5. `docs/store-team/creative-platform.md` (binding context once it exists): the brand idea, the
+   manifesto, and the campaign signature every surface shares. Where it and the charter disagree,
+   the charter wins.
 
 ## Step 3: Topic selection + slug pre-check
 
@@ -92,6 +96,28 @@ use `contentSlot.fallbackCategory` only per the Thursday/Sunday rules below). Th
 the weekly rhythm in content-plan.md §2 (Mon/Wed guides, Tue/Fri real-talk, Thu podcast-notes,
 Sat care, Sun comparisons/wellness-basics flex); if the two ever disagree, trust the gate and
 file a suggestion.
+
+**Clip-expansion check (at most once a week).** Read `videoClips` from `GET /api/team/calendar`.
+Each row has this shape (PLANNED: the Phase 2 calendar change builds to it; the email playbook
+references this definition):
+
+```
+{episodeId, productHandle, title, speaker, format, status, plannedSlotAt, postedAt?, permalink?,
+ posterUrl?, fact, firstLine}
+```
+
+`fact` is the single product fact the clip is built on; `firstLine` is its first spoken line.
+If a clip posted yesterday (`postedAt` set, its Instagram post live, not merely approved) and no
+Notebook post this week has already expanded a clip, today's post expands that clip: take its
+`fact`, write the post around it in today's category shape, and embed the clip (`posterUrl` linked
+to `permalink`) alongside the clip's product embed (`productHandle`), which is stock-verified in
+Step 4 like any other embed. "This week" is Monday 00:00 UTC to now; detect a prior expansion with
+`POST /api/team/event {"op":"list","team":"content","sinceDays":7}` and scan each event's `summary`
+for `clipExpansion`, ignoring events before Monday 00:00 UTC. A pending podcast brief on Thursday
+still wins, and the expansion does not carry over to a later day. When the calendar has no
+`videoClips` field, or no clip posted yesterday, skip this check and pick the topic as below.
+Record the expansion in the Step 4 `step` event's summary (`clipExpansion: <episodeId>`) so the next
+run's once-a-week check can find it.
 
 **Thursday first-check (podcast-notes):** query the pending podcast brief before anything else:
 
@@ -186,7 +212,44 @@ resumed-draft), and whether it was a fresh topic or a resume.
 
 ## Step 4: Draft the post (Sanity, status draft)
 
-Create idempotently: doc `_id` is `blogPost-${slug}`, `createIfNotExists` then `patch`. Fields:
+**Comparison-doc authoring, Sunday quota only (content-plan §2, #3892; owner decision 2026-09-20,
+blocker #120: SEED /compare and KEEP it).** When today's brief is the seo-curator's Sunday
+comparison slot AND it is planned for the structured `_type:'comparison'` doc (per
+`routine-seo-curation.md`'s Structured comparison-doc quota: while fewer than 3-5 `comparison`
+docs exist, a clean, in-stock, both-sides-real Sunday head-to-head is seeded as a `comparison` doc
+for the content lane to author), author a Sanity `comparison` document, a different doc type at a
+different route (`/compare/{slug}`, plus its `.md` twin) with a different shape from the `blogPost`
+below, instead of — or alongside without duplicating — the Notebook post.
+
+- **Schema** (`studio/schemas/comparison.js`): `title`, `slug`, `excerpt`, `items[]` (2-5 entries:
+  `name`, `productHandle` when it's a catalog product, `blurb`, `bestFor`), optional `attributes[]`
+  (at-a-glance table rows: `label` plus `values[]` in the same order as `items`), `verdict`,
+  optional `body` (rich-text deep dive), `faqs[]` (`question`/`answer`, emitted as FAQPage
+  JSON-LD), `seoTitle`/`seoDescription`, `publishedAt`, `status`.
+- **Author it via** `npx tsx scripts/sanity-content-cli.ts create-if-not-exists --id comparison-<slug> --file <path-to-json>`
+  (the CLI is generic across `_type`; no code change is needed).
+- **Link-to-Notebook differentiation rule, mandatory.** The comparison doc is a short, structured
+  spec-and-verdict surface (scannable `attributes` rows plus a one-paragraph `verdict`), never a
+  re-run of the Notebook essay's prose. Where a Notebook post on the same head-to-head already
+  exists or is being written this run, the comparison doc's `body`/`verdict` LINKS to it for the
+  deep dive rather than repeating it. At a 2.0% index rate, near-identical prose shipped at two
+  URLs is actively harmful, not merely redundant. If a given head-to-head genuinely cannot support
+  both without repetition, ship only the comparison doc and let the Notebook post stand as the
+  essay.
+- **Ten already-published Notebook comparison posts are restructuring source material, not new
+  research:** wand-vs-bullet-vibrator, air-pulse-vs-clitoral-suction,
+  rabbit-vs-dual-stimulation-vibrator, remote-vs-app-controlled-long-distance-toy,
+  egg-vibrator-vs-bullet-vibrator, dildo-vs-vibrator-whats-the-difference,
+  mini-vs-full-size-vibrator-does-size-matter, air-pulse-toy-vs-vibrator-difference,
+  silicone-vs-water-based-lube, ai-companion-toys-vs-what-you-can-actually-buy.
+- **Same gates as any published prose:** route the comparison doc's copy (`excerpt`, item
+  `blurb`s, `verdict`, `faqs`) through Step 5's dual gate before publish.
+- **Honest in-stock, both-sides-real rule applies** (content-plan §2 line 27): every item is a
+  real, currently in-stock option; never a fabricated or discontinued comparator.
+- Filed separately, not part of this procedure: comparison URLs are not yet in the sitemap, so a
+  seeded doc will not be submitted for indexing on its own.
+
+Create the `blogPost` idempotently: doc `_id` is `blogPost-${slug}`, `createIfNotExists` then `patch`. Fields:
 
 - `title`; `slug` (`{_type:'slug', current}`); `author` (reference to the Emma `blogAuthor` doc,
   `_ref:'blogAuthor-emma'`); `category` (reference to a `blogCategory`: `blogCategory-guides` |
@@ -304,18 +367,28 @@ phrase**]", was the pre-#925 wide reading the charter has since narrowed to
 anaphoric-demonstrative-subject only; the charter wins and the script follows the charter, so a plain
 abstract-noun-plus-copula sentence stating an idea for the first time is never a hit.) The caps are
 unchanged: 3 per post, 1 per section, never 2 in a paragraph. Trim by de-constructing the flagged
-shape, not by swapping synonyms inside it.
+shape, not by swapping synonyms inside it. **`seoTitle` and `seoDescription` are in scope** (#10266):
+pass them alongside `title`/`excerpt`/`body` in the draft JSON, since both are customer-facing
+strings that ship to every SERP and LLM snippet and the whole-document tally counts them.
 
-**"X, not Y" antithesis pre-flight (mandatory, before Step 5, content-plan §7):** no deterministic
-checker exists for this one yet, so it is a manual count. Read the whole draft including the FAQ
-block and count every instance of the antithesis construction — copula or verb, then a comma or full
-stop, then "not" plus a contrasting noun phrase ("a change, not a loss"; "It does not lower the
-threshold. It meets it."). The charter's own fresh-language rule says to rotate out any phrase that
-starts repeating, and `check-fresh-language.ts`'s word 6-gram comparison cannot see this class at
-all: the words never repeat while the rhetorical mold does (found on content run 687, eight instances
-in one post, clean 0 shared 6-grams). Trim to content-plan §7's cap — 2-3 per post, at most 1 on a
-heading — before submitting to the voice gate, by de-constructing the shape, not by swapping a
-synonym inside it.
+**"X, not Y" antithesis pre-flight (mandatory, before Step 5, content-plan §7):** run the
+deterministic checker on the draft JSON and trim until it exits 0, before submitting to the voice
+gate (ticket #10116 closed the manual-count gap this paragraph used to describe):
+
+```bash
+npx tsx scripts/check-antithesis-cap.ts <draft.json>
+```
+
+The checker covers the whole draft including the FAQ block, and **`seoTitle` and `seoDescription`
+are in scope** (#10266): pass them alongside `title`/`excerpt`/`body` in the draft JSON, since both
+are customer-facing strings that ship to every SERP and LLM snippet. It flags every instance of the
+antithesis construction — copula or verb, then a comma or full stop, then "not" plus a contrasting
+noun phrase ("a change, not a loss"; "It does not lower the threshold. It meets it."). The charter's
+own fresh-language rule says to rotate out any phrase that starts repeating, and
+`check-fresh-language.ts`'s word 6-gram comparison cannot see this class at all: the words never
+repeat while the rhetorical mold does (found on content run 687, eight instances in one post, clean 0
+shared 6-grams). Trim to content-plan §7's cap — 2-3 per post, at most 1 on a heading — before
+submitting to the voice gate, by de-constructing the shape, not by swapping a synonym inside it.
 
 **Unsourced-frequency pre-flight (mandatory, before Step 5):** run the deterministic checker on the
 draft JSON and drive it to exit 0 before submitting to the voice gate:
@@ -334,7 +407,8 @@ address (`that fear will keep you buying`). The limit is zero: any candidate tri
 sourcing the claim, attributing it, or removing it. Do NOT soften it with a hedge (`can`, `often`,
 `it's easy to`): those are charter-banned in this register, so hedging trades a claim defect for a
 voice defect. Like the aphorism checker, it flags candidates and leaves the final judgment to the voice
-gate. Added after runs 196 and 269 each lost a gate cycle to this class with no mechanical guard in
+gate. **`seoTitle` and `seoDescription` are in scope** (#10266): pass them alongside
+`title`/`excerpt`/`body` in the draft JSON. Added after runs 196 and 269 each lost a gate cycle to this class with no mechanical guard in
 place (suggestions #1674, #2618).
 
 **Claim-scope pre-flight (mandatory, before Step 5):** before submitting to the gates, list every
@@ -351,7 +425,15 @@ REVISE:
   without the condition that bounds it;
 - **two different objects sharing one coordinated noun phrase**, where a modifier parses onto a
   category it does not belong to (e.g. "silicone and latex condoms" reading as the nonexistent
-  "silicone condoms");
+  "silicone condoms"). The same shape recurs one level up, in a **coordinated rationale**: two
+  objects share one because-clause that is only true of one of them (run 975: "Water-based is the
+  safe default with a silicone toy and with latex condoms, because oil compromises latex" pins a
+  latex-specific reason onto the silicone-toy half too, which is actually a silicone-on-silicone
+  surface-compatibility issue, nothing to do with oil and latex). Nothing here is quantified,
+  superlative, or numeric, so a claim can be factually correct on both halves and still fail this
+  check on the reasoning. The fix for either shape is the same: **split the sentence so each
+  coordinated element carries its own reason**, never a hedge and never a deletion of the reason
+  (run 975 resolved this way and both gates PASSed the result);
 - an **absolute or guaranteed OUTCOME for the reader from a named product**, especially in future
   tense (`it will`, `you will`, `this delivers`), where the post elsewhere acknowledges individual
   variation. This shape hides in product pairing copy rather than in a factual sentence, so it is
@@ -419,12 +501,22 @@ named manufacturer's PDP line, which the accuracy gate web-verified was wrong ab
 manufacturer's actual policy. This is a different defect from claim-scope above: claim-scope
 narrows a claim that is true but stated too widely; this catches a claim whose only source is our
 own marketing prose, which may be imprecise or simply wrong about a third party. Before submit,
-list every brand-policy, spec, runtime, material-limit, or comparative claim in the draft whose
-only source is a Shopify product description (ours or a cited competitor's), and for each one
-either trace it to a first-party source (the manufacturer's own published guidance, an
-`mfgProductSpecs` doc, or a spec metafield) or delete it. Never hedge it: a product description
-under the `xdipx` namespace is our own copy and carries no evidentiary weight, and a claim naming a
-real company is the highest-risk shape because it is checkable and wrong-able.
+list every brand-policy, spec, runtime, material-limit, comparative, **or mechanism/technology-class**
+claim in the draft — "this toy is air-pulse / pressure-wave / sonic / thrusting" is exactly as
+checkable and wrong-able about a third party's product as a spec figure is — whose only source is a
+Shopify product description (ours or a cited competitor's), **our own enrichment output (the `xdipx`
+namespace metafields, `product_type_dial` in particular), or the Emma-rewritten Shopify product
+TITLE**, and for each one either trace it to a first-party source (the manufacturer's own published
+guidance, an `mfgProductSpecs` doc, or a spec metafield) or delete it. Never hedge it: a product
+description, metafield, or title under the `xdipx` namespace is our own copy and carries no
+evidentiary weight even though a title or a dial value reads as catalog metadata rather than prose,
+and a claim naming a real company is the highest-risk shape because it is checkable and wrong-able.
+Run 959 lost `bloomgasm-pulsing-petals-throbbing-stimulator` to exactly this gap: trusted on
+`product_type_dial:"air-pulsation"` and the title "Pulsing Petals Rose Air-Pulse Clitoral
+Stimulator," both our own enrichment, when the only resolvable listing for that SKU read "3 Speeds &
+7 Patterns of Pulsing" — vibration, not air-pulse. Repaired in-run by substitution
+(`romp-glow`, verified across four independent retailers); the resolution rule is unchanged: trace
+it to a first-party or independent source, or delete the pick, never hedge it.
 
 **The same pre-flight also covers secondary-source-as-primary, not just our-own-PDP-as-source
 (second occurrence: runs 607 and 760).** An allowlisted host is not an evidentiary source for
@@ -438,6 +530,23 @@ numeric or comparative claim, identify whether its source is the primary study i
 secondary page's paraphrase of one, and delete or re-scope any claim whose only trace is a named
 individual's anecdotal reference to an unnamed study. The standing rule is unchanged: narrow or
 delete, never hedge.
+
+**Self-consistency pre-flight (mandatory, before Step 5, ticket #11099):** a post that sets its own
+rule and then breaks it in a later section is a failure class none of the pre-flights above catch,
+because each of them models a claim against outside evidence, not the document against itself. Three
+occurrences, same shape (the body states a standard, a later section of the SAME post diverges from
+it): run 327 lost its publish to a body/FAQ enumeration split; run 626 lost it again when a
+fever-severity tier change to the body red-flag list left FAQ Q5's copy of the same enumeration
+unchanged; run 1037 took an accuracy-gate BLOCK when the post told readers to read the printed ingress
+code and never the adjective, then two sections later extended a safe-under-running-water endorsement
+to two products on the strength of the bare adjective "100 percent waterproof," which neither
+manufacturer backs with a printed IP code. Before submit: list every RULE or STANDARD the draft tells
+the reader to apply (read the printed code, never the adjective; use water-based only; stop at these
+symptoms), then grep the whole document, the FAQ block included, for every place the post applies that
+rule to a specific product or case, and confirm each application obeys the rule the post itself set.
+This runs in addition to, not instead of, the enumeration-consistency scan in Step 5 item 3, which
+stays scoped to the rewrite cycle: this pre-flight catches it on first submit, before a gate cycle is
+spent on it.
 
 **Solidarity-voice pre-flight (mandatory, before Step 5):** count the first-person markers (`I` /
 `we` / `our`) in the body. If the count is under about 4, or they are not distributed across the
@@ -461,11 +570,13 @@ post does not embed, and the inverse the older audit is blind to, a post that ca
 hero names no catalog product at all. Resolve each by regenerating or re-uploading the hero with an
 explicit `--prompt` that depicts a product the article is actually about, not by loosening the check.
 
-**`--upload` must repeat `--prompt`.** `gen-notebook-art.ts --upload` called without `--prompt`
-silently overwrites `imagePrompt` with the generic `SURFACES[hero].defaultPrompt` — non-empty, so
-it passes this checker clean while destroying the exact record #2750 exists to protect (ticket
-#9369). Always repeat the same `--prompt` used at generation time on the upload call; the
-script-side fix (preserve-or-refuse without `--prompt`) is still open.
+**`--upload` must repeat `--prompt`.** `gen-notebook-art.ts --upload` used to silently overwrite
+`imagePrompt` with the generic `SURFACES[hero].defaultPrompt` whenever `--prompt` was not repeated
+on the upload call — non-empty, so it passed this checker clean while destroying the exact record
+#2750 exists to protect (ticket #9369). As of ticket #10682 the script itself refuses an `--upload`
+call with no explicit `--prompt` rather than silently substituting the default, so a missing
+`--prompt` is now a loud CLI error instead of a quiet bad write. Always repeat the same `--prompt`
+used at generation time on the upload call.
 
 One `step` event (`phase:'draft'`) with title, slug, category, embed handles.
 
@@ -556,8 +667,13 @@ Two reviewers, both binding, sequenced so a cheap voice failure never spends the
      two sections earlier, then the cycle-2 rewrite widened a storage claim into contradiction with
      the already-PASSed glass line), and run 329 fixed it in one sentence, so the defect is cheap to
      fix and expensive to detect late. Cheap mechanical hint: a scope-widening rewrite almost always
-     introduces a universal quantifier (whatever, anything, everything, always, never), so treat any
-     of those words appearing in a rewrite as a prompt to re-read the rest of the post.
+     introduces a universal quantifier (whatever, anything, everything, always, never, none of, the
+     only, nothing else), so treat any of those words appearing in a rewrite as a prompt to re-read
+     the rest of the post. The scan runs on predicate position as well as subject position (ticket
+     #10117: a rewrite that dodged "none of" as the subject by relocating the same universal into the
+     predicate — "the only thing left to decide is who wears it" — was still a scope-widening rewrite
+     and still needs the re-read). A quantifier bound to a catalog collection rather than to people is
+     still a universal-results claim needing a source.
    - **Enumeration-consistency scan (part of the same pre-resubmit self-check, ticket #6910):** when
      a gate asks for a change to an enumerated list, a red-flag list, a safety enumeration, or a tier
      assignment, first grep the whole document for every other instance of that enumeration, the FAQ

@@ -1,6 +1,15 @@
 # Video worker on RunPod (owned Wan 2.2 provider)
 
-Operator page for the team. Engineering detail lives in `infra/video-worker/README.md`.
+> **RETIRED 2026-09-23. Historical record only; nothing on this page is live.** Video renders on
+> Atlas Cloud (Wavespeed mirror) per ADR-016 (docs/adr/ADR-016-video-pipeline-v2-atlas-provider.md)
+> and docs/store-team/video-content-strategy-2026-09-23.md. The RunPod serverless endpoint and its
+> 100 GB network volume are deleted, and the ADR-016 Phase 4 deprecation removed the worker source
+> (`infra/video-worker/`), the RunPod client modules, the `wan22-*` tiers, the pod-watch cron, and
+> the RunPod probes and credential check. Every path and module named below is gone from the repo;
+> read them in git history. The bake-off notes further down remain the reference for InfiniteTalk
+> versus S2V quality.
+
+Operator page for the team. Engineering detail lived in `infra/video-worker/README.md` (deleted).
 
 ## What it is
 

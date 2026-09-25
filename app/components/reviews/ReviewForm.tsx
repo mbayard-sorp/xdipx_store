@@ -40,7 +40,7 @@ export function ReviewForm({
         <div
           className="text-6xl mb-4 animate-bounce inline-block"
           aria-hidden="true"
-          style={{ color: '#7C8F78' }}
+          style={{ color: 'var(--color-sage)' }}
         >
           ♥
         </div>

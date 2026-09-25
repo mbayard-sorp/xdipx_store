@@ -42,6 +42,16 @@ curl -s "$BASE_URL/api/team/gate?team=content&excludeRun=$RUN_ID" -H "x-team-sec
 and stop. The gate enforces `content_team_enabled`, `content_team_daily_cents`, and
 `content_team_max_runs`; this routine plus the daily writer share the content team's budget.
 
+**Use the literal `runType:"seo-curation"` from the POST body above, never `"manual"`.** Two
+historical passes (runs 847 and 970) wrote their run row with `runType:'manual'` despite doing
+genuine curation work, which made runType-keyed liveness queries read a multi-week outage that
+was not real and sent two later passes chasing a root cause that did not exist (suggestions #9335,
+#10662). `POST /api/team/run {op:'update'}` does not accept a `runType` field (it is set once, at
+`op:'start'`, and is immutable after), so a historical row stuck on `'manual'` cannot be
+self-corrected by this routine via the team API. If a future pass finds another one, do not attempt
+a workaround write: file it as a `code`/db-fix suggestion for an engineer to correct directly, so a
+runType-keyed query stops under-reporting the lane.
+
 ## Step 2: Read state (GROQ, read-only)
 
 1. Pending gray zone: `*[_type == "seoKeyword" && status == "pending" && flagged != true && relevanceScore >= 0.50 && relevanceScore < 0.85]{_id, term, kind, intent, relevanceScore, volume, "cluster": cluster->slug.current}`

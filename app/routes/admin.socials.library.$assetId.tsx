@@ -11,7 +11,9 @@ import { getAdminUser, requireAdmin } from '~/lib/session.server'
 import {
   addAssetTags, archiveAssets, getAssetUsage, getLibraryAsset, removeAssetTag, unarchiveAssets,
 } from '~/lib/social-studio.server'
+import { clearAssetAdjudication, getAssetAdjudication, setAssetAdjudication } from '~/lib/social-asset-adjudication.server'
 import { getApprovedCastMembers } from '~/lib/sanity.server'
+import { missingVisionChecks } from '~/lib/social-publish-gate.server'
 import { TagChipInput } from '~/components/admin/social/TagChipInput'
 import { RegenerateModal } from '~/components/admin/social/RegenerateModal'
 import { PlatformChip } from '~/components/admin/social/PostPreviewCard'
@@ -26,13 +28,22 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   if (!Number.isInteger(id) || id <= 0) throw new Response('Not found', { status: 404 })
   const asset = await getLibraryAsset(id)
   if (!asset) throw new Response('Not found', { status: 404 })
-  const [usage, cast] = await Promise.all([
+  const [usage, cast, adjudication] = await Promise.all([
     getAssetUsage(asset),
     getApprovedCastMembers().catch(() => []),
+    getAssetAdjudication(asset.url),
   ])
+  // Ticket #10511: summarize the stored vision verdict so the drawer can show
+  // whether this asset would clear the publish gate's vision-verdict check
+  // without the admin having to read the raw JSON blob.
+  const vision = asset.visionVerdict
+    ? { pass: asset.visionVerdict.pass, missing: missingVisionChecks(asset.visionVerdict), checkedAt: asset.visionVerdict.checkedAt }
+    : null
   return {
     asset,
     usage,
+    adjudication,
+    vision,
     roster: cast.map(m => ({ slug: m.slug, name: m.name, photoUrl: m.photoUrl, role: m.role })),
   }
 }
@@ -63,17 +74,53 @@ export async function action({ request, params }: ActionFunctionArgs) {
     const n = await unarchiveAssets([id])
     return n > 0 ? { ok: true, intent: 'unarchive' } : { ok: false, error: 'Asset not found' }
   }
+  // Owner-only adjudication (ticket #10503): clears a specific gate finding
+  // for THIS asset going forward. Never reachable from a team-token route.
+  if (intent === 'adjudicate') {
+    const asset = await getLibraryAsset(id)
+    if (!asset) return { ok: false, error: 'Asset not found' }
+    const findings = String(form.get('findings') ?? '').split('\n').map(f => f.trim()).filter(Boolean)
+    if (findings.length === 0) return { ok: false, error: 'Name at least one finding to clear (one per line)' }
+    const admin = await getAdminUser(request)
+    await setAssetAdjudication({
+      url: asset.url,
+      overriddenFindings: findings,
+      note: String(form.get('note') ?? '').trim() || null,
+      adjudicatedBy: admin?.email || 'owner',
+    })
+    return { ok: true, intent: 'adjudicate' }
+  }
+  if (intent === 'clear-adjudication') {
+    const asset = await getLibraryAsset(id)
+    if (!asset) return { ok: false, error: 'Asset not found' }
+    const cleared = await clearAssetAdjudication(asset.url)
+    return cleared ? { ok: true, intent: 'clear-adjudication' } : { ok: false, error: 'No adjudication on file' }
+  }
+  // Ticket #10511: re-run the vision gate against this asset's OWN url and
+  // record the fresh result in place, so a stuck row (an old verdict missing
+  // a check added later, or a needs_changes post blocked on stale art) can be
+  // cleared without regenerating and re-billing the frame.
+  if (intent === 're-gate') {
+    const asset = await getLibraryAsset(id)
+    if (!asset) return { ok: false, error: 'Asset not found' }
+    const { regateAsset } = await import('~/lib/social-vision-gate.server')
+    const verdict = await regateAsset(id, asset.url)
+    return { ok: true, intent: 're-gate', verdict }
+  }
   return { ok: false, error: 'Unknown intent' }
 }
 
 export default function LibraryAssetDrawer() {
-  const { asset, usage, roster } = useLoaderData<typeof loader>()
+  const { asset, usage, adjudication, vision, roster } = useLoaderData<typeof loader>()
   const [params] = useSearchParams()
   const navigate = useNavigate()
   const [regen, setRegen] = useState(false)
+  const [adjudicating, setAdjudicating] = useState(false)
   const back = `/admin/socials/library?${params.toString()}`
   const close = () => navigate(back)
   const archiveFetcher = useFetcher<{ ok: boolean; error?: string; intent?: 'archive' | 'unarchive'; warning?: string | null }>()
+  const adjudicationFetcher = useFetcher<{ ok: boolean; error?: string; intent?: 'adjudicate' | 'clear-adjudication' }>()
+  const regateFetcher = useFetcher<{ ok: boolean; error?: string; intent?: 're-gate'; verdict?: { pass: boolean; notes: string } }>()
   const isArchived = !!asset.archivedAt
 
   return (
@@ -102,6 +149,17 @@ export default function LibraryAssetDrawer() {
             <button type="button" onClick={() => setRegen(true)} className="inline-flex items-center gap-1 min-h-11 px-4 rounded-full bg-coral text-white text-sm font-semibold hover:bg-coral-2">
               <RefreshIcon size={14} /> Edit prompt, regenerate
             </button>
+            <regateFetcher.Form method="post">
+              <input type="hidden" name="intent" value="re-gate" />
+              <button
+                type="submit"
+                disabled={regateFetcher.state !== 'idle'}
+                className="inline-flex items-center gap-1 min-h-11 px-3 rounded-full border border-line bg-paper text-sm font-medium text-ink hover:border-ink-4 disabled:opacity-50"
+                title="Re-run the vision gate against this exact asset and record the fresh verdict, without regenerating the image"
+              >
+                <RefreshIcon size={14} /> {regateFetcher.state !== 'idle' ? 'Re-gating…' : 'Re-run vision gate'}
+              </button>
+            </regateFetcher.Form>
             <archiveFetcher.Form method="post">
               <input type="hidden" name="intent" value={isArchived ? 'unarchive' : 'archive'} />
               <button
@@ -117,6 +175,20 @@ export default function LibraryAssetDrawer() {
           {isArchived && (
             <p className="text-xs text-ink-3">
               Archived{asset.archivedBy ? ` by ${asset.archivedBy}` : ''}. Hidden from the library grid and the Composer picker.
+            </p>
+          )}
+          {vision && (
+            <p className="text-xs text-ink-3">
+              Vision gate: <span className={vision.pass && vision.missing.length === 0 ? 'text-sage font-medium' : 'text-red-700 font-medium'}>
+                {vision.pass && vision.missing.length === 0 ? 'pass' : vision.missing.length > 0 ? `stale (missing ${vision.missing.join(', ')})` : 'fail'}
+              </span> (checked {formatLaWallClock(vision.checkedAt)})
+            </p>
+          )}
+          {!vision && <p className="text-xs text-red-700">Vision gate: no recorded verdict.</p>}
+          {regateFetcher.data?.ok === false && <p className="text-xs text-red-700">{regateFetcher.data.error}</p>}
+          {regateFetcher.data?.ok && regateFetcher.data.intent === 're-gate' && regateFetcher.data.verdict && (
+            <p className={`text-xs ${regateFetcher.data.verdict.pass ? 'text-sage' : 'text-red-700'}`}>
+              Re-gated: {regateFetcher.data.verdict.pass ? 'pass' : 'fail'} — {regateFetcher.data.verdict.notes}
             </p>
           )}
           {archiveFetcher.data?.ok === false && <p className="text-xs text-red-700">{archiveFetcher.data.error}</p>}
@@ -137,6 +209,75 @@ export default function LibraryAssetDrawer() {
             <dt className="text-ink-4">created</dt><dd className="font-mono text-ink">{formatLaWallClock(asset.createdAt)} by {asset.createdBy}</dd>
             {asset.generationBatchId && <><dt className="text-ink-4">batch</dt><dd className="font-mono text-ink break-all">{asset.generationBatchId}</dd></>}
           </dl>
+
+          <section>
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-3 mb-1">Gate adjudication</h3>
+            <p className="text-[11px] text-ink-4 mb-2">
+              Clear a specific publish-gate finding for THIS asset. The social-drafts routine hands this to the
+              publish gate before it judges any future post reusing this asset; it never bypasses the fact checks
+              (stock, provenance, caption ceiling, vocabulary), only the subjective ones you name below.
+            </p>
+            {adjudication ? (
+              <div className="rounded-xl border border-line bg-paper-2 p-3 text-xs space-y-1">
+                <p className="text-ink-4">
+                  cleared by <span className="font-mono text-ink">{adjudication.adjudicatedBy}</span>
+                  {adjudication.updatedAt ? ` (updated ${formatLaWallClock(adjudication.updatedAt)})` : ` (${formatLaWallClock(adjudication.createdAt)})`}
+                </p>
+                <ul className="list-disc list-inside font-mono text-ink">
+                  {adjudication.overriddenFindings.map(f => <li key={f}>{f}</li>)}
+                </ul>
+                {adjudication.note && <p className="text-ink-3 italic">{adjudication.note}</p>}
+                <adjudicationFetcher.Form method="post" className="pt-1">
+                  <input type="hidden" name="intent" value="clear-adjudication" />
+                  <button
+                    type="submit"
+                    disabled={adjudicationFetcher.state !== 'idle'}
+                    className="min-h-9 px-3 rounded-full border border-line bg-paper text-xs font-medium text-ink hover:border-ink-4 disabled:opacity-50"
+                  >
+                    Remove adjudication
+                  </button>
+                </adjudicationFetcher.Form>
+              </div>
+            ) : adjudicating ? (
+              <adjudicationFetcher.Form method="post" className="space-y-2" onSubmit={() => setAdjudicating(false)}>
+                <input type="hidden" name="intent" value="adjudicate" />
+                <textarea
+                  name="findings"
+                  required
+                  rows={2}
+                  placeholder="One finding per line, e.g. age-ambiguity"
+                  className="w-full rounded-lg border border-line bg-paper p-2 text-xs font-mono text-ink"
+                />
+                <textarea
+                  name="note"
+                  rows={2}
+                  placeholder="Why (owner reasoning, shown back on every future read)"
+                  className="w-full rounded-lg border border-line bg-paper p-2 text-xs text-ink"
+                />
+                <div className="flex gap-2">
+                  <button
+                    type="submit"
+                    disabled={adjudicationFetcher.state !== 'idle'}
+                    className="min-h-9 px-3 rounded-full bg-coral text-white text-xs font-semibold hover:bg-coral-2 disabled:opacity-50"
+                  >
+                    Save adjudication
+                  </button>
+                  <button type="button" onClick={() => setAdjudicating(false)} className="min-h-9 px-3 rounded-full border border-line bg-paper text-xs font-medium text-ink hover:border-ink-4">
+                    Cancel
+                  </button>
+                </div>
+              </adjudicationFetcher.Form>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setAdjudicating(true)}
+                className="min-h-9 px-3 rounded-full border border-line bg-paper text-xs font-medium text-ink hover:border-ink-4"
+              >
+                Clear a finding for this asset
+              </button>
+            )}
+            {adjudicationFetcher.data?.ok === false && <p className="mt-1 text-xs text-red-700">{adjudicationFetcher.data.error}</p>}
+          </section>
 
           <section>
             <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-3 mb-1">Prompt</h3>

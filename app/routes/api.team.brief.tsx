@@ -2,7 +2,13 @@
  * /api/team/brief — the weekly store-wide strategy brief.
  *
  *   GET  -> { brief: { id, weekStart, brief, metricsJson, createdBy, createdAt } | null }
- *   POST { op: 'publish', weekStart, brief, metricsJson?, createdBy? } -> { id }
+ *   POST { op: 'publish', weekStart, brief, metricsJson?, createdBy? } -> { id, shortlistDropped? }
+ *
+ * `metricsJson.videoShortlist` (video program v2) is the merchandising team's
+ * weekly product shortlist for video: [{ handle, title, format, reason,
+ * stockCheckedAt }]. Malformed entries are logged and dropped, never a failed
+ * publish; the count dropped comes back as `shortlistDropped`. GET returns the
+ * stored shortlist unchanged.
  *
  * Written by store-strategist at the end of the weekly strategy routine;
  * read by every team routine at run start. Publishing supersedes the
@@ -11,6 +17,7 @@
 
 import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router'
 import { assertTeamAuth, getActiveBrief, publishBrief } from '~/lib/team.server'
+import { sanitizeBriefMetrics } from '~/lib/video-shortlist'
 
 export async function loader({ request }: LoaderFunctionArgs) {
   assertTeamAuth(request)
@@ -31,13 +38,17 @@ export async function action({ request }: ActionFunctionArgs) {
     if (typeof b['brief'] !== 'string' || !b['brief']) {
       return new Response('Bad Request: brief required', { status: 400 })
     }
+    const { metricsJson, dropped } = sanitizeBriefMetrics(b['metricsJson'])
+    if (dropped.length) {
+      console.warn(`[api.team.brief] dropped ${dropped.length} malformed videoShortlist entr${dropped.length === 1 ? 'y' : 'ies'}`, dropped)
+    }
     const id = await publishBrief({
       weekStart,
       brief:       b['brief'],
-      metricsJson: b['metricsJson'],
+      metricsJson,
       createdBy:   typeof b['createdBy'] === 'string' ? b['createdBy'] : undefined,
     })
-    return Response.json({ id })
+    return Response.json(dropped.length ? { id, shortlistDropped: dropped.length } : { id })
   }
 
   return new Response('Bad Request', { status: 400 })

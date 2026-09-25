@@ -86,14 +86,31 @@ Invoked by `store-strategist` before brief synthesis:
 6. If any milestone row or the status log changed: update the tracker doc(s), commit on branch
    `pm/tracker-<YYYY-MM-DD>` touching ONLY `docs/store-team/trackers/*.md`, push, and open a
    docs-only PR. You never merge it. **The release engine cannot merge it either, and you must say
-   so in the PR body.** Two independent reasons, both verified 2026-08-04: `pm/` is not in
-   `AGENT_BRANCH_PREFIXES` (`app/lib/release-engine.server.ts`), so the engine never even lists the
-   PR, and the allowlist regex in `.github/workflows/agent-allowlist.yml` is
-   `docs/store-team/[^/]+\.md`, which does not cross into the `trackers/` subdirectory. No tracker
-   PR has ever been merged by the engine. Until both are fixed this PR waits for the owner, so open
-   it **ready for review, never as a draft**, and name it in the scoreboard event as owner-blocked
-   rather than in-flight. Prepend the dated Status log entry. No changes → no PR;
-   say so in the scoreboard event.
+   so in the PR body — but say the right reason (corrected 2026-09-23, qa-pm-tracker-owner-merge-
+   claim-stale).** `pm/` WAS added to `AGENT_BRANCH_PREFIXES` (`app/lib/release-engine.server.ts`)
+   on 2026-08-04, so the engine now lists a `pm/tracker-*` PR like any other agent branch and does
+   NOT treat it as owner-merge-only on that ground — do not claim otherwise, that specific claim is
+   stale. What still blocks the merge is the allowlist regex alone: `.github/workflows/
+   agent-allowlist.yml` matches `docs/store-team/[^/]+\.md`, which does not cross into the
+   `trackers/` subdirectory, so the `agent-allowlist` check fails (confirmed on ticket #10899 / PR
+   #1285: `protectedPaths=false`, `allowlist=skipped`) and the PR merges via the ordinary
+   QA-verified release-engine lane only once that regex is widened to cover `trackers/`. No tracker
+   PR has ever been merged by the engine. Until the regex is fixed this PR waits for the owner, so
+   open it **ready for review, never as a draft**, and name it in the scoreboard event as
+   owner-blocked (allowlist regex, not branch-prefix) rather than in-flight. Prepend the dated
+   Status log entry. No changes → no PR; say so in the scoreboard event.
+
+   **The PR URL is this step's output, not the push (ticket #10493).** Nine `pm/tracker-*` branches
+   existed on origin from 2026-07-20 through 2026-09-14 and seven of them never got a PR at all —
+   not closed, not draft, not failing CI, never opened — while three consecutive weekly audits
+   reported it as a growing backlog of unmerged PRs the owner needed to go merge or close. There was
+   nothing to merge; the branch sat on the remote with no PR pointing at it, invisible to everyone.
+   So: after `git push`, capture and report the actual PR URL in the run summary and the scoreboard
+   event. A push that does not end in a real, confirmed PR URL is a **FAILED step**, not a partial
+   success — name it as a failure in the same sentence that names the branch, and file it as a
+   blocker (`POST /api/team/blocker`) rather than letting the run report the push as done. If
+   `gh pr create` is genuinely unavailable in this environment, say that plainly in the run summary
+   and file it as the real constraint; do not push a branch and call the step finished.
 
    **A row filed to TRACK this tracker PR lands at `pr_open` with a `pr` link — never as a bare
    `kind:'code'` row at `approved`.** (#4539, per `operating-system.md` §3 rule 4.) A self-filed

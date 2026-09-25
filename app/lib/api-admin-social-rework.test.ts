@@ -17,6 +17,7 @@ const reworkCaptionMock = vi.hoisted(() => vi.fn())
 const regenerateSocialImageMock = vi.hoisted(() => vi.fn())
 const createOwnerReworkRowMock = vi.hoisted(() => vi.fn())
 const ownerApprovePostMock = vi.hoisted(() => vi.fn())
+const regateMediaAndApproveMock = vi.hoisted(() => vi.fn())
 
 vi.mock('~/lib/session.server', () => ({
   requireAdmin: requireAdminMock,
@@ -31,6 +32,7 @@ vi.mock('~/lib/social-admin-rework.server', () => ({
   regenerateSocialImage: regenerateSocialImageMock,
   createOwnerReworkRow: createOwnerReworkRowMock,
   ownerApprovePost: ownerApprovePostMock,
+  regateMediaAndApprove: regateMediaAndApproveMock,
 }))
 vi.mock('~/lib/api-error.server', () => ({
   apiError: (_tag: string, err: unknown) =>
@@ -188,6 +190,27 @@ describe('owner-approve', () => {
   it('returns 409 with findings when deterministic checks block it', async () => {
     ownerApprovePostMock.mockResolvedValue({ ok: false, error: 'blocked', findings: [{ check: 'x' }] })
     const res = await post({ intent: 'owner-approve', postId: 61 })
+    expect(res.status).toBe(409)
+  })
+})
+
+describe('regate-media (ticket #10511)', () => {
+  it('validates postId', async () => {
+    const res = await post({ intent: 'regate-media' })
+    expect(res.status).toBe(400)
+    expect(regateMediaAndApproveMock).not.toHaveBeenCalled()
+  })
+
+  it('re-gates and approves, returning ok:true', async () => {
+    regateMediaAndApproveMock.mockResolvedValue({ ok: true })
+    const res = await post({ intent: 'regate-media', postId: 61 })
+    expect(res.status).toBe(200)
+    expect(regateMediaAndApproveMock).toHaveBeenCalledWith({ postId: 61, actor: 'Mike' })
+  })
+
+  it('returns 409 when the deterministic re-check still blocks after the re-gate', async () => {
+    regateMediaAndApproveMock.mockResolvedValue({ ok: false, error: 'still blocked' })
+    const res = await post({ intent: 'regate-media', postId: 61 })
     expect(res.status).toBe(409)
   })
 })

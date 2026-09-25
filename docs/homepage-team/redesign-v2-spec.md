@@ -13,7 +13,7 @@
 > implements this directly on a gated PR; the engineer never merges it, the release engine does
 > once CI and QA verification pass and the diff touches no protected path.
 >
-> Voice: all copy below complies with `docs/emma-voice.md` (v4). No em-dashes, no "Buy now",
+> Voice: all copy below complies with `docs/emma-voice.md` (v5.5). No em-dashes, no "Buy now",
 > CTA whitelist only, Emma has no lived experience, no homepage-hero top billing for Emma.
 
 ---

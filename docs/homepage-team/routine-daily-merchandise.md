@@ -181,7 +181,15 @@ Skip this step Tuesday through Sunday. On Mondays, run both of these in order be
    propose new ones if not. Nothing else refreshes this table — the last row was minted 2026-07-07
    and the runway ran to 2026-09-07, after which every routine that reads "today's theme" would have
    found nothing. Also close out past-dated rows still marked `active` so the calendar states what is
-   true today.
+   true today — **but only for `IG: `-prefixed rows.** `POST /api/team/calendar {op:'setStatus'}`
+   is IG-row-guarded by design (app/routes/api.team.calendar.tsx); a non-IG row's status is
+   admin-session-only and this team-token routine structurally cannot change it (stale-watching-
+   backlog-*, marketing-calendar bookkeeping drift, second occurrence 2026-09-13/2026-09-06). Don't
+   attempt a non-IG `setStatus` call and don't silently skip it either: when a non-IG row is stuck
+   past-dated `active` or a current-week row is stuck `planned`, name the row id in the run summary
+   and file it as a `process` suggestion (`targetTeam` unset, so it reaches the strategist) if one
+   isn't already open, so it reaches an admin-authorized action instead of rolling forward untouched
+   week after week.
 
 3. **Audit every generated promo/tile image against the NEW theme, and clear the leftovers.** On the
    theme rotation, look at each generated promo/wayfinder-tile/rail image on the live page and check
@@ -500,10 +508,10 @@ prompts, follow them.
 
 Imagery follows mission brief section 2: the product is the star — pass the product's real
 Shopify photo as a reference image (`--ref-image`) for every product-linked surface, or use sensual
-human context (lingerie on a body, skin, playful tension) matched to what the surface sells. Housewares
+human context (skin, product resting on bare skin, playful tension) matched to what the surface sells. Housewares
 still-lifes with no product are banned, and so are dark/moody/candlelit scenes: bright daylight or
 high-key studio light, tinted color-block backdrops from the doctrine ground lock, the product bold and large in frame. Fun and
-curiosity-inspiring is the target; exposed genitalia, nipples, and sex acts are the hard limit.
+curiosity-inspiring is the target; nudity (visible nipples, labia, penis, or anus) and sex acts are the hard limit, and the imagery ceiling is `docs/store-team/instagram-campaigns.md` §3.2a with the on-skin treatment of §3.2c (owner direction 2026-09-20, "On-skin extends to all areas of the site"), pointed at and never restated; its stop list and the nudity definition (visible nipples, labia, penis, or anus) still bind.
 
 Run this as a loop, one image at a time, tracking a per-run `imagesSoFar` counter:
 
@@ -629,14 +637,20 @@ Every merchandise run touches all of these, not just the hero and rails:
    code ticket owns that path. For every See-all the run controls, its destination must CONTAIN the
    module's own products; `/collections/best-sellers` is not an acceptable fallback for any module,
    because best-seller order is a different ranking from the discovery index and is structurally
-   guaranteed to mismatch. **Definition of done, every run:** after publishing, fetch the live
-   homepage and, for each See-all, assert at least one of the module's own handles appears on
-   destination page 1. **Probe the destination via its collection loader / JSON payload (or the
-   products API), NOT a raw-HTML grep:** PLP product grids are client-hydrated, so the handles are
-   absent from the destination's initial SSR HTML and a grep returns false 0s (run 145 could not
-   confirm continuity for exactly this reason). Report the check in the run summary; a failure blocks
-   the run's done state. When no destination genuinely contains the set, ship the module with **no**
-   See-all rather than point it somewhere plausible.
+   guaranteed to mismatch. **Probe BEFORE publishing, not after (#4865, second occurrence #10260):**
+   for each candidate `ctaLink`, check the destination's collection loader / JSON payload (or the
+   products API) — NOT a raw-HTML grep, since PLP product grids are client-hydrated and the handles
+   are absent from the destination's initial SSR HTML, which reads as a false 0 (run 145) — and
+   confirm at least one of the module's own handles appears on destination page 1 before you write
+   the rail. Checking only after publish let two live rails ship with a `ctaLink` that never
+   contained the module's own products (run 442's me-time/under-thirty rails; run 952's
+   `teamRail-2026-09-06-2`/wayfinder `wf65a`, pointing at `/collections/under-30` and
+   `/collections/couples` with zero of either module's handles on page 1). **Definition of done,
+   every run:** the pre-publish probe result for each See-all is recorded before the write, and the
+   live homepage is re-fetched after publishing to confirm the same assertion still holds. Report
+   both checks in the run summary; a failure blocks the run's done state. When no destination
+   genuinely contains the set, publish the module with `ctaLink` **unset** — ship with no See-all —
+   rather than point it somewhere plausible.
    **Rail diversity (no product in more than one wired rail).** A product handle appears in at most
    one wired `emmaCuratedRail` per page. Sharing one SKU across every rail (run #72 shipped
    nixie-mystic-wave in all three) makes the rails read as one shelf; dedupe handles across the wired
@@ -1117,6 +1131,17 @@ PR's entry on the same line and produced real git conflicts between semantically
 (PR #609 went `mergeable:false` once #619 merged first); bottom-append makes same-day PRs stack
 naturally instead of colliding. A run that shipped a visible change without a changelog entry is
 incomplete. This is a docs append on the agent-editor allowlist; it carries no code.
+
+**If this run's dispatch forbids git branch/commit/push (ticket #9503), do not attempt the PR.**
+Run 880 (2026-09-15) hit exactly this: the scheduled dispatch explicitly forbade any git operation
+for the run, which the append instruction above does not account for, and the changelog entry for a
+real, shipped change (hero re-pin, rail 0 relineup, 4 new images) was silently lost. When git access
+is unavailable this run, write the complete changelog entry (in this file's exact entry format,
+with the real run id, Sanity revisions, asset IDs, and Step 2c sameness-diff surfaces) into the run's
+own `kind:'instructions'`, `category:'docs'` ticket body instead of into the file, and name it
+explicitly in the run summary as a pending changelog append. A subsequent run with git access, or
+the agent-editor apply pass, appends it verbatim from that ticket text rather than the shipping run
+re-deriving data it no longer holds.
 
 **The run that made the change opens this PR itself, and files its ticket as `kind:'instructions'`,
 never `kind:'code'`.** (#4758) Only the run that shipped the change holds the data the entry format

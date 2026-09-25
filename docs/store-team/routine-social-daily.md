@@ -52,9 +52,12 @@ elsewhere in this file that treats "drafted and honestly gated" as a finished ru
 
 **What done means.** For every gate platform (Instagram, X) whose valve is on and whose
 `social_freq_<platform>` is above zero, the day is done when at least one row for that platform is
-`approved` or `posted` today, and the target is the full quota. A run ends with the day's count in
-front of it: count `approved` plus `posted` rows per platform for today's UTC date before you write
-the final run update.
+`approved` or `posted` today, and the target is the full quota. **Under the on-skin standing order
+(`instagram-campaigns.md` §3.2c, owner direction 2026-09-22) at least one of each platform's rows
+counted here is an on-skin campaign row: `postType:'campaign'` with `bodyZone` set. A day filled only
+by `manual` rows is reported as short, not full, and the run drafts an on-skin bodyscape row before
+it ends.** A run ends with the day's count in front of it: count `approved` plus `posted` rows per
+platform for today's UTC date, and the on-skin subset, before you write the final run update.
 
 **Run status is derived from that count, not from effort.**
 
@@ -78,8 +81,10 @@ and the publish gate; nothing here softens a verdict.
    allowance and the combined 2x ceiling in Step 2.5 do not bind on a zero platform; the attempt
    ceiling in rung 5 does. Run 720 (2026-09-06) left rows 185 and 186 at `needs_changes` on a
    one-line "add anticipation" REVISE and finished at zero. Those were twenty minutes from live.
-2. **Pivot after two failed iterations on one concept** (Step 2b). Same product, subject, or image
-   angle failing twice is a dead concept for today.
+2. **Pivot after two failed iterations on one concept** (Step 2b). Under the on-skin standing order
+   a concept is the same product in the same body zone. Pivot to a different in-stock SKU with a
+   simpler silhouette (single colour, no accent stripe, no nozzle detail) on the same on-skin
+   bodyscape treatment; change the product, body zone, or crop scale, never the treatment.
 3. **Fall back to a proven shape.** List `status:'posted'` rows for the platform from the last 14
    days. Those rows PASSed this exact gate and stayed live; their shape is the calibration. Draft the
    next attempt in a shape that has at least two live precedents: the same slot, the same format,
@@ -89,15 +94,20 @@ and the publish gate; nothing here softens a verdict.
    and the category-comparison education post with the product in frame (rows 142, 149, 167, 168,
    152). A subject class that failed the gate on two consecutive days (toy care and cleaning,
    2026-09-05 and 2026-09-06, twelve attempts) is off the table until the calibration ticket for it
-   closes; do not lead a zero day with it.
+   closes; do not lead a zero day with it. **While the §3.2c standing order is in force, a fallback
+   stays on-skin.** The clothed precedents above are calibration for slot, format, and charge, not
+   for wardrobe. A clothed or `manual` shape is a fallback only after two different on-skin products
+   have each failed twice on product identity in the same run, and the run summary names both.
 4. **Recover the campaign before recovering the caption.** A day with no active `IG: ` campaign
    is a defect, not a context (`instagram-campaigns.md` §4: there is never a day with no active
    campaign). If the active campaign was closed early (a removal, an owner deletion), activate its
    planned successor in the same Step 2a pass and pull its window forward; that is date arithmetic
    inside your remit, not inventing campaign N+1. Both zero days ran on "no active campaign, so a
    resource filler", and the filler was the class that could not clear the gate.
-4b. **A recovery draft is scheduled for today, never tomorrow.** The Step 3 default of
-   `scheduledFor` = tomorrow is for a day that is already covered. While the platform is at zero,
+4b. **A recovery draft is scheduled for today, never tomorrow.** This is the same rule as Step 3's
+   `target_day`, read from the other end: `target_day` is today exactly while the platform is at
+   zero for today, and the Step 3 default of `scheduledFor` = tomorrow is for a day that is
+   already covered. While the platform is at zero,
    every new draft and rework carries today's UTC date (or no slot at all, which the publisher
    reads as "ship when there is room"), so the hourly tick ships it the same day the gate PASSes
    it. Row 193 (2026-09-06) cleared the gate at 17:28 UTC after eight attempts and was scheduled
@@ -106,7 +116,7 @@ and the publish gate; nothing here softens a verdict.
    move this rung makes automatic.
 5. **Attempt ceiling: 4 x `social_freq_<platform>` drafts per platform per UTC day, all statuses,
    both runs combined.** This replaces the day-of-quota exhaustion in Step 3 as the thing that ends
-   drafting: `rejected` rows no longer consume `today_remaining`, but every row you write consumes
+   drafting: `rejected` rows no longer consume `slot_remaining`, but every row you write consumes
    this. Reaching it without a live post is exhaustion, and exhaustion is when you may stop.
 
 **Exhaustion is the only stopping point, and it has a fixed shape.** Only when the ladder is walked
@@ -146,9 +156,19 @@ row hoping for a different answer, never self-certify, never soften.
 
 **The evening run is the recovery run.** It reads the day's `approved`/`posted` counts first. A
 live platform at zero means recovery is its first job and its quota arithmetic must not stop it:
-`rejected` rows do not count against `today_remaining` (Step 3), and rung 1 reworks bind before any
+`rejected` rows do not count against `slot_remaining` (Step 3), and rung 1 reworks bind before any
 new drafting. "The morning run already used the quota" describes a day the morning run filled with
 live posts, not one it filled with rejections.
+
+**Recovery may not be bought by retreating to a cold frame.** A zero-day recovery draft is held to
+the same mix as any other draft: the evening run may satisfy a zero-post day with an educational or
+clothed frame **at most once per rolling 7**, and beyond that it keeps walking the ladder in the
+shape the mix needs rather than shipping the safest picture available. Retreat is the failure mode
+this section exists to stop, and a recovery slot is exactly where it happens. Every run summary
+states two things about imagery, zero day or not: **how many vision-gate attempts were spent**, and
+**whether a body reference existed for the cast member used** (`bodyReferencePhoto`, resolved by
+`presenterPhotoUrlForCrop`). "Held the close crop, no body reference for <slug>" is a complete and
+honest answer; a silent portrait fallback is not.
 
 **Who supports a zero day (the rest of the team).** The ticket is the handoff, and each lane has a
 standing job it does not get to decline:
@@ -188,6 +208,9 @@ is on the record with a ticket the team can act on tomorrow.
    2026-08-16): the one-campaign-two-registers through line, the X companion beat, the pairing
    rule, maker relations, and the Meta-approved-catalog preference. Where it and a charter or gate
    disagree, the charter and the gate win, as that file itself states.
+4c. `docs/store-team/creative-platform.md` (binding context once it exists): the brand idea, the
+   manifesto, and the campaign signature every surface shares, next to `campaign-look.md`. Where it
+   and the charter disagree, the charter wins.
 5. Calendar (`GET /api/team/calendar`), current featured products/deals. Read it for two signals,
    not as a formality (owner audit 2026-09-01, after the WANDWEEK20 window ran 08-25 to 08-31 with
    zero posts):
@@ -479,9 +502,10 @@ where the account posts nothing is a real miss, not a neutral outcome. Two thing
 neither weakens a single gate above:
 
 1. **Pivot after 2 failed iterations on one idea; don't grind it to the daily ceiling.** If a post
-   concept (the same product, subject, or image angle) draws two BLOCK/REVISE verdicts in a run,
-   stop iterating it and move to a genuinely different subject, product, or format for the
-   remaining allowance. On 2026-09-05, 10 of the day's Instagram allowance and both of X's
+   concept (the same product, subject, or image angle; under the on-skin order, the same product
+   in the same body zone) draws two BLOCK/REVISE verdicts in a run, stop iterating it and move to
+   a genuinely different subject, product, or format for the remaining allowance. Under the on-skin
+   order the pivot changes the product, zone, or crop and keeps the bodyscape treatment. On 2026-09-05, 10 of the day's Instagram allowance and both of X's
    new-draft slots were spent on one toy-care angle before the day's quota was gone, and every
    single attempt failed the gate. A pivot after the second failure leaves room to try something
    with better odds instead of guaranteeing a zero day on the way to exhausting the ceiling. A
@@ -538,7 +562,7 @@ run summary, never silently drop it.
 `rework_allowance(platform) = social_freq_<platform>`, an equal budget dedicated to reworking
 `needs_changes` rows, stated here so it is auditable rather than implicit. Outstanding owner
 feedback is worked **before** new drafting, up to the rework allowance for that platform.
-Consuming rework allowance does **not** reduce `today_remaining(platform)` for new drafts (Step 3);
+Consuming rework allowance does **not** reduce `slot_remaining(platform)` for new drafts (Step 3);
 it draws down its own count instead:
 
 ```
@@ -582,6 +606,15 @@ happened in run 595: the morning run's full IG rework allowance (4/4) went to ro
 three of the reworks (139, 141, 143) came back REVISE and still needed one more fix with no rework
 budget left, and the correct move was `op:'draft'` with `reworkedFrom` still set, not left unset.
 
+**Staleness rule for `needs_changes` (ticket #11144).** This rework pass has no aging or dismissal
+mechanism analogous to the 14-day suggestion sweep in Step 7b, so a `needs_changes` row tied to a
+campaign that has since closed sits in every future rework-pass read forever with no exit: reworking
+it is really drafting fresh copy under a stale row id, not addressing the original feedback clauses.
+A `needs_changes` row whose `scheduledFor` is more than **7 days** past AND whose campaign has closed
+since qualifies as stale. Mark it `rejected` with a note naming the closed campaign and the days past
+`scheduledFor`, instead of reworking it or leaving it to be re-read next run. Sweep up to **5 stale
+rows per run** so the queue converges instead of aging in place.
+
 ## Step 2.6 — Stock gate (never feature an out-of-stock product)
 
 Owner direction 2026-08-09, after a live post featuring an out-of-stock product had to be deleted.
@@ -590,6 +623,9 @@ carousels, and Brand Crush alike.
 
 - **Draft-time:** before selecting any product for a post, verify `availableForSale` via the
   Storefront API. An out-of-stock, DRAFT, or ARCHIVED product is ineligible; pick the next candidate.
+  Keep the product `id` (the `gid://shopify/Product/<n>` string) off that same response: it goes on
+  the draft call as `shopifyProductId` (Step 6), which is what lets the publish-time stock guard
+  re-run this exact check at the hourly tick instead of trusting a snapshot taken here.
 - **Queue-hygiene sweep (run start):** sweep the still-unposted `approved`/`pending_review` drafts and,
   for any whose featured product has since gone out of stock, mark it `needs_changes` with feedback
   naming the stock issue, so the owner never approves a post that can no longer be bought.
@@ -609,17 +645,60 @@ catalog for no benefit on the organic surface. The gates that do bind an Instagr
 unchanged: the voice charter, `docs/ads-policy.md` §Organic social and §Creative, Step 2.6 stock,
 and `social-publish-gate`.
 
-Where approval does bind, hard: the approved set is the only set that can appear in the shop or
-carry a product tag. If and when product tagging is wired into the publisher, a tag may reference
-an approved product only, and an unapproved one is a publish-time block, not a warning.
+Where approval does bind, hard: the approved set is the only set that can appear in the shop. Product
+tagging itself is permanently retired, not merely unwired (ticket #10732): the endpoint the publisher
+called does not exist, and even a corrected one could never succeed, since Meta's commerce policy
+prohibits Shops for adult products outright (`docs/ads-policy.md`'s Product tagging bullet has the
+citations). Do not re-add it without an explicit owner decision that a real, policy-compliant path
+exists.
 
-Until tagging exists, commerce on Instagram runs post to profile to link in bio to `/social` to PDP.
+Commerce on Instagram runs post to profile to link in bio to `/social` to PDP.
+
+## Step 2.8: Clip days (the week is built around the clips)
+
+A **clip day** is any day with a video row scheduled for it: an Instagram `social_posts` row
+carrying a `videoJobId` (postType `video_reel`) whose `scheduledFor` is today in LA wall-clock (the
+fanout writes `scheduledFor` as the LA wall-clock date of the episode's planned slot, not the UTC
+date). These rows arrive fanned out from the owner's render approval in `/admin/video-studio` (see
+the video note in Step 5); you never create them. Check at run start with
+`POST /api/team/social-post {"op":"list","status":"draft"}` (the list op takes no platform filter)
+and keep the rows where `platform` is `instagram`, `videoJobId` is set, and `scheduledFor` is today
+in LA wall-clock. That list caps at 50 rows, so before declaring a non-clip day also run
+`{"op":"list","status":"draft","reviewStatus":"pending_review"}` and apply the same filter.
+
+On a clip day:
+
+- **The reel is the day's Instagram post, and the owner posts it.** Draft no competing Instagram
+  still for that day. Do NOT send the reel row to `POST /api/team/publish-gate`: the hourly publish
+  tick does not read `video_team_autopublish` today, so a gate PASS that moves a `videoJobId` row to
+  `approved` ships the reel unattended. The reel row stays at `pending_review`. The owner's "post"
+  touch is the manual **Post now** in Social Studio (`/admin/socials/queue`), which already
+  double-gates video through `manual-publish-gate`. When the Phase 3 valve double-gate merges and
+  the owner delegates by flipping `video_team_autopublish` on, this paragraph is superseded.
+- **Step 1b counts the reel.** On a clip day the reel row at `pending_review` counts toward Step 1b's
+  definition of done for Instagram, and the repair ladder does not fire for Instagram that day.
+  X is judged by Step 1b as usual.
+- **The X companion leads with the clip's one fact** (the single product fact the clip is built on,
+  from its script), at register 6-7 per the social addendum, on the same SKU, with the PDP link and
+  UTMs per the companion beat in Step 3. It carries the clip itself once X video upload ships
+  (`app/lib/social-publish/x.server.ts` does not implement chunked video upload yet and refuses a
+  video row); until then it is a still companion under Step 5's X rules, gated in Step 6.5 like any
+  X draft.
+- **Captions are unchanged.** Instagram stays at 9 by implication; the reel's caption came through
+  the owner's approval and is not yours to rewrite (file a suggestion targeting the video team if it
+  reads off-voice).
+
+On a non-clip day nothing changes: stills remain the base layer, and the rest of this playbook runs
+as written. Report clip days in the run summary as `clipDay: true` with the reel's post id.
 
 ## Step 3 — Draft (reworks included)
 
 **Owner direction 2026-08-22, binding at run start:** "I'm officially saying, our posts should be at
 a 9 for the explicit register. That's an order. I want innuendo, suggestive phrases, skin in the
-images (not nudity)." Instagram captions now run at **9 by implication** per the social addendum in
+images (not nudity)." **Read "nudity" there with the owner's own definition of 2026-09-20: visible
+nipples, labia, penis, or anus, and nothing else.** A bare body that shows none of those is not
+nudity and is licensed, which is what the on-skin treatment in `instagram-campaigns.md` §3.2c
+runs on. Instagram captions now run at **9 by implication** per the social addendum in
 `docs/emma-voice.md` (v5.5) and `instagram-campaigns.md` §3.2b: the wanting is nameable, the heat
 arrives through innuendo, anticipation, and the unsaid, and the vocabulary fence is unchanged (no act
 naming, no orgasm or arousal words, no anatomy nouns, no emoji-anatomy). "Too tame" is now a REVISE
@@ -629,34 +708,74 @@ the picture (the description goes in `altText`), the picture depicts the subject
 (§3.9), and a post about a category we sell shows the product, slot A included (§4a). Hashtags are
 5 to 8 per §7a. Any earlier "register 4-5" language for Instagram in this file or elsewhere is stale.
 
-**THE QUOTA IS PER DAY, NOT PER RUN. Count today's rows before you draft anything.** The social
-routine fires **twice daily** (14:00 and 22:00 UTC, `routine-schedule.md` routine 6). Two runs each
-drafting a full quota is double the intended volume, and on Instagram that is the fastest way to get
-the account actioned. So the first thing Step 3 does is arithmetic:
+**Register FLOOR, checked at draft time, symmetrical to the ceiling Step 6.5 already runs
+(drift-ig-register-floor, week 2026-09-21).** The vocabulary fence above is a ceiling; it is not
+the only failure mode. 14 of 14 Instagram posts published 09-14..09-22 read as plain register 5-6
+education with no innuendo or anticipation beat, which is a floor breach, not a safe default: on
+Instagram "too tame" is a defect exactly like a vocabulary-fence breach is. Before a caption goes to
+the voice gate, confirm it reads at register 8 or above and can name the specific act or feeling it
+is anchoring to; a caption that cannot clear that bar is rewritten before drafting stops, not shipped
+on the theory that plain-education is the safe choice. Report a register self-assessment per
+Instagram post in the run summary (Step 8).
+
+**THE QUOTA IS PER SLOT DAY, NOT PER RUN, AND NOT PER RUN DAY. Count the rows already standing
+for the day you are drafting FOR before you draft anything.** The social routine fires **twice
+daily** (14:00 and 22:00 UTC, `routine-schedule.md` routine 6). Two runs each drafting a full quota
+is double the intended volume, and on Instagram that is the fastest way to get the account actioned.
+So the first thing Step 3 does is arithmetic:
 
 ```
-today_remaining(platform) = social_freq_<platform>
-                          - new rows written for that platform today at review_status
-                            pending_review, needs_changes, or approved, or at status posted
+target_day(platform)    = today (UTC)    while the platform has no approved or posted row
+                                         whose slot is today  -> Step 1b recovery
+                        = tomorrow (UTC) otherwise              -> ordinary supply
+
+slot_remaining(platform) = social_freq_<platform>
+                         - rows for that platform whose SLOT is target_day, at review_status
+                           pending_review, needs_changes, or approved, or at status posted
 ```
+
+A row's **slot** is its `scheduledFor` date (or the UTC date of `scheduledAt` when only that is
+set). A row with neither counts toward **today**, because that is what the publisher does with it:
+`eligibleWhere` reads a slotless row as "ship when there is room". `op:'list'` returns
+`scheduledFor`, `scheduledAt`, `postedAt` and `createdAt` on every row, so this is arithmetic you
+can do from the Step 2 item 7 list without another call.
+
+**Count by the slot, never by the day the row moved. This is the fix for a loop that drained the
+queue to zero (2026-09-21).** The formula used to subtract rows "written today ... or at status
+posted", and a row posted today was written *yesterday*, for today, while a new draft defaults to
+`scheduledFor` = **tomorrow**. So a day whose posts arrived from yesterday's buffer computed a
+remainder of 0 and both runs drafted nothing, leaving the next day with no supply at all. Run 973
+(2026-09-20 14:09) and run 980 (2026-09-20 22:10) each wrote an honest zero on that reasoning, zero
+rows were created on 2026-09-20, 2026-09-21 opened empty, and X reached a zero-post day (P1 ticket
+#10658). The consumption of one day was being charged against the supply of the next, which is a
+self-starving oscillator: a full day guarantees the empty one after it. Counting by slot closes it,
+because a posted row is charged to the day it was FOR, which has already shipped, and today's
+publishing can no longer reach tomorrow's allowance.
 
 **`rejected` rows do not count (Step 1b, owner direction 2026-09-06).** A row the gate BLOCKed is
 dead: it will never publish, so it fills nothing. Counting it as filled is how the evening run of
 2026-09-05 (run 710) drafted nothing on a day with zero live posts, because twelve rejections had
 "used the quota". What bounds runaway drafting instead is the **attempt ceiling** in Step 1b rung
 5: `4 x social_freq_<platform>` rows per platform per UTC day, all statuses, both runs combined.
-Reaching it with the platform still at zero live posts is exhaustion, with the fixed shape Step 1b
-gives it.
+That ceiling stays per **run day**, not per slot day: it bounds how much work a day may spend, not
+how much supply a day may hold. Reaching it with the platform still at zero live posts is
+exhaustion, with the fixed shape Step 1b gives it.
 
 **Reworks are not part of this formula (ticket #5421).** They draw down their own
-`rework_allowance(platform)`, defined in Step 2.5, and do not subtract from `today_remaining`. The
+`rework_allowance(platform)`, defined in Step 2.5, and do not subtract from `slot_remaining`. The
 two pools are joined only by the combined per-platform ceiling in Step 2.5
 (`2 x social_freq_<platform>` a day, rework-first if it binds).
 
-Use the Step 2 item 7 list, filtered to today's date, to get that count. **If the remainder is 0,
+Use the Step 2 item 7 list, filtered to `target_day`, to get that count. **If the remainder is 0,
 draft nothing for that platform and say so in the run summary.** A run that honestly drafts zero
-because the day is already full is a correct run, not a wasted one. Never treat a fresh
-`social_freq_*` as this run's allowance.
+because the day it is drafting for is already full is a correct run, not a wasted one. Never treat a
+fresh `social_freq_*` as this run's allowance.
+
+**State both numbers in the run summary, per platform:** `target_day` and the `slot_remaining` you
+computed from it. A zero has to be legible afterwards as "tomorrow is already covered" rather than
+"today already happened", because those two readings are the bug above and its fix, and only the
+summary can tell them apart on the record. Run summaries written before 2026-09-22 use the old name
+`today_remaining`; it meant this quantity computed against the run's own calendar day.
 
 This lives here, in the binding playbook, and not only in the evening trigger's prompt. A cloud
 trigger prompt is out-of-repo config that this file cannot see and that nobody reviews on a diff, so
@@ -676,11 +795,21 @@ Restricted Goods standard regardless of how clean the image is), fresh language 
 fit 280 chars **and require media, same as Instagram and TikTok** (Step 5) — an X draft is never text
 plus a link alone. Instagram and TikTok drafts are posted manually
 by the owner once approved. At most one promo-angle post per run, and only referencing
-owner-approved promo codes. Propose a `scheduledFor` date for every draft (default: tomorrow) so
-the Studio's calendar strip populates.
+owner-approved promo codes. Propose a `scheduledFor` date for every draft (`target_day`, which is
+tomorrow on an ordinary day and today during a Step 1b recovery) so the Studio's calendar strip
+populates and so the row is charged to the day it is actually meant to fill.
 
 **Instagram drafts against the active campaign.** Read its pillars, formats, rotation, and visual
 scheme from `docs/store-team/instagram-campaigns.md`, then:
+
+- **Resolve "the active campaign" from the draft's scheduled publish date, not the run date
+  (drift-campaign-spine-phase, week 2026-09-21).** A draft written today for `target_day` =
+  tomorrow belongs to whichever campaign's window covers tomorrow, which is not always the campaign
+  Step 2a activated for today. Getting this wrong runs the content two days ahead of its own spine:
+  the week of 09-14 shipped six Materials 101 education posts before the Materials 101 campaign
+  window (row 31) opened on 09-21, while the campaign that WAS live that week ("The Orgasm Gap,
+  Closed") appeared on almost nothing. Name, per Instagram post in the run summary, which
+  `marketing_calendar` row id its theme was drawn from.
 
 - **Rotate.** Never two consecutive Instagram posts from the same pillar, and never two consecutive
   posts in the same format. The ground follows the 4-beat cycle and the archetype follows the 7-beat
@@ -745,9 +874,38 @@ scheme from `docs/store-team/instagram-campaigns.md`, then:
   carousel, 30% pure education with no product in frame, 20% inspiring, 10% site news and trend
   reacts; at most half of a multi-post day is product-forward). The charter points at the brief for
   this ratio, so the brief is where it is maintained.
-- **Set `postType:'campaign'`** on Instagram campaign posts (the enum already carries it and no row
-  has ever used it) and name the campaign slug in the draft's event summary, so posts can be traced
-  to their campaign until the schema carries a real link.
+- **Check `mixReport` before defaulting to another product-free post, not only in the retro (ticket
+  #10719).** Call `POST /api/team/social-post {"op":"mixReport"}` (Step 7) during slate-fill, before
+  drafting slot A/D beyond what the day requires. mixReport has shown the drift running the other
+  way from the 2026-08-17 measurement above: product-free far over its §6b share, product-forward
+  far under the 6-7/14 target band, and zero carousels in the trailing 14 published rows. When the
+  returned productForward line reads under band, use remaining non-slot-A capacity for a
+  product-forward slot (B/C) rather than another product-free resource/education post, subject to
+  the #4770 per-run cap and slot-A-first precondition above, which still bind unchanged. **At least
+  one carousel per rolling 14-day window is a standing slot-E requirement, not an optional format**:
+  if mixReport's carousel count reads 0 in the trailing 14, schedule one this run, budget
+  permitting, rather than deferring it another cycle.
+- **Rolling 7-day product-forward FLOOR, checked alongside the ceiling (drift-ig-product-ratio-floor,
+  week 2026-09-21).** The "at most half a day is product-forward" rule above is a ceiling and was
+  never close to breached; the account drifted under it instead, no existing check watched that
+  direction, and it went as low as 2 of 14 posts (~14%) against the ~40% mission-brief target.
+  Target the rolling-7-day product-forward share at ~40%, floor not below ~30%, checked at draft
+  time from the same `mixReport` call. Report the trailing-7-day product-forward percentage in the
+  run summary (Step 8).
+- **When the drift is not a one-off, the "prefer" above becomes a "must" (social-mix-drift-product-
+  forward-carousel, three independent measurements: 2026-09-01, 2026-09-19, 2026-09-22).** Written
+  guidance has told a run to prefer product-forward under band for weeks and the ratio kept drifting
+  the same direction anyway. So: when the rolling-14 `mixReport` productForward count reads more
+  than 2 posts under the low end of its band on two consecutive runs, the next run's slate MUST open
+  with slot B or C (after slot A, which still ships first) rather than treating product-forward as
+  optional capacity, and at least one carousel MUST be scheduled in that same run's slot E/A choice
+  whenever the rolling-14 carousel count is still 0. This is a checked precondition at that point,
+  not a preference the run can defer under time pressure.
+- **Set `postType:'campaign'`** on every Instagram AND X product row under the on-skin standing
+  order, with `bodyZone`, `contactMode`, and `cropScale` set on both platforms, and name the campaign
+  slug in the draft's event summary, so posts can be traced to their campaign until the schema
+  carries a real link. A `manual` product row under the standing order is a run defect the summary
+  names.
 - **A campaign licenses nothing.** Step 4a, 4b, 2.6, and 2b all apply unchanged inside a campaign.
   "Wand Week" is not permission to sell wands.
 - **Any post removal ends the campaign** and steps volume down one level immediately, per
@@ -841,10 +999,13 @@ as usual: the pairing is advice, the sale lives on X and the site.
 rule only if a run verifies it before shipping; the week of 2026-08-17 it did not, and four
 toy-featuring posts (Womanizer Premium 2, Ferri, Dame Pom, Fifty Shades Ace Pro) all went out with
 no lube named. So before writing any draft that features a toy, confirm one of two things is true
-and record which in the draft's event summary: either the caption names a compatible lubricant
+and record which on the draft call itself: either the caption names a compatible lubricant
 (Instagram: named in the caption, no link; X: the lube PDP linked with channel UTMs), or no pairing
-genuinely applies (a no-product education beat, or a feature that is not a toy) and the summary says
-in one clause why none applies. A toy-featuring draft that names no lube and logs no reason has
+genuinely applies (a no-product education beat, or a feature that is not a toy) and the draft sends
+`pairingNoneReason` with one clause saying why. The publish gate reads that field, not the event
+summary; rows 283 and 284 (2026-09-21) blocked `pairing-missing` because the reason lived only in
+the summary. On X, count both PDP links at 23 characters each and check the weighted length is under
+280 BEFORE briefing the image; cut words, never the pairing. A toy-featuring draft that names no lube and logs no reason has
 failed this check and is not ready to ship. This is real helpfulness sourced from
 `accessory_product_ids` / `pairing_why` or material compatibility, never upsell theater.
 
@@ -1065,6 +1226,81 @@ that verdict stands and you do not work around it. Before accepting such a verdi
 roster was read with `SANITY_API_TOKEN` and not an empty token: on 2026-08-19 an unauthenticated
 count reported zero when seven existed.
 
+**`sceneLocation` is a required element of the draft call, not an optional extra (ticket #10269).**
+`social_posts.scene_location` shipped in migration 093 and `POST /api/team/social-post {op:'draft'}`
+has accepted it from day one, but no document ever told a caller to send it, so it sat null on
+every one of 152 rows and the §3.8 "no location repeat inside 8 consecutive Instagram product
+posts" window could only be guessed from caption prose. The location `social-art-director` chose in
+this step is what goes in `sceneLocation` on the draft call (Step 6) — carry it through, it is not
+optional. When the brief is an on-skin frame (macro/close crop of a body zone rather than a full
+scene), also carry `social-art-director`'s body zone, contact mode, and crop-scale choices through as
+`bodyZone`, `contactMode`, and `cropScale` on the same draft call (migration 099, same ticket): these
+are the sibling fields the on-skin campaign's own variety windows need to be checkable rather than
+asserted, and they will decay the same way `sceneLocation` did if nothing sends them. `sceneLocation` is sent on EVERY product row without exception, and the three on-skin fields are
+sent whenever the frame touches skin. **A product row written without them is a run defect and the
+run summary names it**, because an UNKNOWN in the mix report is indistinguishable from a cap nobody
+kept. They stay optional only for a post with no location and no body-zone shoot at all (education,
+inspiration).
+
+**Step 5.0a, the on-skin mix, and it is a rule you check before you brief (§3.2b, §3.2c).**
+On-skin frames are the active look on every surface, not a social-only experiment (owner direction
+2026-09-20). Do not restate the ceiling here; read §3.2a and §3.2c and brief from them. What this
+step owns is the mix, and every number below is a rolling window over the most recent posts, never a
+per-campaign total:
+
+- **Charge: roughly 4 ceiling / 2 mid / 1 educational per rolling 7.** §3.2b gives both an on-skin
+  definition: **ceiling on-skin** is a bare contact zone in implied-nude territory (hip hollow, small
+  of the back to the dimples, sternum with the breasts bare, stomach to the navel); **mid on-skin**
+  is a contact zone that reads clothed-adjacent even while bare (inner wrist, forearm, behind the
+  knee, the back of a shoulder). Educational stays the only frame that may be quiet.
+- **At most 3 close crops per rolling 7, and never two consecutive.** At least one ceiling frame per
+  rolling 7 is wide enough to read a location. Ten tight crops of bare skin is a stock library.
+- **Body-zone rotation window of 5.** No zone repeats inside 5 consecutive on-skin frames, judged on
+  the visible zone and not the label. Four anal or prostate products in one set is four gluteal
+  frames if shot naively, which is exactly what the window stops.
+- **Placement follows use.** Pair every body zone with a catalog category before briefing it, per the
+  worked treatments in §3.2c (plug, cock ring, paddle, lipstick bullet, beads, pasties). Pointer,
+  not a restatement: read the section.
+
+**The closer-object rule replaces the garment line in every prompt template below.** The templates
+say "wardrobe with its coverage", and on an on-skin frame there is no wardrobe to state. State
+instead **what closes each edge of the frame**: the drawn object or the named action holding it.
+§3.2b's three binding craft rules apply to the words you type: write the frame and never the
+exclusion, use an inanimate closer or a limb named by the action it is performing rather than by
+region, and never brief the supine-from-above composition with breasts in frame.
+
+Check the mix with the `mixReport` op (Step 7) BEFORE briefing, not only in the retro. A cap you
+only measure afterwards is a cap you break first.
+
+**A `macro` or `close` crop needs the cast member's BODY reference, and as of 2026-09-20 every
+cast member has one.** `presenterPhotoUrlForCrop` (`app/lib/sanity.server.ts`) picks the body
+reference for those two crop scales and the portrait for everything else. The owner approved and
+uploaded a `bodyReferencePhoto` and a `skinToneNote` for all eight active cast members (Diego,
+Emma, Jade, Marcus, Maya, Priya, Sofia, Vivian), clearing blocker #182. **Macro and close on-skin
+frames are cleared to ship.** Emma is in the rotation like anyone else, per the owner's answer to
+blocker #193.
+
+**Check, do not assume.** This paragraph states a rule, not a snapshot, because the snapshot version
+of it went stale inside a day and held the campaign's key frame for no reason. Before briefing a
+`macro` or `close` crop for a cast member, confirm that person has a `bodyReferencePhoto`. If a
+future cast member does not, hold THAT PERSON's close crop and say so in the run summary; do not
+hold the format. The selector falls back to the portrait silently when the field is empty, so
+nothing errors and the run reports success while the model invents everything below the neck and
+§3.7 clause (a) fails. That silent degradation is the reason for the check.
+
+**One real gap remains, and it is narrower than it used to be.** The route path
+(`app/routes/api.team.social-image.tsx`, `app/routes/api.admin.social-image.tsx`) calls
+`resolveCastReference`, which wraps the selector and also applies `withSkinToneNote` and the
+bare-product picker. `scripts/gen-social-image.ts` reaches `presenterPhotoUrlForCrop` directly
+instead, so it DOES resolve the right reference but the other two never run on that path. Ticket
+#10475 closes it.
+
+**Use `--cast-slug`, never `--presenter-image`, for a macro or close crop.** The CLI already
+enforces this and will not let you get it wrong: a hand-passed `--presenter-image` with
+`--crop-scale macro|close` exits 1 by design (`scripts/gen-social-image.ts:178`), and a
+`--cast-slug` whose member has no `bodyReferencePhoto` exits 1 with the remedy printed. Passing the
+body reference URL by hand is refused, not required.
+
 **The brief carries subject, product(s), and feeling, always (owner direction 2026-08-22,
 `instagram-campaigns.md` §3.9).** Alongside the handle, photo, dimensions, and beat, pass
 `social-art-director` the post's subject in one line, the product(s) that belong to that subject,
@@ -1090,6 +1326,14 @@ bowls, plates, candles, fruit bowls, napkins, styled empty tables) per `docs/des
 A product-free frame carries a narrative property (a personal trace, an interrupted state) or a cast
 member, never houseware standing in for the idea. This is the same §4.1 ban the metaphor check below
 already enforces, moved forward to selection so a resource brief never reaches the gate carrying one.
+
+**Only brief from a bare-product reference (§3.2c, binding).** Shopify `featuredMedia` is sometimes
+the retail carton, not the product: SKU 96203 has the box as image A and the product as image B, and
+passing A made the model reconstruct the toy from box art and invent a stalk and a club that do not
+exist. **Walk the product's Shopify media list and pick a text-free bare-product frame. Never assume
+the featured image is one.** That chosen URL is what goes to `--ref-image` and `--extra-ref`. If no
+text-free bare-product frame exists in the media list, say so in the run summary and move the slot
+to a different SKU rather than briefing from the carton.
 
 **Never generate a real brand's wordmark (hard pre-generation rule, ticket #5493).** Do not ask the
 image model to render a real brand's wordmark, logo lockup, or label copy on a product. These are
@@ -1197,14 +1441,27 @@ product and is hardcoded to 4:5:
 ```bash
 curl -s -X POST "$BASE_URL/api/team/social-image" \
   -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
-  -d '{"op":"cast","prompt":"<scene, location, wardrobe, light, negatives>",
+  -d '{"op":"cast","prompt":"<scene, location, light, what closes each edge, negatives>",
        "handle":"<product-handle>","mood":"<short-token>","date":"<YYYY-MM-DD>",
        "presenterImageUrl":"<castMember referencePhoto, the exact versioned URL>",
        "productImageUrl":"<real Shopify product photo>",
        "extraImageUrls":["<the same product photo again>"],
        "scale":"<cue from the product real dimensions>","count":2,
+       "sceneLocation":"<where, always>",
+       "cropScale":"<macro | close | medium, ALWAYS sent>",
+       "bodyZone":"<named zone from the vocabulary>",
+       "contactMode":"<named mode from the vocabulary>",
        "caller":"social-media-manager"}'
 ```
+
+**All four axis keys go on every product generation, and `cropScale` is the one that matters most.**
+This template used to carry none of them and asked for "wardrobe" in the prompt, which is how rows
+292 and 293 (2026-09-22) came out clothed with `body_zone` and `contact_mode` null.
+`requireSceneAxesForGeneration` only demands `bodyZone` and `contactMode` **when `cropScale` is
+`macro` or `close`**, so omitting `cropScale` satisfied validation while supplying nothing, the
+asset carried no `axis:` tag, the draft-time backfill found nothing, and the row landed null. Null
+is not the `none` sentinel: `none` means "judged, and not an on-skin frame", null means nobody
+answered, and the mix report scores null as UNKNOWN, which is not a passing line.
 
 **A second real product passed via `extraImageUrls` is a known high-failure-rate composite
 (#7728).** The two-stage packaging-strip treatment that `productImageUrl` (the PRIMARY product)
@@ -1394,10 +1651,12 @@ stops.
   degraded-to-zero honesty the Step 2b imagery preflight already requires for Instagram: the "no zero
   days" baseline is channel-scoped, and a wrong image on a linked post is worse than a missing post.
 - **Cost note.** A cast composite runs `--candidates 2`, so a full 4-post X day plus a 4-post
-  Instagram day draws roughly 16 billed generations against `social_team_max_images`, which defaults
-  to 12 and is currently unset. Reuse-first genuinely matters here, and if runs start reporting the
-  image cap as the binding constraint that is an owner config item, not something to work around by
-  dropping the cast.
+  Instagram day draws roughly 16 billed generations against `social_team_max_images`, **which the
+  owner set to 50 on 2026-09-22** (it had never been written and was running on the code default of
+  12, which is what exhausted the budget mid-run on 2026-09-21 and produced the X zero-post day in
+  ticket #10658). Reuse-first still matters, and if runs start reporting the image cap as the
+  binding constraint that is an owner config item, not something to work around by dropping the
+  cast.
 
 **Only a generated, rehosted asset is publishable.** The URL you put in `mediaUrls` must have a
 `social-` or `ig-` prefixed basename, because `isGeneratedSocialAsset` checks exactly that and the
@@ -1416,15 +1675,25 @@ accept 2 to 10 slides.
 `social_media_assets` is the team's own index and currently holds 269 unattached assets, all
 on-scheme and provenance-passing, that reuse-first never looked at because it only asked
 `media-manager` for "an existing Shopify Files / Sanity asset." Query `social_media_assets` for a
-reusable candidate first. This does not move generation later: it slots into the existing pre-draft
-position, before any caption is written, exactly where reuse-first has always lived, because a
-caption written against an undecided image is a caption written blind.
+reusable candidate first, via `POST /api/team/social-asset-query {"op":"search", product?, cast?,
+archetype?, tag?, source?, picked?, limit?}` (ticket #10660): a team-token-authed route over the
+same `listLibraryAssets` query `/admin/socials/library` uses, reachable from the scheduled sandbox,
+which has neither an admin session nor a direct Neon network path. `picked` defaults to false, so
+the default result set is candidates never yet attached to a draft or post. This does not move
+generation later: it slots into the existing pre-draft position, before any caption is written,
+exactly where reuse-first has always lived, because a caption written against an undecided image is
+a caption written blind.
 
 **Mandatory filter, all of it, or do not reuse and generate instead.** A reused asset must still
 satisfy the freshness rules in `docs/store-team/instagram-campaigns.md` §3.8: filter candidates on
 cast slug (never the same face two days running), ground colour (the 4-beat ground cycle),
 archetype (the 7-beat archetype spine), and recency, and **exclude any asset already attached to a
-posted row**. Skipping this filter produces a visibly repetitive grid, a customer-facing quality
+posted row**. **Add the on-skin axis to that filter while the standing order is in force:** a
+candidate for a product post must carry an `axis:bodyZone=` tag naming a real zone, and an asset
+with no axis tags at all is not eligible. The library holds a few hundred assets generated before
+the axes existed, all of them clothed and all of them axis-less, so reuse without this clause is
+the cheapest possible way to launder a boring frame back onto the grid and it defeats the standing
+order entirely. Skipping this filter produces a visibly repetitive grid, a customer-facing quality
 regression, not a savings worth having. Record which asset the run reused and why it was eligible
 (which filter checks it passed) in the draft's event summary, the same way a generated asset's
 brief is recorded.
@@ -1443,7 +1712,10 @@ mandatory and unchanged: generator URLs expire (Atlas output in ~14 days, fal in
 fetches the image server-side at publish time, so every asset is rehosted regardless of provider,
 routing per `docs/media-model-routing.md`. The script also writes the spend row.
 
-**Product post, cast composite.** The presenter holds and shows the product (§3.6):
+**Product post, cast composite.** The presenter holds and shows the product (§3.6). **`--scene-location`
+is required on every call, no exception** (ticket #10501: the script itself now refuses without it,
+before any money is spent) — pass `social-art-director`'s location choice, normalized to a slug
+(`bedroom-loft`, `bathroom-spa`):
 
 ```bash
 npx tsx scripts/gen-social-image.ts \
@@ -1453,6 +1725,26 @@ npx tsx scripts/gen-social-image.ts \
   --ref-image "<real Shopify product photo>" \
   --extra-ref "<the same product photo again>" \
   --scale "<cue from the product's real dimensions, see below>" \
+  --scene-location "<social-art-director's location, e.g. bedroom-loft>" \
+  --candidates 2 --caller social-media-manager
+```
+
+**On-skin brief (macro/close crop): use `--cast-slug`, never `--presenter-image`, and add
+`--body-zone`/`--contact-mode`.** Per the rule above ("Use `--cast-slug`, never `--presenter-image`,
+for a macro or close crop"), a macro or close on-skin frame also requires `--body-zone` and
+`--contact-mode` — the script refuses without them, same as `--scene-location`:
+
+```bash
+npx tsx scripts/gen-social-image.ts \
+  --prompt "<scene, the closer-object rule, light, product silhouette, negatives>" \
+  --handle <product-handle> --archetype cast --mood <short-token> \
+  --cast-slug <approved-cast-slug> --crop-scale macro|close \
+  --ref-image "<real Shopify product photo>" \
+  --extra-ref "<the same product photo again>" \
+  --scale "<cue from the product's real dimensions, see below>" \
+  --scene-location "<social-art-director's location>" \
+  --body-zone "<social-art-director's zone, e.g. hip-hollow>" \
+  --contact-mode "<social-art-director's contact mode, e.g. resting>" \
   --candidates 2 --caller social-media-manager
 ```
 
@@ -1463,7 +1755,9 @@ how a frame once shipped with an object that was not the SKU at all.
 **Product-free post** (education, inspiration, a campaign kickoff naming several categories): drop
 `--presenter-image` and pass the cast reference as `--ref-image`. With no product to preserve, a
 single reference holding just the presenter is the right tool. For art with no person either, use
-`--no-ref` with a reason.
+`--no-ref` with a reason. **`--scene-location` is still required** — it is the one axis with no
+"none" sentinel and no exemption for product-free art; give it a location even for a metaphor or
+typography frame (a flat-lay hook can still say `studio-flatlay`).
 
 **Scale is a lookup, not a judgment.** Read the length from the product's `xdipx.specifications`
 metafield ("Length: 4.7 inches") and build the cue with `scaleCueFromLengthInches()`. Do not guess a
@@ -1515,6 +1809,10 @@ carrying a bare Nalpac/Shopify SKU packshot — shipping either is drafting into
 - **Product-free art (metaphor hook, typography plate):** the single-image form,
   `--archetype scene|metaphor|macro|plate ... --ref-image <url>`, or `--no-ref --no-ref-reason
   "<why>"` for genuinely product-free art.
+- **`--scene-location` is mandatory on every call above, no exception** (ticket #10501): the script
+  refuses with exit 1 before generating if it is missing. `--body-zone` and `--contact-mode` are
+  additionally mandatory whenever `--crop-scale` is `macro` or `close`. This is enforced pre-spend at
+  generation, not backfilled later — a missing axis here is a run defect, not a note for later.
 - **The cast-composite path is LIVE. Do not degrade to the single-image form.** This bullet used to
   say the cast form was waiting on an unmerged publish-job PR; that PR merged, and
   `generateCastComposite` and `scaleCueFromLengthInches` both ship in
@@ -1532,7 +1830,8 @@ identity is degraded, rather than letting a reuse-only run look like a normal on
 the video_jobs pipeline), never improvised here: approved videos arrive in your world as
 pre-approved `social_posts` rows (postType `video_reel`/`video_short`, `video_job_id` set) fanned
 out from `/admin/video-studio`. Do not draft over them, count them against your text/image
-quotas, or reschedule them; your daily drafts stay additive to the video slate. If a video draft's
+quotas, or reschedule them. On a clip day the reel is the day's Instagram post and the X companion
+follows it (Step 2.8); on every other day your drafts stay additive to the video slate. If a video draft's
 caption reads off-voice, file a suggestion targeting the video team rather than editing it.
 
 LinkedIn drafts are **text-only by default** — no `mediaUrls` required, and product photography is
@@ -1546,10 +1845,34 @@ verdict for this exact caption. `verdict` must be `PASS` and `reviewer` names th
 it; anything else (a missing verdict, a `REVISE`/`BLOCK`, or a gate that could not run) returns 400
 and writes no row.
 
+**`sceneLocation` rides along on every product draft** (ticket #10269, see Step 5): the
+same value `social-art-director` chose, carried through unchanged, always, including when the crop
+ate the room. `bodyZone`/`contactMode`/`cropScale` ride along too, on every frame that touches skin.
+**`castSlugs` rides along on every product draft as well**, because §3.7 clause (a) is only
+checkable when the row names who the skin belongs to. A product row written without these is a run
+defect: report it in the run summary by row id rather than letting it land as a null nobody reads.
+
+**`shopifyProductId` rides along on every product draft, and it is the one field on this list that
+has a money consequence when it is missing.** It is the Shopify product gid
+(`gid://shopify/Product/<numeric id>`) of the SKU the post features, the same product the Step 2.6
+stock check already fetched by handle; read the gid off that response and carry it here. Two things
+read this column and read nothing else. The publish-time stock guard
+(`social-publish/stock-guard.server.ts`) re-checks stock at the hourly tick only when the column is
+set, so a product post written without it can ship after its product sells out, which is the
+2026-08-09 incident the guard exists to prevent. And the mix report (Step 7) counts a row as
+product-forward only when it is set. On 2026-09-20 the report read 0 product-forward of 14 while the
+captions named SKUs, because this playbook had never listed the field: every product post the routine
+had ever drafted carried a null. The gate now backfills the column from the `productHandle` its PASS
+asserts (`applyPublishGateVerdict`), so a forgotten id is repaired at approval time, but that is the
+safety net, not the path: a product row drafted without `shopifyProductId` is a run defect, report it
+by row id exactly like a missing `sceneLocation`. A product-free frame omits it, and that omission is
+what the report counts as product-free, so never send a product id on a frame that does not feature
+the product.
+
 ```bash
 curl -s -X POST "$BASE_URL/api/team/social-post" \
   -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
-  -d '{"op":"draft","platform":"instagram","postType":"manual","tweetText":"<caption>","mediaUrls":["<url>"],"altText":"<plain description of the image, Emma voice, never in the caption>","subject":"<the post subject in one line>","imageBrief":"<the social-art-director brief: subject, product(s), feeling>","scheduledFor":"<YYYY-MM-DD>","reworkedFrom":<id or omit>,"voiceGate":{"verdict":"PASS","reviewer":"emma-empathy-reviewer","addendum":"social","notes":"<one line from the gate>"}}'
+  -d '{"op":"draft","platform":"instagram","postType":"campaign","tweetText":"<caption>","mediaUrls":["<url>"],"altText":"<plain description of the image, Emma voice, never in the caption>","subject":"<the post subject in one line>","imageBrief":"<the social-art-director brief: subject, product(s), feeling>","shopifyProductId":"<product post only: gid://shopify/Product/<id> of the featured SKU, from the Step 2.6 fetch>","sceneLocation":"<the location social-art-director chose, e.g. bedroom-loft>","castSlugs":["<the cast member social-art-director chose>"],"bodyZone":"<on-skin frame only, e.g. hip-hollow>","contactMode":"<on-skin frame only, e.g. resting>","cropScale":"<on-skin frame only, e.g. close>","pairingNoneReason":"<only when no lube is named: one clause why>","scheduledFor":"<YYYY-MM-DD>","reworkedFrom":<id or omit>,"voiceGate":{"verdict":"PASS","reviewer":"emma-empathy-reviewer","addendum":"social","notes":"<one line from the gate>"}}'
 ```
 
 **X drafts carry `mediaUrls` too — never omit it.** The server 400s a `platform:'x'` draft with an
@@ -1559,7 +1882,7 @@ empty or missing `mediaUrls` array (ticket #4131), the same fail-closed shape as
 ```bash
 curl -s -X POST "$BASE_URL/api/team/social-post" \
   -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
-  -d '{"op":"draft","platform":"x","postType":"manual","tweetText":"<caption with PDP link>","mediaUrls":["<url>"],"altText":"<plain description of the image>","scheduledFor":"<YYYY-MM-DD>","voiceGate":{"verdict":"PASS","reviewer":"emma-empathy-reviewer","addendum":"social","notes":"<one line from the gate>"}}'
+  -d '{"op":"draft","platform":"x","postType":"campaign","tweetText":"<caption with PDP link>","mediaUrls":["<url>"],"altText":"<plain description of the image>","shopifyProductId":"<product post only: the same gid as the Instagram post this beat companions>","bodyZone":"<on-skin frame only, e.g. hip-hollow>","contactMode":"<on-skin frame only, e.g. resting>","cropScale":"<on-skin frame only, e.g. close>","pairingNoneReason":"<only when no lube is named: one clause why>","scheduledFor":"<YYYY-MM-DD>","voiceGate":{"verdict":"PASS","reviewer":"emma-empathy-reviewer","addendum":"social","notes":"<one line from the gate>"}}'
 ```
 
 **`altText` is fail-closed too, for any media-bearing Instagram or X draft (ticket #5486), the same
@@ -1622,6 +1945,13 @@ the [X] thing you [verb]?") and rewrite any hit before `op:'draft'`. id141 (a re
 "tell me below" a day after row 133 spent it in the same campaign. Both checks are draft-time
 catches for the exact failure mode the voice gate misses (it reads a caption in isolation, not
 against posted history) and the publish gate catches at the cost of a full rework cycle.
+**Tenth check, X weighted length (ticket #10435), X drafts only:** before calling `op:'draft'` on
+a `platform:'x'` row, compute the caption's weighted length the way X (and the publish gate) does:
+every URL counts at t.co width, 23 characters, regardless of its real length
+(`app/lib/social-publish/x-limits.ts`), not `String.length`. Trim or rewrite if the weighted total
+exceeds 280. Four X drafts BLOCKed on the publish gate's deterministic `caption-too-long` check in
+the week before 2026-09-20 (rows 260, 251, 247, 241, all 290-369 raw chars against the 280 weighted
+limit) that this check would have caught before the draft ever reached the gate.
 
 **Every image-bearing post carries an accessibility description, and it goes in `altText`, never in
 `tweetText` (ticket #4067, re-homed by owner direction 2026-08-22).** This is standing, not an
@@ -1751,7 +2081,10 @@ The gate that runs works; the problem this sweep fixes is coverage, not the gate
 `videoJobId` exactly the same way, one `POST /api/team/publish-gate` call per row. These are Reels
 the owner approved in the Video Studio; that approval reviewed the video, not the finished post, so
 they wait here for the same verdict your own drafts get. Skipping them strands them: no other pass
-gates a video row, and an ungated row can never publish.
+gates a video row, and an ungated row can never publish. **Carve-out (clip days, Step 2.8):** until
+the Phase 3 valve double-gate merges and the owner flips `video_team_autopublish` on, do not gate a
+`videoJobId` reel row here. It stays at `pending_review` for the owner's manual Post now in
+`/admin/socials/queue`, and on its clip day it counts toward Step 1b's done for Instagram.
 
 Give it only the post id. It gathers its own inputs server-side: the caption as it will publish,
 every media URL, the charter as it reads today, and the ads policy (see the known-gap note above for
@@ -1851,7 +2184,43 @@ had, so the replacement is not optional. Read instead:
 5. **Slate-mix self-check, computed not asserted (ticket #4066).** Of the last 7 published Instagram
    posts, count and report three numbers: how many were product-forward, how many were carousels, and
    how many were slot A (the product-free resource post). Compute them from real rows, do not assert
-   them. Two consecutive weeks over the 50% product-forward ceiling (`instagram-campaigns.md` §4a)
+   them.
+
+   **Call the mix report; do not hand-count it.** The call is:
+
+   ```bash
+   curl -s -X POST "$BASE_URL/api/team/social-post" \
+     -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
+     -d '{"op":"mixReport"}'
+   ```
+
+   It is backed by `app/lib/social-mix-report.server.ts` (ticket #10271) and it computes more than
+   the three numbers above: the ceiling / mid / educational split against the §3.2b charge ratio,
+   the close-crop cap from §3.2c, the body-zone and location variety windows from §3.2c and §3.8,
+   and the carousel count. Paste the returned `lines` into the `decision` event verbatim.
+
+   **The product-forward and product-free lines read `shopify_product_id` and nothing else.** They
+   never infer a product from caption prose. So a product post drafted without `shopifyProductId`
+   (Step 6) counts as product-free here, and a product-forward line that reads implausibly low
+   against the slate is the first symptom of that defect, not a content finding. On 2026-09-20 it
+   read 0 of 14 for exactly that reason. When the line disagrees with what the slate says shipped,
+   list the row ids whose column is null in the summary before drawing any conclusion about mix.
+
+   The op and the `/admin/socials` panel that renders the same numbers both shipped with #10271.
+   **This playbook did not call either**, so Step 7 went on asking for three hand-counted numbers
+   while a fuller report sat one request away. That is the same shape as the regression the report
+   exists to catch: an instrument nothing reads. Call it every run.
+
+   **An UNKNOWN line is not a passing line.** `bodyZone`, `contactMode` and `cropScale` (migration
+   099) and `sceneLocation` (093) are null on every row drafted before Step 5 and Step 6 started
+   sending them, so those windows read UNKNOWN until enough new rows accumulate. Report the UNKNOWN
+   count as its own number. Reading a quiet report as a clean one is precisely how the regression
+   this instrument exists to catch survived three weeks: on 2026-09-19 the last 21 posted frames
+   held 1 ceiling frame against the ~12 the ratio implies, and nothing on any page said so.
+
+   **It is a report, never a gate.** It produces aggregate lines, never a per-frame verdict, and it
+   is not wired into `social-publish-gate.server.ts`. A breach is a finding for this summary to act
+   on, not a reason to hold a post the publish gate already passed. Two consecutive weeks over the 50% product-forward ceiling (`instagram-campaigns.md` §4a)
    files a suggestion (`team:'social'`, kind `instructions`) against this playbook. A standing target,
    checked within two weeks of this rule landing: at least one product-free resource post AND at least
    one carousel have published.
@@ -1940,3 +2309,7 @@ The summary always carries: drafts written and reworks (per platform), gate resu
 check slugs, **drafted versus approved versus posted as three separate numbers per platform**, the
 Step 1b rung the run reached, and the retro verdict. A summary that reports twelve drafts and does
 not say how many are live has not reported the run.
+
+Also carries, per the drift-floor checks in Step 3: a register self-assessment per Instagram post,
+the trailing-7-day product-forward percentage, and, per Instagram post, which `marketing_calendar`
+row id its theme was drawn from.

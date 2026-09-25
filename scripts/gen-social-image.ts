@@ -16,7 +16,18 @@
  *     [--platform instagram|tiktok|x] [--ref-image <shopify-product-photo-url>] \
  *     [--no-ref --no-ref-reason "metaphor hook, no product target"] \
  *     [--slide 2] [--date 2026-08-12] [--images-so-far 3] \
+ *     [--body-zone hip-hollow] [--contact-mode resting] [--crop-scale medium] \
+ *     [--scene-location bedroom-loft] \
  *     [--only fal|imagen] [--caller social-media-manager] [--dry-run]
+ *
+ * The four scene axes (--body-zone / --contact-mode / --crop-scale /
+ * --scene-location, ticket #10479) ride with generation, where the brief
+ * actually chooses them, and are stamped onto the `social_media_assets` row.
+ * The draft op resolves them back from the asset by media URL, so the drafting
+ * agent never has to restate them. Each is validated against
+ * `app/lib/social-scene-vocab.ts` server-side: an out-of-vocabulary token is
+ * refused HERE, before any money is spent, which is the whole point of putting
+ * the check at generation rather than at draft time.
  *
  * --ref-image is REQUIRED unless --no-ref is given with a reason, mirroring the
  * homepage rule: an image meant to show a real SKU must place the real SKU via
@@ -76,6 +87,7 @@ function hasFlag(name: string): boolean {
  * is honored, not treated as unset.
  */
 import { SOCIAL_MAX_IMAGES_DEFAULT } from '~/lib/team-keys'
+import { requireSceneAxesForGeneration } from '~/lib/social-scene-vocab'
 // Type-only: erased at runtime, so importing it never loads shopify.server /
 // db.server into the sandbox. Generation + rehost now run SERVER-SIDE via
 // POST /api/team/social-image (ticket #4133), where the Shopify Admin token
@@ -106,7 +118,23 @@ async function main() {
   const mood        = arg('mood')
   const platform    = arg('platform') ?? 'instagram'
   const refImage    = arg('ref-image')
-  const presenter   = arg('presenter-image')
+  const presenterArg = arg('presenter-image')
+  const castSlug    = arg('cast-slug')
+  const cropScale   = arg('crop-scale')
+  // The other three scene axes (ticket #10479). They are decided HERE, in the
+  // brief, alongside the crop, so they travel with the generation call and get
+  // stamped onto the `social_media_assets` row. The draft then resolves them
+  // back by URL instead of asking the drafting agent to restate them, which is
+  // the step that failed 281 times out of 281 across migrations 093 and 099.
+  const bodyZone      = arg('body-zone')
+  const contactMode   = arg('contact-mode')
+  const sceneLocation = arg('scene-location')
+  const sceneAxes = {
+    ...(bodyZone ? { bodyZone } : {}),
+    ...(contactMode ? { contactMode } : {}),
+    ...(cropScale ? { cropScale } : {}),
+    ...(sceneLocation ? { sceneLocation } : {}),
+  }
   const scale       = arg('scale')
   const extraRef    = arg('extra-ref')
   const noRef       = hasFlag('no-ref')
@@ -120,7 +148,7 @@ async function main() {
   const dryRun      = hasFlag('dry-run')
 
   if (!prompt || !handle || !archetype || !mood) {
-    console.error('Usage: gen-social-image.ts --prompt <p> --handle <h> --archetype scene|cast|metaphor|macro|plate --mood <m> [--platform instagram|tiktok|x] [--ref-image <url>] [--no-ref --no-ref-reason "<why>"] [--slide <n>] [--date YYYY-MM-DD] [--images-so-far <n>] [--only fal|imagen] [--caller <c>] [--run-id <n>] [--dry-run]')
+    console.error('Usage: gen-social-image.ts --prompt <p> --handle <h> --archetype scene|cast|metaphor|macro|plate --mood <m> [--platform instagram|tiktok|x] [--ref-image <url>] [--no-ref --no-ref-reason "<why>"] [--cast-slug <slug> --crop-scale macro|close|medium|wide | --presenter-image <url>] [--scale palm|handheld|forearm|bottle] [--slide <n>] [--date YYYY-MM-DD] [--images-so-far <n>] [--only fal|imagen] [--caller <c>] [--run-id <n>] [--dry-run]')
     process.exit(1)
   }
   if (!ARCHETYPES.includes(archetype)) {
@@ -145,22 +173,121 @@ async function main() {
     console.error('--no-ref requires --no-ref-reason "<why>" (echoed in the manifest)')
     process.exit(1)
   }
+  // ── Presenter reference selection (ticket #10270, wired 2026-09-20) ──────
+  //
+  // `presenterPhotoUrlForCrop` shipped with #10270 and had no caller: this
+  // script took `--presenter-image` as a caller-supplied URL and never asked
+  // which reference the crop actually needs. A macro or close on-skin crop
+  // carries no face, so anchoring it to the portrait means the model invents
+  // everything below the neck including skin tone, under a named persona's
+  // name. §3.7 clause (a) fails and nothing said so, because the selector's
+  // fallback is silent by design.
+  //
+  // So: pass `--cast-slug` and `--crop-scale` and this resolves the right
+  // reference and REFUSES when the close-crop one does not exist yet. The
+  // refusal is the point. A silent portrait substitution is worse than no
+  // image, and "held" is the documented posture until the owner approves a
+  // body reference (`routine-social-daily.md` Step 5).
+  const CROP_SCALES = ['macro', 'close', 'medium', 'wide']
+  if (cropScale && !CROP_SCALES.includes(cropScale)) {
+    console.error(`--crop-scale must be one of: ${CROP_SCALES.join(', ')}`)
+    process.exit(1)
+  }
+  const needsBodyReference = cropScale === 'macro' || cropScale === 'close'
+
+  // ── Scene axes: required, not merely validated-if-present (ticket #10501) ──
+  //
+  // Ticket #10479/#10480 made the axes ride with generation, where the brief
+  // actually chooses them, so the draft op never has to ask the drafting
+  // agent to recall them. But nothing forced a caller to actually SUPPLY
+  // them here, so the routine's Step 5 template could (and did) omit every
+  // one, producing an untagged asset the backfill has nothing to read from.
+  // That is exactly the shape that decayed coverage to 0/7 twice already
+  // (migrations 093 and 099). Refusing here is pre-spend and costs exactly
+  // one retry — the opposite of refusing at draft time, which would strand
+  // an already-billed image. The rule itself lives in social-scene-vocab.ts
+  // (requireSceneAxesForGeneration), shared with api.team.social-image.tsx
+  // so the two surfaces cannot drift.
+  const axesRequired = requireSceneAxesForGeneration(sceneAxes)
+  if (!axesRequired.ok) {
+    console.error(`${axesRequired.error}. See app/lib/social-scene-vocab.ts.`)
+    process.exit(1)
+  }
+
+  if (castSlug && presenterArg) {
+    console.error('--cast-slug and --presenter-image are mutually exclusive: pass the slug and let the crop scale pick the reference, or pass the URL yourself.')
+    process.exit(1)
+  }
+  // The back-compat path cannot be allowed to smuggle in the exact failure
+  // above. A hand-passed URL for a close crop is the silent substitution.
+  if (presenterArg && needsBodyReference) {
+    console.error(`--presenter-image with --crop-scale ${cropScale} is refused: a close or macro crop must resolve its reference through --cast-slug so the missing-body-reference case can be caught. See routine-social-daily.md Step 5.`)
+    process.exit(1)
+  }
+
+  // Ticket #10475: this block keeps every pre-spend refusal below (unknown
+  // slug, missing body reference) so a human running the CLI interactively
+  // still gets an immediate, friendly exit, but no longer resolves the
+  // reference URL itself. The route's own `if (castSlug)` branch
+  // (app/routes/api.team.social-image.tsx) already calls the shared
+  // `resolveCastReference`, which both picks the URL AND prepends the
+  // member's `withSkinToneNote` clause to the prompt — sending a
+  // pre-resolved `presenterImageUrl` here instead of `castSlug` bypassed
+  // that branch entirely, so the skin-tone note (and, when no explicit
+  // product image is supplied, `pickBareProductImage`) never ran on this
+  // scheduled path.
+  const presenter = presenterArg
+  if (castSlug) {
+    if (!cropScale) {
+      console.error('--cast-slug requires --crop-scale macro|close|medium|wide: the crop is what decides which reference is correct.')
+      process.exit(1)
+    }
+    const { getApprovedCastMembers } = await import('../app/lib/sanity.server')
+    const roster = await getApprovedCastMembers()
+    if (!roster.length) {
+      // Never read an empty roster as "there are none": an unauthenticated
+      // read of this dataset returned 1 of 8 on 2026-08-19 and that false zero
+      // reached three binding documents.
+      console.error('No approved cast members returned. Check SANITY_API_TOKEN is set and non-empty before concluding the roster is empty.')
+      process.exit(1)
+    }
+    const member = roster.find(m => m.slug === castSlug)
+    if (!member) {
+      console.error(`--cast-slug "${castSlug}" is not an approved cast member. Approved: ${roster.map(m => m.slug).join(', ')}`)
+      process.exit(1)
+    }
+    if (needsBodyReference && !member.bodyReferencePhotoUrl) {
+      console.error(
+        `${member.name} has no bodyReferencePhoto, so a ${cropScale} crop cannot be generated.\n` +
+        'Generating it from the portrait would invent the body and skin tone under this persona\'s name,\n' +
+        'which fails instagram-campaigns.md §3.7 clause (a). Hold the post and say so in the run summary.\n' +
+        'To unblock: npx tsx scripts/generate-cast-body-references.ts, owner picks, upload to\n' +
+        'castMember.bodyReferencePhoto.',
+      )
+      process.exit(1)
+    }
+    console.log(`presenter reference: ${member.name} @ crop ${cropScale} -> ${needsBodyReference ? 'bodyReferencePhoto' : 'referencePhoto'} (resolved server-side)`)
+  }
+  // Either reference path means a cast composite: a caller-supplied URL or an
+  // approved cast slug the route resolves itself.
+  const usingCastComposite = Boolean(presenter || castSlug)
+
   // A cast composite needs BOTH references. With only the presenter, the model
   // preserves the presenter and invents the product, which is exactly the
   // failure this mode exists to fix.
-  if (presenter && !refImage) {
-    console.error('--presenter-image requires --ref-image <real shopify product photo>: a cast composite needs both references, or the product is invented.')
+  if (usingCastComposite && !refImage) {
+    console.error('--presenter-image/--cast-slug requires --ref-image <real shopify product photo>: a cast composite needs both references, or the product is invented.')
     process.exit(1)
   }
-  if (presenter && archetype !== 'cast') {
-    console.error('--presenter-image requires --archetype cast')
+  if (usingCastComposite && archetype !== 'cast') {
+    console.error('--presenter-image/--cast-slug requires --archetype cast')
     process.exit(1)
   }
   // Required, not defaulted. A silent default would be wrong for most of the
   // catalog and wrong invisibly, which is exactly how a palm-sized toy shipped
   // vase-sized (#2761).
-  if (presenter && !scale) {
-    console.error('--presenter-image requires --scale palm|handheld|forearm|bottle (or a free-text clause relative to the hand). Omitting it renders the product the wrong size.')
+  if (usingCastComposite && !scale) {
+    console.error('--presenter-image/--cast-slug requires --scale palm|handheld|forearm|bottle (or a free-text clause relative to the hand). Omitting it renders the product the wrong size.')
     process.exit(1)
   }
 
@@ -238,8 +365,8 @@ async function main() {
         prompt, handle, archetype, mood, platform, imageSize, aspect, date,
         ...(slide ? { slide } : {}),
         filename: buildSocialAssetFilename({ handle, archetype: archetype as never, mood, date, aspect, ...(slide ? { slide } : {}) }),
-        only: presenter ? 'composeSceneFrame (qwen plate -> flux-2 lora edit)' : (only ?? 'fal-then-imagen'),
-        ...(presenter ? { presenter, mode: 'cast-composite', scale } : {}),
+        only: usingCastComposite ? 'composeSceneFrame (qwen plate -> flux-2 lora edit)' : (only ?? 'fal-then-imagen'),
+        ...(usingCastComposite ? { mode: 'cast-composite', scale, ...(presenter ? { presenter } : { castSlug }) } : {}),
         caller, cap, capSource,
         ...(refImage ? { refImage } : { noRefReason }),
       },
@@ -250,16 +377,21 @@ async function main() {
   // ── 4a. Cast composite (two-stage) ────────────────────────────────────────
   // A single reference image holds exactly one thing, so the single-ref path
   // below cannot hold a cast identity AND a real product at once: it preserves
-  // the presenter and invents the product. Anything with a presenter goes
-  // through composeSceneFrame instead, which takes both references.
-  if (presenter) {
+  // the presenter and invents the product. Anything with a presenter or a
+  // cast slug goes through composeSceneFrame instead, which takes both
+  // references.
+  if (usingCastComposite) {
     const result = await callSocialImageRoute<GenerateCastCompositeResult>({
       op: 'cast',
       prompt,
       handle,
       mood,
       date,
-      presenterImageUrl: presenter,
+      // castSlug (not a pre-resolved URL) when the caller used --cast-slug,
+      // so the route's own resolveCastReference call runs and applies the
+      // skin-tone note (ticket #10475); the caller-supplied URL path is
+      // unchanged.
+      ...(presenter ? { presenterImageUrl: presenter } : { castSlug }),
       productImageUrl: refImage!,
       scale: scale!,
       ...(extraRef ? { extraImageUrls: [extraRef] } : {}),
@@ -270,6 +402,8 @@ async function main() {
       aspectRatio: platform === 'x' ? '16:9' : '4:5',
       count: Number(arg('candidates') ?? '2'),
       caller,
+      // Stamped onto every candidate's library row (#10479).
+      ...sceneAxes,
       ...(runId && /^\d+$/.test(runId) ? { runId: Number(runId) } : {}),
     })
 
@@ -285,6 +419,9 @@ async function main() {
       provider: 'fal',
       stages: result.costs,
       scale,
+      // Echoed so the run log shows what was recorded on the asset. The draft
+      // does not need it back: it resolves the axes from the asset by URL.
+      ...(Object.keys(sceneAxes).length ? { sceneAxes } : {}),
       cap, capSource,
     }))
     process.exit(0)
@@ -306,6 +443,8 @@ async function main() {
     ...(slide ? { slide } : {}),
     ...(refImage ? { refImageUrl: refImage } : {}),
     ...(only ? { only } : {}),
+    // Stamped onto the library row (#10479), same as the cast path above.
+    ...sceneAxes,
     ...(runId && /^\d+$/.test(runId) ? { runId: Number(runId) } : {}),
   })
 
@@ -319,6 +458,7 @@ async function main() {
       : null,
     provider: result.provider,
     model: result.model,
+    ...(Object.keys(sceneAxes).length ? { sceneAxes } : {}),
     cap,
     capSource,
     ...(refImage ? {} : { noRefReason }),

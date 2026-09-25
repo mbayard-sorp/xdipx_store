@@ -192,11 +192,17 @@ export const SOCIAL_MAX_IMAGES_DEFAULT = 12
  * cost exceeds it, so a model-tier misconfig cannot drain the daily budget in
  * one loop. frame_review parks every job at awaiting_frame_approval so the
  * owner picks the scene frame in /admin/video-studio BEFORE the expensive clip
- * generation; flipping it off lets auto-QC choose the frame.
+ * generation; flipping it off lets auto-QC choose the frame. render_review
+ * parks every finished cut at awaiting_render_approval so the owner approves
+ * the final video before it fans out to social drafts; flipping it off lets a
+ * finished cut land straight in the Ready-for-review list as before.
  */
 export const VIDEO_EXTRA_KEYS = {
   maxCostCents: 'video_team_max_cost_cents',
   frameReview:  'video_frame_review',
+  // Final-cut gate (defaults ON, read like frame_review: anything but 'false'
+  // is on). No migration seeds the row; absence is the expected steady state.
+  renderReview: 'video_render_review',
   // Hard cap on how many jobs one enqueue-set call may expand to (078). Read
   // via getTeamConfig('video').maxVariantsPerSet — the key rides the existing
   // 'video_team_%' LIKE query, no extra round trip.
@@ -222,11 +228,12 @@ export const VIDEO_MAX_VARIANTS_PER_SET_DEFAULT = 4
 
 /**
  * Default modelTier when video_default_model_tier is unset AND the caller
- * omits modelTier. kling25-pro: the cheapest fully-silent standard tier
- * already in production use, so a misconfigured/absent default never
- * accidentally selects an expensive or unvalidated tier.
+ * omits modelTier. italk-atlas (ADR-016): InfiniteTalk on Atlas, the default
+ * talking tier from the 2026-09-23 bake-off. The previous default,
+ * kling25-pro, was a retired fal tier, so every enqueue that omitted
+ * modelTier was refused. The stored setting stays the owner's override.
  */
-export const VIDEO_DEFAULT_MODEL_TIER_DEFAULT = 'kling25-pro'
+export const VIDEO_DEFAULT_MODEL_TIER_DEFAULT = 'italk-atlas'
 
 /**
  * Delivery-tone vocabulary for video speech (spec §5 Phase 3). Optional and
@@ -463,7 +470,8 @@ export const VALVE_KEYS = {
   // OFF; `getValve` treats the missing row as off so it ships inert.
   socialMetricsSweep: 'social_metrics_sweep_enabled',
   // Serialized video program (all-hands 2026-08-26): arms the 2x-weekly render
-  // routine that claims owner-APPROVED episodes and spends real RunPod money.
+  // routine that claims owner-APPROVED episodes and spends real video-provider
+  // money (Atlas Cloud since ADR-016).
   // Ships OFF with no migration seed: getValve treats the missing row as off,
   // and the owner's first flip on the Video tab creates the row. The writers
   // room (zero spend) is NOT gated by this; only the render lane is.

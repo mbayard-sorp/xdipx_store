@@ -30,8 +30,8 @@ import {
   listAdCampaigns, decideAdCampaign, SUGGESTION_LIST_MAX, getSocialFrequencies,
   type TeamConfig, type GateResult, type TicketStatus,
 } from '~/lib/team.server'
-import { TEAM_IDS, teamKeys, isTeamId, HOMEPAGE_EXTRA_KEYS, CONTENT_EXTRA_KEYS, VIDEO_EXTRA_KEYS, VALVE_KEYS, SOCIAL_PLATFORMS, SOCIAL_FREQ_DEFAULTS, socialFreqKey, X_METRICS_MAX_READS_MONTH_KEY, X_METRICS_MAX_READS_MONTH_DEFAULT, type TeamId, type SocialPlatform } from '~/lib/team-keys'
-import { getTodayRunpodPodSpendCents } from '~/lib/token-log.server'
+import { TEAM_IDS, teamKeys, isTeamId, HOMEPAGE_EXTRA_KEYS, CONTENT_EXTRA_KEYS, VIDEO_EXTRA_KEYS, VIDEO_DEFAULT_MODEL_TIER_DEFAULT, VALVE_KEYS, SOCIAL_PLATFORMS, SOCIAL_FREQ_DEFAULTS, socialFreqKey, X_METRICS_MAX_READS_MONTH_KEY, X_METRICS_MAX_READS_MONTH_DEFAULT, SOCIAL_EXTRA_KEYS as SOCIAL_TEAM_EXTRA_KEYS, SOCIAL_MAX_IMAGES_DEFAULT, type TeamId, type SocialPlatform } from '~/lib/team-keys'
+import { VIDEO_MODELS } from '~/lib/fal-video.server'
 import {
   NO_EXECUTOR_KINDS, classifyTeamTablesError, facetTotal, fmtAge, sumFacetCount, truncationNote,
   type TicketFacetRow,
@@ -183,6 +183,7 @@ interface LoaderData {
   videoProgram: boolean
   videoDefaultModelTier: string | null
   videoFrameReview: boolean
+  videoRenderReview: boolean
   videoEndcard: boolean
   instagramAutopublish: boolean
   instagramPublishMaxPerDay: number
@@ -200,12 +201,12 @@ interface LoaderData {
   releaseEngine: boolean
   releaseEngineMaxMerges: number
   /**
-   * Today's out-of-band RunPod pod (GPU) spend in cents, record-only and NOT
-   * gated (ticket #6320). Shown on the Video tab beside the gated "Spent today"
-   * figure so a day that spent bake-off/bootstrap money on the Pods product no
-   * longer reads $0. Null on any tab other than video, or on a read failure.
+   * Tiers the Video tab's default-model-tier picker offers: every registered
+   * tier that is not a retired fal tier and not owner-only, read from
+   * VIDEO_MODELS so the picker cannot drift from the registry. Empty on
+   * every other tab.
    */
-  runpodPodSpentCents: number | null
+  videoTierOptions: Array<{ id: string; label: string }>
 }
 
 export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderData> {
@@ -218,7 +219,7 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
   const config = await getTeamConfig(team).catch(
     (): TeamConfig => ({ team, enabled: false, dailyCents: 500, maxRunsPerDay: 1, autoApproveSuggestions: false }),
   )
-  const [autopost, socialTrendScout, socialMetricsSweep, suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish, videoProgram, videoDefaultModelTier, videoFrameReview, videoEndcard, instagramAutopublish, instagramPublishRow, xAutopublish, xPublishRows, releaseEngineRow, socialFrequencies] = await Promise.all([
+  const [autopost, socialTrendScout, socialMetricsSweep, suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish, videoProgram, videoDefaultModelTier, videoFrameReview, videoRenderReview, videoEndcard, instagramAutopublish, instagramPublishRow, xAutopublish, xPublishRows, releaseEngineRow, socialFrequencies] = await Promise.all([
     getValve(VALVE_KEYS.socialAutopost).catch(() => false),
     getValve(VALVE_KEYS.socialTrendScout).catch(() => false),
     getValve(VALVE_KEYS.socialMetricsSweep).catch(() => false),
@@ -231,16 +232,20 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
     // writers room is not gated by this; only the render lane's episode-claim.
     getValve(VALVE_KEYS.videoProgram).catch(() => false),
     // Default model tier is not a valve (it holds a tier id, not a boolean);
-    // read directly like frame review below. No row = the code fallback,
-    // which is still the legacy kling25-pro constant, so surfacing the raw
-    // state here is what lets the owner pin wan22-i2v per the fal-images-only
-    // provider policy (2026-08-26).
+    // read directly like frame review below. No row = the code fallback
+    // (VIDEO_DEFAULT_MODEL_TIER_DEFAULT); surfacing the raw state here is what
+    // lets the owner pin a different Atlas tier.
     db.select().from(pipelineSettings).where(eq(pipelineSettings.key, VIDEO_EXTRA_KEYS.defaultModelTier)).limit(1)
       .then(rows => rows[0]?.value ?? null)
       .catch(() => null),
     // Frame review is not a VALVE_KEYS member (it defaults ON, unlike the
     // ship-OFF valves) — read it directly from pipeline_settings.
     db.select().from(pipelineSettings).where(eq(pipelineSettings.key, VIDEO_EXTRA_KEYS.frameReview)).limit(1)
+      .then(rows => rows[0]?.value !== 'false')
+      .catch(() => true),
+    // Render review (final-cut gate) defaults ON exactly like frame review;
+    // no migration seeds the row, so absence reads ON.
+    db.select().from(pipelineSettings).where(eq(pipelineSettings.key, VIDEO_EXTRA_KEYS.renderReview)).limit(1)
       .then(rows => rows[0]?.value !== 'false')
       .catch(() => true),
     // End card defaults OFF; read directly for the same not-a-VALVE_KEYS reason.
@@ -321,11 +326,11 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
     if (classifyTeamTablesError(err) === 'unmigrated') migrated = false
     else loadError = true
   }
-  // Record-only out-of-band pod GPU spend, shown beside the video gate figure
-  // (ticket #6320). Only queried on the video tab; getTodayRunpodPodSpendCents
-  // is itself best-effort and returns 0 on error, so this never adds a failure
-  // mode to the page.
-  const runpodPodSpentCents = team === 'video' ? await getTodayRunpodPodSpendCents() : null
+  const videoTierOptions = team === 'video'
+    ? Object.entries(VIDEO_MODELS)
+      .filter(([, spec]) => !spec.legacy && !spec.ownerOnly)
+      .map(([id, spec]) => ({ id, label: spec.label }))
+    : []
   // Filters live in the query string so a filtered board is a shareable URL and
   // a browser refresh keeps the owner where they were.
   const sortParam = url.searchParams.get('sort')
@@ -443,9 +448,9 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
     filteredOpenTotal, ticketLinks, filter,
     kindOptions, assigneeOptions, teamOptions, statusCounts, briefs, campaigns, autopost, socialTrendScout, socialMetricsSweep,
     suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish, videoProgram,
-    videoDefaultModelTier, videoFrameReview, videoEndcard, instagramAutopublish, instagramPublishMaxPerDay,
+    videoDefaultModelTier, videoFrameReview, videoRenderReview, videoEndcard, instagramAutopublish, instagramPublishMaxPerDay,
     xAutopublish, xPublishMaxPerDay, xPublishMaxSpendUsdMonth, xMetricsMaxReadsMonth, socialFrequencies,
-    releaseEngine, releaseEngineMaxMerges, runpodPodSpentCents,
+    releaseEngine, releaseEngineMaxMerges, videoTierOptions,
   }
 }
 
@@ -464,6 +469,13 @@ export async function action({ request }: ActionFunctionArgs) {
     ...Object.values(VIDEO_EXTRA_KEYS),
     ...Object.values(VALVE_KEYS),
     ...Object.values(SOCIAL_EXTRA_KEYS),
+    // The social team's daily image cap (social_team_max_images). It lives in
+    // team-keys.ts and is already read by getTeamConfig('social'), but had no
+    // control anywhere, so it had never been written at all: the social routine
+    // ran on the hardcoded default of 12 and run 992 hit 12/12 and returned
+    // over_image_cap before it could draft a compliant X candidate, costing a
+    // zero-post day (ticket #10658). Raising it took a one-off script.
+    ...Object.values(SOCIAL_TEAM_EXTRA_KEYS),
     ...Object.values(RELEASE_ENGINE_KEYS),
     // Per-platform drafting quotas (ticket #3676). The keys already exist in
     // team-keys.ts (socialFreqKey) and are read by getSocialFrequencies();
@@ -583,10 +595,10 @@ export default function AgentTeamsPage() {
     suggestions, needsYou, needsYouTotal, filteredOpenTotal,
     ticketLinks, filter, kindOptions, assigneeOptions, teamOptions, statusCounts,
     briefs, campaigns, autopost, socialTrendScout, socialMetricsSweep, suggestionApply, contentAutopublish,
-    seoCuration, trendScout, videoAutopublish, videoProgram, videoDefaultModelTier, videoFrameReview, videoEndcard,
+    seoCuration, trendScout, videoAutopublish, videoProgram, videoDefaultModelTier, videoFrameReview, videoRenderReview, videoEndcard,
     instagramAutopublish, instagramPublishMaxPerDay,
     xAutopublish, xPublishMaxPerDay, xPublishMaxSpendUsdMonth, xMetricsMaxReadsMonth, socialFrequencies,
-    releaseEngine, releaseEngineMaxMerges, runpodPodSpentCents,
+    releaseEngine, releaseEngineMaxMerges, videoTierOptions,
   } = useLoaderData<typeof loader>()
   const keys = teamKeys(team)
   const activeBrief = briefs.find(b => b.status === 'active')
@@ -683,16 +695,17 @@ export default function AgentTeamsPage() {
           {team === 'content' && (
             <SettingField label="Max images / day" settingKey={CONTENT_EXTRA_KEYS.maxImagesPerDay} value={config.maxImagesPerDay ?? 0} />
           )}
+          {team === 'social' && (
+            <SettingField label="Max images / day" settingKey={SOCIAL_TEAM_EXTRA_KEYS.maxImagesPerDay} value={config.maxImagesPerDay ?? SOCIAL_MAX_IMAGES_DEFAULT} />
+          )}
           {team === 'video' && (
             <>
               <SettingField label="Max cost / video (cents)" settingKey={VIDEO_EXTRA_KEYS.maxCostCents} value={config.maxCostCents ?? 600} asDollars />
               <SettingField label="Max variants / set" settingKey={VIDEO_EXTRA_KEYS.maxVariantsPerSet} value={config.maxVariantsPerSet ?? 4} />
               {/* Which tier an enqueue with no explicit modelTier resolves to.
-                  Only the owned-worker tiers are offered: fal video tiers are
-                  legacy per the fal-images-only provider policy (2026-08-26),
-                  and the audio-driven tier cannot be a default (it requires a
-                  presenterLine every silent b-roll enqueue lacks). No row =
-                  the code fallback, still legacy kling25-pro. */}
+                  Only live tiers are offered: fal video tiers are legacy per
+                  the fal-images-only provider policy (2026-08-26), and
+                  owner-only tiers are never a routine default. No row = the code fallback. */}
               <Form method="post" className="flex flex-col gap-1">
                 <label className="text-xs text-ink-4">Default model tier</label>
                 <input type="hidden" name="intent" value="save" />
@@ -704,9 +717,10 @@ export default function AgentTeamsPage() {
                     className="w-full rounded-lg border border-line bg-paper-2 px-3 py-1.5 text-sm text-ink"
                     aria-label="Default model tier"
                   >
-                    <option value="" disabled>{videoDefaultModelTier ? '' : 'unset (falls back to legacy kling25-pro)'}</option>
-                    <option value="wan22-i2v">wan22-i2v (RunPod, recommended)</option>
-                    <option value="wan22-t2v">wan22-t2v (RunPod, text-to-video)</option>
+                    <option value="" disabled>{videoDefaultModelTier ? '' : `unset (falls back to ${VIDEO_DEFAULT_MODEL_TIER_DEFAULT})`}</option>
+                    {videoTierOptions.map(o => (
+                      <option key={o.id} value={o.id}>{o.id} ({o.label})</option>
+                    ))}
                   </select>
                   <button className="rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-ink hover:bg-paper-2">
                     Save
@@ -839,6 +853,12 @@ export default function AgentTeamsPage() {
               on={videoFrameReview}
             />
             <ValveRow
+              label={`Final-cut review is ${videoRenderReview ? 'ON' : 'OFF'}`}
+              detail="When ON, every finished video parks at the end of rendering so you watch the final cut in /admin/video-studio before anything reaches Social Studio. Approve fans it out to social drafts; reject needs a reason, which goes on the episode. OFF sends finished cuts straight to Ready for review."
+              settingKey={VIDEO_EXTRA_KEYS.renderReview}
+              on={videoRenderReview}
+            />
+            <ValveRow
               label={`Autopublish is ${videoAutopublish ? 'ON' : 'OFF'}`}
               detail="Even when ON, platform posting also requires per-platform publisher keys (all unset today; publishers are stubs). Keep OFF while videos are review-first."
               settingKey={VALVE_KEYS.videoAutopublish}
@@ -846,7 +866,7 @@ export default function AgentTeamsPage() {
             />
             <ValveRow
               label={`Video program render is ${videoProgram ? 'ON' : 'OFF'}`}
-              detail="Arms the 2x-weekly render routine for the serialized program: episode-claim hands out owner-APPROVED episodes and the enqueue spends real RunPod money on them. The writers room (zero spend) runs regardless. Ships OFF; flip after the first slate is approved."
+              detail="Arms the 2x-weekly render routine for the serialized program: episode-claim hands out owner-APPROVED episodes and the enqueue spends real Atlas Cloud money on them. The writers room (zero spend) runs regardless. Ships OFF; flip after the first slate is approved."
               settingKey={VALVE_KEYS.videoProgram}
               on={videoProgram}
             />
@@ -907,13 +927,6 @@ export default function AgentTeamsPage() {
             {...(!gateResult.ok && gateResult.reason ? { sub: gateResult.reason } : {})}
             tone={gateResult.ok ? 'ok' : 'warn'}
           />
-          {team === 'video' && runpodPodSpentCents != null && (
-            <StatCard
-              label="Out-of-band GPU"
-              value={fmtUsdCents(runpodPodSpentCents)}
-              sub="RunPod pods (bootstraps, bake-offs). Recorded, not gated"
-            />
-          )}
         </div>
       )}
 

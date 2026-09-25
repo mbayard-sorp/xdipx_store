@@ -220,6 +220,7 @@ const METAFIELDS_FRAGMENT = `
     { namespace: "xdipx", key: "pair_bundle_copy" }
     { namespace: "xdipx", key: "endorsement_copy" }
     { namespace: "xdipx", key: "card_art_blocked" }
+    { namespace: "xdipx", key: "cast_target" }
     { namespace: "custom", key: "original_description" }
   ]) {
     namespace key value
@@ -510,6 +511,94 @@ function gateCardImages(
   return moodImageUrl ? [{ url: moodImageUrl, altText: '' }] : []
 }
 
+
+/**
+ * Pick a bare-product frame out of a product's media list (ticket #10341).
+ *
+ * instagram-campaigns.md section 3.2c: "Only brief from a bare-product
+ * reference. Shopify featuredMedia is sometimes the retail carton (SKU 96203:
+ * box is image A, product is image B)." No code walked the list, so a brief
+ * built from the featured image sometimes briefed the model on a cardboard box
+ * and got a box-shaped invention back.
+ *
+ * Pure over the media list so it is unit-testable: the caller fetches, this
+ * decides. Heuristic by design, not a promise. It skips frames whose altText or
+ * URL filename names packaging, and when every frame looks like packaging (or
+ * the list is a single image) it returns the featured frame with
+ * `fellBack: true` so the caller can say so out loud rather than silently
+ * briefing from a carton.
+ *
+ * Respects the same card-art doctrine gate as `gateCardImages`: pass
+ * `cardArtBlocked` and the reviewed `moodImageUrl` and a blocked packshot never
+ * comes back out of here either.
+ */
+const PACKAGING_RE = /\b(box|boxed|boxes|package|packaged|packaging|carton|cartons|retail|label|labels|labelled|labeled|blister)\b/
+
+export interface BareProductImage {
+  /** The chosen image URL, or null when nothing is usable. */
+  url: string | null
+  altText: string
+  /** Index into the input list, or -1 when nothing was chosen from it. */
+  index: number
+  /** True when no bare-product frame was identified and this is the fallback. */
+  fellBack: boolean
+}
+
+/** True when this frame's alt text or filename names packaging. */
+export function looksLikePackaging(image: { url: string; altText?: string | null }): boolean {
+  const filename = (image.url.split('?')[0] ?? '').split('/').pop() ?? ''
+  const haystack = `${image.altText ?? ''} ${filename}`.toLowerCase().replace(/[^a-z0-9]+/g, ' ')
+  return PACKAGING_RE.test(haystack)
+}
+
+/**
+ * Ticket #11028: `looksLikePackaging` only catches an explicit textual
+ * signal, and a Nalpac-imported SKU carries none — its images are named
+ * `<sku><letter>.jpg` (`92268A.jpg`) with no altText at all. A manual check
+ * of 8 in-stock SKUs found image A was the retail carton on 7 of them, so
+ * treating an unlabeled first-lettered Nalpac frame as confidently bare (what
+ * the old `bareIndex = list.findIndex(...)` did, by picking index 0) is
+ * exactly the SKU 96203 failure 3.2c's "only brief from a bare-product
+ * reference" rule exists to stop. This is NOT the same signal as
+ * `looksLikePackaging`: it does not claim the frame IS packaging (it might be
+ * a fine bare shot), only that nothing here confirms it, so it must not win
+ * over a frame that carries no such doubt.
+ */
+const NALPAC_UNLABELED_FIRST_FRAME_RE = /^\d+a\.[a-z0-9]+$/i
+
+function isUnconfirmedNalpacFirstFrame(image: { url: string; altText?: string | null }): boolean {
+  if (image.altText && image.altText.trim()) return false
+  const filename = (image.url.split('?')[0] ?? '').split('/').pop() ?? ''
+  return NALPAC_UNLABELED_FIRST_FRAME_RE.test(filename)
+}
+
+export function pickBareProductImage(
+  media: { url: string; altText?: string | null }[] | null | undefined,
+  opts?: { cardArtBlocked?: boolean; moodImageUrl?: string | null },
+): BareProductImage {
+  if (opts?.cardArtBlocked) {
+    const mood = opts.moodImageUrl ?? null
+    return { url: mood, altText: '', index: -1, fellBack: true }
+  }
+  const list = (media ?? []).filter(m => !!m?.url)
+  if (!list.length) return { url: null, altText: '', index: -1, fellBack: true }
+  // Explicit packaging signal excludes a frame outright; among what is left,
+  // prefer one that is not ALSO the unconfirmed Nalpac first frame (ticket
+  // #11028) — e.g. an `<sku>B.jpg` sibling, which Nalpac's own convention
+  // (and 3.2c's SKU 96203 writeup) commonly uses for the actual product shot.
+  const nonPackaging = list.filter(m => !looksLikePackaging(m))
+  const confirmedBare = nonPackaging.find(m => !isUnconfirmedNalpacFirstFrame(m))
+  if (confirmedBare) {
+    return { url: confirmedBare.url, altText: confirmedBare.altText ?? '', index: list.indexOf(confirmedBare), fellBack: false }
+  }
+  // Nothing confirms a bare frame exists: the best candidate (a non-packaging
+  // frame if any survived, else the featured frame) rides back, but flagged,
+  // so the caller records the fallback rather than silently briefing from
+  // what might be a carton.
+  const fallback = nonPackaging[0] ?? list[0]!
+  return { url: fallback.url, altText: fallback.altText ?? '', index: list.indexOf(fallback), fellBack: true }
+}
+
 // ─── Sensation dial v1 → v2 projection ────────────────────────────────────
 // Legacy fixed-key labels per dimension. Used only when sensation_dial_v2 is
 // absent — lets old products keep rendering while migration proceeds.
@@ -755,6 +844,7 @@ function nodeToDeal(node: ShopifyProductNode): Deal {
   const mapRestrictedRaw = parseMetafield(mf, 'map_restricted')
   const heroVideo        = parseMetafieldJSON<{ src?: string; poster?: string; duration?: number }>(mf, 'hero_video', {})
   const productTypeDial  = parseMetafield(mf, 'product_type_dial') as ProductTypeDial | ''
+  const castTarget       = parseMetafield(mf, 'cast_target')
   const sensationDial    = parseMetafieldJSON<Deal['sensationDial']>(mf, 'sensation_dial', {})
   const sensationDialV2  = normalizeSensationDialV2(parseMetafieldJSON<unknown>(mf, 'sensation_dial_v2', null))
     ?? projectLegacyDial(sensationDial as SensationDial | undefined)
@@ -825,6 +915,7 @@ function nodeToDeal(node: ShopifyProductNode): Deal {
     ...(audienceTags.length > 0 ? { audienceTags } : {}),
     ...(mattersTags.length  > 0 ? { mattersTags }  : {}),
     ...(productTypeDial ? { productTypeDial } : {}),
+    ...(castTarget ? { castTarget } : {}),
     ...(sensationDial && Object.keys(sensationDial).length > 0 ? { sensationDial } : {}),
     ...(sensationDialV2 ? { sensationDialV2 } : {}),
     ...(careInstructions ? { careInstructions } : {}),
@@ -1760,6 +1851,7 @@ const GMC_FEED_METAFIELDS_FRAGMENT = `
     { namespace: "xdipx", key: "feature_bullets" }
     { namespace: "xdipx", key: "specifications" }
     { namespace: "xdipx", key: "product_type_dial" }
+    { namespace: "xdipx", key: "cast_target" }
     { namespace: "xdipx", key: "deal_score" }
     { namespace: "xdipx", key: "nalpac_sku" }
     { namespace: "mm-google-shopping", key: "google_product_category" }
@@ -1864,6 +1956,7 @@ function nodeToFeedDeal(node: ShopifyFeedProductNode): VaultDeal {
   const mapPriceNum   = mapPriceRaw ? parseFloat(mapPriceRaw) : null
   const mapRestricted = parseMetafieldByNsKey(mf, 'xdipx', 'map_restricted') === 'true'
   const productTypeDial = parseMetafieldByNsKey(mf, 'xdipx', 'product_type_dial')
+  const castTarget     = parseMetafieldByNsKey(mf, 'xdipx', 'cast_target')
   const dealScoreRaw   = parseMetafieldByNsKey(mf, 'xdipx', 'deal_score')
   const dealScoreNum   = dealScoreRaw ? parseFloat(dealScoreRaw) : null
   const nalpacSku      = parseMetafieldByNsKey(mf, 'xdipx', 'nalpac_sku')
@@ -1909,6 +2002,7 @@ function nodeToFeedDeal(node: ShopifyFeedProductNode): VaultDeal {
     ...(featureBullets.length > 0 ? { featureBullets } : {}),
     ...(specifications.length > 0 ? { specifications } : {}),
     ...(productTypeDial != null ? { productTypeDial } : {}),
+    ...(castTarget      != null ? { castTarget }      : {}),
     ...(originalPrice   != null ? { originalPrice }   : {}),
     ...(mapPriceNum !== null && !isNaN(mapPriceNum) ? { mapPrice: mapPriceNum } : {}),
     ...(mapRestricted ? { mapRestricted } : {}),
@@ -3140,6 +3234,10 @@ export interface ProductPageDoc {
    *  custom.product_subtype_dial (the only non-xdipx-namespace metafield in
    *  this push path). Empty/undefined for sex-machine and unclassified products. */
   productSubtypeDial?: string | null | undefined  // custom.product_subtype_dial (single_line_text_field)
+  /** ADR-015, ticket #10730 — xdipx.cast_target (single_line_text_field).
+   *  Caller decides whether to write: applyFullEnrichmentWrites only sets
+   *  this when no override already exists on the product (write-if-absent). */
+  castTarget?: string | undefined
   moodTags?: string[] | undefined                 // xdipx.mood_tags (list.text)
   audienceTags?: string[] | undefined             // xdipx.audience_tags (list.text)
   mattersTags?: string[] | undefined              // xdipx.matters_tags (list.text)
@@ -3243,6 +3341,7 @@ export async function pushProductToShopify(doc: ProductPageDoc): Promise<void> {
   // Phase 1 D1 — hierarchical taxonomy subtype scoped to product_type_dial.
   // Lives in custom namespace per metafield-defs registry.
   addCustom('product_subtype_dial', doc.productSubtypeDial ?? undefined, 'single_line_text_field')
+  add('cast_target',      doc.castTarget,                      'single_line_text_field')
   add('original_title',   doc.originalTitle,                   'single_line_text_field')
   // Phase 2 — category stored as JSON string[] (mirrors care/box/specs).
   // Legacy single-value strings still parse via parseCategory on read.

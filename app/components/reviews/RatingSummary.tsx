@@ -64,7 +64,7 @@ export function RatingSummary({ aggregate, productId }: RatingSummaryProps) {
                   className="h-full rounded-full transition-all duration-500"
                   style={{
                     width: `${Math.round((count / total) * 100)}%`,
-                    background: '#7C8F78',
+                    background: 'var(--color-sage)',
                   }}
                 />
               </div>

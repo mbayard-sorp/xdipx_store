@@ -27,6 +27,12 @@ export function xPermalink(externalPostId: string): string {
 /** X accepts at most 4 images on one post. */
 export const X_MEDIA_MAX = 4
 
+/** X's ceiling on a standard account's video length, in seconds. */
+export const X_VIDEO_MAX_DURATION_SEC = 140
+
+/** X's ceiling on a `tweet_video` upload, in bytes (512 MB). */
+export const X_VIDEO_MAX_SIZE_BYTES = 512 * 1024 * 1024
+
 /**
  * Every link on X is rewritten through t.co and billed against the character
  * count at a fixed width regardless of the real URL's length. A 90-character

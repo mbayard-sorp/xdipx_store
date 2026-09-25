@@ -131,11 +131,91 @@ describe('extractPromoCode', () => {
   })
 })
 
+// Real live suggestion #9321 (BULLETWEEK20 CORRECTED), reproduced verbatim.
+// Refused 'no-eligible-products' before this fix — extractSkus's old
+// labelled-list-only pattern found nothing, because this brief never writes
+// "SKU:" or "SKUs" immediately before a number list; it writes a lead-in
+// sentence naming a count, then a "; "-delimited "<SKU> <name> $<price> ->
+// <pct>%" list. All 12 SKUs verified live against production Shopify
+// 2026-09-22 (see the PR body for the resolved product ids/titles).
+const BULLETWEEK20_BRIEF =
+  'BULLETWEEK20 CORRECTED -- supersedes #8023. 20% off code BULLETWEEK20, window ' +
+  '2026-09-28 to 2026-10-04, scoped to exactly 12 SKUs (down from 21). MAP check on all 12: ' +
+  'map_price = 0.0, fully discountable (confirmed live via Shopify Admin GraphQL, 2026-09-14). ' +
+  'Post-discount margin computed against LIVE Shopify variant price as of 2026-09-14, all ' +
+  'healthy and well above the 25% floor, no category-license needed for these 12: ' +
+  '99352 Camtoyz Fouria $53.99 -> 30.5%; 98578 Syntra Bullet $21.99 -> 28.9%; ' +
+  '99388 Shine On Glowing Pink $38.99 -> 29.5% (stock 12, watch); 99662 Minnie\'s Wink Aqua ' +
+  '$37.99 -> 29.4%; 96768 Mini\'s Leopard Print $30.99 -> 29.2%; 76970 Prints Charming Buzzed ' +
+  'Mini $25.99 -> 30.3%; 76963 Prints Charming Canna Queen $34.99 -> 31.2%; 76964 Prints ' +
+  'Charming Bullet $34.99 -> 31.2%; 94262 Prowler RED Anal Plug $22.99 -> 29.5%; ' +
+  '74849 Beat Rechargeable Bullet $30.99 -> 29.4%; 84141 ROMP Riot $26.99 -> 30.5%; ' +
+  '93182 WINX Star Tickles $20.99 -> 28.8%.\n' +
+  'EXCLUDED from #8023\'s original 21, margin-negative at 20% off against live price: ' +
+  '93291 BANG! 7X ($13.99, wholesale $14.99, -33.9%), 96159 Blaze Dual Massager Kit ' +
+  '($42.99, wholesale $35.85, -4.2%). EXCLUDED for thin stock (under 10 units): ' +
+  '75956 Frenzy Power Bullet (1 unit), 81359 Happy Rabbit (5 units).'
+
+// Real live suggestion #9322 (COUPLESCONTROL20), reproduced verbatim. Same
+// refusal, same root cause, same fix. All 8 SKUs verified live 2026-09-22.
+const COUPLESCONTROL20_BRIEF =
+  'COUPLESCONTROL20 -- 20% off code, window 2026-10-05 to 2026-10-11, category sale on the ' +
+  'couples remote/app-controlled category. ' +
+  '8 SKUs survive MAP-clean (map_price=0.0) with positive post-discount margin, all ACTIVE, ' +
+  'availableForSale and stock-healthy as of 2026-09-14: 97482 App-Controlled Lush Anal Butt ' +
+  'Plug $124.99 -> 31.0% (stock 1450); 74252 Remote Control BANG! Bullet $30.99 -> 29.4% (91); ' +
+  '98310 Remote Control Lay Panty Vibrator $70.99 -> 30.5% (171); 83219 Remote-Controlled ' +
+  'Gossip Pop Rocker $57.99 -> 30.9% (37); 84140 Cello Remote G-Spot Egg $35.99 -> 30.5% (64); ' +
+  '97905 The Beat Remote G-Spot $44.99 -> 30.4% (17); 97099 Love Language Couples Game ' +
+  '$22.99 -> 10.3% (63, category-license invoked); 85192 Rose Petal Sexy Surprises Kit ' +
+  '$7.99 -> 6.1% (158, category-license invoked). None negative.\n' +
+  'EXCLUDED, off scope: everything MAP=MSRP and everything MAP<MSRP-at-floor where 20% off ' +
+  'would price below MAP (80519, 93780, 97097, 97549, 97169, 93752). 93281 Rotating Nexus ' +
+  'Tornado excluded on thin stock (6 units).'
+
 describe('extractSkus', () => {
   it('reads SKU numbers from a labelled list and ignores counts and prices', () => {
     expect(extractSkus(LIVE_BRIEF_51)).toEqual(['84740', '84743', '84747', '84748'])
     // "SKUs (1503 MAP-locked ...)" is a count, not a scope: the paren breaks the label.
     expect(extractSkus('about 60% of SKUs (1503 MAP-locked) are floored')).toEqual([])
+  })
+
+  // Ticket #10737: 3 of the last 4 approved promo briefs refused
+  // 'no-eligible-products' on exactly this shape.
+  it('reads all 12 SKUs from the real BULLETWEEK20 margin-list brief (#9321)', () => {
+    const skus = extractSkus(BULLETWEEK20_BRIEF)
+    expect(skus).toEqual([
+      '99352', '98578', '99388', '99662', '96768', '76970',
+      '76963', '76964', '94262', '74849', '84141', '93182',
+    ])
+  })
+
+  it('reads all 8 SKUs from the real COUPLESCONTROL20 margin-list brief (#9322)', () => {
+    const skus = extractSkus(COUPLESCONTROL20_BRIEF)
+    expect(skus).toEqual([
+      '97482', '74252', '98310', '83219', '84140', '97905', '97099', '85192',
+    ])
+  })
+
+  it('never picks up an EXCLUDED SKU, which never carries the "-> pct%" arrow', () => {
+    const skus = extractSkus(BULLETWEEK20_BRIEF)
+    for (const excluded of ['93291', '96159', '75956', '81359']) {
+      expect(skus).not.toContain(excluded)
+    }
+    const couplesSkus = extractSkus(COUPLESCONTROL20_BRIEF)
+    for (const excluded of ['80519', '93780', '97097', '93281']) {
+      expect(couplesSkus).not.toContain(excluded)
+    }
+  })
+
+  it('does not mistake a lead-in count or a nearby date for the SKU owning a later margin figure', () => {
+    // "12" (the count) and "2026-09-14" (the confirmation date) both precede
+    // the first real entry by a long stretch of prose; neither must be
+    // captured as if it owned "99352 Camtoyz Fouria $53.99 -> 30.5%".
+    const skus = extractSkus(BULLETWEEK20_BRIEF)
+    expect(skus).not.toContain('2026')
+    expect(skus).not.toContain('12')
+    expect(skus[0]).toBe('99352')
   })
 })
 
@@ -326,6 +406,36 @@ describe('executeApprovedPromo', () => {
     expect(res.refused).toBe(true)
     expect(res.reason).toBe('no-eligible-products')
     expect(deps.createDiscount).not.toHaveBeenCalled()
+  })
+
+  // Ticket #10737 regression: #9321 (BULLETWEEK20) and #9322 (COUPLESCONTROL20)
+  // were refused 'no-eligible-products' — every one of their SKUs is a real,
+  // live, resolvable product, but extractSkus's old labelled-list-only pattern
+  // found nothing in this margin-list brief shape, so resolveProductGids was
+  // asked to resolve zero SKUs and correctly (per its own contract) came back
+  // empty. This asserts the SKUs actually reach resolveProductGids now.
+  it('mints BULLETWEEK20 end to end, resolving all 12 real SKUs (#9321)', async () => {
+    const deps = makeDeps()
+    const res = await executeApprovedPromo({ id: 9321, suggestion: BULLETWEEK20_BRIEF }, deps)
+    expect(res.minted).toBe(true)
+    expect(res.code).toBe('BULLETWEEK20')
+    const sel = (deps.resolveProductGids as any).mock.calls[0][0]
+    expect(sel.skus).toEqual([
+      '99352', '98578', '99388', '99662', '96768', '76970',
+      '76963', '76964', '94262', '74849', '84141', '93182',
+    ])
+    expect(deps.createDiscount).toHaveBeenCalledOnce()
+  })
+
+  it('mints COUPLESCONTROL20 end to end, resolving all 8 real SKUs (#9322)', async () => {
+    const deps = makeDeps()
+    const res = await executeApprovedPromo({ id: 9322, suggestion: COUPLESCONTROL20_BRIEF }, deps)
+    expect(res.minted).toBe(true)
+    const sel = (deps.resolveProductGids as any).mock.calls[0][0]
+    expect(sel.skus).toEqual([
+      '97482', '74252', '98310', '83219', '84140', '97905', '97099', '85192',
+    ])
+    expect(deps.createDiscount).toHaveBeenCalledOnce()
   })
 
   it('reports a Shopify userError without throwing and does not claim a mint', async () => {

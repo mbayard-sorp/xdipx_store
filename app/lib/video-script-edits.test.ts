@@ -47,7 +47,9 @@ vi.mock('./db.server', () => ({
 // (same mock as video-episode-lifecycle.test.ts, which exercises the rest of this module).
 vi.mock('./video-pipeline.server', () => ({ dryRunEpisodeScript: vi.fn() }))
 
-import { listOwnerScriptEdits } from './video-episodes.server'
+import { listOwnerScriptEdits, listLineNotes, extractLineNotes } from './video-episodes.server'
+import { PgDialect } from 'drizzle-orm/pg-core'
+import type { SQL } from 'drizzle-orm'
 
 function edit(over: Partial<EditRow> = {}): EditRow {
   return {
@@ -94,5 +96,57 @@ describe('listOwnerScriptEdits', () => {
     expect(state.lastLimit).toBe(200)
     await listOwnerScriptEdits({ limit: 0 })
     expect(state.lastLimit).toBe(1)
+  })
+})
+
+const dialect = new PgDialect()
+const sqlOf = (cond: unknown) => dialect.sqlToQuery(cond as SQL)
+
+describe('listOwnerScriptEdits excludeEditedBy (plan Phase 2b)', () => {
+  it('filters the room out by editor name when asked', async () => {
+    await listOwnerScriptEdits({ excludeEditedBy: ['video-room'] })
+    const q = sqlOf(state.lastWhere)
+    expect(q.sql).toMatch(/"edited_by" not in/)
+    expect(q.params).toContain('video-room')
+  })
+
+  it('combines the exclusion with an episode filter', async () => {
+    await listOwnerScriptEdits({ episodeId: 7, excludeEditedBy: ['video-room'] })
+    const q = sqlOf(state.lastWhere)
+    expect(q.sql).toMatch(/"episode_id" = .* and .*"edited_by" not in/)
+  })
+
+  it('an empty exclusion list adds no condition', async () => {
+    await listOwnerScriptEdits({ excludeEditedBy: [] })
+    expect(state.lastWhere).toBeUndefined()
+  })
+})
+
+describe('line notes for the retro (plan Phase 2b)', () => {
+  const notes = [
+    { at: '2026-09-20T10:00:00.000Z', decision: 'approved' as const, by: 'mike' },
+    { at: '2026-09-21T10:00:00.000Z', decision: 'line_note' as const, field: 'scenes', lineIdx: 1, note: 'cut the second clause', by: 'mike' },
+    { at: '2026-09-22T10:00:00.000Z', decision: 'line_note' as const, field: 'cta', lineIdx: 0, note: 'wrong CTA', by: 'mike' },
+  ]
+
+  it('extracts only line_note entries, newest first, with their episode', () => {
+    const out = extractLineNotes([{ id: 7, reviewNotesJson: notes }, { id: 8, reviewNotesJson: null }], 50)
+    expect(out).toEqual([
+      { episodeId: 7, at: '2026-09-22T10:00:00.000Z', field: 'cta', lineIdx: 0, note: 'wrong CTA', by: 'mike' },
+      { episodeId: 7, at: '2026-09-21T10:00:00.000Z', field: 'scenes', lineIdx: 1, note: 'cut the second clause', by: 'mike' },
+    ])
+  })
+
+  it('caps at the limit', () => {
+    expect(extractLineNotes([{ id: 7, reviewNotesJson: notes }], 1)).toHaveLength(1)
+  })
+
+  it('listLineNotes queries only episodes carrying a line_note and flattens them', async () => {
+    ;(state.rows as unknown[]) = [{ id: 7, reviewNotesJson: notes }]
+    const out = await listLineNotes({ episodeId: 7 })
+    expect(out.map(n => n.field)).toEqual(['cta', 'scenes'])
+    const q = sqlOf(state.lastWhere)
+    expect(q.sql).toContain('"decision":"line_note"')
+    expect(q.sql).toMatch(/"id" = /)
   })
 })

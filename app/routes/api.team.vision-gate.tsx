@@ -1,7 +1,7 @@
 /**
  * POST /api/team/vision-gate — server-side anatomy vision-gate check.
  *
- *   { imageUrl } -> VisionVerdict
+ *   { imageUrl, assetId? } -> VisionVerdict (+ recorded:true, assetId when assetId given)
  *   { imageBase64, mediaType } -> VisionVerdict
  *
  * Why this route exists (ticket #8989). scripts/gen-notebook-art.ts gates
@@ -30,6 +30,15 @@
  * read from a check that never finished (auth/transport/timeout) apart from
  * a genuine fail — see that field's own doc comment in
  * social-vision-gate.server.ts.
+ *
+ * `assetId` (ticket #10511/#10560) is an opt-in: when given alongside
+ * `imageUrl`, the fresh verdict is ALSO recorded onto that `social_media_assets`
+ * row (via `regateAsset`), not merely returned. Before this, nothing could
+ * refresh a stored verdict on an existing asset — it was written once at
+ * generation and every check ever added to `VISION_CHECK_NAMES` afterward
+ * invalidated it with no way to clear the backlog short of regenerating the
+ * art. Omit `assetId` to keep the old judge-only behavior (imageBase64
+ * candidates have no asset row yet to record against).
  */
 import type { ActionFunctionArgs } from 'react-router'
 import { assertTeamAuth, gate } from '~/lib/team.server'
@@ -62,12 +71,18 @@ export async function action({ request }: ActionFunctionArgs) {
       return Response.json({ error: 'gated', reason: gateResult.reason, gate: gateResult }, { status: 403 })
     }
 
-    const { runVisionGate, runVisionGateOnImage } = await import('~/lib/social-vision-gate.server')
+    const { runVisionGate, runVisionGateOnImage, regateAsset } = await import('~/lib/social-vision-gate.server')
+    const assetId = num(b['assetId'])
     const verdict = imageUrl
-      ? await runVisionGate(imageUrl)
+      ? assetId != null
+        ? await regateAsset(assetId, imageUrl)
+        : await runVisionGate(imageUrl)
       : await runVisionGateOnImage({ data: imageBase64!, mediaType: mediaType! })
 
-    return Response.json(verdict, { headers: { 'Cache-Control': 'no-store' } })
+    return Response.json(
+      { ...verdict, ...(assetId != null ? { recorded: true, assetId } : {}) },
+      { headers: { 'Cache-Control': 'no-store' } },
+    )
   } catch (err) {
     if (err instanceof Response) return err
     return apiError('team-vision-gate', err, 'vision-gate check failed')

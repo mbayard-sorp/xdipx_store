@@ -46,6 +46,23 @@
  * the same trick `live-post-feedback.ts` uses for the owner's verdict on a live
  * post, for the same reason: no column, and the column is not worth a protected
  * migration on its own.
+ *
+ * ## The durable product link is backfilled from the handle
+ *
+ * The paragraph above predates migration 080: `social_posts.shopify_product_id`
+ * now exists, and two things read it that read nothing else. The publish-time
+ * stock guard (`social-publish/stock-guard.server.ts`) skips its check when the
+ * column is null, and the rolling mix report (`social-mix-report.server.ts`)
+ * counts a row as product-forward only when it is set. The drafting playbook
+ * never told a caller to send it, so every routine-drafted product post landed
+ * with the column null: on 2026-09-20 the report read 0 product-forward of 14
+ * while the captions plainly named SKUs, and the hourly tick re-checked stock
+ * on none of them. So when a PASS asserts `featuresProduct` with a handle and
+ * the row has no product id, the approved write resolves the handle to its
+ * Shopify gid and fills the column. A row that already carries an id is left
+ * alone: the drafter is the source of truth, and the gate only fills a blank.
+ * A resolver failure never blocks the approval; it just leaves the column as
+ * it was, which is exactly today's behaviour, not a regression of it.
  */
 
 import { and, desc, eq } from 'drizzle-orm'
@@ -57,6 +74,7 @@ import {
   type GatePlatform,
 } from './social-publish-gate.server'
 import { findingToStored, type GateStatusValue, type StoredGateFinding } from './social-gate-status'
+import { parseSceneAxes } from './social-scene-vocab'
 
 /**
  * Platforms this gate may verdict.
@@ -444,6 +462,12 @@ export interface ApprovePatch {
   gateCheckedAt: Date
   gateFindings: StoredGateFinding[]
   updatedAt: Date
+  /**
+   * Set only on an approved write, only when the PASS named a product handle
+   * and the row's `shopify_product_id` was null (see the module header). The
+   * Shopify gid, the same shape `{op:'draft'}` stores and the stock guard reads.
+   */
+  shopifyProductId?: string
 }
 
 export type PostRow = typeof socialPosts.$inferSelect
@@ -451,10 +475,52 @@ export type ReviewStatus = 'approved' | 'needs_changes' | 'rejected' | 'pending_
 
 export interface ApplyDeps {
   now?: () => Date
-  /** Passed through to the deterministic gate so a test can decide stock. */
-  gateDeps?: { getAvailability?: (handle: string) => Promise<boolean | null> }
+  /**
+   * Passed through verbatim to the deterministic gate (ticket #10560 widened
+   * this from `{ getAvailability }` alone so a test can also inject
+   * `getProductTypeDial`, the pairing check's own dependency).
+   */
+  gateDeps?: Parameters<typeof runDeterministicPublishChecks>[1]
   /** Defaults to the live database. */
   repo?: ApproveRepo
+  /**
+   * Handle -> Shopify product gid, for the `shopify_product_id` backfill on an
+   * approved product post. Defaults to the Storefront lookup. Null (or a throw)
+   * means the column is left as it was.
+   */
+  resolveProductIdByHandle?: (handle: string) => Promise<string | null>
+}
+
+/**
+ * Lazy import, like the deterministic gate's own default stock lookup, so the
+ * test suite never loads `shopify.server` and its live env.
+ */
+async function defaultResolveProductIdByHandle(handle: string): Promise<string | null> {
+  const { getProductByHandle } = await import('./shopify.server')
+  const product = await getProductByHandle(handle)
+  return product?.id ?? null
+}
+
+/**
+ * The gid to backfill onto the row, or null when there is nothing to do: the
+ * PASS named no product, the row already carries an id, or the handle did not
+ * resolve. Never throws; see the module header for why a failure here must not
+ * turn into a refused approval.
+ */
+async function productIdToBackfill(
+  post: Pick<PostRow, 'shopifyProductId'>,
+  input: PublishGateVerdictInput,
+  resolve: (handle: string) => Promise<string | null>,
+): Promise<string | null> {
+  if (!input.featuresProduct || !input.productHandle) return null
+  if (post.shopifyProductId) return null
+  try {
+    const id = (await resolve(input.productHandle))?.trim()
+    return id && id.length <= 60 ? id : null
+  } catch (err) {
+    console.error('[publish-gate] shopify_product_id backfill failed, leaving the column null:', err)
+    return null
+  }
 }
 
 /** The live implementation. */
@@ -541,16 +607,32 @@ export async function applyPublishGateVerdict(
 
   // A non-PASS needs no verification: it is not going anywhere. Recording it is
   // the whole job, and REVISE/BLOCK carry the reason the drafter has to act on.
+  // Deliberately does NOT run the deterministic checks here (see the "does not
+  // skip the deterministic checks on a non-PASS" test below, which asserts the
+  // opposite name for the opposite reason): a verdict that isn't shipping isn't
+  // worth a Storefront round trip.
   if (input.verdict !== 'PASS') {
     const reviewStatus =
       input.verdict === 'BLOCK' ? 'rejected'
       : input.verdict === 'REVISE' ? 'needs_changes'
       : 'pending_review'   // HOLD: left where the owner will see it
+    // #10982: the agent contract makes `findings` optional, and most BLOCK/
+    // REVISE/HOLD verdicts arrive with none -- the reasoning lives only in
+    // `notes`. The dashboard (GateVerdictPanel, PostPreviewCard) and any
+    // aggregate-by-check-name query both read `gate_findings`, so an empty
+    // array here reads as "nothing was found" on a row that was explicitly
+    // refused. Synthesize one finding from the notes when the agent itemised
+    // none, so the column is never empty on a non-PASS.
+    const findings = agentFindings.length > 0 ? agentFindings : [{
+      check: 'agent-judgment',
+      verdict: gateStatusForVerdict(input.verdict),
+      note: input.notes,
+    }]
     await write(
       reviewStatus,
       formatGateStamp({ ...input, productHandle: input.productHandle ?? null }, now),
       gateStatusForVerdict(input.verdict),
-      agentFindings,
+      findings,
     )
     return { ok: true, reviewStatus }
   }
@@ -563,6 +645,17 @@ export async function applyPublishGateVerdict(
     platform,
     productHandle: input.productHandle ?? null,
     recentCaptions: await repo.recentCaptions(14, platform),
+    // #10337: age fallback for the vision-verdict legacy carve-out when the
+    // media has no social_media_assets row to date it by.
+    postCreatedAt: post.createdAt ?? null,
+    // #10476: the video poster frame is a second blob the grid renders and
+    // mediaUrls does not carry.
+    posterUrl: post.posterUrl ?? null,
+    // #10560: read fresh off the row so a reason recorded at draft or rework
+    // time is honored here, the deterministic re-verification the agent's
+    // PASS cannot talk past.
+    pairingNoneReason: post.pairingNoneReason ?? null,
+    castSlugs: post.castSlugs ?? [],
   }, deps.gateDeps)
 
   if (gate.blocked || gate.held) {
@@ -599,12 +692,23 @@ export async function applyPublishGateVerdict(
     }
   }
 
-  await write(
-    'approved',
-    formatGateStamp({ ...input, productHandle: input.productHandle ?? null }, now),
-    'pass',
-    [...agentFindings, ...gate.findings.map(findingToStored)],
+  // The durable product link (module header). Resolved after the deterministic
+  // checks passed, so a stock-out never pays for a Storefront round trip, and
+  // written in the same patch as the approval so the two cannot land apart.
+  const backfillId = await productIdToBackfill(
+    post, input, deps.resolveProductIdByHandle ?? defaultResolveProductIdByHandle,
   )
+  await repo.write(id, {
+    reviewStatus: 'approved',
+    feedback: formatGateStamp({ ...input, productHandle: input.productHandle ?? null }, now),
+    reviewedBy: input.reviewer.slice(0, 60),
+    reviewedAt: now,
+    gateStatus: 'pass',
+    gateCheckedAt: now,
+    gateFindings: [...agentFindings, ...gate.findings.map(findingToStored)],
+    updatedAt: now,
+    ...(backfillId ? { shopifyProductId: backfillId } : {}),
+  })
   return { ok: true, reviewStatus: 'approved' }
 }
 
@@ -639,6 +743,18 @@ export interface ReworkInput {
   imageBrief?: string
   /** Durable subject line for the post (migration 084). */
   subject?: string
+  /** Scene location (migration 093). Rotated per §3.8. */
+  sceneLocation?: string
+  /** Cast member slugs in frame (migration 093). Empty array clears the row. */
+  castSlugs?: string[]
+  /** On-skin body zone (migration 099). */
+  bodyZone?: string
+  /** On-skin contact mode (migration 099). */
+  contactMode?: string
+  /** On-skin crop scale (migration 099). */
+  cropScale?: string
+  /** Pairing-presence self-check reason (migration 100, ticket #10560). */
+  pairingNoneReason?: string
 }
 
 export type ReworkParse =
@@ -647,6 +763,7 @@ export type ReworkParse =
 
 /** Captions/URLs can be long, but not unbounded — reject a caller bug loudly. */
 const REWORK_TWEET_MAX = 2000
+
 
 /**
  * Validate a rework payload. Pure and side-effect-free so the contract is unit
@@ -719,6 +836,44 @@ export function parseReworkInput(raw: unknown): ReworkParse {
     }
     subject = r['subject']
   }
+  // Pairing-presence self-check reason (migration 100, ticket #10560). Same
+  // shape as altText/imageBrief/subject above: rides along with the rework,
+  // never satisfies the "must change something" requirement on its own.
+  let pairingNoneReason: string | undefined
+  if (r['pairingNoneReason'] !== undefined) {
+    if (typeof r['pairingNoneReason'] !== 'string' || r['pairingNoneReason'].trim() === '') {
+      return { ok: false, status: 400, error: 'Bad Request: rework.pairingNoneReason, when present, must be a non-empty string' }
+    }
+    pairingNoneReason = r['pairingNoneReason'].trim()
+  }
+
+  // Variety axes (#10339). Like altText/imageBrief/subject above, these ride
+  // along with a mediaUrls/tweetText rework and never satisfy the "must change
+  // something" requirement on their own.
+  //
+  // Ticket #10480: validated against the single-source vocabulary in
+  // `social-scene-vocab.ts`, not by string length. A length-only check was
+  // what let `hip_hollow` through to the column, where it matched neither
+  // CEILING_ZONES nor MID_ZONES and became an invisible hole in the mix
+  // report. The rework path validates identically to the draft path so a
+  // REVISE cannot introduce a token the draft would have refused.
+  const parsedAxes = parseSceneAxes(r, 'rework.')
+  if (!parsedAxes.ok) return { ok: false, status: 400, error: parsedAxes.error }
+  const variety = parsedAxes.axes
+
+  // castSlugs mirrors the draft op: an array of non-empty strings, filtered.
+  // An explicit empty array is honored (it clears the cast on a frame the
+  // rework took the cast member out of), which is why this is not folded into
+  // the non-empty rule above.
+  let castSlugs: string[] | undefined
+  if (r['castSlugs'] !== undefined) {
+    if (!Array.isArray(r['castSlugs'])) {
+      return { ok: false, status: 400, error: 'Bad Request: rework.castSlugs must be an array of strings' }
+    }
+    castSlugs = (r['castSlugs'] as unknown[])
+      .filter((s): s is string => typeof s === 'string' && s.trim() !== '')
+      .map(s => s.trim())
+  }
 
   const input: ReworkInput = {}
   if (mediaUrls !== undefined) input.mediaUrls = mediaUrls
@@ -726,6 +881,12 @@ export function parseReworkInput(raw: unknown): ReworkParse {
   if (altText !== undefined) input.altText = altText
   if (imageBrief !== undefined) input.imageBrief = imageBrief
   if (subject !== undefined) input.subject = subject
+  if (variety.sceneLocation !== undefined) input.sceneLocation = variety.sceneLocation
+  if (castSlugs !== undefined) input.castSlugs = castSlugs
+  if (variety.bodyZone !== undefined) input.bodyZone = variety.bodyZone
+  if (variety.contactMode !== undefined) input.contactMode = variety.contactMode
+  if (variety.cropScale !== undefined) input.cropScale = variety.cropScale
+  if (pairingNoneReason !== undefined) input.pairingNoneReason = pairingNoneReason
   return { ok: true, input }
 }
 
@@ -777,6 +938,12 @@ export interface ReworkPatch {
   altText?: string
   imageBrief?: string
   subject?: string
+  sceneLocation?: string
+  castSlugs?: string[]
+  bodyZone?: string
+  contactMode?: string
+  cropScale?: string
+  pairingNoneReason?: string
 }
 
 export interface ReworkRepo {
@@ -876,6 +1043,12 @@ export async function reworkSocialPost(
     ...(input.altText !== undefined ? { altText: input.altText } : {}),
     ...(input.imageBrief !== undefined ? { imageBrief: input.imageBrief } : {}),
     ...(input.subject !== undefined ? { subject: input.subject } : {}),
+    ...(input.sceneLocation !== undefined ? { sceneLocation: input.sceneLocation } : {}),
+    ...(input.castSlugs !== undefined ? { castSlugs: input.castSlugs } : {}),
+    ...(input.bodyZone !== undefined ? { bodyZone: input.bodyZone } : {}),
+    ...(input.contactMode !== undefined ? { contactMode: input.contactMode } : {}),
+    ...(input.cropScale !== undefined ? { cropScale: input.cropScale } : {}),
+    ...(input.pairingNoneReason !== undefined ? { pairingNoneReason: input.pairingNoneReason } : {}),
   }
   await repo.write(id, patch)
   return { ok: true, reviewStatus: 'pending_review' }

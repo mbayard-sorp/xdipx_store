@@ -13,6 +13,12 @@
  * The frame-approval queue is the cost gate: jobs park after scene-frame
  * composition (cents) and only the owner's pick releases the clip generation
  * (dollars) while the video_frame_review valve is ON.
+ *
+ * The final-cut queue is the ship gate: with video_render_review ON (default)
+ * a finished cut parks at awaiting_render_approval. approve-render releases it
+ * to 'done' and runs exactly the approve path (fan-out plus optional Shopify
+ * graduation); reject-render requires a reason, fails the job, and hands a
+ * linked episode back to the owner's decide screen with that reason on it.
  */
 
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from 'react-router'
@@ -25,6 +31,8 @@ import {
   approveSceneFrame,
   retrySceneFrames,
   rejectVideoJob,
+  approveRenderedVideo,
+  rejectRenderedVideo,
   regenerateVideoJob,
   fanOutVideoToSocialDrafts,
   recordVideoMetrics,
@@ -51,6 +59,7 @@ import { mediaAssets } from '../../db/schema'
 import { eq } from 'drizzle-orm'
 import { getAdminUser } from '~/lib/session.server'
 import { ResponsiveTable } from '~/components/admin/ResponsiveTable'
+import { INFLIGHT_VIDEO_STATUSES } from '~/lib/video-status'
 
 export const meta: MetaFunction = () => [{ title: 'Video Studio — xdipx Admin' }]
 
@@ -97,10 +106,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       frames: r.frames,
       finalUrl: r.finalUrl,
       posterUrl: r.posterUrl,
-      // RunPod off-confirmation (ticket #5717): stamped by the poster stage;
-      // re-probed by the hourly pod-watch until confirmed.
-      runpodIdleConfirmedAt: r.job.runpodIdleConfirmedAt,
-      runpodIdleCouldNotAsk: (r.job.runpodIdleProbeJson?.couldNotAsk?.length ?? 0) > 0,
+      // The frame(s) the owner approved at the frame gate, for the final-cut
+      // sheet: the still the clip was generated from beside what it became.
+      approvedFrames: approvedFramesOf(r),
       // Multi-scene jobs only (Phase 3, 20-60s videos): null/undefined for
       // every single-scene job, which keeps the existing UI branch untouched.
       scenes: r.job.scenesJson,
@@ -111,6 +119,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
     models,
     cast: cast.map(m => ({ slug: m.slug, name: m.name })),
   }
+}
+
+/** Approved scene frame(s) for a job: one for single-scene, one per own-frame scene otherwise. */
+function approvedFramesOf(r: VideoJobWithAssets): { label: string; url: string }[] {
+  const byId = new Map(r.frames.map(f => [f.id, f.blobUrl]))
+  if (r.job.sceneStateJson?.length) {
+    return r.job.sceneStateJson.flatMap((st, i) => {
+      const url = st.frameAssetId != null ? byId.get(st.frameAssetId) : undefined
+      return url ? [{ label: `Scene ${i + 1} frame`, url }] : []
+    })
+  }
+  const url = r.job.sceneFrameAssetId != null ? byId.get(r.job.sceneFrameAssetId) : undefined
+  return url ? [{ label: 'Approved frame', url }] : []
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -179,6 +200,24 @@ export async function action({ request }: ActionFunctionArgs) {
         await rejectVideoJob(jobRowId, String(form.get('reason') ?? ''))
         return Response.json({ ok: true })
       }
+      case 'approve-render': {
+        // Release the parked cut, then run exactly what 'approve' runs. The
+        // release is conditional on the parked status, so a double click
+        // throws here instead of fanning out twice.
+        await approveRenderedVideo(jobRowId)
+        try {
+          return Response.json(await approveAndFanOut(jobRowId, form, user?.email ?? 'owner'))
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'fan-out failed'
+          throw new Error(`Final cut released, but a later step failed (${msg}). It now sits under Ready for review; check Social Studio before approving again.`)
+        }
+      }
+      case 'reject-render': {
+        const reason = String(form.get('reason') ?? '').trim()
+        if (!reason) return Response.json({ error: 'Say why: the reason goes on the episode for the writers room' }, { status: 400 })
+        const result = await rejectRenderedVideo(jobRowId, reason, user?.email ?? 'owner')
+        return Response.json({ ok: true, ...result })
+      }
       case 'regenerate': {
         const result = await regenerateVideoJob(jobRowId, String(form.get('feedback') ?? ''))
         return Response.json({ ok: true, ...result })
@@ -201,54 +240,7 @@ export async function action({ request }: ActionFunctionArgs) {
         return Response.json({ ok: true })
       }
       case 'approve': {
-        const graduation = String(form.get('graduation') ?? 'none') // none | media | hero
-        const reviewer = user?.email ?? 'owner'
-        const fanout = await fanOutVideoToSocialDrafts(jobRowId, reviewer)
-        const postIds = fanout.created.map(c => c.id)
-
-        let shopify: string | null = null
-        if (graduation === 'media' || graduation === 'hero') {
-          const rows = await listVideoJobs(100)
-          const row = rows.find(r => r.job.id === jobRowId)
-          if (!row?.finalUrl) throw new Error('Final video missing')
-          const product = await getProductByHandle(row.job.productHandle)
-          const productGid = row.job.shopifyProductGid ?? product?.id
-          if (!productGid) throw new Error(`No Shopify product GID for ${row.job.productHandle}`)
-          const videoBuffer = await blobFetchToBuffer(row.finalUrl)
-          const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '')
-          const persona = row.job.presenter.replace(':', '-')
-          const filename = `social-${row.job.productHandle}-${persona}-${stamp}.mp4`
-
-          if (graduation === 'media') {
-            const staged = await createStagedVideoUpload(filename, videoBuffer.length)
-            const uploadForm = new FormData()
-            for (const p of staged.parameters) uploadForm.append(p.name, p.value)
-            uploadForm.append('file', new Blob([new Uint8Array(videoBuffer)], { type: 'video/mp4' }), filename)
-            const res = await fetch(staged.url, { method: 'POST', body: uploadForm })
-            if (!res.ok) throw new Error(`Staged upload failed: ${res.status}`)
-            const mediaId = await attachVideoToProduct(productGid, staged.resourceUrl, `${row.job.productHandle} video`)
-            const ready = await pollMediaReady(productGid, mediaId)
-            shopify = `attached to product media (${ready ? 'READY' : 'processing'})`
-          } else {
-            const src = await uploadVideoToShopifyFiles(videoBuffer, filename, { alt: `${row.job.productHandle} hero video` })
-            let poster: string | undefined
-            if (row.posterUrl) {
-              const posterBuffer = await blobFetchToBuffer(row.posterUrl)
-              poster = await uploadMoodImageToShopifyFiles(posterBuffer, filename.replace('.mp4', '-poster.jpg'))
-            }
-            const [finalAsset] = row.job.finalAssetId
-              ? await db.select().from(mediaAssets).where(eq(mediaAssets.id, row.job.finalAssetId)).limit(1)
-              : []
-            const duration = finalAsset?.durationSeconds ? Number(finalAsset.durationSeconds) : undefined
-            await setHeroVideoMetafield(productGid, {
-              src,
-              ...(poster ? { poster } : {}),
-              ...(duration && duration > 0 ? { duration } : {}),
-            })
-            shopify = 'hero_video metafield set (card autoplay + PDP)'
-          }
-        }
-        return Response.json({ ok: true, postIds, skipped: fanout.skipped, shopify })
+        return Response.json(await approveAndFanOut(jobRowId, form, user?.email ?? 'owner'))
       }
       default:
         return Response.json({ error: `Unknown intent ${intent}` }, { status: 400 })
@@ -257,6 +249,62 @@ export async function action({ request }: ActionFunctionArgs) {
     console.error('[video-studio]', err)
     return Response.json({ error: err instanceof Error ? err.message : 'Action failed' }, { status: 500 })
   }
+}
+
+/**
+ * The approve path, shared by 'approve' (a cut that finished with the render
+ * gate off) and 'approve-render' (a parked cut the owner just released):
+ * social drafts for every target platform, plus the optional Shopify
+ * graduation. fanOutVideoToSocialDrafts refuses anything not status 'done'.
+ */
+async function approveAndFanOut(jobRowId: number, form: FormData, reviewer: string) {
+  const graduation = String(form.get('graduation') ?? 'none') // none | media | hero
+  const fanout = await fanOutVideoToSocialDrafts(jobRowId, reviewer)
+  const postIds = fanout.created.map(c => c.id)
+
+  let shopify: string | null = null
+  if (graduation === 'media' || graduation === 'hero') {
+    const rows = await listVideoJobs(100)
+    const row = rows.find(r => r.job.id === jobRowId)
+    if (!row?.finalUrl) throw new Error('Final video missing')
+    const product = await getProductByHandle(row.job.productHandle)
+    const productGid = row.job.shopifyProductGid ?? product?.id
+    if (!productGid) throw new Error(`No Shopify product GID for ${row.job.productHandle}`)
+    const videoBuffer = await blobFetchToBuffer(row.finalUrl)
+    const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+    const persona = row.job.presenter.replace(':', '-')
+    const filename = `social-${row.job.productHandle}-${persona}-${stamp}.mp4`
+
+    if (graduation === 'media') {
+      const staged = await createStagedVideoUpload(filename, videoBuffer.length)
+      const uploadForm = new FormData()
+      for (const p of staged.parameters) uploadForm.append(p.name, p.value)
+      uploadForm.append('file', new Blob([new Uint8Array(videoBuffer)], { type: 'video/mp4' }), filename)
+      const res = await fetch(staged.url, { method: 'POST', body: uploadForm })
+      if (!res.ok) throw new Error(`Staged upload failed: ${res.status}`)
+      const mediaId = await attachVideoToProduct(productGid, staged.resourceUrl, `${row.job.productHandle} video`)
+      const ready = await pollMediaReady(productGid, mediaId)
+      shopify = `attached to product media (${ready ? 'READY' : 'processing'})`
+    } else {
+      const src = await uploadVideoToShopifyFiles(videoBuffer, filename, { alt: `${row.job.productHandle} hero video` })
+      let poster: string | undefined
+      if (row.posterUrl) {
+        const posterBuffer = await blobFetchToBuffer(row.posterUrl)
+        poster = await uploadMoodImageToShopifyFiles(posterBuffer, filename.replace('.mp4', '-poster.jpg'))
+      }
+      const [finalAsset] = row.job.finalAssetId
+        ? await db.select().from(mediaAssets).where(eq(mediaAssets.id, row.job.finalAssetId)).limit(1)
+        : []
+      const duration = finalAsset?.durationSeconds ? Number(finalAsset.durationSeconds) : undefined
+      await setHeroVideoMetafield(productGid, {
+        src,
+        ...(poster ? { poster } : {}),
+        ...(duration && duration > 0 ? { duration } : {}),
+      })
+      shopify = 'hero_video metafield set (card autoplay + PDP)'
+    }
+  }
+  return { ok: true, postIds, skipped: fanout.skipped, shopify }
 }
 
 /**
@@ -344,7 +392,7 @@ async function composeAction(form: FormData): Promise<Response> {
 
 type Row = Awaited<ReturnType<typeof loader>>['rows'][number]
 
-const ACTIVE = new Set(['queued', 'running', 'awaiting_provider', 'applying'])
+const ACTIVE = new Set<string>(INFLIGHT_VIDEO_STATUSES)
 
 export default function VideoStudioPage() {
   const { rows, active, models, cast } = useLoaderData<typeof loader>()
@@ -366,6 +414,7 @@ export default function VideoStudioPage() {
   }, [active, revalidate])
 
   const parked = rows.filter(r => r.status === 'awaiting_frame_approval')
+  const finalCuts = rows.filter(r => r.status === 'awaiting_render_approval')
   const inFlight = rows.filter(r => ACTIVE.has(r.status))
   const ready = rows.filter(r => r.status === 'done' && r.stage === 'done')
   const failed = rows.filter(r => r.status === 'failed')
@@ -395,7 +444,8 @@ export default function VideoStudioPage() {
       </div>
 
       {/* Stat row */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+        <Stat label="Final cut awaiting you" value={finalCuts.length} accent={finalCuts.length > 0} />
         <Stat label="Awaiting frame pick" value={parked.length} accent={parked.length > 0} />
         <Stat label="Generating" value={inFlight.length} accent={false} />
         <Stat label="Ready to review" value={ready.length} accent={ready.length > 0} />
@@ -404,6 +454,14 @@ export default function VideoStudioPage() {
 
       {/* ── Compose ─────────────────────────────────────────────────────── */}
       <ComposeSection models={models} cast={cast} busy={busy} />
+
+      {/* ── Final-cut approvals (render gate) ──────────────────────────── */}
+      {finalCuts.length > 0 && (
+        <section className="space-y-4">
+          <h2 className="font-display text-lg text-ink">Awaiting your approval: final cut</h2>
+          {finalCuts.map(job => <FinalCutCard key={job.id} job={job} busy={busy} />)}
+        </section>
+      )}
 
       {/* ── Frame approvals ─────────────────────────────────────────────── */}
       {parked.length > 0 && (
@@ -640,30 +698,10 @@ function MultiSceneFramePicker({ job, busy }: { job: Row; busy: boolean }) {
   )
 }
 
-function GpuBadge({ job }: { job: Row }) {
-  // Only meaningful for jobs that rendered on the owned worker; a fal-only
-  // job never probes. Three honest states, never conflated (ticket #5717).
-  if (job.runpodIdleConfirmedAt) {
-    return (
-      <p className="mt-1 text-[11px] text-[#4F6150]">
-        GPU confirmed off {new Date(job.runpodIdleConfirmedAt).toLocaleTimeString()}
-      </p>
-    )
-  }
-  if (job.runpodIdleCouldNotAsk) {
-    return <p className="mt-1 text-[11px] text-amber-800">GPU status unknown, RunPod could not be asked; the hourly watch re-probes</p>
-  }
-  if (job.modelTier.startsWith('wan22')) {
-    return <p className="mt-1 text-[11px] text-ink-3">GPU idle check pending (hourly watch re-probes until confirmed)</p>
-  }
-  return null
-}
-
 function ReadyCard({ job, busy }: { job: Row; busy: boolean }) {
   return (
     <div className="rounded-[22px] border border-line bg-paper-2 p-4">
       <JobHeader job={job} />
-      <GpuBadge job={job} />
       <div className="mt-3 flex flex-col gap-4 md:flex-row">
         <div className="w-full md:w-56">
           {job.finalUrl && (
@@ -725,6 +763,103 @@ function ReadyCard({ job, busy }: { job: Row; busy: boolean }) {
             </Form>
             <RejectForm jobRowId={job.id} busy={busy} />
           </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * A cut parked at the render gate. Mobile-first: player, then the sheet (the
+ * poster beside the approved frame it was generated from), then approve and
+ * reject stacked; side by side from md up. Nothing fans out until Approve.
+ */
+function FinalCutCard({ job, busy }: { job: Row; busy: boolean }) {
+  const sheet = [
+    ...(job.posterUrl ? [{ label: 'Poster (from the render)', url: job.posterUrl }] : []),
+    ...job.approvedFrames,
+  ]
+  return (
+    <div className="rounded-[22px] border border-coral bg-paper-2 p-4">
+      <JobHeader job={job} />
+      <p className="mt-1 text-xs text-ink-3">
+        Rendered and parked. Nothing is in Social Studio until you approve. ${Number(job.costUsd).toFixed(2)} spent.
+      </p>
+      <div className="mt-3 flex flex-col gap-4 md:flex-row">
+        <div className="w-full md:w-56">
+          {job.finalUrl ? (
+            <video
+              src={job.finalUrl}
+              poster={job.posterUrl ?? undefined}
+              controls
+              playsInline
+              preload="metadata"
+              className="w-full rounded-lg border border-line bg-ink"
+            />
+          ) : (
+            <p className="text-sm text-coral">Final video missing on this job.</p>
+          )}
+          {job.finalUrl && (
+            <a href={job.finalUrl} download className="mt-1 inline-block text-xs text-coral underline">
+              Download mp4
+            </a>
+          )}
+        </div>
+        <div className="flex-1 space-y-3">
+          {sheet.length > 0 && (
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              {sheet.map(p => (
+                <figure key={`${p.label}-${p.url}`} className="space-y-1">
+                  <a href={p.url} target="_blank" rel="noreferrer">
+                    <img src={p.url} alt={p.label} loading="lazy" className="aspect-[9/16] w-full rounded-lg border border-line object-cover" />
+                  </a>
+                  <figcaption className="text-[11px] text-ink-3">{p.label}</figcaption>
+                </figure>
+              ))}
+            </div>
+          )}
+          {Object.entries(job.captions).length > 0 && (
+            <div className="space-y-1">
+              {Object.entries(job.captions).map(([platform, caption]) => (
+                <p key={platform} className="text-sm text-ink-3">
+                  <span className="font-medium text-ink">{platform}:</span> {caption}
+                </p>
+              ))}
+            </div>
+          )}
+          <Form method="post" className="space-y-2">
+            <input type="hidden" name="intent" value="approve-render" />
+            <input type="hidden" name="jobRowId" value={job.id} />
+            <fieldset className="space-y-1 text-sm text-ink-3">
+              <legend className="text-xs font-medium uppercase tracking-wide text-ink-4">Also send to Shopify?</legend>
+              <label className="flex items-center gap-2">
+                <input type="radio" name="graduation" value="none" defaultChecked /> Social drafts only
+              </label>
+              <label className="flex items-center gap-2">
+                <input type="radio" name="graduation" value="media" /> Attach to PDP media gallery
+              </label>
+              <label className="flex items-center gap-2">
+                <input type="radio" name="graduation" value="hero" /> Set as hero_video (card autoplay + PDP)
+              </label>
+            </fieldset>
+            <button type="submit" disabled={busy} className="w-full rounded-full bg-coral px-5 py-2 text-sm text-paper disabled:opacity-40 md:w-auto">
+              Approve final cut · fan out to {job.targetPlatforms.join(', ')}
+            </button>
+          </Form>
+          <Form method="post" className="flex flex-col gap-2 md:flex-row md:items-start">
+            <input type="hidden" name="intent" value="reject-render" />
+            <input type="hidden" name="jobRowId" value={job.id} />
+            <textarea
+              name="reason"
+              required
+              rows={2}
+              placeholder="Why not? (required; goes on the episode so the room can revise or you can re-render)"
+              className="flex-1 rounded-lg border border-line bg-paper px-3 py-2 text-sm"
+            />
+            <button type="submit" disabled={busy} className="rounded-full border border-line px-4 py-2 text-sm text-ink-3 hover:text-coral disabled:opacity-40">
+              Reject cut
+            </button>
+          </Form>
         </div>
       </div>
     </div>

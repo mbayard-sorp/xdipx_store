@@ -27,9 +27,12 @@
  *   # content-run-scheduled hero generation always sees itself as the
  *   # blocking sibling run and the gate fails closed on every candidate.
  *
- *   # Step 2 — after review, upload the chosen file and patch the target doc:
+ *   # Step 2 — after review, upload the chosen file and patch the target doc.
+ *   # --prompt is REQUIRED here (ticket #10682): repeat the exact prompt from
+ *   # Step 1, or the upload is refused rather than silently writing the
+ *   # generic surface-default prompt to imagePrompt.
  *   npx tsx scripts/gen-notebook-art.ts --surface category --slug care \
- *     --upload .notebook-art/category-care-1.png --alt "..."
+ *     --upload .notebook-art/category-care-1.png --alt "..." --prompt "..."
  *
  *   # Hero cast-plus-product composite (--cast <castSlug> on --surface hero):
  *   # routes through composeSceneFrame() (packaging-strip + identity-hold), NOT
@@ -62,7 +65,20 @@ import { resolve, basename } from 'node:path'
 // this module at all — matches the majority of scripts/*.ts, which already
 // import app/lib this way rather than via the alias.
 import { HERO_TARGET, resizeToExactCover } from '../app/lib/hero-image-resize'
-import type { VisionGateDeps, VisionVerdict } from '../app/lib/social-vision-gate.server'
+import type { VisionVerdict } from '../app/lib/social-vision-gate.server'
+// Ticket #10483 extracted the buffer-based anatomy/imagery-ceiling gate into
+// a server module (app/lib/vision-gate-buffer.server.ts) so
+// app/lib/homepage-media.server.ts could reuse it too, without a server file
+// importing from `scripts/`. These four names are kept as thin re-exports
+// because this file's own test (gen-notebook-art.test.ts) imports them by
+// these names.
+import {
+  sniffImageMediaType,
+  remoteVisionCallVision,
+  visionDepsForEnv as heroVisionDeps,
+  gateImageBuffer as gateHeroBuffer,
+} from '../app/lib/vision-gate-buffer.server'
+export { sniffImageMediaType, remoteVisionCallVision, heroVisionDeps, gateHeroBuffer }
 
 // ─── Anatomy vision gate for the hero surface (ticket #8691) ─────────────────
 //
@@ -70,85 +86,6 @@ import type { VisionGateDeps, VisionVerdict } from '../app/lib/social-vision-gat
 // forking a second implementation. Matches that module's own default budget
 // (generateWithVisionGate's maxAttempts) so the two surfaces behave the same.
 const HERO_VISION_MAX_ATTEMPTS = 2
-
-/**
- * Remote fallback for the anatomy vision gate's `callVision` hook (ticket
- * #8989). `social-vision-gate.server.ts`'s default `callVision` builds
- * `new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })` IN THIS
- * process, which the scheduled content sandbox does not carry — every hero
- * candidate failed closed there and blocker #142 was filed. The fix already
- * proven for social images (ticket #4133): POST to a route that runs the
- * privileged call SERVER-SIDE, where the key already lives, instead of
- * needing the key here. Throws on any transport/HTTP failure, and also when
- * the server itself could not complete the check (its own
- * `checkCompleted: false`) — either way `runVisionGateOnImage` (this
- * function's caller, via `gateHeroBuffer`) treats the throw exactly like a
- * local auth/transport failure and produces the same fail-closed verdict, so
- * a route outage degrades the same way a missing key always has, never as a
- * silent pass.
- */
-export function remoteVisionCallVision(runId?: number): NonNullable<VisionGateDeps['callVision']> {
-  const BASE_URL = (process.env['BASE_URL'] ?? 'https://xdipx.com').replace(/\/$/, '')
-  const TEAM_TOKEN = process.env['TEAM_TOKEN'] ?? process.env['HOMEPAGE_TEAM_TOKEN'] ?? process.env['CRON_SECRET'] ?? ''
-  return async (imageBase64, mediaType) => {
-    if (!TEAM_TOKEN) throw new Error('vision-gate: no TEAM_TOKEN/HOMEPAGE_TEAM_TOKEN/CRON_SECRET in env for the remote route')
-    const res = await fetch(`${BASE_URL}/api/team/vision-gate`, {
-      method: 'POST',
-      headers: { 'x-team-secret': TEAM_TOKEN, 'content-type': 'application/json' },
-      // runId lets the route's gate('content', runId) exclude the caller's OWN
-      // in-progress content run from the run_in_progress blocking-run check
-      // (mirrors the already-proven --run-id plumbing in gen-social-image.ts).
-      // Without it, a content-run-scheduled hero generation always sees itself
-      // as the blocking sibling run and the gate fails closed on every call.
-      body: JSON.stringify({ imageBase64, mediaType, ...(runId !== undefined ? { runId } : {}) }),
-    })
-    if (!res.ok) throw new Error(`vision-gate route HTTP ${res.status}`)
-    const verdict = (await res.json()) as VisionVerdict
-    if (!verdict.checkCompleted) {
-      throw new Error(`vision-gate route could not complete the check: ${verdict.notes}`)
-    }
-    return { pass: verdict.pass, checks: verdict.checks, notes: verdict.notes }
-  }
-}
-
-/**
- * Which `callVision` `gateHeroBuffer`'s default should use: the in-process
- * Anthropic call when `ANTHROPIC_API_KEY` is present (owner/local/preview
- * runs, unchanged), the privileged route when it is not (the scheduled
- * content sandbox, ticket #8989). Only consulted when a caller passes no
- * explicit `deps` — every test in this file passes its own `callVision` and
- * is unaffected by which branch this returns.
- */
-export function heroVisionDeps(runId?: number): VisionGateDeps | undefined {
-  return process.env['ANTHROPIC_API_KEY']?.trim() ? undefined : { callVision: remoteVisionCallVision(runId) }
-}
-
-/** Base64-encode a candidate buffer and run it through the shared anatomy
- *  vision gate. Never throws — same fail-closed contract as the social path. */
-/**
- * Sniff the real container format from a candidate buffer's magic bytes.
- * `generateImage()`'s `GenerateImageResult` carries no content-type alongside
- * its raw `Buffer[]` (providers are mixed: Atlas's ref-image/edit path
- * commonly returns JPEG, fal/Imagen commonly return PNG), and this function
- * used to hardcode `image/png` regardless of the actual bytes. Anthropic's
- * vision endpoint validates the declared media type against the bytes and
- * 400s on a mismatch, which meant every Atlas-sourced (JPEG) hero candidate
- * failed the gate closed with `checkCompleted: false` — never a real anatomy
- * read. Same allowlist/fallback as the social path's own detection
- * (`social-vision-gate.server.ts`'s `fetchImageBase64` default).
- */
-export function sniffImageMediaType(buf: Buffer): 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp' {
-  if (buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return 'image/png'
-  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg'
-  if (buf.length >= 6 && buf.toString('ascii', 0, 3) === 'GIF') return 'image/gif'
-  if (buf.length >= 12 && buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP') return 'image/webp'
-  return 'image/jpeg' // matches the social path's own unknown-format fallback
-}
-
-export async function gateHeroBuffer(buf: Buffer, deps?: VisionGateDeps, runId?: number): Promise<VisionVerdict> {
-  const { runVisionGateOnImage } = await import('../app/lib/social-vision-gate.server')
-  return runVisionGateOnImage({ data: buf.toString('base64'), mediaType: sniffImageMediaType(buf) }, deps ?? heroVisionDeps(runId))
-}
 
 /** Keep only the buffers whose paired verdict passed. `verdicts[i]` must correspond to `buffers[i]`. */
 export function splitByVerdict(
@@ -679,7 +616,23 @@ async function main() {
     process.exit(1)
   }
 
-  const prompt = arg('prompt') ?? SURFACES[surface].defaultPrompt(slug)
+  // #10682 (code half of #9369): --upload used to fall through to this same
+  // `?? SURFACES[surface].defaultPrompt(slug)` default whenever --prompt was
+  // not repeated on the upload call, silently overwriting blogPost.imagePrompt
+  // with the generic surface-default prompt instead of the one that actually
+  // produced the candidate image. That defeated ticket #2750's guardrail and
+  // burned repeat generation spend on the same SKUs. --upload now REQUIRES
+  // --prompt explicitly (fails loud); generation-only invocations keep the
+  // convenience default since there is no persisted imagePrompt at risk yet.
+  const explicitPrompt = arg('prompt')
+  if (uploadFile && !explicitPrompt) {
+    console.error(
+      '--prompt is required with --upload: repeat the exact prompt that produced the file you are ' +
+      'uploading (Step 1\'s prompt), or the wrong value gets written to imagePrompt (ticket #10682).',
+    )
+    process.exit(1)
+  }
+  const prompt = explicitPrompt ?? SURFACES[surface].defaultPrompt(slug)
 
   if (uploadFile) {
     if (!alt) {

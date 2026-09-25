@@ -17,8 +17,8 @@ import {
 
 describe('probe vocabulary', () => {
   it('describes the four new kinds in a sentence the owner can read', () => {
-    expect(PROBE_DESCRIPTIONS['env_present']!('RUNPOD_API_KEY'))
-      .toBe("RUNPOD_API_KEY is set in the app's environment")
+    expect(PROBE_DESCRIPTIONS['env_present']!('ATLAS_CLOUD_API_KEY'))
+      .toBe("ATLAS_CLOUD_API_KEY is set in the app's environment")
     expect(PROBE_DESCRIPTIONS['pr_merged']!('991')).toBe('PR 991 is merged')
     expect(PROBE_DESCRIPTIONS['check_green']!('migration-dry-run'))
       .toBe('the migration-dry-run check is green on main')
