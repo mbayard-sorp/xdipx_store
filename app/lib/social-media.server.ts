@@ -469,6 +469,16 @@ export interface GenerateCastCompositeResult {
    * the library write failed (non-fatal: the image still shipped).
    */
   assetIds?: (number | null)[]
+  /**
+   * The batch id every surviving and dropped candidate from this attempt was
+   * ingested under (`social_media_assets.generation_batch_id`). #11009: when
+   * the caller loses this whole response (a platform-level kill, not a JS
+   * exception), the batch id is the one thing that lets it reconstruct what
+   * was already billed and ingested via `POST /api/team/social-asset-query
+   * {op:'search', generationBatchId}` — the candidates themselves are already
+   * on the row regardless of whether this response ever arrives.
+   */
+  generationBatchId?: string
 }
 
 /**
@@ -532,7 +542,7 @@ async function maybeCropToZone(
 /** One composeSceneFrame call, rehosted, ingested, and vision-gated per candidate. */
 async function generateCastCompositeBatch(
   opts: GenerateCastCompositeOpts,
-): Promise<Required<Pick<GenerateCastCompositeResult, 'urls' | 'filenames' | 'costs' | 'requestIds' | 'assetIds'>> & Pick<GenerateCastCompositeResult, 'plateRequestId'>> {
+): Promise<Required<Pick<GenerateCastCompositeResult, 'urls' | 'filenames' | 'costs' | 'requestIds' | 'assetIds' | 'generationBatchId'>> & Pick<GenerateCastCompositeResult, 'plateRequestId'>> {
   const { composeSceneFrame } = await import('./fal-video.server')
   const { runVisionGate, recordVisionVerdict } = await import('./social-vision-gate.server')
 
@@ -643,8 +653,30 @@ async function generateCastCompositeBatch(
     costs,
     requestIds,
     assetIds,
+    generationBatchId,
     ...(frame.plateRequestId ? { plateRequestId: frame.plateRequestId } : {}),
   }
+}
+
+/**
+ * Safety margin under `api.team.social-image.tsx`'s Vercel function ceiling
+ * (`vercel.json` `maxDuration: 300`), left so a run that used most of its
+ * budget on the first attempt still gets a chance to return JSON instead of
+ * being hard-killed mid-request (#11009: one of eight bodyscape-loop calls
+ * returned an empty 0-byte HTTP body — while four library rows were still
+ * created and billed — because the two-attempt regeneration ran past the
+ * platform's response window; a platform-level kill happens outside this
+ * process, so no try/catch inside the route can turn it into a response).
+ * 240s leaves a full minute of headroom for whichever attempt is already in
+ * flight, plus response serialization, before the platform's own deadline.
+ */
+const CAST_COMPOSITE_BUDGET_MS = 240_000
+
+/** Exported for the timeout-path test (#11009): true while there is still
+ * budget left to plausibly start and finish a second full generate+vision-gate
+ * round before the platform's own deadline. */
+export function hasCastCompositeBudgetLeft(deadlineAt: number, now: number = Date.now()): boolean {
+  return now < deadlineAt
 }
 
 /**
@@ -654,12 +686,25 @@ async function generateCastCompositeBatch(
  * more before giving up. Both attempts are billed and both contribute
  * `costs`; a caller that gets `urls: []` back has exhausted the budget and
  * must fall back exactly as it already does on a zero-candidate result.
+ *
+ * #11009: that same `urls: []` contract is also what a caller gets when the
+ * first attempt alone has already eaten most of the route's time budget —
+ * starting a second full round in that case is what turned a slow-but-honest
+ * empty result into an unrecoverable empty HTTP body. Skipping the second
+ * attempt degrades to the existing, already-handled "budget exhausted" shape
+ * rather than risking the platform kill.
  */
 export async function generateCastComposite(
   opts: GenerateCastCompositeOpts,
 ): Promise<GenerateCastCompositeResult> {
+  const deadlineAt = Date.now() + CAST_COMPOSITE_BUDGET_MS
   const first = await generateCastCompositeBatch(opts)
   if (first.urls.length > 0) return first
+
+  if (!hasCastCompositeBudgetLeft(deadlineAt)) {
+    console.error('[social-media] skipping cast-composite regeneration: over the route time budget')
+    return first
+  }
 
   const second = await generateCastCompositeBatch(opts)
   return { ...second, costs: [...first.costs, ...second.costs] }

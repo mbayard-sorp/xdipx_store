@@ -5,7 +5,7 @@
 // below are drawn from real rows rather than invented: the generated assets are
 // the ones on live posts 24 and 25, and the packshots are the ones sitting on
 // pending drafts 22, 26 and 30 right now.
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 
 const mockAddAssetTags = vi.fn(async (_ids: number[], _tag: string) => 1)
 vi.mock('./social-studio.server', () => ({ addAssetTags: mockAddAssetTags }))
@@ -350,5 +350,68 @@ describe('tagIncompleteVisionVerdict', () => {
     mockAddAssetTags.mockClear()
     mockAddAssetTags.mockImplementationOnce(async () => { throw new Error('neon down') })
     await expect(tagIncompleteVisionVerdict(42, incomplete)).resolves.toBeUndefined()
+  })
+})
+
+// Ticket #11009: one of eight bodyscape-loop calls to `POST
+// /api/team/social-image {op:'cast'}` returned an empty 0-byte HTTP body while
+// still billing and ingesting library rows, because the two-attempt
+// vision-gate regeneration ran past the platform's function deadline. A
+// platform-level kill happens outside this process, so no try/catch inside
+// the route can turn it into a response; the fix is not to start a second
+// full generate+vision-gate round once the route is out of time budget.
+describe('generateCastComposite budget guard (#11009)', () => {
+  const CAST_OPTS = {
+    prompt: 'a scene', handle: 'we-vibe-chorus', mood: 'warm', date: '2026-09-24',
+    presenterImageUrl: 'https://x/presenter.jpg',
+    productImageUrl: 'https://x/product.jpg',
+    scale: 'palm' as const,
+  }
+
+  afterEach(() => {
+    vi.doUnmock('./fal-video.server')
+    vi.restoreAllMocks()
+    vi.resetModules()
+  })
+
+  it('skips the second regeneration attempt once the route budget is gone, returning the first empty manifest', async () => {
+    const composeSceneFrame = vi.fn(async () => ({ urls: [], requestIds: [], costKey: 'fal/flux-2-edit' }))
+    vi.doMock('./fal-video.server', () => ({ composeSceneFrame }))
+    vi.resetModules()
+
+    const nowSpy = vi.spyOn(Date, 'now')
+    nowSpy.mockReturnValueOnce(1_000_000_000)      // deadline computed at entry
+    nowSpy.mockReturnValueOnce(1_000_000_000 + 241_000) // checked after attempt 1: over the 240s budget
+
+    const { generateCastComposite } = await import('./social-media.server')
+    const result = await generateCastComposite(CAST_OPTS)
+
+    expect(composeSceneFrame).toHaveBeenCalledTimes(1)
+    expect(result.urls).toEqual([])
+    expect(result.generationBatchId).toEqual(expect.any(String))
+  })
+
+  it('still runs the second attempt when time remains (no regression on #6763)', async () => {
+    const composeSceneFrame = vi.fn(async () => ({ urls: [], requestIds: [], costKey: 'fal/flux-2-edit' }))
+    vi.doMock('./fal-video.server', () => ({ composeSceneFrame }))
+    vi.resetModules()
+
+    const nowSpy = vi.spyOn(Date, 'now')
+    nowSpy.mockReturnValueOnce(1_000_000_000)      // deadline computed at entry
+    nowSpy.mockReturnValueOnce(1_000_000_000 + 5_000) // checked after attempt 1: well inside budget
+
+    const { generateCastComposite } = await import('./social-media.server')
+    await generateCastComposite(CAST_OPTS)
+
+    expect(composeSceneFrame).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('hasCastCompositeBudgetLeft (#11009)', () => {
+  it('reads true before the deadline and false at or after it', async () => {
+    const { hasCastCompositeBudgetLeft } = await import('./social-media.server')
+    expect(hasCastCompositeBudgetLeft(1_000, 500)).toBe(true)
+    expect(hasCastCompositeBudgetLeft(1_000, 1_000)).toBe(false)
+    expect(hasCastCompositeBudgetLeft(1_000, 1_001)).toBe(false)
   })
 })
