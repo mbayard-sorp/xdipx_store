@@ -10,6 +10,11 @@
  *       -> { variantGroupId, totalEstCostUsd, jobs: [{jobId, estCostUsd, axes}] }
  *   { op: 'list', limit? } -> { jobs: [...] }   (includes fan-out review outcomes
  *                                                — the agent's training channel)
+ *   { op: 'get', jobId } -> { job }   (same shape as one list entry)
+ *   { op: 'resolve', providerRequestId } -> { found, matches: [{ jobRowId, jobId,
+ *     episodeId, stage, jobStage, status, tier, provider, assets }] }
+ *     maps an Atlas/fal/Wavespeed request id to its job, episode and assets
+ *     (ticket #11552). List and get entries carry providerRequestIds.
  *   { op: 'config' } -> valves, model tiers/rates, formulas, tones, approved
  *                       cast, platform frequencies
  *   { op: 'stock-check', handle } -> { found, availableForSale, totalInventory,
@@ -59,6 +64,7 @@ import { db } from '~/lib/db.server'
 import { socialPosts, nalpacPriceHistory } from '../../db/schema'
 import { inArray, eq } from 'drizzle-orm'
 import { apiError } from '~/lib/api-error.server'
+import { publicProviderRequestIds, resolveProviderRequestId, PROVIDER_REQUEST_ID_RE } from '~/lib/video-provider-lookup.server'
 import type { VideoScriptJson } from '../../db/schema'
 
 interface ValidatedEnqueueCommon {
@@ -317,9 +323,20 @@ export async function action({ request }: ActionFunctionArgs) {
       return Response.json(result)
     }
 
-    if (b['op'] === 'list') {
+    if (b['op'] === 'resolve') {
+      const rid = typeof b['providerRequestId'] === 'string' ? b['providerRequestId'].trim() : ''
+      if (!PROVIDER_REQUEST_ID_RE.test(rid)) {
+        return new Response('Bad Request: providerRequestId required (6-64 chars, letters, digits, - or _)', { status: 400 })
+      }
+      const matches = await resolveProviderRequestId(rid)
+      return Response.json({ found: matches.length > 0, providerRequestId: rid, matches }, { status: matches.length ? 200 : 404 })
+    }
+
+    if (b['op'] === 'list' || b['op'] === 'get') {
+      const getId = typeof b['jobId'] === 'string' ? b['jobId'] : null
+      if (b['op'] === 'get' && !getId) return new Response('Bad Request: jobId required', { status: 400 })
       const limit = typeof b['limit'] === 'number' ? Math.min(Math.max(1, b['limit']), 100) : 40
-      const rows = await listVideoJobs(limit)
+      const rows = getId ? await listVideoJobs(1, { jobId: getId }) : await listVideoJobs(limit)
       const jobRowIds = rows.map(r => r.job.id)
       const fanout = jobRowIds.length
         ? await db
@@ -357,9 +374,15 @@ export async function action({ request }: ActionFunctionArgs) {
         metricsJson: r.job.metricsJson,
         createdAt: r.job.createdAt,
         completedAt: r.job.completedAt,
+        // One Atlas/fal/Wavespeed handle per stage, bookkeeping keys removed (ticket #11552).
+        providerRequestIds: publicProviderRequestIds(r.job.providerRequestIds),
         // Owner review outcomes on the fanned-out drafts: the training channel.
         socialPosts: fanout.filter(p => p.videoJobId === r.job.id),
       }))
+      if (b['op'] === 'get') {
+        if (!jobs.length) return Response.json({ error: 'not_found', jobId: getId }, { status: 404 })
+        return Response.json({ job: jobs[0] })
+      }
       return Response.json({ jobs })
     }
 

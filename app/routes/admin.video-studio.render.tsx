@@ -61,6 +61,8 @@ import { mediaAssets } from '../../db/schema'
 import { eq } from 'drizzle-orm'
 import { getAdminUser } from '~/lib/session.server'
 import { ResponsiveTable } from '~/components/admin/ResponsiveTable'
+import { ProviderRequestId } from '~/components/admin/ProviderRequestId'
+import { providerHandleList } from '~/lib/video-provider-lookup.server'
 import { INFLIGHT_VIDEO_STATUSES } from '~/lib/video-status'
 
 export const meta: MetaFunction = () => [{ title: 'Video Studio — xdipx Admin' }]
@@ -116,6 +118,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       scenes: r.job.scenesJson,
       sceneState: r.job.sceneStateJson,
       sceneFrames: r.sceneFrames,
+      // Provider trace (ticket #11552): per-clip request ids and the job's
+      // per-stage handles, bookkeeping keys removed.
+      clips: r.clips ?? [],
+      providerHandles: providerHandleList(r.job.providerRequestIds),
     })),
     active: hasActiveVideoJobs(rows),
     models,
@@ -517,6 +523,7 @@ export default function VideoStudioPage() {
                       </button>
                     ))}
                   </div>
+                  <FrameTraces frames={job.frames} />
                 </Form>
               )}
               <div className="mt-3 flex flex-col gap-3 md:flex-row">
@@ -670,6 +677,47 @@ function JobHeader({ job, compact }: { job: Row; compact?: boolean }) {
       {job.variantAxes?.sceneSlug && <Chip>{job.variantAxes.sceneSlug}</Chip>}
       {job.scenes && <Chip>{sceneDoneCount(job.sceneState)}/{job.scenes.length} scenes</Chip>}
       {!compact && job.hook && <p className="w-full text-sm text-ink-3">"{job.hook}"</p>}
+      <ProviderTrace job={job} />
+    </div>
+  )
+}
+
+/**
+ * Provider, model and request id per rendered clip part, plus any stage
+ * handle still in flight (ticket #11552). Renders nothing for a job that has
+ * not reached a provider yet.
+ */
+function ProviderTrace({ job }: { job: Row }) {
+  const clipIds = new Set(job.clips.map(c => c.providerRequestId))
+  const pending = job.providerHandles.filter(h => !clipIds.has(h.requestId))
+  if (!job.clips.length && !pending.length) return null
+  return (
+    <div className="flex w-full flex-col gap-1">
+      {job.clips.map(c => c.providerRequestId ? (
+        <ProviderRequestId
+          key={c.id}
+          label={c.purpose ?? 'clip'}
+          provider={job.providerHandles.find(h => h.requestId === c.providerRequestId)?.provider ?? null}
+          model={c.sourceModel ?? job.modelTier}
+          requestId={c.providerRequestId}
+        />
+      ) : null)}
+      {pending.map(h => (
+        <ProviderRequestId key={h.stage} label={h.stage} provider={h.provider} model={job.modelTier} requestId={h.requestId} />
+      ))}
+    </div>
+  )
+}
+
+/** Request id per frame candidate, listed under the picker (a copy button cannot nest inside the pick button). */
+function FrameTraces({ frames }: { frames: Row['frames'] }) {
+  const traced = frames.filter(f => f.providerRequestId)
+  if (!traced.length) return null
+  return (
+    <div className="mt-2 flex flex-col gap-1">
+      {frames.map((f, i) => f.providerRequestId ? (
+        <ProviderRequestId key={f.id} label={`Frame ${i + 1}`} model={f.sourceModel ?? null} requestId={f.providerRequestId} />
+      ) : null)}
     </div>
   )
 }
@@ -719,6 +767,7 @@ function MultiSceneFramePicker({ job, busy }: { job: Row; busy: boolean }) {
           ))}
           {!candidates.length && <p className="col-span-3 text-xs text-ink-4">Candidates still rendering — refresh in a moment.</p>}
         </div>
+        <FrameTraces frames={candidates} />
       </Form>
     </div>
   )

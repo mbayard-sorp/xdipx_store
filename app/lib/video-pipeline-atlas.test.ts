@@ -91,7 +91,8 @@ vi.mock('~/lib/video-assembly.server', () => ({
 }))
 vi.mock('~/lib/video-postpass.server', () => ({ concatWithAudio: vi.fn(), runPostPass: vi.fn(), buildEndCard: vi.fn() }))
 
-import { advanceInflightVideoJobs } from '~/lib/video-pipeline.server'
+import { advanceInflightVideoJobs, withoutRehostAttempts, handleRequestId } from '~/lib/video-pipeline.server'
+import { publicProviderRequestIds, providerHandleList, planBackfillForJob } from '~/lib/video-provider-lookup.server'
 import { estimateVideoCostUsd } from '~/lib/model-pricing.server'
 
 const ATLAS = 'https://api.atlascloud.ai/api/v1'
@@ -364,5 +365,66 @@ describe('Atlas voiceover: silent wan27-atlas render -> cast-voice overdub -> as
     expect(state.updates.map(u => String(u['error'] ?? '')).join(' ')).toMatch(/maya.*no voiceId assigned/)
     expect(voiceoverMock).not.toHaveBeenCalled()
     expect(ivrVoiceMock).not.toHaveBeenCalled()
+  })
+})
+
+/** Ticket #11552: the provider request id travels onto the asset row and is readable back. */
+describe('provider request ids on assets (ticket #11552)', () => {
+  it('the re-hosted clip asset carries the Atlas request id of the clip stage', async () => {
+    state.selectResults = [[jobRow({ status: 'awaiting_provider', providerRequestIds: { clip: HANDLE } })]]
+    fetchMock
+      .mockResolvedValueOnce(prediction('completed', [OUT_MP4]))
+      .mockResolvedValueOnce(prediction('completed', [OUT_MP4]))
+      .mockResolvedValueOnce(new Response(new Uint8Array([0, 0, 0, 24])))
+    blobPutMock.mockResolvedValue({ url: 'https://x.public.blob.vercel-storage.com/video/job-atlas/clip-abc.mp4' })
+
+    const r = await advanceInflightVideoJobs()
+
+    expect(r.failed).toBe(0)
+    expect(state.inserts.find(i => i['purpose'] === 'clip')?.['providerRequestId']).toBe(PRED_ID)
+  })
+
+  it('a clip re-hosted after a retry still carries the id, never the bookkeeping count', async () => {
+    state.selectResults = [[jobRow({ status: 'awaiting_provider', providerRequestIds: { clip: HANDLE, download_attempts: 1 } })]]
+    fetchMock
+      .mockResolvedValueOnce(prediction('completed', [OUT_MP4]))
+      .mockResolvedValueOnce(prediction('completed', [OUT_MP4]))
+      .mockResolvedValueOnce(new Response(new Uint8Array([0, 0, 0, 24])))
+    blobPutMock.mockResolvedValue({ url: 'https://x.public.blob.vercel-storage.com/video/job-atlas/clip-ok.mp4' })
+    await advanceInflightVideoJobs()
+    expect(state.inserts.find(i => i['purpose'] === 'clip')?.['providerRequestId']).toBe(PRED_ID)
+  })
+
+  it('handleRequestId reads a handle and refuses non-handles', () => {
+    expect(handleRequestId(HANDLE)).toBe(PRED_ID)
+    expect(handleRequestId(2)).toBeNull()
+    expect(handleRequestId({ requestId: undefined })).toBeNull()
+    expect(handleRequestId({ requestId: 'x'.repeat(80) })).toHaveLength(64)
+  })
+
+  it('withoutRehostAttempts strips the bookkeeping key, and the public view drops every non-handle', () => {
+    const raw = { clip: HANDLE, download_attempts: 2, assembly_attempts: 1 } as never
+    expect(withoutRehostAttempts(raw)).toEqual({ clip: HANDLE, assembly_attempts: 1 })
+    expect(publicProviderRequestIds(raw)).toEqual({ clip: HANDLE })
+    expect(providerHandleList(raw)).toEqual([{ stage: 'clip', provider: 'atlas', requestId: PRED_ID }])
+  })
+
+  it('backfill plan pairs each stage handle with its one blob and skips ambiguity', () => {
+    const base = 'https://x.public.blob.vercel-storage.com/video/job-atlas'
+    const suffix = 'AbCdEfGhIjKlMnOpQrStUv'
+    const plan = planBackfillForJob('job-atlas', {
+      clip: HANDLE,
+      scene_1: { ...HANDLE, requestId: 'scene1req' },
+      lipsync: { ...HANDLE, requestId: 'lsreq0001' },
+      download_attempts: 1,
+    } as never, [
+      { id: 1, blobUrl: `${base}/clip-${suffix}.mp4`, providerRequestId: null },
+      { id: 2, blobUrl: `${base}/clip-vo-${suffix}.mp4`, providerRequestId: null },
+      { id: 3, blobUrl: `${base}/clip-ls-${suffix}.mp4`, providerRequestId: null },
+      { id: 4, blobUrl: `${base}/clip-ls-${suffix}x.mp4`, providerRequestId: null },
+    ])
+    expect(plan.writes).toEqual([{ assetId: 1, stage: 'clip', requestId: PRED_ID }])
+    expect(plan.ambiguous).toEqual(['lipsync'])
+    expect(plan.unmatched).toEqual(['scene_1'])
   })
 })

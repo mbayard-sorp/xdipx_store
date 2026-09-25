@@ -930,10 +930,21 @@ async function rehostWithRetry<T>(job: VideoJobRow, work: () => Promise<T>): Pro
 }
 
 /** providerRequestIds without the re-host bookkeeping key. */
-function withoutRehostAttempts(handles: VideoJobRow['providerRequestIds']): VideoJobRow['providerRequestIds'] {
+export function withoutRehostAttempts(handles: VideoJobRow['providerRequestIds']): VideoJobRow['providerRequestIds'] {
   const copy = { ...(handles as Record<string, unknown>) }
   delete copy[REHOST_ATTEMPTS_KEY]
   return copy as unknown as VideoJobRow['providerRequestIds']
+}
+
+/**
+ * The provider request id carried by a stage handle, fit for
+ * media_assets.provider_request_id (varchar 64). Null for anything that is not
+ * a handle, such as the numeric bookkeeping keys (ticket #11552).
+ */
+export function handleRequestId(handle: unknown): string | null {
+  if (!handle || typeof handle !== 'object') return null
+  const rid = (handle as { requestId?: unknown }).requestId
+  return typeof rid === 'string' && rid ? rid.slice(0, 64) : null
 }
 
 async function advanceJob(job: VideoJobRow): Promise<AdvanceOutcome> {
@@ -1219,6 +1230,7 @@ async function advanceSceneFrame(job: VideoJobRow): Promise<AdvanceOutcome> {
       sourceModel: costKey,
       costUsd: String(estimateImageCostUsd(costKey, 1)),
       videoJobId: job.id,
+      providerRequestId: handleRequestId({ requestId: requestIds[i] }),
     }).returning({ id: mediaAssets.id })
     if (row) {
       assetIds.push(row.id)
@@ -1405,6 +1417,7 @@ async function advanceSceneFrameMultiScene(job: VideoJobRow, scenes: VideoSceneS
       sourceModel: costKey,
       costUsd: String(estimateImageCostUsd(costKey, 1)),
       videoJobId: job.id,
+      providerRequestId: handleRequestId({ requestId: requestIds[i] }),
     }).returning({ id: mediaAssets.id })
     if (row) {
       assetIds.push(row.id)
@@ -1554,6 +1567,7 @@ async function advanceClip(job: VideoJobRow): Promise<AdvanceOutcome> {
     contentType: 'video/mp4',
     sourceModel: pollClipSpec?.costKey ?? job.modelTier,
     videoJobId: job.id,
+    providerRequestId: handleRequestId(existing),
   })
   await touch(job, { stage: 'lipsync', status: 'queued', providerRequestIds: withoutRehostAttempts(job.providerRequestIds) })
   return 'progressed'
@@ -1705,6 +1719,7 @@ async function advanceClipMultiScene(job: VideoJobRow, spec: VideoModelSpec, sce
     contentType: 'video/mp4',
     sourceModel: clipSpec.costKey,
     videoJobId: job.id,
+    providerRequestId: handleRequestId(existing),
   }).returning({ id: mediaAssets.id })
   if (!row) throw new Error(`Scene ${idx} clip asset insert failed`)
   const nextState: VideoSceneState[] = state.map((s, i) =>
@@ -1887,6 +1902,7 @@ async function advanceClipAvatar(job: VideoJobRow, spec: VideoModelSpec): Promis
       contentType: 'video/mp4',
       sourceModel: spec.costKey,
       videoJobId: job.id,
+      providerRequestId: handleRequestId(handles[key]),
     })
   }
   // Lipsync is a no-op for the avatar tier (speech is already embedded); the
@@ -2105,6 +2121,7 @@ async function advanceLipsyncPerform(job: VideoJobRow, spec: VideoModelSpec): Pr
     contentType: 'video/mp4',
     sourceModel: spec.costKey,
     videoJobId: job.id,
+    providerRequestId: handleRequestId(existing),
   })
   await touch(job, { stage: 'assembly', status: 'queued' })
   return 'progressed'
@@ -2722,9 +2739,20 @@ export async function recordVideoMetrics(
 
 // ─── Reads (Video Studio + team API) ─────────────────────────────────────────
 
+/** A media_assets row as Video Studio shows it, with its provider trace (ticket #11552). */
+export interface VideoAssetTrace {
+  id: number
+  blobUrl: string
+  purpose?: string
+  sourceModel?: string | null
+  providerRequestId?: string | null
+}
+
 export interface VideoJobWithAssets {
   job: VideoJobRow
-  frames: { id: number; blobUrl: string }[]
+  frames: VideoAssetTrace[]
+  /** Provider-produced video parts (clip, clip_b, ...), oldest first, with their request ids. */
+  clips?: VideoAssetTrace[]
   /**
    * Multi-scene jobs only: candidate scene_frame assets grouped by scene index.
    * Parsed off the blob path (video/<jobId>/scene-<idx>-frame-<i>.jpg) rather
@@ -2732,7 +2760,7 @@ export interface VideoJobWithAssets {
    * migration, and the naming convention is owned entirely by
    * advanceSceneFrameMultiScene.
    */
-  sceneFrames?: Record<number, { id: number; blobUrl: string }[]>
+  sceneFrames?: Record<number, VideoAssetTrace[]>
   finalUrl: string | null
   posterUrl: string | null
 }
@@ -2746,21 +2774,39 @@ export interface VideoJobWithAssets {
 // to click).
 const SCENE_FRAME_BLOB_RE = /\/scene-(\d+)-frame-\d+(?:-[^/]+)?\.jpg$/
 
-export async function listVideoJobs(limit = 40): Promise<VideoJobWithAssets[]> {
-  const jobs = await db.select().from(videoJobs).orderBy(desc(videoJobs.createdAt)).limit(limit)
+export async function listVideoJobs(limit = 40, opts: { jobId?: string; rowIds?: number[] } = {}): Promise<VideoJobWithAssets[]> {
+  if (opts.rowIds && !opts.rowIds.length) return []
+  const filter = opts.jobId != null
+    ? eq(videoJobs.jobId, opts.jobId)
+    : opts.rowIds ? inArray(videoJobs.id, opts.rowIds) : undefined
+  const base = db.select().from(videoJobs)
+  const jobs = await (filter ? base.where(filter) : base).orderBy(desc(videoJobs.createdAt)).limit(limit)
   if (!jobs.length) return []
   const jobIds = jobs.map(j => j.id)
   const assets = await db
-    .select({ id: mediaAssets.id, blobUrl: mediaAssets.blobUrl, purpose: mediaAssets.purpose, videoJobId: mediaAssets.videoJobId })
+    .select({
+      id: mediaAssets.id,
+      blobUrl: mediaAssets.blobUrl,
+      purpose: mediaAssets.purpose,
+      videoJobId: mediaAssets.videoJobId,
+      sourceModel: mediaAssets.sourceModel,
+      providerRequestId: mediaAssets.providerRequestId,
+    })
     .from(mediaAssets)
     .where(inArray(mediaAssets.videoJobId, jobIds))
+  const trace = (a: typeof assets[number]): VideoAssetTrace => ({
+    id: a.id,
+    blobUrl: a.blobUrl,
+    sourceModel: a.sourceModel ?? null,
+    providerRequestId: a.providerRequestId ?? null,
+  })
   return jobs.map(job => {
     const own = assets.filter(a => a.videoJobId === job.id)
     const finalAsset = own.find(a => a.id === job.finalAssetId) ?? null
     const posterAsset = own.find(a => a.id === job.posterAssetId) ?? null
     const frameAssets = own.filter(a => a.purpose === 'scene_frame')
 
-    let sceneFrames: Record<number, { id: number; blobUrl: string }[]> | undefined
+    let sceneFrames: Record<number, VideoAssetTrace[]> | undefined
     if (job.scenesJson && job.scenesJson.length >= MULTI_SCENE_MIN) {
       sceneFrames = {}
       for (const a of frameAssets) {
@@ -2768,14 +2814,18 @@ export async function listVideoJobs(limit = 40): Promise<VideoJobWithAssets[]> {
         if (!m) continue
         const idx = Number(m[1])
         const list = sceneFrames[idx] ?? []
-        list.push({ id: a.id, blobUrl: a.blobUrl })
+        list.push(trace(a))
         sceneFrames[idx] = list
       }
     }
 
     return {
       job,
-      frames: frameAssets.map(a => ({ id: a.id, blobUrl: a.blobUrl })),
+      frames: frameAssets.map(trace),
+      clips: own
+        .filter(a => (a.purpose === 'clip' || /^clip_[a-z]$/.test(a.purpose)) && a.providerRequestId)
+        .sort((x, y) => x.id - y.id)
+        .map(a => ({ ...trace(a), purpose: a.purpose })),
       ...(sceneFrames ? { sceneFrames } : {}),
       finalUrl: finalAsset?.blobUrl ?? null,
       posterUrl: posterAsset?.blobUrl ?? null,
