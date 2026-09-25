@@ -1111,6 +1111,7 @@ const THRESHOLD_MODES: ThresholdMode[] = ['aggressive', 'balanced', 'conservativ
 
 function modeBlurb(mode: ApprovalModeV2, thresholds: Record<string, number>): string {
   if (mode === 'review_all') return 'Queue every change for manual review'
+  if (mode === 'autopilot') return 'Your rules are the approval. Nothing queues; a daily digest email lists big moves and any hard stop.'
   const pct = Math.round((thresholds[mode] ?? 0) * 100)
   return `Auto-approve price changes up to ${pct}%`
 }
@@ -1176,7 +1177,7 @@ function ApprovalModePanel({
     )
   }
 
-  const modes: ApprovalModeV2[] = ['aggressive', 'balanced', 'conservative', 'review_all']
+  const modes: ApprovalModeV2[] = ['autopilot', 'aggressive', 'balanced', 'conservative', 'review_all']
 
   return (
     <section className="bg-white rounded-2xl border border-line p-5 space-y-4">
@@ -1199,7 +1200,7 @@ function ApprovalModePanel({
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
         {modes.map(mode => {
           const isActive = optimisticMode === mode
-          const editable = mode !== 'review_all'
+          const editable = mode !== 'review_all' && mode !== 'autopilot'
           return (
             <div
               key={mode}

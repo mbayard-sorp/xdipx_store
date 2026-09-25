@@ -116,9 +116,22 @@ export function computePrice(params: {
   msrp:               number | null
   cfg:                PricingConfig
   absolutePriceFloor?: number
+  /**
+   * Whether MSRP caps the sell price. Off by default in production via the
+   * `pricing_msrp_ceiling_enabled` valve (owner direction 2026-09-25: MSRP is
+   * irrelevant to pricing; only Lovense/Playground MAP binds). When off, MSRP
+   * still supplies the compare-at strike-through where the strategy asks for
+   * it, but never pulls the sell price down and can never produce
+   * `msrpBelowFloor`. Defaults to true here so pure callers and existing tests
+   * keep the historical formula.
+   */
+  msrpCeiling?:       boolean
 }): PriceResult & { belowAbsoluteFloor: boolean; msrpBelowFloor: boolean } | null {
-  const { cost, map, msrp, cfg } = params
+  const { cost, map, cfg } = params
   const absolutePriceFloor = params.absolutePriceFloor ?? ABSOLUTE_PRICE_FLOOR_DEFAULT
+  // With the ceiling off, treat MSRP as absent for every sell-price step below;
+  // it is re-read only for compare_at.
+  const msrp = params.msrpCeiling === false ? null : params.msrp
 
   if (cost == null) return null
 
@@ -181,9 +194,10 @@ export function computePrice(params: {
     sell = cfg.map_behavior === 'above_map_only' ? round2(map + 0.01) : round2(map)
   }
 
+  const compareMsrp = params.msrp
   const compare_at =
-    cfg.compare_at_strategy === 'msrp' && msrp != null && sell < msrp
-      ? msrp
+    cfg.compare_at_strategy === 'msrp' && compareMsrp != null && sell < compareMsrp
+      ? compareMsrp
       : null
 
   return { sell, compare_at, belowAbsoluteFloor: sell < absolutePriceFloor, msrpBelowFloor }
@@ -218,8 +232,11 @@ export function computeDiscontinuedPrice(params: {
   msrp:             number | null
   daysDiscontinued: number
   cfg:              Pick<PricingConfig, 'target_margin_pct' | 'margin_floor_pct'>
+  /** See computePrice. When false, MSRP is compare-at only, never a cap. */
+  msrpCeiling?:     boolean
 }): PriceResult | null {
-  const { cost, msrp, daysDiscontinued, cfg } = params
+  const { cost, daysDiscontinued, cfg } = params
+  const msrp = params.msrpCeiling === false ? null : params.msrp
 
   if (cost == null) return null
 
@@ -245,6 +262,7 @@ export function computeDiscontinuedPrice(params: {
   let rounded = roundPsychological(sell)
   if (rounded < floor) rounded = roundUpPsychological(floor)
 
-  const compare_at = msrp != null && rounded < msrp ? msrp : null
+  const compareMsrp = params.msrp
+  const compare_at = compareMsrp != null && rounded < compareMsrp ? compareMsrp : null
   return { sell: rounded, compare_at }
 }

@@ -406,7 +406,7 @@ export async function getGlobalRule(): Promise<GroupRuleValues> {
 // V2 approval mode (4-mode enum)
 // ---------------------------------------------------------------------------
 
-export type ApprovalModeV2 = 'aggressive' | 'balanced' | 'conservative' | 'review_all'
+export type ApprovalModeV2 = 'aggressive' | 'balanced' | 'conservative' | 'review_all' | 'autopilot'
 
 export async function getApprovalModeV2(): Promise<ApprovalModeV2> {
   try {
@@ -416,7 +416,7 @@ export async function getApprovalModeV2(): Promise<ApprovalModeV2> {
       .where(eq(pipelineSettings.key, 'pricing_approval_mode'))
       .limit(1)
     const val = rows[0]?.value
-    if (val === 'aggressive' || val === 'conservative' || val === 'review_all' || val === 'balanced') return val
+    if (val === 'aggressive' || val === 'conservative' || val === 'review_all' || val === 'balanced' || val === 'autopilot') return val
   } catch { /* fall through */ }
   return 'balanced'
 }

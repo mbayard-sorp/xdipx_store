@@ -107,6 +107,11 @@ export async function handlePricingBatchRecompute(req: Request, res: Response): 
       }
     }
 
+    if (result.done) {
+      await sendAutopilotDigest().catch(err =>
+        console.error('[cron:pricing-batch-recompute] digest failed (ignored):', err))
+    }
+
     let continued = false
     if (!result.done) {
       const kickKey = `pricing-batch:continuations:${new Date().toISOString().slice(0, 10)}`
@@ -158,6 +163,50 @@ async function kickContinuation(): Promise<boolean> {
     console.warn('[cron:pricing-batch-recompute] continuation kick threw:', e)
     return false
   }
+}
+
+/**
+ * Autopilot's replacement for the approval queue: once the day's walk is
+ * complete, one email listing every applied change over the digest threshold
+ * and every reject or apply error. Sent only in autopilot mode; the other
+ * modes still have a queue to read. Empty days send nothing.
+ */
+async function sendAutopilotDigest(): Promise<void> {
+  const { getPricingDigest, getDigestMinDelta, utcDay } =
+    await import('../app/lib/pricing-apply-v2.server.js')
+  const { getApprovalModeV2 } = await import('../app/lib/pricing-admin.server.js')
+  if ((await getApprovalModeV2()) !== 'autopilot') return
+
+  const minDelta = await getDigestMinDelta()
+  const digest = await getPricingDigest(utcDay(), minDelta)
+  if (digest.bigMoves.length === 0 && digest.problems.length === 0) return
+
+  const { sendOwnerEmail, escapeHtml } = await import('../app/lib/owner-alerts.server.js')
+  const money = (n: number) => `$${n.toFixed(2)}`
+  const pct = (n: number) => `${n > 0 ? '+' : ''}${Math.round(n * 100)}%`
+  const line = (r: { sku: string | null; productType: string | null; oldSell: number; newSell: number; deltaPct: number; marginAfter: number | null; rationale: string | null }) =>
+    `<tr><td>${escapeHtml(r.sku ?? '?')}</td><td>${escapeHtml(r.productType ?? '')}</td>`
+    + `<td>${money(r.oldSell)} → ${money(r.newSell)}</td><td>${pct(r.deltaPct)}</td>`
+    + `<td>${r.marginAfter == null ? '' : Math.round(r.marginAfter * 100) + '%'}</td>`
+    + `<td>${escapeHtml((r.rationale ?? '').slice(0, 120))}</td></tr>`
+  const table = (rows: typeof digest.bigMoves) =>
+    `<table cellpadding="4" style="border-collapse:collapse;font-size:12px"><tr><th>SKU</th><th>Type</th><th>Price</th><th>Δ</th><th>Margin</th><th>Why</th></tr>${rows.slice(0, 200).map(line).join('')}</table>`
+
+  const html =
+    `<p>Pricing autopilot, ${digest.day}: ${digest.applied} changes applied, ${digest.rejected} rejected, ${digest.errors} apply errors.</p>`
+    + (digest.bigMoves.length
+      ? `<h3>Moves of ${Math.round(minDelta * 100)}% or more (${digest.bigMoves.length})</h3>${table(digest.bigMoves)}`
+      : '')
+    + (digest.problems.length
+      ? `<h3>Rejected or failed (${digest.problems.length})</h3><p>A reject is a floor or MAP hard stop the engine refused to cross; an apply error is a Shopify write that failed.</p>${table(digest.problems)}`
+      : '')
+    + `<p>Nothing here needs a click. Change the rules on /admin/pricing if the numbers are wrong.</p>`
+
+  await sendOwnerEmail(
+    `xdipx pricing digest ${digest.day}: ${digest.bigMoves.length} big moves, ${digest.problems.length} problems`,
+    html,
+    { escalation: 'pricing-report' },
+  )
 }
 
 /**

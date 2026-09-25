@@ -6,7 +6,7 @@ import { pipelineSettings } from '../../db/schema'
 
 import type { ApprovalModeV2 } from '~/lib/pricing-admin.server'
 
-const VALID_MODES: ApprovalModeV2[] = ['aggressive', 'balanced', 'conservative', 'review_all']
+const VALID_MODES: ApprovalModeV2[] = ['aggressive', 'balanced', 'conservative', 'review_all', 'autopilot']
 
 export async function action({ request }: ActionFunctionArgs) {
   await requireAdmin(request)

@@ -662,3 +662,51 @@ describe('roundUpPsychological', () => {
     }
   })
 })
+
+// ---------------------------------------------------------------------------
+// MSRP ceiling valve (pricing_msrp_ceiling_enabled, default off)
+// ---------------------------------------------------------------------------
+
+describe('computePrice — msrpCeiling=false', () => {
+  const cfg = {
+    target_margin_pct: 0.45,
+    margin_floor_pct: 0.30,
+    map_behavior: 'at_map' as const,
+    compare_at_strategy: 'msrp' as const,
+    velocity_modifier_enabled: false,
+  }
+
+  it('ignores an MSRP below the floor-satisfying price and never sets msrpBelowFloor', () => {
+    // cost 45, stored MSRP 20 (the SKU 70983 case): with the ceiling on this
+    // pins sell at 19.99 and queues forever; with it off it prices off cost.
+    const r = computePrice({ cost: 45, map: null, msrp: 20, cfg, msrpCeiling: false })
+    expect(r).not.toBeNull()
+    expect(r!.sell).toBeGreaterThanOrEqual(45 / 0.7)
+    expect(r!.msrpBelowFloor).toBe(false)
+    expect(r!.compare_at).toBeNull() // MSRP below sell: no strike-through
+  })
+
+  it('still uses MSRP as the compare-at strike-through when it sits above the sell price', () => {
+    const r = computePrice({ cost: 10, map: null, msrp: 40, cfg, msrpCeiling: false })
+    expect(r!.sell).toBeLessThan(40)
+    expect(r!.compare_at).toBe(40)
+  })
+
+  it('default (ceiling on) is unchanged: MSRP still caps the sell price', () => {
+    const r = computePrice({ cost: 45, map: null, msrp: 20, cfg })
+    expect(r!.sell).toBeLessThanOrEqual(20)
+    expect(r!.msrpBelowFloor).toBe(true)
+  })
+})
+
+describe('computeDiscontinuedPrice — msrpCeiling=false', () => {
+  const cfg = { target_margin_pct: 0.5, margin_floor_pct: 0.3 }
+
+  it('does not cap the clearance price at a stale MSRP but keeps it as compare-at when higher', () => {
+    const free = computeDiscontinuedPrice({ cost: 45, msrp: 20, daysDiscontinued: 0, cfg, msrpCeiling: false })
+    expect(free!.sell).toBeGreaterThanOrEqual(45 / 0.7)
+    expect(free!.compare_at).toBeNull()
+    const high = computeDiscontinuedPrice({ cost: 10, msrp: 60, daysDiscontinued: 0, cfg, msrpCeiling: false })
+    expect(high!.compare_at).toBe(60)
+  })
+})
