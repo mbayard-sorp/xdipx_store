@@ -531,6 +531,23 @@ secondary page's paraphrase of one, and delete or re-scope any claim whose only 
 individual's anecdotal reference to an unnamed study. The standing rule is unchanged: narrow or
 delete, never hedge.
 
+**Self-consistency pre-flight (mandatory, before Step 5, ticket #11099):** a post that sets its own
+rule and then breaks it in a later section is a failure class none of the pre-flights above catch,
+because each of them models a claim against outside evidence, not the document against itself. Three
+occurrences, same shape (the body states a standard, a later section of the SAME post diverges from
+it): run 327 lost its publish to a body/FAQ enumeration split; run 626 lost it again when a
+fever-severity tier change to the body red-flag list left FAQ Q5's copy of the same enumeration
+unchanged; run 1037 took an accuracy-gate BLOCK when the post told readers to read the printed ingress
+code and never the adjective, then two sections later extended a safe-under-running-water endorsement
+to two products on the strength of the bare adjective "100 percent waterproof," which neither
+manufacturer backs with a printed IP code. Before submit: list every RULE or STANDARD the draft tells
+the reader to apply (read the printed code, never the adjective; use water-based only; stop at these
+symptoms), then grep the whole document, the FAQ block included, for every place the post applies that
+rule to a specific product or case, and confirm each application obeys the rule the post itself set.
+This runs in addition to, not instead of, the enumeration-consistency scan in Step 5 item 3, which
+stays scoped to the rewrite cycle: this pre-flight catches it on first submit, before a gate cycle is
+spent on it.
+
 **Solidarity-voice pre-flight (mandatory, before Step 5):** count the first-person markers (`I` /
 `we` / `our`) in the body. If the count is under about 4, or they are not distributed across the
 opening, middle, and close, add solidarity seams **now**, not after a REVISE — missing solidarity voice

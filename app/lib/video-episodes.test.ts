@@ -87,6 +87,19 @@ describe('spokenTextOf / scriptsSpeakIdentically', () => {
     expect(scriptsSpeakIdentically(a, b)).toBe(true)
     expect(spokenTextOf(a)).toBe('presenterLine:line')
   })
+
+  it('covers the spoken CTA line (ticket #11150): a cta edit is not identical', () => {
+    const a = { presenterLine: 'line', cta: "Take a peek" } as VideoScriptJson
+    const b = { presenterLine: 'line', cta: "I'll take it" } as VideoScriptJson
+    expect(scriptsSpeakIdentically(a, b)).toBe(false)
+    expect(spokenTextOf(a)).toBe("presenterLine:line\ncta:Take a peek")
+  })
+
+  it('a cta added or removed is never identical either', () => {
+    const withCta = { presenterLine: 'line', cta: 'Take a peek' } as VideoScriptJson
+    const withoutCta = { presenterLine: 'line' } as VideoScriptJson
+    expect(scriptsSpeakIdentically(withCta, withoutCta)).toBe(false)
+  })
 })
 
 describe('mapSpeakerToPresenter (ADR-014, ticket #6586)', () => {
