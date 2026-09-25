@@ -8,12 +8,14 @@ import { describe, expect, it } from 'vitest'
 import {
   isCropScale,
   needsBodyReference,
+  needsHandReference,
   resolveCastReference,
   withSkinToneNote,
 } from './social-cast-reference.server'
 
 const PORTRAIT = 'https://cdn.sanity.io/images/proj/ds/portrait.jpg'
 const BODY = 'https://cdn.sanity.io/images/proj/ds/body.jpg'
+const HAND = 'https://cdn.sanity.io/images/proj/ds/hand.jpg'
 const PROMPT = 'held at the collarbone, window light'
 
 const withBody = {
@@ -21,8 +23,10 @@ const withBody = {
   photoUrl: PORTRAIT,
   bodyReferencePhotoUrl: BODY,
   skinToneNote: 'deep brown skin with warm undertones',
+  handReferencePhotoUrl: HAND,
 }
 const withoutBody = { ...withBody, bodyReferencePhotoUrl: null }
+const withoutHand = { ...withBody, handReferencePhotoUrl: null }
 
 describe('isCropScale', () => {
   it('accepts the four documented scales and nothing else', () => {
@@ -38,6 +42,18 @@ describe('needsBodyReference', () => {
     expect(needsBodyReference('medium')).toBe(false)
     expect(needsBodyReference('wide')).toBe(false)
     expect(needsBodyReference(undefined)).toBe(false)
+  })
+})
+
+describe('needsHandReference', () => {
+  it('is true only for the held contact modes', () => {
+    expect(needsHandReference('self-held')).toBe(true)
+    expect(needsHandReference('other-held')).toBe(true)
+    expect(needsHandReference('drawn')).toBe(true)
+    expect(needsHandReference('resting')).toBe(false)
+    expect(needsHandReference('worn')).toBe(false)
+    expect(needsHandReference('balanced')).toBe(false)
+    expect(needsHandReference(undefined)).toBe(false)
   })
 })
 
@@ -97,6 +113,44 @@ describe('resolveCastReference', () => {
 
   it('never puts an em-dash in the warning', () => {
     const r = resolveCastReference({ member: withoutBody, cropScale: 'close', prompt: PROMPT })
+    expect(r.warning).not.toContain(String.fromCharCode(8212))
+  })
+
+  it('attaches the hand reference as an extra reference for a held contact mode', () => {
+    const r = resolveCastReference({ member: withBody, cropScale: 'medium', prompt: PROMPT, contactMode: 'self-held' })
+    expect(r.extraReferenceUrls).toEqual([HAND])
+    expect(r.handReferenceMissing).toBe(false)
+    expect(r.warning).toBeUndefined()
+    // The extra reference never replaces the presenter reference.
+    expect(r.presenterImageUrl).toBe(PORTRAIT)
+  })
+
+  it('attaches nothing extra for a non-held contact mode', () => {
+    const r = resolveCastReference({ member: withBody, cropScale: 'medium', prompt: PROMPT, contactMode: 'resting' })
+    expect(r.extraReferenceUrls).toEqual([])
+    expect(r.handReferenceMissing).toBe(false)
+  })
+
+  it('attaches nothing extra when contactMode is absent', () => {
+    const r = resolveCastReference({ member: withBody, cropScale: 'medium', prompt: PROMPT })
+    expect(r.extraReferenceUrls).toEqual([])
+  })
+
+  it('flags a held contact mode with no approved hand reference, still returns a usable resolution', () => {
+    const r = resolveCastReference({ member: withoutHand, cropScale: 'medium', prompt: PROMPT, contactMode: 'other-held' })
+    expect(r.extraReferenceUrls).toEqual([])
+    expect(r.handReferenceMissing).toBe(true)
+    expect(r.warning).toContain('handReferencePhoto')
+    expect(r.warning).toContain('Maya')
+  })
+
+  it('combines the body and hand warnings when both are missing', () => {
+    const bare = { ...withoutBody, handReferencePhotoUrl: null }
+    const r = resolveCastReference({ member: bare, cropScale: 'macro', prompt: PROMPT, contactMode: 'drawn' })
+    expect(r.bodyReferenceMissing).toBe(true)
+    expect(r.handReferenceMissing).toBe(true)
+    expect(r.warning).toContain('bodyReferencePhoto')
+    expect(r.warning).toContain('handReferencePhoto')
     expect(r.warning).not.toContain(String.fromCharCode(8212))
   })
 })

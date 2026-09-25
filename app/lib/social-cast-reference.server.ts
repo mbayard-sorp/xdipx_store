@@ -36,9 +36,20 @@ export function needsBodyReference(cropScale: string | null | undefined): boolea
   return cropScale === 'macro' || cropScale === 'close'
 }
 
+/**
+ * A held contact mode is the case that needs the dedicated hand reference
+ * (ticket #11476): the product is picked up, drawn, or held by someone other
+ * than the presenter, and the body plate's own static pose cannot supply a
+ * credible grip. `resting`, `worn`, `balanced` and the non-skin sentinel do
+ * not touch a hand at all, so they get nothing extra.
+ */
+export function needsHandReference(contactMode: string | null | undefined): boolean {
+  return contactMode === 'self-held' || contactMode === 'other-held' || contactMode === 'drawn'
+}
+
 export type CastReferenceMember = Pick<
   CastMember,
-  'name' | 'photoUrl' | 'bodyReferencePhotoUrl' | 'skinToneNote'
+  'name' | 'photoUrl' | 'bodyReferencePhotoUrl' | 'skinToneNote' | 'handReferencePhotoUrl'
 >
 
 export interface CastReferenceResolution {
@@ -52,6 +63,14 @@ export interface CastReferenceResolution {
   bodyReferenceMissing: boolean
   /** Human-readable reason, present only when `bodyReferenceMissing`. */
   warning?: string
+  /**
+   * The member's handReferencePhotoUrl, passed alongside (never instead of)
+   * `presenterImageUrl` for a held contact mode via `extraImageUrls`. Empty
+   * when the contact mode is not held, or the member has none yet.
+   */
+  extraReferenceUrls: string[]
+  /** True when a held contact mode had no handReferencePhotoUrl to draw on. */
+  handReferenceMissing: boolean
 }
 
 /**
@@ -70,32 +89,51 @@ export function resolveCastReference(opts: {
   member: CastReferenceMember
   cropScale: string | null | undefined
   prompt: string
+  contactMode?: string | null | undefined
 }): CastReferenceResolution {
-  const { member, cropScale, prompt } = opts
+  const { member, cropScale, prompt, contactMode } = opts
   const wantsBody = needsBodyReference(cropScale)
   const bodyReferenceMissing = wantsBody && !member.bodyReferencePhotoUrl
   const presenterImageUrl = presenterPhotoUrlForCrop(member, cropScale)
+
+  const wantsHand = needsHandReference(contactMode)
+  const handReferenceMissing = wantsHand && !member.handReferencePhotoUrl
+  const extraReferenceUrls = wantsHand && member.handReferencePhotoUrl ? [member.handReferencePhotoUrl] : []
+
+  const warnings: string[] = []
+  if (bodyReferenceMissing) {
+    // Ticket #10560: this used to end with a directive to an agent
+    // ("Hold the post and say so in the run summary"), which is not a
+    // control — nothing enforced it, and it let everyone believe the
+    // instruction was a substitute for an actual sink. The route now
+    // records this on the run's event timeline and tags the asset row
+    // itself (api.team.social-image.tsx), so this stays a plain,
+    // human-readable description of what happened and how to fix the
+    // root cause.
+    warnings.push(
+      `${member.name} has no bodyReferencePhoto, so this ${cropScale} crop was generated from the portrait. ` +
+      'The body and skin tone below the neck are invented under this persona\'s name, which fails ' +
+      'instagram-campaigns.md section 3.7 clause (a). ' +
+      'To unblock: npx tsx scripts/generate-cast-body-references.ts, owner picks, upload to castMember.bodyReferencePhoto.',
+    )
+  }
+  if (handReferenceMissing) {
+    // Same shape as the body-reference warning above: recorded on the run's
+    // event timeline (api.team.social-image.tsx), never silent.
+    warnings.push(
+      `${member.name} has no handReferencePhoto, so this ${contactMode} frame has no dedicated hand reference. ` +
+      'The grip is edited from the seated body plate alone, which tends to render with no hand in frame at all. ' +
+      'To unblock: npx tsx scripts/generate-cast-hand-references.ts, owner picks, upload to castMember.handReferencePhoto.',
+    )
+  }
+
   return {
     presenterImageUrl,
     prompt: withSkinToneNote(prompt, member.skinToneNote),
     referenceField: wantsBody && member.bodyReferencePhotoUrl ? 'bodyReferencePhoto' : 'referencePhoto',
     bodyReferenceMissing,
-    ...(bodyReferenceMissing
-      ? {
-          // Ticket #10560: this used to end with a directive to an agent
-          // ("Hold the post and say so in the run summary"), which is not a
-          // control — nothing enforced it, and it let everyone believe the
-          // instruction was a substitute for an actual sink. The route now
-          // records this on the run's event timeline and tags the asset row
-          // itself (api.team.social-image.tsx), so this stays a plain,
-          // human-readable description of what happened and how to fix the
-          // root cause.
-          warning:
-            `${member.name} has no bodyReferencePhoto, so this ${cropScale} crop was generated from the portrait. ` +
-            'The body and skin tone below the neck are invented under this persona\'s name, which fails ' +
-            'instagram-campaigns.md section 3.7 clause (a). ' +
-            'To unblock: npx tsx scripts/generate-cast-body-references.ts, owner picks, upload to castMember.bodyReferencePhoto.',
-        }
-      : {}),
+    extraReferenceUrls,
+    handReferenceMissing,
+    ...(warnings.length ? { warning: warnings.join(' ') } : {}),
   }
 }

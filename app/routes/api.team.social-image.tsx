@@ -8,7 +8,8 @@
  *     castSlug?, castSlugs?, productImageUrl?, extraImageUrls?, scale,
  *     count?, caller?, runId?, + the scene axes }
  *       -> GenerateCastCompositeResult { urls, filenames, costs, requestIds, plateRequestId? }
- *          plus bodyReferenceMissing?/warning?/productImageFellBack? (#10336, #10341)
+ *          plus bodyReferenceMissing?/handReferenceMissing?/warning?/productImageFellBack?
+ *          (#10336, #10341, #11476)
  *          plus derivedLengthInches?/derivedScaleCue? when `handle` resolves to a
  *          product carrying `xdipx.specifications` (#10981)
  *          plus ok:false/reason when every candidate across both attempts was
@@ -156,7 +157,12 @@ export async function action({ request }: ActionFunctionArgs) {
       let presenterImageUrl = str(b['presenterImageUrl'])
       let castPrompt = prompt
       let bodyReferenceMissing = false
+      let handReferenceMissing = false
       let warning: string | undefined
+      // Ticket #11476: the cast member's own hand reference, attached
+      // automatically for a held contact mode via extraImageUrls, alongside
+      // (never instead of) whatever the caller passes explicitly.
+      let castExtraReferenceUrls: string[] = []
       const scale = str(b['scale'])
 
       // Presenter reference selection (ticket #10336). Same decision the CLI
@@ -183,11 +189,13 @@ export async function action({ request }: ActionFunctionArgs) {
         if (!member) {
           return new Response(`Bad Request: castSlug "${castSlug}" is not an approved cast member`, { status: 400 })
         }
-        const resolved = resolveCastReference({ member, cropScale, prompt })
+        const resolved = resolveCastReference({ member, cropScale, prompt, contactMode: sceneAxes.contactMode })
         presenterImageUrl = resolved.presenterImageUrl
         castPrompt = resolved.prompt
         bodyReferenceMissing = resolved.bodyReferenceMissing
+        handReferenceMissing = resolved.handReferenceMissing
         warning = resolved.warning
+        castExtraReferenceUrls = resolved.extraReferenceUrls
       }
 
       // Product reference (ticket #10341). featuredMedia is sometimes the
@@ -242,9 +250,13 @@ export async function action({ request }: ActionFunctionArgs) {
       if (!presenterImageUrl) return new Response('Bad Request: presenterImageUrl or castSlug required', { status: 400 })
       if (!productImageUrl) return new Response('Bad Request: productImageUrl required', { status: 400 })
       if (!scale) return new Response('Bad Request: scale required', { status: 400 })
-      const extraImageUrls = Array.isArray(b['extraImageUrls'])
+      const callerExtraImageUrls = Array.isArray(b['extraImageUrls'])
         ? (b['extraImageUrls'] as unknown[]).filter((u): u is string => typeof u === 'string' && u.length > 0)
-        : undefined
+        : []
+      // Ticket #11476: the cast hand reference rides alongside whatever the
+      // caller passed explicitly, deduped so a caller that also names it via
+      // `extraImageUrls` (e.g. the CLI's `--extra-ref`) does not send it twice.
+      const extraImageUrls = [...new Set([...callerExtraImageUrls, ...castExtraReferenceUrls])]
       const count = num(b['count'])
       // Frame shape, not pixel size. Only the two social stills shapes are
       // accepted: 4:5 for the Instagram grid, 16:9 for X's timeline. Anything
@@ -339,7 +351,7 @@ export async function action({ request }: ActionFunctionArgs) {
       // and reads its own response. Both writes are non-fatal, matching
       // `tryIngestSocialAsset`'s contract: telemetry must never fail an
       // already-billed generation.
-      if (bodyReferenceMissing || productImageFellBack) {
+      if (bodyReferenceMissing || handReferenceMissing || productImageFellBack) {
         const parts = [
           ...(warning ? [warning] : []),
           ...(productImageFellBack ? ['Fell back to a packaging/retail-box frame; no bare-product image was available.'] : []),
@@ -372,6 +384,7 @@ export async function action({ request }: ActionFunctionArgs) {
         // existing caller's shape.
         ...(billedButEmpty ? { ok: false, reason: dropReason } : {}),
         ...(bodyReferenceMissing ? { bodyReferenceMissing: true } : {}),
+        ...(handReferenceMissing ? { handReferenceMissing: true } : {}),
         ...(warning ? { warning } : {}),
         ...(productImageFellBack ? { productImageFellBack: true } : {}),
         // Ticket #10981: echoed so the run summary can quote what anchored
