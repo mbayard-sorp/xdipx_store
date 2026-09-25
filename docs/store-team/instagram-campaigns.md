@@ -529,6 +529,22 @@ A vibrator over a nipple is not settled by that and stays an owner question.
 
 - **The product rests.** *"the toy should be resting, it looks like it's pushing into the skin."*
   It settles where it was set down. It never presses, dents or pushes into skin.
+- **Gravity is not optional (owner direction 2026-09-24: "The product needs to obey physics...
+  It needs to be held or resting on the body and the laws of gravity are obeyed").** Before an
+  on-skin frame is briefed it must answer one question: what is carrying the product's weight?
+  There are exactly three legal answers and the brief must name one. (1) A HAND carries it: a real
+  grip, fingers wrapped around the product or a palm cupped under it from below. An open flat palm
+  laid on the skin beside the product is not a grip, and neither is a hand resting on top of it. If
+  any part of the product extends past the hand into free space on a vertical surface, it is
+  floating. (2) A HORIZONTAL PLANE carries it: the product rests on a body surface that actually
+  faces up in the frame, such as the top of a thigh with the leg flat, a supine stomach, an upturned
+  forearm, a level open palm. Judge the plane as rendered, not as briefed or labelled. (3) The
+  product is WORN or strapped, so the body carries it by design. Anything else falls. A product on a
+  shin, an outer thigh, a standing hip, a vertical back or the side of a calf with no hand on it is
+  adhered, not resting, and it reads as a sticker. Reject it and regenerate. This does not touch the
+  scale licence: `docs/design-doctrine.md` §4 item 2 licenses deliberate scale exaggeration and the
+  vision gate carries no real-world-proportion reject, and that stands unchanged. Scale may be
+  exaggerated; support may not be faked.
 - **No product emerging from a navel.** The model does this unprompted and did it twice. Name it as
   a negative in every belly frame.
 - **Anatomy is a reject condition.** *"a lot of body distortion. Belly button on a back."* One
@@ -700,6 +716,63 @@ and §9 pointers; output is the story line in the format above plus the cue's ne
 second person implied in the bed). series-showrunner does not join the daily run; in the weekly
 writers-room retro it reads the week's story lines against the owner's frame notes and keeps a
 banned-cue list so a cue cannot repeat inside five posts, the same window as the zone.
+
+### 3.2d The paired reference frames (owner-approved 2026-09-24)
+
+Both frames were briefed correctly and the render disobeyed the brief. Read as a pair — same
+campaign, same week, same model, both passed every gate — because the pair is what makes the
+gravity rule in §3.2c nameable rather than abstract.
+
+**DO THIS. `social_posts` row 304, `social_media_assets` 698, permalink
+instagram.com/p/DdrKEBUIKEt.** The owner's best frame the campaign has produced ("Image 3 is the
+best one I've seen produced for the campaign thus far"). IT STAYS LIVE; do not retire, rework or
+delete it. Its full prompt is the reusable spine (provider `fal`, model `atlas/seedream-4.5-edit`,
+aspect 4:5, crop box 0.180,0.280,0.950,0.820). Six transferable qualities, which are the portable
+part rather than the wording:
+
+1. **Camera at the zone's own height, three-quarter from the side, never from above.** Overhead
+   reads as a product flatlay on a person; side-on at the zone's height reads as a body.
+2. **No face in frame**, so the body is unambiguously the subject.
+3. **One continuous curve fills the frame** (hip into the turn of the lower stomach), a single
+   anatomical line rather than an assembly of parts.
+4. **Hard directional low light from one side**, one soft catchlight, open shadows that never go
+   black. The large shadow shape carries as much composition as the lit skin.
+5. **One small piece of jewellery as both the §3.7 adult identity marker and the only prop** (a
+   fine gold chain low at the waist). Reads as a life, zero housewares.
+6. **High-chroma product against warm skin**, with a textile closing the bottom edge so the crop
+   has a floor.
+
+One fix on every reuse: keep the prompt's grip clause ("gripped the way it is held to use, not set
+down", "thumb along the seam") and ADD the negative "no open flat palm beside the product; fingers
+wrapped around it so the hand visibly carries its weight." The render returned a flat palm where the
+prompt asked for a grip.
+
+**NOT THIS. `social_posts` row 308, `social_media_assets` 675.** Owner-named as the example of poor
+placement ("a good example sample of the product placed poorly"). Never posted. It fails three
+separate rules at once, which is why it is the counter-exemplar:
+
+1. **Gravity (§3.2c).** The rose sits on the outer surface of her lower leg below the knee, a
+   convex, near-vertical plane as rendered, with no hand anywhere near it (both arms are folded
+   around her knee at the top of the frame). Its contact shadow is a small hard ellipse that reads
+   like a sticker rather than a weighted object settling into soft tissue.
+2. **Placement follows use (§3.2c, "Placement follows use, or it is a product on a person").** A
+   clitoral air-pulse device on a shin has no relationship to how the product is used. Even
+   perfectly held, a shin says nothing about this product. This rule already existed and was broken
+   with nothing detecting it.
+3. **Visible zone versus labelled zone (§3.2c's rotation window, "judged on the visible zone, not
+   the label").** The row is tagged `bodyZone=thigh-top`; the visible zone is the shin. The rotation
+   window was therefore computed against a zone that is not in the picture.
+
+**Root cause: render non-compliance, not bad briefing.** Both frames were briefed correctly and the
+render disobeyed. Asset 698's brief read "her right hand holds the product low against her own hip
+hollow, thumb along the seam, gripped the way it is held to use, not set down"; it rendered as an
+open flat palm, handle end past the fingers into free space. Asset 675's brief read "resting on the
+top of her near thigh, just above the knee, under its own weight" — a genuine upward-facing plane —
+and the render straightened her legs and relocated the rose to the side of her lower leg. Both
+passed all seven vision-gate checks, because all seven are safety checks and none asks whether an
+object could physically be where it is. So the §3.2c gravity rule is the reject standard that makes
+the defect nameable; it is not by itself the fix. A render that silently changes the briefed pose,
+contact plane or body zone is the same defect class as a floating product.
 
 ### 3.3 Carousel arc: six slides
 
