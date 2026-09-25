@@ -196,6 +196,24 @@ per PR, so a full 15-PR run is ~30 minutes of Max.
 
 1. Read the suggestion and the files it names. Too vague to implement faithfully → leave it
    approved, post a `decision` event saying what's missing.
+
+   **Check for an existing open PR before branching** (rows #11269/#11383 duplicated this way on
+   2026-09-25). The most likely way this happens is silent: a prior run opened the PR but its Step
+   2.6 `mark ... pr_open` call never completed (session cut off mid-run, a transient API failure),
+   so the row is still sitting `approved` even though a PR already exists. Before creating a branch,
+   check whether one already exists for this suggestion id: an open PR on `agents/suggestion-<id>`
+   (or a `<id>b`/`<id>c` retry suffix from an earlier run — `gh pr list --search "suggestion-<id>"
+   --state open`). If you find one:
+   - Still `approved` and the existing PR looks healthy (green or on its way) → just issue the
+     missed `{"op":"mark","id":<id>,"status":"pr_open","applyRef":"<existing PR URL>"}` call
+     yourself and move on. Do not open a second PR.
+   - The existing PR is stale, abandoned, or superseded by a newer version of the suggestion →
+     close it with a one-line comment explaining why before opening its replacement, so at most one
+     PR is ever open per suggestion id.
+
+   Never leave two open PRs racing to apply the same suggestion: whichever merges first conflicts
+   the other on the same file, and the loser then sits parked as an invisible `skip / conflict` that
+   nothing surfaces (`docs/store-team/operating-system.md` §10, "three ways a PR can be stuck").
 2. Branch `agents/suggestion-<id>` from the default branch.
 3. Minimal diff, allowlisted files only: **`.claude/agents/*.md`, `docs/store-team/*.md`,
    `docs/homepage-team/*.md`, and nothing else.** That is the literal regex in
