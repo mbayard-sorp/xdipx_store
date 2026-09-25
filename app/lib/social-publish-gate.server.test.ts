@@ -1185,4 +1185,20 @@ describe('legible text baked into the image', () => {
     expect(classifyLegibleText('UPC 012345678905')).toBe('packaging')
     expect(classifyLegibleText('@xdipx')).toBe('caption-or-watermark')
   })
+
+  // Ticket #11487, regression case asset 675: once the vision-gate prompt
+  // actually reports a garbled pseudo-text description instead of "" (the
+  // prompt fix in social-vision-gate.server.ts), this classifier's existing
+  // 'unclassified' bucket is what blocks it. classifyLegibleText itself was
+  // never the bug; this proves the downstream half of the fix still holds.
+  it('blocks a garbled pseudo-text description as unclassified', () => {
+    const garbled = 'garbled illegible marks beneath a circular button, resembling text but not readable'
+    expect(classifyLegibleText(garbled)).toBe('unclassified')
+  })
+
+  it('blocks dot-and-dash pseudo-text as unclassified', async () => {
+    const r = await run('dot-and-dash pseudo-text on the product body')
+    expect(checks(r)).toContain('vision-legible-text')
+    expect(r.blocked).toBe(true)
+  })
 })

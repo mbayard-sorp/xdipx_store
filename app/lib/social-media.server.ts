@@ -511,6 +511,42 @@ export async function tagIncompleteVisionVerdict(assetId: number | null | undefi
 }
 
 /**
+ * Product-fidelity check (ticket #11487, owner: "You've got a lot of product
+ * drift on the rose images. The bodyscape is fine."). Compares the rendered
+ * candidate against the bare product reference the generator was actually
+ * given, on the same on-skin scope as `maybeCropToZone` (`cropScale` is
+ * `close` or `macro` with a real body zone briefed) — a wide/medium crop, or
+ * an axis-free frame, is not the on-skin case this ticket is about, and skips
+ * the check rather than spending on it.
+ *
+ * REPORT ONLY (DONE WHEN clause 2): unlike `maybeCropToZone`, this never
+ * drops a candidate and never throws. A drift finding, or a check that could
+ * not complete, both return `[]` when there is nothing to tag; a completed
+ * check always returns its `fidelity:*` tags regardless of match or drift,
+ * so the finding is queryable before anyone decides whether to gate on it.
+ */
+async function maybeCheckProductFidelity(
+  renderedUrl: string,
+  productImageUrl: string,
+  sceneAxes: SceneAxes | undefined,
+): Promise<string[]> {
+  const cropScale = sceneAxes?.cropScale
+  const bodyZone = sceneAxes?.bodyZone
+  if (cropScale !== 'close' && cropScale !== 'macro') return []
+  if (!bodyZone || bodyZone === NON_SKIN_SENTINEL) return []
+  try {
+    const { runProductFidelityCheck, formatFidelityTags } = await import('./social-product-fidelity.server')
+    const verdict = await runProductFidelityCheck(renderedUrl, productImageUrl)
+    return formatFidelityTags(verdict)
+  } catch (err) {
+    // Never lets a fidelity-check failure affect generation; report-only
+    // means report-only even when the report itself cannot be produced.
+    console.error('[social-media] product-fidelity check failed (non-fatal)', err)
+    return []
+  }
+}
+
+/**
  * Crop-to-zone pass (ticket #10999, "the crop is the closer"). Briefed as a
  * close on-skin bodyscape, the two-stage compositor renders wide about half
  * the time, and the FULL wide render is what used to reach the vision gate
@@ -627,7 +663,11 @@ async function generateCastCompositeBatch(
       // re-fetch. Non-fatal; the Shopify url is what the gate checks, so the
       // row indexes under it and carries the Sanity asset id alongside.
       // `shopifyFileId` (#5426) makes a future purge deterministic.
-      const candidateTags = [...sceneAxisTagList, ...(cropOutcome.tag ? [cropOutcome.tag] : [])]
+      // Product-fidelity check (#11487), on-skin frames only, same scope as
+      // the crop-to-zone pass above: REPORT ONLY, tags the row, never drops a
+      // candidate. See maybeCheckProductFidelity's own doc comment.
+      const fidelityTags = await maybeCheckProductFidelity(url, opts.productImageUrl, opts.sceneAxes)
+      const candidateTags = [...sceneAxisTagList, ...(cropOutcome.tag ? [cropOutcome.tag] : []), ...fidelityTags]
       const asset = await tryIngestSocialAsset({
         buffer,
         filename,

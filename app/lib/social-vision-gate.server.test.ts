@@ -264,6 +264,28 @@ describe('anusNotVisible prompt calibration', () => {
   })
 })
 
+// Ticket #11487, regression case asset 675 (ROMP 2.0 render): the model
+// returned legibleText: "" on a frame that actually had garbled, illegible
+// pseudo-text molded beneath the product's button, because the old wording
+// only asked for text it could cleanly READ. The fix is calibration text, so
+// it is asserted directly, the same pattern as the anusNotVisible block above.
+describe('legibleText prompt calibration (garbled/illegible marks, ticket #11487)', () => {
+  it('tells the model not to return "" just because a mark is not cleanly readable', () => {
+    expect(VISION_SYSTEM_PROMPT).toContain('Do not return "" just because you cannot read it cleanly')
+    expect(VISION_SYSTEM_PROMPT).toContain('Only return "" when there is truly no text or text-like mark anywhere in the frame')
+  })
+
+  it('names the garbled/dot-and-dash pseudo-text failure mode explicitly', () => {
+    expect(VISION_SYSTEM_PROMPT).toContain('garbled or partially-formed characters')
+    expect(VISION_SYSTEM_PROMPT).toContain('illegible pseudo-text pattern')
+    expect(VISION_SYSTEM_PROMPT).toContain('dot-and-dash')
+  })
+
+  it('still asks for a transcription first, garbled marks are the fallback instruction', () => {
+    expect(VISION_SYSTEM_PROMPT).toContain('Transcribe everything legible into one string')
+  })
+})
+
 describe('runVisionGate', () => {
   it('passes a clean asset', async () => {
     const d = deps()
