@@ -93,49 +93,40 @@ For every claimed clip, before any payload is built, confirm the product can shi
 handle is on the row (`productPlacements[0].handle`; `productHandle` once the PLANNED Phase 2 field
 lands).
 
-1. **Shopify availability, via the store's own product read.** `GET https://xdipx.com/products/<handle>`.
-   A 404 means the product is unpublished or archived in Shopify. On a 200, read the Product JSON-LD
-   `offers`. Offers are **per variant** (each `InStock` only when that variant is
-   `availableForSale` with `quantityAvailable > 0`, from Shopify via `app/lib/shopify.server.ts`),
-   so the product passes if **any** Offer is `https://schema.org/InStock` and fails if none is. A 5xx
-   is not an answer: treat the product as unverified and fail it. The PDP sits behind the storefront
-   edge cache (`s-maxage=60`, stale-while-revalidate up to 600 s, `app/lib/cache-headers.ts`), so
-   the read can be up to about ten minutes stale; note that in the retro.
+1. **Shopify availability, via `POST /api/team/video-job {op:'stock-check', handle}`.** An uncached
+   Storefront read through `app/lib/shopify.server.ts`'s `getProductStockCheck`, so this check is
+   never behind the PDP's edge cache. `found:false` means the product is unpublished or archived in
+   Shopify; on `found:true`, the product passes if `availableForSale` is `true` (any variant
+   `availableForSale` with `quantityAvailable > 0`) and fails otherwise. A thrown/5xx response from
+   the op is not an answer: treat the product as unverified and fail it. The response also carries
+   `nalpac: {qty, refreshedAt} | null` (looked up by the product's `xdipx.nalpac_sku` metafield
+   against `nalpac_price_history`) — use it as the live cross-check for item 2 below when present,
+   and fall back to the shortlist when it is `null` (no `nalpac_sku` on the product).
 2. **Nalpac stock, as the shortlist recorded it.** When a shortlist exists
    (`metricsJson.videoShortlist`), find the handle and read its `stockCheckedAt`; record that age in
    the retro. A shortlist that exists and omits the handle fails the clip. When no shortlist exists,
    mark the clip `nalpac_unverified` in the retro and proceed on the Shopify read alone. This routine
    cannot read the feed live.
 
-Follow-up ticket (file once as `kind:'code'`, `dedupeKey:'video:stock-check-op'`): "Add
-`POST /api/team/video-job {op:'stock-check', handle}` returning `{availableForSale, totalInventory}`
-read through `app/lib/shopify.server.ts`, team-token auth, read-only, no cache, so the render
-routine checks stock without scraping the PDP's cached JSON-LD. DONE WHEN the op is on main and
-listed in the route header."
-
 **A product that fails either check is not rendered.** Release its claim
 (`episode-release`, reason `out_of_stock` or `stock_unverified`) and claim the batch alternate
 covering the same format:
 
-- **PLANNED (Phase 2):** a targeted claim of the alternate linked to that slot (the `alternate`
-  field on propose). Use it once the route header lists it.
-- **Until then**, with the plain claim: do not release the failed clip yet, because a released row
-  returns to `approved` and the oldest-first claim would serve it straight back. Hold it, keep
-  claiming, and render the first returned reserve row that shares the failed clip's `batchId` and
-  format (read from `concept` until `format` lands) and passes its own stock check. Hold every other
-  returned row unrendered. Stop after 6 claim calls in total. At the end of Step 4, release every
-  held row that was not enqueued, each with its reason. An out-of-stock primary also goes on the
-  report as an owner decision (reject it on `/admin/video-studio/scripts`), because it will be
-  served again next Thursday. **Caveat:** reserves are served only after every claimable primary,
-  so if older approved rows sit in the queue the 6-call cap can run out before any reserve comes
-  back. Then the slot goes unrendered and the report says so honestly; never raise the cap to chase
-  it.
+1. `POST /api/team/video-episode {"op":"episode-list","status":"approved","batchId":"<the failed
+   clip's batchId>","isReserve":true}` -> `{episodes}`. Filter the result to the row(s) that share
+   the failed clip's format (read from `concept` until `format` lands on the schema) and pick the
+   first.
+2. `POST /api/team/video-episode {"op":"episode-claim","episodeId":<that row's id>,"runId":$RUN_ID}`
+   -> `{episode}` on success, or 409 `episode_not_claimable` if it was already claimed or decided out
+   from under you (another run beat you to it, or the owner rejected it) — try the next candidate
+   from step 1, if any.
+3. Run this alternate through Step 3's own stock check like any other clip before enqueuing it. An
+   out-of-stock primary also goes on the report as an owner decision (reject it on
+   `/admin/video-studio/scripts`), because it will be served again next Thursday.
 
-Follow-up ticket (file once as `kind:'code'`, `dedupeKey:'video:claim-by-episode-id'`):
-"`episode-claim` accepts an explicit `episodeId` (the server still requires the row to be
-`approved` and still honors `video_program_enabled`), so the render routine can claim a slot's
-alternate chosen from `episode-list {status:'approved'}` by `batchId` and `isReserve`. DONE WHEN the
-op accepts `episodeId` on main and the route header documents it."
+This replaced the interim 6-call hold-and-release loop (ticket #11152, `episode-claim` now accepts
+an explicit `episodeId`): no more holding rows unrendered across a capped number of untargeted
+claims, because the alternate is found by `episode-list` and claimed directly, by id, in one shot.
 
 No alternate passes -> the slot goes unrendered this week, and the report says which and why.
 

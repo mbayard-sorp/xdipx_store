@@ -13,9 +13,17 @@
  * HTTP, the same shape `api.team.social-image.tsx` already uses to keep a
  * privileged/direct call server-side.
  *
- * { op: 'search', product?, cast?, archetype?, tag?, source?, picked?, limit? }
+ * { op: 'search', product?, cast?, archetype?, tag?, source?, picked?,
+ *   generationBatchId?, limit? }
  *   -> { assets: [{ id, url, width, height, aspect, archetype, productHandle,
- *        castSlugs, tags, source, createdAt, visionVerdict, visionVerdictAt }] }
+ *        castSlugs, tags, source, createdAt, visionVerdict, visionVerdictAt,
+ *        generationBatchId }] }
+ *
+ * `generationBatchId` (#11009): a caller that lost the HTTP response from
+ * `api.team.social-image.tsx`'s `cast` op (a platform-level timeout kill, not
+ * a JS exception the route could catch and report) can look up every
+ * candidate already billed and ingested under the batch id that response
+ * would have carried, via `{op:'search', generationBatchId}`.
  *
  * `picked` defaults to false: an asset already attached to any draft or post
  * is not free for reuse, so the default view is "never yet used" candidates
@@ -62,6 +70,7 @@ export async function action({ request }: ActionFunctionArgs) {
       picked: b['picked'] === true,
       before: null,
       archived: false,
+      generationBatchId: str(b['generationBatchId']),
     })
 
     const assets = page.assets.slice(0, limit).map(a => ({
@@ -78,6 +87,7 @@ export async function action({ request }: ActionFunctionArgs) {
       createdAt: a.createdAt,
       visionVerdict: a.visionVerdict ?? null,
       visionVerdictAt: a.visionVerdictAt ?? null,
+      generationBatchId: a.generationBatchId ?? null,
     }))
 
     return Response.json({ assets })

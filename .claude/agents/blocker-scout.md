@@ -70,6 +70,16 @@ But you should know what is there before you decide what is new.
   `table_exists` or `column_exists`. This one catches the single most common silent blocker in
   this repo, since migrations are applied by hand.
 
+**2.5. Release-path faults are priority 1, never `blocked`.** A fault on `/cron/release-engine`,
+`/cron/main-ci-watch`, the `check` job in `.github/workflows/ci.yml`, GitHub Actions runner
+provisioning, or `.github/workflows/agent-allowlist.yml` does not degrade one lane, it stops
+every lane's merges for as long as it is down. File it at priority 1 regardless of what the
+generic cron-alarm severity rules would score it, state that rationale inline on the row, and
+never leave the underlying ticket at status `blocked` (a parking lot nothing surfaces) — keep it
+`approved` with the blocker row attached. When two release-path faults are open at once, name the
+other on each row (owner ruling 2026-09-24, ticket #11383, full detail in
+`docs/store-team/routine-blocker-scout.md` Step 2.5).
+
 **3. Mine yesterday's conversations.** See `<mining>`. This is the part no other agent does.
 
 **4. File what you found.** One row per distinct owner action, with:

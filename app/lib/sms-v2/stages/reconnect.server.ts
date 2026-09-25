@@ -15,10 +15,12 @@ import { resolveTransition } from '../transitions.server'
 import {
   pickReconnectWithOrderTemplate,
   pickReconnectColdTemplate,
+  pickReconnectResearchTemplate,
 } from '../templates/reconnect-templates'
 import { getCrossChannelHint } from '../cross-channel.server'
 import { pickCrossChannelTemplate } from '../templates/cross-channel-templates'
 import { runCatalogLookup } from './discovery.server'
+import { executeSupportStage } from './support.server'
 import type { EmmaContext, IntentResult, ProductRef, StageResponse } from '../types.server'
 
 // ─── Main export ──────────────────────────────────────────────────────────────
@@ -34,6 +36,32 @@ export async function executeReconnectStage(
   // from the shared catalog search before falling back to the greeting paths.
   if (intent.intent === 'NAME_ITEM') {
     return runCatalogLookup(ctx, intent, customerText)
+  }
+
+  // #11335: a returning customer's first message back can itself be a direct,
+  // answerable question instead of small talk ("where's my order?", "what's
+  // your phone number?"). Silently falling through to the generic greeting
+  // discarded the question, and if the customer didn't reply a second time
+  // they never got an answer at all (the stage's own reclassify-on-next-turn
+  // assumption only holds if there is a next turn). SUPPORT hands off to the
+  // real order-status stage (already a valid RECONNECT transition); RESEARCH
+  // gets an honest contact-channel answer since this stage has no LLM to
+  // research an arbitrary question itself.
+  if (intent.intent === 'SUPPORT') {
+    return executeSupportStage(ctx, intent, customerText)
+  }
+
+  if (intent.intent === 'RESEARCH') {
+    return {
+      stageOut:     resolveTransition('RECONNECT', 'DISCOVERY'),
+      goalAchieved: false,
+      segments:     [{ prose: pickReconnectResearchTemplate() }],
+      stateWrites:  { stage: 'DISCOVERY' },
+      telemetry: {
+        intent:           intent.intent,
+        intentConfidence: intent.confidence,
+      },
+    }
   }
 
   // Phase 10 — Cross-channel continuation: if the customer was active on

@@ -269,11 +269,16 @@ where the change is a fix to something already live (never claim you verified ag
 when you read production instead); state in the run summary which of these you did. **The routine
 stops here.** Human review happens on the actual preview (`qa-reviewer` on the daily QA pass, or you),
 and the release engine squash-merges once CI is green, the linked ticket is `verified`, and the
-protected-path classifier finds nothing sensitive in the diff. Anything touching checkout and payment,
-cart, migrations and schema, auth and session, team valves and spend controls, CI and deploy config, or
-the release engine itself stops and emails you; only you merge those. **The team still cannot merge
-its own code.** That remains the enforcement of the "gate code" decision, and `release_engine_enabled`
-off restores owner-merges-everything.
+protected-path classifier finds nothing sensitive in the diff. The protected-path list is **cost-only**
+(owner direction 2026-08-19): team valves and spend controls, the enforcement core (`github.server.ts`,
+`release-engine.server.ts`, `migration-classify.server.ts`, `.github/**`), secrets, the checkout
+probe, the deploy-critical build scripts, and non-additive `db/migrations/**`. Checkout and cart
+code, auth and session, `db/schema.ts`, `vercel.json`, and `package.json` are no longer protected —
+they are ordinary code PRs covered by CI, the QA verdict, and post-deploy smoke with automatic
+revert. Anything on the cost-only list stops and emails you; only you merge those. **The team still
+cannot merge its own code.** That remains the enforcement of the "gate code" decision, and
+`release_engine_enabled` off restores owner-merges-everything. Full detail:
+`docs/store-team/operating-system.md` §4.
 
 ### 6. Spend
 

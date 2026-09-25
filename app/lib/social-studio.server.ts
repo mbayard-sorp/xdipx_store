@@ -302,6 +302,14 @@ export interface LibraryFilters {
    * right here is what makes archiving do anything at all.
    */
   archived: boolean
+  /**
+   * #11009: filter to one `generateCastComposite`/`generateCastCompositeBatch`
+   * ingest batch (`social_media_assets.generation_batch_id`). Lets a caller
+   * that lost the HTTP response from `api.team.social-image.tsx` (a
+   * platform-level timeout kill, not a JS exception it could catch) reconstruct
+   * what was already billed and ingested under that batch id.
+   */
+  generationBatchId: string | null
 }
 
 export function parseLibraryFilters(url: URL): LibraryFilters {
@@ -318,6 +326,7 @@ export function parseLibraryFilters(url: URL): LibraryFilters {
     picked: pickedRaw === '1' ? true : pickedRaw === '0' ? false : null,
     before: Number.isInteger(before) && before > 0 ? before : null,
     archived: p.get('archived') === '1',
+    generationBatchId: p.get('generationBatchId')?.trim() || null,
   }
 }
 
@@ -343,6 +352,7 @@ export async function listLibraryAssets(f: LibraryFilters): Promise<LibraryPage>
   if (f.archetype) conds.push(eq(socialMediaAssets.archetype, f.archetype))
   if (f.source) conds.push(eq(socialMediaAssets.source, f.source))
   if (f.picked != null) conds.push(eq(socialMediaAssets.isPicked, f.picked))
+  if (f.generationBatchId) conds.push(eq(socialMediaAssets.generationBatchId, f.generationBatchId))
   if (f.before) conds.push(lt(socialMediaAssets.id, f.before))
   // Always applied, not conditional on a truthy value: the default
   // (archived=false) must actively exclude archived rows, which is the

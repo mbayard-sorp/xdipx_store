@@ -50,6 +50,7 @@ const ROW = {
   createdAt: new Date('2026-08-18T00:00:00Z'),
   visionVerdict: { pass: true },
   visionVerdictAt: new Date('2026-08-18T00:05:00Z'),
+  generationBatchId: 'batch-abc123',
 }
 
 beforeEach(() => {
@@ -80,7 +81,26 @@ describe('search', () => {
       createdAt: ROW.createdAt.toISOString(),
       visionVerdict: { pass: true },
       visionVerdictAt: ROW.visionVerdictAt.toISOString(),
+      generationBatchId: 'batch-abc123',
     }])
+  })
+
+  it('returns null generationBatchId when the row has none (pre-#11009 rows)', async () => {
+    listLibraryAssetsMock.mockResolvedValueOnce({
+      assets: [{ ...ROW, generationBatchId: null }],
+      nextBefore: null,
+      facets: { tags: [], products: [], casts: [], archetypes: [], sources: [] },
+    })
+    const res = await post({ op: 'search' })
+    const body = await res.json() as { assets: { generationBatchId: string | null }[] }
+    expect(body.assets[0]?.generationBatchId).toBeNull()
+  })
+
+  it('passes generationBatchId through so a lost manifest can be reconstructed (#11009)', async () => {
+    await post({ op: 'search', generationBatchId: 'batch-abc123' })
+    expect(listLibraryAssetsMock).toHaveBeenCalledWith(expect.objectContaining({
+      generationBatchId: 'batch-abc123',
+    }))
   })
 
   it('passes product, cast, archetype, tag and source filters through', async () => {
