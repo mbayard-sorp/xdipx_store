@@ -286,6 +286,24 @@ is on the record with a ticket the team can act on tomorrow.
    then a clean act rather than an archaeology problem.
 7. Review outcomes: `POST /api/team/social-post {"op":"list"}` — `reviewStatus`, `feedback`, and
    `editedText` per row are the owner's verdicts on your last drafts.
+7b. **Owner image feedback since the last run (owner direction 2026-09-25, ticket #11550).** Read
+   `docs/store-team/imagery-owner-notes.md` every run. Once the library feedback endpoint ships
+   (ticket #11551), also call `POST /api/team/social-asset-feedback {"op":"list","since":<last run
+   start>}` and `{"op":"summary","since":<last run start>}`; until then, read the ledger only.
+   - Every UP with reason `more-like-this` is a live positive precedent the Step 5 brief MUST cite
+     by asset id and `provider_request_id`.
+   - Every DOWN reason is a negative the Step 5 scene brief and the media-manager negatives MUST
+     name explicitly for the lever it constrains: `product-drift` to reference discipline per
+     §3.2c, `crop-too-tight`/`crop-too-loose` to `cropScale`, `over-the-ceiling`/`too-tame` to
+     the §3.2a register, `cast-off-model` to cast continuity, and so on, one lever per reason.
+   - The run report (team event) states which feedback rows were applied and how, or states
+     "no new feedback since <ts>".
+   - A reason that appears on 2 or more assets across runs is appended to
+     `imagery-owner-notes.md` as a numbered rule via an `instructions` row in the retro, exactly as
+     the Writers Room does for video.
+   - A heart on an `is_picked=false` frame from the same generation batch as the shipped one means
+     the picker was wrong: record it as a retro finding against the pick criteria, not the
+     generator.
 8. LinkedIn only (when `social_freq_linkedin` > 0): pending research briefs (Sanity GROQ)
    `*[_type=="researchBrief" && status=="pending" && targetPlatform=="linkedin"]` — the weekly
    adult-business-researcher fills this queue (`docs/store-team/routine-research-weekly.md`).

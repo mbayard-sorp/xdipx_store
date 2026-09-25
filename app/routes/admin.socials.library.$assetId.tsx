@@ -12,6 +12,9 @@ import {
   addAssetTags, archiveAssets, getAssetUsage, getLibraryAsset, removeAssetTag, unarchiveAssets,
 } from '~/lib/social-studio.server'
 import { clearAssetAdjudication, getAssetAdjudication, setAssetAdjudication } from '~/lib/social-asset-adjudication.server'
+import { getFeedbackForAssets, handleFeedbackIntent } from '~/lib/social-asset-feedback.server'
+import { AssetFeedbackControls } from '~/components/admin/social/AssetFeedback'
+import { FEEDBACK_REASONS } from '~/lib/social-asset-feedback-reasons'
 import { getApprovedCastMembers } from '~/lib/sanity.server'
 import { missingVisionChecks } from '~/lib/social-publish-gate.server'
 import { TagChipInput } from '~/components/admin/social/TagChipInput'
@@ -28,11 +31,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   if (!Number.isInteger(id) || id <= 0) throw new Response('Not found', { status: 404 })
   const asset = await getLibraryAsset(id)
   if (!asset) throw new Response('Not found', { status: 404 })
-  const [usage, cast, adjudication] = await Promise.all([
+  const [usage, cast, adjudication, feedbackMap] = await Promise.all([
     getAssetUsage(asset),
     getApprovedCastMembers().catch(() => []),
     getAssetAdjudication(asset.url),
+    getFeedbackForAssets([id]),
   ])
+  const feedback = feedbackMap[id] ?? null
   // Ticket #10511: summarize the stored vision verdict so the drawer can show
   // whether this asset would clear the publish gate's vision-verdict check
   // without the admin having to read the raw JSON blob.
@@ -43,6 +48,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     asset,
     usage,
     adjudication,
+    feedback,
     vision,
     roster: cast.map(m => ({ slug: m.slug, name: m.name, photoUrl: m.photoUrl, role: m.role })),
   }
@@ -73,6 +79,11 @@ export async function action({ request, params }: ActionFunctionArgs) {
   if (intent === 'unarchive') {
     const n = await unarchiveAssets([id])
     return n > 0 ? { ok: true, intent: 'unarchive' } : { ok: false, error: 'Asset not found' }
+  }
+  // #11551: owner heart / thumbs-down. requireAdmin above; never a team-token path.
+  if (intent === 'feedback') {
+    const admin = await getAdminUser(request)
+    return handleFeedbackIntent(id, form, admin?.email || 'owner')
   }
   // Owner-only adjudication (ticket #10503): clears a specific gate finding
   // for THIS asset going forward. Never reachable from a team-token route.
@@ -111,7 +122,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
 }
 
 export default function LibraryAssetDrawer() {
-  const { asset, usage, adjudication, vision, roster } = useLoaderData<typeof loader>()
+  const { asset, usage, adjudication, feedback, vision, roster } = useLoaderData<typeof loader>()
   const [params] = useSearchParams()
   const navigate = useNavigate()
   const [regen, setRegen] = useState(false)
@@ -198,7 +209,17 @@ export default function LibraryAssetDrawer() {
 
           <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
             <dt className="text-ink-4">source</dt><dd className="font-mono text-ink">{asset.source}{asset.provider ? ` / ${asset.provider}` : ''}</dd>
+            <dt className="text-ink-4">provider</dt><dd className="font-mono text-ink">{asset.provider ?? 'unknown'}</dd>
             {asset.model && <><dt className="text-ink-4">model</dt><dd className="font-mono text-ink break-all">{asset.model}</dd></>}
+            {asset.providerRequestId && (
+              <>
+                <dt className="text-ink-4">request id</dt>
+                <dd className="flex items-center gap-2 flex-wrap">
+                  <span className="font-mono text-ink break-all">{asset.providerRequestId}</span>
+                  <CopyRequestId value={asset.providerRequestId} />
+                </dd>
+              </>
+            )}
             <dt className="text-ink-4">size</dt><dd className="font-mono text-ink">{asset.width && asset.height ? `${asset.width}x${asset.height}` : 'unknown'}{asset.aspect ? ` (${asset.aspect})` : ''}</dd>
             {asset.archetype && <><dt className="text-ink-4">archetype</dt><dd className="font-mono text-ink">{asset.archetype}</dd></>}
             {asset.productHandle && (
@@ -209,6 +230,25 @@ export default function LibraryAssetDrawer() {
             <dt className="text-ink-4">created</dt><dd className="font-mono text-ink">{formatLaWallClock(asset.createdAt)} by {asset.createdBy}</dd>
             {asset.generationBatchId && <><dt className="text-ink-4">batch</dt><dd className="font-mono text-ink break-all">{asset.generationBatchId}</dd></>}
           </dl>
+
+          <section>
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-3 mb-1">Your feedback</h3>
+            <div className="flex items-center gap-3 flex-wrap">
+              <AssetFeedbackControls
+                key={asset.id}
+                assetId={asset.id}
+                initial={feedback}
+                action={`/admin/socials/library/${asset.id}`}
+                size="md"
+              />
+              <p className="text-xs text-ink-3">
+                {feedback
+                  ? `${feedback.verdict === 'up' ? 'Loved ♥' : 'Rejected'}${feedback.reasons.length ? `: ${feedback.reasons.map(r => FEEDBACK_REASONS[feedback.verdict].find(x => x.value === r)?.label ?? r).join(', ')}` : ''}`
+                  : 'Not rated yet. The social team reads this at the start of every run.'}
+              </p>
+            </div>
+            {feedback?.note && <p className="mt-1 text-xs text-ink-3 italic">{feedback.note}</p>}
+          </section>
 
           <section>
             <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-3 mb-1">Gate adjudication</h3>
@@ -330,5 +370,21 @@ export default function LibraryAssetDrawer() {
         />
       )}
     </div>
+  )
+}
+
+/** Copies the provider request id (ticket #11548). Clipboard only, no data fetching. */
+function CopyRequestId({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        void navigator.clipboard?.writeText(value).then(() => setCopied(true), () => setCopied(false))
+      }}
+      className="inline-flex items-center min-h-9 px-2.5 rounded-full border border-line bg-paper text-xs font-medium text-ink hover:border-ink-4"
+    >
+      {copied ? 'Copied' : 'Copy'}
+    </button>
   )
 }

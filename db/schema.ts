@@ -347,6 +347,9 @@ export const socialMediaAssets = pgTable('social_media_assets', {
   // The Shopify Files GID for `url`, when rehosted there. Populated going
   // forward (uploadMoodImageToShopifyFilesWithId); historic rows stay null.
   shopifyFileId:     varchar('shopify_file_id', { length: 120 }),
+  // Provider generation id (Atlas prediction id, fal request id), migration
+  // 103, ticket #11548. Lets the owner resolve a dashboard id to an asset.
+  providerRequestId: varchar('provider_request_id', { length: 64 }),
   // Vision-gate hard check (migration 087, ticket #6763). NULL means never
   // checked; the publish gate treats that as a BLOCK for any library asset,
   // never a silent skip. See app/lib/social-vision-gate.server.ts.
@@ -389,6 +392,32 @@ export const socialAssetAdjudications = pgTable('social_asset_adjudications', {
   updatedAt:          timestamp('updated_at', { withTimezone: true }),
 }, t => ({
   urlIdx: uniqueIndex('idx_social_asset_adjudications_url').on(t.assetUrl),
+}))
+
+/**
+ * Owner feedback on library images (migration 104, ticket #11551). A heart
+ * ('up') or thumbs-down ('down') per asset with fixed reason chips
+ * (`app/lib/social-asset-feedback-reasons.ts`) and an optional note. One live
+ * verdict per asset, upserted on change.
+ *
+ * OWNER-WRITE ONLY (`admin.socials.library.tsx` and
+ * `admin.socials.library.$assetId.tsx`, requireAdmin). Never written by an
+ * agent or a team-token route, or the signal trains on itself. Read via
+ * `POST /api/team/social-asset-feedback` so the social routine can load the
+ * owner's taste at run start.
+ */
+export const socialAssetFeedback = pgTable('social_asset_feedback', {
+  id:        serial('id').primaryKey(),
+  assetId:   integer('asset_id').notNull(),
+  /** 'up' (heart) | 'down' (thumbs-down). */
+  verdict:   varchar('verdict', { length: 8 }).notNull(),
+  reasons:   jsonb('reasons').$type<string[]>().notNull().default([]),
+  note:      text('note'),
+  ratedBy:   varchar('rated_by', { length: 60 }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }),
+}, t => ({
+  assetIdx: uniqueIndex('idx_social_asset_feedback_asset').on(t.assetId),
 }))
 
 /**
@@ -1728,9 +1757,13 @@ export const mediaAssets = pgTable('media_assets', {
   costUsd:         decimal('cost_usd', { precision: 10, scale: 5 }).notNull().default('0'),
   sourceModel:     varchar('source_model', { length: 64 }),
   videoJobId:      integer('video_job_id').references((): AnyPgColumn => videoJobs.id, { onDelete: 'set null' }),
+  // Provider request id (Atlas/fal/Wavespeed) of the call that produced this
+  // asset, migration 105 (ticket #11552). Null for derived assets (ffmpeg).
+  providerRequestId: varchar('provider_request_id', { length: 64 }),
   createdAt:       timestamp('created_at').notNull().defaultNow(),
 }, t => ({
   jobIdx: index('idx_media_assets_job').on(t.videoJobId),
+  providerRequestIdx: index('idx_media_assets_provider_request_id').on(t.providerRequestId),
 }))
 
 /** One spoken word with real start/end seconds from ElevenLabs with-timestamps. */

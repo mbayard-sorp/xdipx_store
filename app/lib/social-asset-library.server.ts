@@ -73,6 +73,11 @@ export interface IngestSocialAssetInput {
   isPicked?: boolean
   postId?: number
   createdBy?: string
+  /** Provider generation id (Atlas prediction id, fal request id), #11548. */
+  providerRequestId?: string
+  /** Ingest straight into the archive (crop-rejected frames, #11549). */
+  archivedAt?: Date
+  archivedBy?: string
 }
 
 /**
@@ -210,6 +215,9 @@ export async function ingestSocialAsset(
     ...(input.tags?.length ? { tags: input.tags } : {}),
     ...(input.generationBatchId ? { generationBatchId: input.generationBatchId.slice(0, 80) } : {}),
     ...(input.postId ? { postId: input.postId } : {}),
+    ...(input.providerRequestId ? { providerRequestId: input.providerRequestId.slice(0, 64) } : {}),
+    ...(input.archivedAt ? { archivedAt: input.archivedAt } : {}),
+    ...(input.archivedBy ? { archivedBy: input.archivedBy.slice(0, 60) } : {}),
   }
 
   return d.insertAsset(row)

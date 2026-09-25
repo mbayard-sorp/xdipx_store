@@ -587,6 +587,9 @@ async function maybeCropToZone(
   return { buffer: result.buffer, ...(result.box ? { tag: formatCropBoxTag(result.box) } : {}) }
 }
 
+/** `archived_by` for an uncropped frame the crop-to-zone pass refused (#11549). */
+export const CROP_REJECT_ARCHIVED_BY = 'system:crop-reject'
+
 /** One composeSceneFrame call, rehosted, ingested, and vision-gated per candidate. */
 async function generateCastCompositeBatch(
   opts: GenerateCastCompositeOpts,
@@ -631,6 +634,9 @@ async function generateCastCompositeBatch(
     ...(opts.bodyReferenceMissing ? ['body-reference-missing'] : []),
     ...(opts.productImageFellBack ? ['product-image-fell-back'] : []),
   ]
+  // Ticket #11548: the provider that actually produced the frame, not a
+  // hardcoded label. costKey prefix is the fallback for an older result shape.
+  const frameProvider = frame.provider ?? (frame.costKey.startsWith('atlas') ? 'atlas' : 'fal')
   for (const [i, falUrl] of frame.urls.entries()) {
     const filename = buildSocialAssetFilename({
       handle: opts.handle,
@@ -642,10 +648,14 @@ async function generateCastCompositeBatch(
     // A candidate that fails to fetch or rehost is dropped from urls/filenames
     // but stays BILLED: the caller's `costs` remainder row accounts for it, so
     // spend and the image cap count at generation time, not upload time (#887).
+    const providerRequestId = frame.requestIds[i]
+    // Rehost failures leave no bytes to save, so the provider request id rides
+    // on the drop reason to keep the frame traceable in the provider dashboard.
+    const reqSuffix = providerRequestId ? ` request_id=${providerRequestId}` : ''
     try {
       const res = await fetch(falUrl)
       if (!res.ok) {
-        dropReasons.push(`rehost_fetch_failed:${res.status}`)
+        dropReasons.push(`rehost_fetch_failed:${res.status}${reqSuffix}`)
         continue
       }
       const fetchedBuffer = Buffer.from(await res.arrayBuffer())
@@ -655,6 +665,41 @@ async function generateCastCompositeBatch(
       const cropOutcome = await maybeCropToZone(fetchedBuffer, opts.sceneAxes, opts.aspectRatio ?? '4:5')
       if ('rejected' in cropOutcome) {
         dropReasons.push(cropOutcome.reason)
+        // Ticket #11549: keep the UNCROPPED frame in the library as an
+        // archived row so the owner can see and score it. Archived rows never
+        // reach the default grid or the Composer picker, and the candidate is
+        // still excluded from the returned urls/filenames.
+        try {
+          const dropped = await uploadMoodImageToShopifyFilesWithId(fetchedBuffer, filename)
+          await tryIngestSocialAsset({
+            buffer: fetchedBuffer,
+            filename,
+            contentType: 'image/jpeg',
+            url: dropped.url,
+            shopifyFileId: dropped.fileId,
+            aspect: opts.aspectRatio ?? '4:5',
+            source: 'generated',
+            provider: frameProvider,
+            model: frame.costKey,
+            prompt: scaledPrompt,
+            archetype: 'cast',
+            productHandle: opts.handle,
+            generationBatchId,
+            isPicked: false,
+            createdBy: opts.caller ?? 'social-media-manager',
+            archivedAt: new Date(),
+            archivedBy: CROP_REJECT_ARCHIVED_BY,
+            ...(providerRequestId ? { providerRequestId } : {}),
+            ...(opts.castSlugs?.length ? { castSlugs: opts.castSlugs } : {}),
+            tags: [
+              ...sceneAxisTagList,
+              `dropped:${cropOutcome.reason}`,
+              ...(providerRequestId ? [`request_id:${providerRequestId}`] : []),
+            ],
+          })
+        } catch (err) {
+          console.error(`[social-media] failed to save crop-rejected candidate to library (non-fatal): ${filename}`, err)
+        }
         continue
       }
       const buffer: Buffer = cropOutcome.buffer
@@ -676,8 +721,9 @@ async function generateCastCompositeBatch(
         shopifyFileId: fileId,
         aspect: opts.aspectRatio ?? '4:5',
         source: 'generated',
-        provider: 'fal',
+        provider: frameProvider,
         model: frame.costKey,
+        ...(providerRequestId ? { providerRequestId } : {}),
         prompt: scaledPrompt,
         archetype: 'cast',
         productHandle: opts.handle,

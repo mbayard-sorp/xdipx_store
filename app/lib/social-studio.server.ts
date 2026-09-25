@@ -12,7 +12,8 @@
  * `draft`/`pending_review`, which is exactly the state the gate verdicts.
  */
 import { db } from '~/lib/db.server'
-import { socialPosts, socialMediaAssets, socialPostSlides, socialComments } from '../../db/schema'
+import { socialPosts, socialMediaAssets, socialPostSlides, socialComments, socialAssetFeedback } from '../../db/schema'
+import { isFeedbackFilter, type FeedbackFilter } from '~/lib/social-asset-feedback-reasons'
 import { and, desc, eq, ilike, inArray, isNotNull, isNull, lt, or, sql, type SQL } from 'drizzle-orm'
 import { SOCIAL_PLATFORMS } from '~/lib/team-keys'
 import { revertSocialPostToDraft } from '~/lib/social-publish-approve.server'
@@ -310,6 +311,14 @@ export interface LibraryFilters {
    * what was already billed and ingested under that batch id.
    */
   generationBatchId: string | null
+  /**
+   * #11549: `?dropped=1` adds crop-rejected frames (archived by
+   * `system:crop-reject`) to the active view. Default false, so the grid and
+   * the Composer picker never show them.
+   */
+  dropped: boolean
+  /** #11551: owner feedback filter. loved = heart, rejected = thumbs-down, unrated = neither. */
+  feedback?: FeedbackFilter | null
 }
 
 export function parseLibraryFilters(url: URL): LibraryFilters {
@@ -327,6 +336,8 @@ export function parseLibraryFilters(url: URL): LibraryFilters {
     before: Number.isInteger(before) && before > 0 ? before : null,
     archived: p.get('archived') === '1',
     generationBatchId: p.get('generationBatchId')?.trim() || null,
+    dropped: p.get('dropped') === '1',
+    feedback: isFeedbackFilter(p.get('feedback')) ? (p.get('feedback') as FeedbackFilter) : null,
   }
 }
 
@@ -343,6 +354,8 @@ export async function listLibraryAssets(f: LibraryFilters): Promise<LibraryPage>
     conds.push(or(
       ilike(socialMediaAssets.prompt, like),
       ilike(socialMediaAssets.productHandle, like),
+      // #11548: a pasted provider request id resolves to its asset exactly.
+      eq(socialMediaAssets.providerRequestId, f.q),
       sql`exists (select 1 from jsonb_array_elements_text(coalesce(${socialMediaAssets.tags}, '[]'::jsonb)) t where t ilike ${like})`,
     )!)
   }
@@ -353,11 +366,22 @@ export async function listLibraryAssets(f: LibraryFilters): Promise<LibraryPage>
   if (f.source) conds.push(eq(socialMediaAssets.source, f.source))
   if (f.picked != null) conds.push(eq(socialMediaAssets.isPicked, f.picked))
   if (f.generationBatchId) conds.push(eq(socialMediaAssets.generationBatchId, f.generationBatchId))
+  if (f.feedback === 'loved' || f.feedback === 'rejected') {
+    conds.push(sql`exists (select 1 from ${socialAssetFeedback} fb where fb.asset_id = ${socialMediaAssets.id} and fb.verdict = ${f.feedback === 'loved' ? 'up' : 'down'})`)
+  } else if (f.feedback === 'unrated') {
+    conds.push(sql`not exists (select 1 from ${socialAssetFeedback} fb where fb.asset_id = ${socialMediaAssets.id})`)
+  }
   if (f.before) conds.push(lt(socialMediaAssets.id, f.before))
   // Always applied, not conditional on a truthy value: the default
   // (archived=false) must actively exclude archived rows, which is the
   // entire point of the archive feature (#5426).
-  conds.push(f.archived ? isNotNull(socialMediaAssets.archivedAt) : isNull(socialMediaAssets.archivedAt))
+  conds.push(
+    f.archived
+      ? isNotNull(socialMediaAssets.archivedAt)
+      : f.dropped
+        ? or(isNull(socialMediaAssets.archivedAt), eq(socialMediaAssets.archivedBy, 'system:crop-reject'))!
+        : isNull(socialMediaAssets.archivedAt),
+  )
 
   const rows = await db
     .select()

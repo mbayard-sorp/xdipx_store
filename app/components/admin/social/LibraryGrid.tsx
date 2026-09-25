@@ -4,6 +4,7 @@
  * shifts while images load. Selection is a controlled Set of asset ids.
  */
 import { CheckIcon, UserIcon, UploadIcon, ImageIcon } from './icons'
+import { AssetFeedbackControls, type AssetFeedbackState } from './AssetFeedback'
 
 /** Page size for the Library listing (newest first, cursor on id). */
 export const LIBRARY_PAGE = 60
@@ -21,6 +22,9 @@ export interface LibraryAsset {
   createdAt: string | Date
   width?: number | null
   height?: number | null
+  /** Provider generation id (#11548); the card shows its first 8 chars. */
+  providerRequestId?: string | null
+  generationBatchId?: string | null
 }
 
 export function aspectClassOf(aspect: string | null | undefined, w?: number | null, h?: number | null): string {
@@ -41,18 +45,57 @@ export function LibraryGrid({
   onToggle,
   onOpen,
   dense = false,
+  feedback,
+  feedbackAction,
+  groupByBatch = false,
 }: {
   assets: LibraryAsset[]
   selected: ReadonlySet<number>
   onToggle: (id: number) => void
   /** Open the detail drawer; absent in picker mode, where a click selects. */
-  onOpen?: (id: number) => void
+  onOpen?: ((id: number) => void) | undefined
   dense?: boolean
+  /** #11551: owner verdicts keyed by asset id. Controls render only when feedbackAction is set. */
+  feedback?: Readonly<Record<number, AssetFeedbackState>> | undefined
+  feedbackAction?: string | undefined
+  /** #11551: section the grid by generation_batch_id so a batch's losers sit next to its pick. */
+  groupByBatch?: boolean
 }) {
+  const gridClass = `grid gap-3 ${dense ? 'grid-cols-3 sm:grid-cols-4 md:grid-cols-5' : 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5'}`
+  if (groupByBatch) {
+    const groups: Array<{ key: string; assets: LibraryAsset[] }> = []
+    const byKey = new Map<string, LibraryAsset[]>()
+    for (const a of assets) {
+      const key = a.generationBatchId ?? ''
+      let list = byKey.get(key)
+      if (!list) { list = []; byKey.set(key, list); groups.push({ key, assets: list }) }
+      list.push(a)
+    }
+    return (
+      <div className="space-y-5">
+        {groups.map(g => (
+          <section key={g.key || 'no-batch'} aria-label={g.key ? `Batch ${g.key}` : 'No batch'}>
+            <h3 className="mb-1.5 font-mono text-[11px] text-ink-3 break-all">
+              {g.key ? `batch ${g.key}` : 'no batch'} <span className="text-ink-4">({g.assets.length}{g.assets.some(a => a.isPicked) ? ', has pick' : ''})</span>
+            </h3>
+            <LibraryGrid
+              assets={g.assets}
+              selected={selected}
+              onToggle={onToggle}
+              onOpen={onOpen}
+              dense={dense}
+              feedback={feedback}
+              feedbackAction={feedbackAction}
+            />
+          </section>
+        ))}
+      </div>
+    )
+  }
   return (
     <ul
       role="list"
-      className={`grid gap-3 ${dense ? 'grid-cols-3 sm:grid-cols-4 md:grid-cols-5' : 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5'}`}
+      className={gridClass}
     >
       {assets.map(a => {
         const on = selected.has(a.id)
@@ -89,9 +132,23 @@ export function LibraryGrid({
                 </span>
               )}
             </div>
+            {feedbackAction && (
+              <div className="absolute top-1.5 right-1.5">
+                <AssetFeedbackControls
+                  assetId={a.id}
+                  initial={feedback?.[a.id] ?? null}
+                  action={feedbackAction}
+                />
+              </div>
+            )}
             {!dense && (
               <p className="mt-1 text-[11px] text-ink-3 truncate">
                 {a.productHandle ?? (a.tags?.length ? a.tags.slice(0, 3).join(', ') : a.source)}
+              </p>
+            )}
+            {!dense && a.providerRequestId && (
+              <p className="text-[10px] font-mono text-ink-4 truncate" title={a.providerRequestId}>
+                {a.providerRequestId.slice(0, 8)}
               </p>
             )}
           </li>

@@ -7,13 +7,15 @@
  * which CLAUDE.md forbids, and at 2 episodes/week this is table volume. The
  * table scrolls inside <ResponsiveTable>; the body never does.
  */
-import { Link, useLoaderData } from 'react-router'
+import { Form, Link, useLoaderData } from 'react-router'
 import type { LoaderFunctionArgs } from 'react-router'
 import { requireAdmin } from '~/lib/session.server'
 import { db } from '~/lib/db.server'
 import { videoEpisodes, videoJobs, videoSeries, socialPosts } from '../../db/schema'
 import { desc, inArray } from 'drizzle-orm'
 import { ResponsiveTable } from '~/components/admin/ResponsiveTable'
+import { ProviderRequestId } from '~/components/admin/ProviderRequestId'
+import { providerHandleList, resolveProviderRequestId, PROVIDER_REQUEST_ID_RE, type ProviderHandleView } from '~/lib/video-provider-lookup.server'
 import { videoStatusOf, stageIndexOf, nextActionOf, STAGE_STEPS, type VideoStatus } from '~/lib/video-status'
 
 interface BoardRow {
@@ -29,6 +31,9 @@ interface BoardRow {
   costUsd: string | null
   next: { label: string; to: string } | null
   updatedAt: string
+  /** Job model tier and its per-stage provider handles (ticket #11552). */
+  model: string | null
+  handles: ProviderHandleView[]
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -43,7 +48,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
     : []
   const seriesById = new Map(seriesRows.map(s => [s.id, s]))
 
-  const jobs = await db.select().from(videoJobs).orderBy(desc(videoJobs.createdAt)).limit(60).catch(() => [] as (typeof videoJobs.$inferSelect)[])
+  // Search (ticket #11552): a pasted provider request id resolves exactly to
+  // its job(s), even ones older than the recent window; any other text
+  // filters the rows by label, title or product.
+  const q = (new URL(request.url).searchParams.get('q') ?? '').trim()
+  const resolved = q && PROVIDER_REQUEST_ID_RE.test(q)
+    ? await resolveProviderRequestId(q).catch(() => [])
+    : []
+  const matchedJobIds = new Set(resolved.map(r => r.jobRowId))
+
+  const recentJobs = await db.select().from(videoJobs).orderBy(desc(videoJobs.createdAt)).limit(60).catch(() => [] as (typeof videoJobs.$inferSelect)[])
+  const missing = [...matchedJobIds].filter(id => !recentJobs.some(j => j.id === id))
+  const olderJobs = missing.length
+    ? await db.select().from(videoJobs).where(inArray(videoJobs.id, missing)).catch(() => [] as (typeof videoJobs.$inferSelect)[])
+    : []
+  const jobs = [...recentJobs, ...olderJobs]
   const jobById = new Map(jobs.map(j => [j.id, j]))
 
   const jobIds = jobs.map(j => j.id)
@@ -73,6 +92,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       costUsd: ep.actualCostUsd ?? ep.estCostUsd,
       next: nextActionOf(status.key, ep.id, job?.id ?? null),
       updatedAt: (ep.updatedAt ?? ep.createdAt).toISOString(),
+      model: job?.modelTier ?? null,
+      handles: job ? providerHandleList(job.providerRequestIds) : [],
       seriesTitle: series?.title ?? null,
     } as BoardRow & { seriesTitle: string | null })
   }
@@ -95,6 +116,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       costUsd: job.costUsd,
       next: nextActionOf(status.key, null, job.id),
       updatedAt: job.updatedAt.toISOString(),
+      model: job.modelTier,
+      handles: providerHandleList(job.providerRequestIds),
     })
   }
 
@@ -108,7 +131,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
     posted: rows.filter(r => r.status.key === 'posted').length,
   }
 
-  return { rows, tiles }
+  let shown = rows
+  let matchedBy: 'request-id' | 'text' | null = null
+  if (matchedJobIds.size) {
+    shown = rows.filter(r => r.jobRowId != null && matchedJobIds.has(r.jobRowId))
+    matchedBy = 'request-id'
+  } else if (q) {
+    const needle = q.toLowerCase()
+    shown = rows.filter(r => [r.label, r.title, r.product ?? ''].some(v => v.toLowerCase().includes(needle)))
+    matchedBy = 'text'
+  }
+
+  return { rows: shown, tiles, q, matchedBy }
 }
 
 function GateTile({ label, count, to, accent }: { label: string; count: number; to: string; accent?: boolean }) {
@@ -143,9 +177,31 @@ function StageRail({ index }: { index: number }) {
 }
 
 export default function VideoBoard() {
-  const { rows, tiles } = useLoaderData<typeof loader>()
+  const { rows, tiles, q, matchedBy } = useLoaderData<typeof loader>()
   return (
     <div className="space-y-4">
+      <Form method="get" className="flex flex-col gap-2 md:flex-row md:items-center" role="search">
+        <label htmlFor="board-q" className="sr-only">Search the board</label>
+        <input
+          id="board-q"
+          name="q"
+          type="search"
+          defaultValue={q}
+          placeholder="Search, or paste an Atlas/fal request id"
+          className="w-full rounded-full border border-line bg-paper px-4 py-2 text-sm text-ink md:max-w-md"
+        />
+        <div className="flex gap-2">
+          <button type="submit" className="rounded-full bg-ink px-4 py-2 text-xs font-semibold text-paper hover:bg-ink-2">Search</button>
+          {q ? <Link to="." className="rounded-full border border-line px-4 py-2 text-xs font-semibold text-ink-2">Clear</Link> : null}
+        </div>
+      </Form>
+      {q ? (
+        <p className="text-xs text-ink-3">
+          {matchedBy === 'request-id'
+            ? `Request id ${q} maps to ${rows.length} row${rows.length === 1 ? '' : 's'}.`
+            : `${rows.length} row${rows.length === 1 ? '' : 's'} match "${q}".`}
+        </p>
+      ) : null}
       <div className="grid grid-cols-2 gap-2 md:grid-cols-3 lg:grid-cols-6">
         <GateTile label="Needs your read" count={tiles.needsRead} to="/admin/video-studio/scripts" accent />
         <GateTile label="Needs a frame" count={tiles.needsFrame} to="/admin/video-studio/render" accent />
@@ -156,14 +212,18 @@ export default function VideoBoard() {
       </div>
 
       {rows.length === 0 ? (
-        <section className="rounded-2xl border border-line bg-paper-2 p-6 text-sm text-ink-3">
+        q ? (
+          <section className="rounded-2xl border border-line bg-paper-2 p-6 text-sm text-ink-3">
+            Nothing on the board matches that search.
+          </section>
+        ) : <section className="rounded-2xl border border-line bg-paper-2 p-6 text-sm text-ink-3">
           Nothing in production yet. The writers room proposes the first slate on its Tuesday run;
           episodes land here at every stage from concept to posted.
         </section>
       ) : (
         <section className="rounded-2xl border border-line bg-paper p-3 md:p-4">
           <ResponsiveTable>
-            <table className="w-full min-w-[900px] text-sm">
+            <table className="w-full min-w-[1100px] text-sm">
               <thead>
                 <tr className="border-b border-line text-left text-[11px] uppercase tracking-wide text-ink-3">
                   <th className="py-2 pr-3 font-semibold">Ep</th>
@@ -173,6 +233,7 @@ export default function VideoBoard() {
                   <th className="py-2 pr-3 font-semibold">Cast</th>
                   <th className="py-2 pr-3 font-semibold">Product</th>
                   <th className="py-2 pr-3 font-semibold">Cost</th>
+                  <th className="py-2 pr-3 font-semibold">Provider</th>
                   <th className="py-2 pr-3 font-semibold">Next</th>
                 </tr>
               </thead>
@@ -196,6 +257,17 @@ export default function VideoBoard() {
                     <td className="py-2 pr-3 text-xs text-ink-3">{r.product ?? '·'}</td>
                     <td className="py-2 pr-3 font-mono text-xs tabular-nums text-ink-3">
                       {r.costUsd != null ? `$${Number(r.costUsd).toFixed(2)}` : '·'}
+                    </td>
+                    <td className="max-w-[340px] py-2 pr-3">
+                      {r.handles.length ? (
+                        <div className="flex flex-col gap-1">
+                          {r.handles.map(h => (
+                            <ProviderRequestId key={h.stage} label={h.stage} provider={h.provider} model={r.model} requestId={h.requestId} />
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-ink-4">·</span>
+                      )}
                     </td>
                     <td className="py-2 pr-3">
                       {r.next ? (
