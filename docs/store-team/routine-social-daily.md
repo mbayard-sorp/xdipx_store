@@ -1062,15 +1062,28 @@ carries part of the funnel. Approval is never a posting licence and never a draf
 and `docs/ads-policy.md` §Meta Shops): it is a tiebreaker between otherwise-equal candidates, and a
 rejected product stays fully available to editorial posts.
 
-**Plain nouns first.** Name the product category and anatomy with the charter's plain nouns
-(`docs/emma-voice.md`, "Say the word, drop the wink") — vibrator, clitoral, prostate, penetration —
-not euphemistic stand-ins ("internal massager", "external contact"). The plain word is warmer and
-clearer and clears the voice gate on the first pass; softening it drew an avoidable REVISE on 2 of
-3 drafts in run 41. This is a clarity rule, **not** a licence to cross the Step 4b platform-policy
-gate: naming a category or anatomy matter-of-factly is not describing what the product does to a
-body, and 4b's arousal/act-description lines still bind on Instagram/TikTok/X. Reserve softer,
-mechanism-only phrasing for surfaces where the charter actually requires restraint (paid-ad
-creative).
+**Two different fences, do not conflate them.** The voice charter licenses plain anatomy nouns for
+clarity: vibrator, clitoral, clitoris, vulva, vagina, labia, penis, anus, prostate, orgasm, the
+orgasm gap. Naming them matter-of-factly clears the voice gate and reads warmer than a euphemism.
+Separately, the caption-lexicon check in `app/lib/social-publish-gate.server.ts` is a
+platform-policy fence the charter does not carry and the voice gate never sees. It hard-blocks
+penetration, intercourse and masturbation (`BORDERLINE_ACTS` tier, owner direction 2026-08-25),
+plus the crude-slang and act-naming tiers and horny/throbbing. No charter citation licenses those
+three. A draft that hits this block is not a voice-gate false positive to argue with, it is a
+different rule doing its job. The remedy is never a euphemism (internal massager, external contact
+are banned by the charter itself) and never a coded spelling to dodge the regex. The remedy is
+rewriting the mechanism the blocked word described into a fact told through a licensed noun: state
+what is true or what the reader will feel (her clitoris, the gap, the orgasm) instead of narrating
+the mechanical act.
+
+**Substitution bank.** penetration -> "the one move", "the default move", "what most sex is built
+around", "the same script"; or best, delete the mechanism sentence and restructure around the
+missing half ("no penetration involved" becomes "her clitoris is actually the point"). intercourse
+-> "sex" plain and unqualified (charter-licensed), "partnered sex", "sex with a partner".
+masturbation -> "self-pleasure" (charter-sanctioned, it names Self-Pleasure Month), "solo sex",
+"getting yourself there", "using your hand". Where the point of the sentence is what she is missing
+rather than what he is doing, "clitoris"/"clitoral" should carry the sentence outright and is the
+strongest and most underused tool here.
 
 **Never gate by experience.** Do not frame a product as "not a first toy", "for advanced users",
 or otherwise assume where the reader is on their journey — it violates the charter's
