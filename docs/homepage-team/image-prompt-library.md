@@ -2180,5 +2180,68 @@ daily image budget. `heroImage`, `heroImageAlt`, and `imagePrompt` all set on th
 
 ---
 
+## Notebook §0-H keeper — content run 1053, "How Do You Talk Dirty Without Feeling Awkward? Start With One Word"
+
+`cast: vivian` + Water-Based H2O Original Lubricant 16oz
+(`jo-h2o-original-water-based-lubricant-16-oz`), `blogPost-how-do-you-talk-dirty-without-feeling-awkward`
+(category `podcast-notes`, routed to §0-H human hero per the §0 router; not † health-adjacent, so the
+levity license and scale exaggeration were both available). Published live, both gates PASS.
+**Casting:** brief-directed `vivian`, verified against the live `castMember` doc (`active: true`,
+`approvedForUse: true`). Clears no-repeat-within-5 on the correct pool, which is real-talk plus
+podcast-notes combined rather than category-scoped: prior five human heroes were `maya` 2026-09-22,
+`diego` 09-18, `sofia` 09-17, `marcus` 09-15, `jade` 09-11; vivian's own last appearance was 09-03.
+Chosen deliberately for the age-diversity mandate (mid 50s against a run of late-20s/early-30s
+figures) and because her `emotionTags` `candid` and `amused` match the post's reader emotion, which
+is bracing for your own cringe. `castMember.vivian.editorialPhoto` unset, so compositing fell back to
+`referencePhoto` per `editorialPhoto ?? referencePhoto` (ticket #2751, and row #10838 already records
+that this fires on 100% of human heroes because every cast doc is missing the field). Camera distance
+stated explicitly ("waist-up framing, the subject centered with generous room on both sides") per the
+standing precedent for a portrait-crop reference. Gesture per the "How do I even start?" row: product
+held out in both hands at arm's length, leaning back from it, with the addition of a mouth-open
+mid-word beat, because the post is specifically about speaking and a silent gesture would have failed
+the swap test. Route: `composeSceneFrame()` → Atlas one-stage (`atlas/seedream-4.5-edit`), composite
+rung, one round only.
+
+**Keeper (round 1, candidate 1):** the label-heavy-hero problem solved by prompting the label as
+pure colour. This product is the textbook critical-rules "label-heavy" case: a fully wraparound
+printed label (JO wordmark, "H2O", multilingual copy, barcode) with **no unlabeled panel anywhere**,
+unlike the amber JO bottle an earlier post handled by rotating to a blank back panel. The rule's
+literal instruction (skip `--ref-image` generation, use the real Shopify photo directly) is written
+for cases where the product alone is the generated subject, and §0-H structurally requires a human
+holding the embedded product at co-primary scale, with no no-product exception available here (the
+post has an embed and is not † health-adjacent). Resolution that worked on the first attempt:
+keep the bottle's true shape, cap and colour faithful to the reference plate, and instruct the label
+area to render as **a flat cyan colour field with no legible text, letters, numbers, logo, wordmark,
+barcode or fine print at all**, so there is nothing for the model to garble. `legibleText` came back
+empty from the vision gate, confirming it held.
+
+**Rejects:** none on the anatomy or imagery gate. Both round-1 candidates cleared all eight
+code-enforced checks (`limbCount`, `handAnatomy`, `faceBodyIntegrity`, `extraOrMergedLimbs`,
+`nippleOccluded`, `genitaliaAbsent`, `anusNotVisible`, `adultUnambiguous`). Candidate 2 was passed
+over on a **curatorial** call rather than a gate failure: it rendered legible and *accurate* "H2O
+ORIGINAL" text on the label, and the doctrine bans text baked into generated images regardless of
+whether the text is correct, so candidate 1's pure-colour label was the cleaner pass on doctrine
+check (d).
+
+**Mechanical note (ticket #9369 / #10682 in practice):** the identical `--prompt` was repeated
+verbatim on the `--upload` call, so `imagePrompt` persisted rather than falling back to the generic
+default. `check-hero-embed-match.ts --slug how-do-you-talk-dirty-without-feeling-awkward` returned
+clean, and the writer re-ran it independently rather than trusting the report.
+
+One round, 2 candidates (both billable at `atlas/seedream-4.5-edit` $0.036), 7.2 cents total, well
+inside the content-team daily image budget. Spend is attributed to `feature: notebook-images` because
+`gen-notebook-art.ts` hardcodes that label and accepts no caller-supplied feature (open row #11100),
+so it does not appear under the content team's own `content-blog` label.
+
+**Doc defect found while writing this entry, filed as a retro row:** `docs/notebook-team/image-brief.md`
+§0 mandates the `cast:`-tagged keeper entry be appended "in the prompt library", but no
+`docs/notebook-team/image-prompt-library.md` exists. The real log is this file,
+`docs/homepage-team/image-prompt-library.md`, which every prior Notebook hero keeper was appended to
+(runs 687, 760, 799, 888, 925, 942, 1037). On this run that wrong pointer led `media-manager` to
+record the keeper narrative only into the Sanity `imagePrompt` field and skip this file, which is why
+this entry was written by the content-writer at retro time instead.
+
+---
+
 *Seeded 2026-07-17 from the doctrine §4 directives and the mission-brief §2 image rules.
 Owner: `media-manager` (append keepers/rejects each run); pruned monthly.*
