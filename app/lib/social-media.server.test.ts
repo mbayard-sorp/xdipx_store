@@ -490,7 +490,8 @@ describe('generateCastComposite: billed-but-dropped candidates are named, not si
     const result = await generateCastComposite(CAST_OPTS)
 
     expect(result.urls).toEqual([])
-    expect(result.dropReasons).toEqual(['rehost_fetch_failed:410', 'rehost_fetch_failed:410'])
+    // #11549: the provider request id rides on the reason so the frame stays traceable.
+    expect(result.dropReasons).toEqual(['rehost_fetch_failed:410 request_id=req-1', 'rehost_fetch_failed:410 request_id=req-1'])
   })
 
   it('leaves dropReasons empty when candidates ship normally', async () => {
@@ -519,5 +520,100 @@ describe('generateCastComposite: billed-but-dropped candidates are named, not si
 
     expect(result.urls).toEqual(['https://cdn/rehosted.jpg'])
     expect(result.dropReasons).toEqual([])
+  })
+})
+
+// Tickets #11548 and #11549: the real provider and the provider request id
+// land on the library row, and a crop-rejected candidate is kept as an
+// archived row instead of vanishing, while never reaching the returned urls.
+describe('generateCastComposite: provider id on the row, crop rejects archived (#11548, #11549)', () => {
+  const CAST_OPTS = {
+    prompt: 'a scene', handle: 'romp-2-0', mood: 'warm', date: '2026-09-25',
+    presenterImageUrl: 'https://x/presenter.jpg',
+    productImageUrl: 'https://x/product.jpg',
+    scale: 'palm' as const,
+  }
+
+  afterEach(() => {
+    vi.doUnmock('./fal-video.server')
+    vi.doUnmock('./social-vision-gate.server')
+    vi.doUnmock('./shopify.server')
+    vi.doUnmock('./social-asset-library.server')
+    vi.doUnmock('./social-crop-to-zone.server')
+    vi.doUnmock('./social-product-fidelity.server')
+    vi.restoreAllMocks()
+    vi.resetModules()
+  })
+
+  function mockCommon(provider: 'atlas' | 'fal' | undefined, costKey: string) {
+    const composeSceneFrame = vi.fn(async () => ({
+      urls: ['https://atlas/candidate.jpg'], requestIds: ['d91a5b6dfdc0483c9b02c795194bb0ee'], costKey,
+      ...(provider ? { provider } : {}),
+    }))
+    vi.doMock('./fal-video.server', () => ({ composeSceneFrame }))
+    vi.doMock('./shopify.server', () => ({
+      uploadMoodImageToShopifyFilesWithId: vi.fn(async () => ({ url: 'https://cdn/rehosted.jpg', fileId: 'gid://shopify/MediaImage/1' })),
+    }))
+    const tryIngestSocialAsset = vi.fn(async (_input: Record<string, unknown>) => ({ id: 902 }))
+    vi.doMock('./social-asset-library.server', () => ({ tryIngestSocialAsset }))
+    vi.doMock('./social-vision-gate.server', () => ({
+      runVisionGate: vi.fn(async () => ({
+        pass: true, checks: null, notes: '', checkedAt: '2026-09-25T00:00:00.000Z',
+        checkCompleted: true, legibleText: '',
+      })),
+      recordVisionVerdict: vi.fn(async () => {}),
+    }))
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array([1, 2, 3]), { status: 200 })))
+    return { tryIngestSocialAsset }
+  }
+
+  it('writes the real provider and the provider request id on the row', async () => {
+    const { tryIngestSocialAsset } = mockCommon('atlas', 'atlas/seedream-4.5-edit')
+    vi.resetModules()
+    const { generateCastComposite } = await import('./social-media.server')
+    const result = await generateCastComposite(CAST_OPTS)
+
+    expect(result.urls).toEqual(['https://cdn/rehosted.jpg'])
+    expect(tryIngestSocialAsset).toHaveBeenCalledTimes(1)
+    const input = tryIngestSocialAsset.mock.calls[0]![0]
+    expect(input.provider).toBe('atlas')
+    expect(input.providerRequestId).toBe('d91a5b6dfdc0483c9b02c795194bb0ee')
+    expect(input.archivedAt).toBeUndefined()
+  })
+
+  it('labels a fal-fallback frame as fal', async () => {
+    const { tryIngestSocialAsset } = mockCommon('fal', 'fal/flux-2-edit')
+    vi.resetModules()
+    const { generateCastComposite } = await import('./social-media.server')
+    await generateCastComposite(CAST_OPTS)
+    expect(tryIngestSocialAsset.mock.calls[0]![0].provider).toBe('fal')
+  })
+
+  it('archives a crop-rejected candidate tagged dropped:<reason> and excludes it from urls', async () => {
+    const { tryIngestSocialAsset } = mockCommon('atlas', 'atlas/seedream-4.5-edit')
+    vi.doMock('./social-crop-to-zone.server', () => ({
+      cropImageToZone: vi.fn(async () => ({ cropped: false, reason: 'zone_miss', notes: 'no hip in frame' })),
+      formatCropBoxTag: vi.fn(() => 'crop:box'),
+    }))
+    vi.resetModules()
+    const { generateCastComposite } = await import('./social-media.server')
+    const result = await generateCastComposite({
+      ...CAST_OPTS,
+      sceneAxes: { cropScale: 'close', bodyZone: 'hip-hollow' },
+    } as Parameters<typeof generateCastComposite>[0])
+
+    expect(result.urls).toEqual([])
+    expect(result.filenames).toEqual([])
+    expect(result.dropReasons).toContain('crop_rejected:zone_miss')
+    expect(tryIngestSocialAsset).toHaveBeenCalled()
+    const input = tryIngestSocialAsset.mock.calls[0]![0]
+    expect(input.archivedAt).toBeInstanceOf(Date)
+    expect(input.archivedBy).toBe('system:crop-reject')
+    expect(input.provider).toBe('atlas')
+    expect(input.providerRequestId).toBe('d91a5b6dfdc0483c9b02c795194bb0ee')
+    expect(input.tags).toEqual(expect.arrayContaining([
+      'dropped:crop_rejected:zone_miss',
+      'request_id:d91a5b6dfdc0483c9b02c795194bb0ee',
+    ]))
   })
 })

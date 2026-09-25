@@ -894,6 +894,11 @@ export interface SceneFrameResult {
   plate?: { costKey: string; count: number }
   /** fal request id of the stage-1 plate call, when a plate was built. */
   plateRequestId?: string
+  /**
+   * Which provider actually produced `urls` (ticket #11548). Atlas is primary
+   * and fal the fallback, so the caller cannot assume either one.
+   */
+  provider?: 'atlas' | 'fal'
 }
 
 /**
@@ -1029,6 +1034,7 @@ async function composeSceneFrameAtlas(opts: ComposeSceneFrameOpts): Promise<Scen
     urls: result.urls,
     requestIds: result.requestIds,
     costKey: result.costKey,
+    provider: 'atlas',
   }
 }
 
@@ -1096,6 +1102,7 @@ async function composeSceneFrameFal(opts: ComposeSceneFrameOpts): Promise<SceneF
     urls: fulfilled.map(f => f.url),
     requestIds: fulfilled.map(f => f.requestId),
     costKey: SCENE_FRAME_COST_KEY,
+    provider: 'fal',
     ...(plate ? { plate: { costKey: SCENE_PLATE_COST_KEY, count: 1 } } : {}),
     ...(plate?.requestId ? { plateRequestId: plate.requestId } : {}),
   }

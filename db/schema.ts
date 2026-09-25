@@ -347,6 +347,9 @@ export const socialMediaAssets = pgTable('social_media_assets', {
   // The Shopify Files GID for `url`, when rehosted there. Populated going
   // forward (uploadMoodImageToShopifyFilesWithId); historic rows stay null.
   shopifyFileId:     varchar('shopify_file_id', { length: 120 }),
+  // Provider generation id (Atlas prediction id, fal request id), migration
+  // 103, ticket #11548. Lets the owner resolve a dashboard id to an asset.
+  providerRequestId: varchar('provider_request_id', { length: 64 }),
   // Vision-gate hard check (migration 087, ticket #6763). NULL means never
   // checked; the publish gate treats that as a BLOCK for any library asset,
   // never a silent skip. See app/lib/social-vision-gate.server.ts.

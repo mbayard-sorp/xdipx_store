@@ -198,7 +198,17 @@ export default function LibraryAssetDrawer() {
 
           <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
             <dt className="text-ink-4">source</dt><dd className="font-mono text-ink">{asset.source}{asset.provider ? ` / ${asset.provider}` : ''}</dd>
+            <dt className="text-ink-4">provider</dt><dd className="font-mono text-ink">{asset.provider ?? 'unknown'}</dd>
             {asset.model && <><dt className="text-ink-4">model</dt><dd className="font-mono text-ink break-all">{asset.model}</dd></>}
+            {asset.providerRequestId && (
+              <>
+                <dt className="text-ink-4">request id</dt>
+                <dd className="flex items-center gap-2 flex-wrap">
+                  <span className="font-mono text-ink break-all">{asset.providerRequestId}</span>
+                  <CopyRequestId value={asset.providerRequestId} />
+                </dd>
+              </>
+            )}
             <dt className="text-ink-4">size</dt><dd className="font-mono text-ink">{asset.width && asset.height ? `${asset.width}x${asset.height}` : 'unknown'}{asset.aspect ? ` (${asset.aspect})` : ''}</dd>
             {asset.archetype && <><dt className="text-ink-4">archetype</dt><dd className="font-mono text-ink">{asset.archetype}</dd></>}
             {asset.productHandle && (
@@ -330,5 +340,21 @@ export default function LibraryAssetDrawer() {
         />
       )}
     </div>
+  )
+}
+
+/** Copies the provider request id (ticket #11548). Clipboard only, no data fetching. */
+function CopyRequestId({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        void navigator.clipboard?.writeText(value).then(() => setCopied(true), () => setCopied(false))
+      }}
+      className="inline-flex items-center min-h-9 px-2.5 rounded-full border border-line bg-paper text-xs font-medium text-ink hover:border-ink-4"
+    >
+      {copied ? 'Copied' : 'Copy'}
+    </button>
   )
 }

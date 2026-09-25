@@ -123,6 +123,7 @@ export default function SocialsLibrary() {
     filters.source && { key: 'source', label: SOURCE_LABELS[filters.source] ?? filters.source },
     filters.picked != null && { key: 'picked', label: filters.picked ? 'picked' : 'not picked' },
     filters.archived && { key: 'archived', label: 'Archived' },
+    filters.dropped && { key: 'dropped', label: 'Including dropped' },
   ].filter(Boolean) as Array<{ key: string; label: string }>
 
   return (
@@ -137,12 +138,12 @@ export default function SocialsLibrary() {
               type="search"
               name="q"
               defaultValue={filters.q}
-              placeholder="Search prompt, tags, product  (/)"
+              placeholder="Search prompt, tags, product, request id  (/)"
               aria-label="Search the library"
               className="w-full min-h-11 rounded-xl border border-line bg-paper pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-coral/30"
             />
           </div>
-          {['tag', 'product', 'cast', 'archetype', 'source', 'picked', 'archived'].map(k => (
+          {['tag', 'product', 'cast', 'archetype', 'source', 'picked', 'archived', 'dropped'].map(k => (
             params.get(k) ? <input key={k} type="hidden" name={k} value={params.get(k) ?? ''} /> : null
           ))}
           <button type="submit" className="min-h-11 px-4 rounded-full border border-line bg-paper text-sm font-medium text-ink hover:border-ink-4">Search</button>
@@ -181,6 +182,15 @@ export default function SocialsLibrary() {
             className={`shrink-0 inline-flex items-center gap-1 min-h-9 px-2.5 rounded-full border text-xs font-mono ${filters.archived ? 'border-coral bg-coral-soft text-ink' : 'border-line bg-paper text-ink-3 hover:border-ink-4'}`}
           >
             <ArchiveIcon size={10} /> Archived
+          </button>
+          <button
+            type="button"
+            onClick={() => setFilter('dropped', filters.dropped ? null : '1')}
+            aria-pressed={filters.dropped}
+            title="Also show frames the crop pass refused"
+            className={`shrink-0 inline-flex items-center gap-1 min-h-9 px-2.5 rounded-full border text-xs font-mono ${filters.dropped ? 'border-coral bg-coral-soft text-ink' : 'border-line bg-paper text-ink-3 hover:border-ink-4'}`}
+          >
+            Include dropped
           </button>
           {facets.tags.slice(0, 12).map(t => (
             <button
