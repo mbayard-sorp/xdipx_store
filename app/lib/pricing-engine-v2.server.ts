@@ -3,7 +3,34 @@
 // until cutover.
 
 export type MapBehavior = 'at_map' | 'above_map_only' | 'ignore_map'
-export type CompareAtStrategy = 'msrp' | 'none'
+/**
+ * What the strike-through anchors on. `launch_price` (owner direction
+ * 2026-09-25): the price the variant first went live at on xdipx, a price we
+ * actually charged, so a cost drop reads as "X% off $100" instead of a
+ * manufacturer's MSRP we never verified. `msrp` is the legacy anchor.
+ */
+export type CompareAtStrategy = 'msrp' | 'launch_price' | 'none'
+
+/** Below this saving the launch-price strike-through is not shown (aligns with the badge floor). */
+export const LAUNCH_BADGE_MIN_PCT = 0.10
+
+/** Pure: the compare-at for a sell price under a strategy, or null for no strike. */
+export function compareAtFor(params: {
+  strategy: CompareAtStrategy
+  sell: number
+  msrp: number | null
+  launchPrice: number | null | undefined
+  minPct?: number
+}): number | null {
+  const { strategy, sell, msrp } = params
+  const minPct = params.minPct ?? LAUNCH_BADGE_MIN_PCT
+  if (strategy === 'launch_price') {
+    const lp = params.launchPrice ?? null
+    return lp != null && lp > 0 && sell <= lp * (1 - minPct) + 1e-9 ? lp : null
+  }
+  if (strategy === 'msrp') return msrp != null && sell < msrp ? msrp : null
+  return null
+}
 export type VelocityBucket = 'top' | 'normal' | 'slow' | 'dead'
 
 export interface PricingConfig {
@@ -116,6 +143,8 @@ export function computePrice(params: {
   msrp:               number | null
   cfg:                PricingConfig
   absolutePriceFloor?: number
+  /** xdipx.launch_price for the variant; consulted under compare_at_strategy=launch_price. */
+  launchPrice?:       number | null
   /**
    * Whether MSRP caps the sell price. Off by default in production via the
    * `pricing_msrp_ceiling_enabled` valve (owner direction 2026-09-25: MSRP is
@@ -194,11 +223,7 @@ export function computePrice(params: {
     sell = cfg.map_behavior === 'above_map_only' ? round2(map + 0.01) : round2(map)
   }
 
-  const compareMsrp = params.msrp
-  const compare_at =
-    cfg.compare_at_strategy === 'msrp' && compareMsrp != null && sell < compareMsrp
-      ? compareMsrp
-      : null
+  const compare_at = compareAtFor({ strategy: cfg.compare_at_strategy, sell, msrp: params.msrp, launchPrice: params.launchPrice })
 
   return { sell, compare_at, belowAbsoluteFloor: sell < absolutePriceFloor, msrpBelowFloor }
 }
@@ -261,11 +286,13 @@ export function computeDiscontinuedPrice(params: {
   cost:             number | null
   msrp:             number | null
   daysDiscontinued: number
-  cfg:              Pick<PricingConfig, 'target_margin_pct' | 'margin_floor_pct'>
+  cfg:              Pick<PricingConfig, 'target_margin_pct' | 'margin_floor_pct'> & Partial<Pick<PricingConfig, 'compare_at_strategy'>>
   /** See computePrice. When false, MSRP is compare-at only, never a cap. */
   msrpCeiling?:     boolean
   /** Owner-edited markdown steps; defaults to DEFAULT_CLEARANCE_LADDER. */
   ladder?:          ClearanceLadder
+  /** xdipx.launch_price for the variant; consulted under compare_at_strategy=launch_price. */
+  launchPrice?:     number | null
 }): PriceResult | null {
   const { cost, daysDiscontinued, cfg } = params
   const msrp = params.msrpCeiling === false ? null : params.msrp
@@ -295,7 +322,10 @@ export function computeDiscontinuedPrice(params: {
   let rounded = roundPsychological(sell)
   if (rounded < floor) rounded = roundUpPsychological(floor)
 
-  const compareMsrp = params.msrp
-  const compare_at = compareMsrp != null && rounded < compareMsrp ? compareMsrp : null
+  // Clearance historically always struck MSRP; keep that for 'msrp' and
+  // 'none' (a discontinued item always shows its reference price), and anchor
+  // on the launch price when the rules ask for it.
+  const strategy: CompareAtStrategy = cfg.compare_at_strategy === 'launch_price' ? 'launch_price' : 'msrp'
+  const compare_at = compareAtFor({ strategy, sell: rounded, msrp: params.msrp, launchPrice: params.launchPrice })
   return { sell: rounded, compare_at }
 }

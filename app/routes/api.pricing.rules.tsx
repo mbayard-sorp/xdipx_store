@@ -112,7 +112,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
   const VALID_LEVELS = new Set(['global', 'group', 'sub_group', 'product_type'])
   const VALID_MAP = new Set(['at_map', 'above_map_only', 'ignore_map'])
-  const VALID_COMPARE = new Set(['msrp', 'none'])
+  const VALID_COMPARE = new Set(['msrp', 'launch_price', 'none'])
 
   for (const p of patches) {
     if (!VALID_LEVELS.has(p.scope_level)) {

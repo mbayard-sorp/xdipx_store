@@ -24,7 +24,7 @@ export interface RulePatch {
 
 const VALID_SCOPE_LEVELS = new Set(['global', 'group', 'sub_group', 'product_type'])
 const VALID_MAP_BEHAVIORS = new Set(['at_map', 'above_map_only', 'ignore_map'])
-const VALID_COMPARE_AT_STRATEGIES = new Set(['msrp', 'none'])
+const VALID_COMPARE_AT_STRATEGIES = new Set(['msrp', 'launch_price', 'none'])
 
 // ---------------------------------------------------------------------------
 // Parser

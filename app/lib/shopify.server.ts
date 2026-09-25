@@ -395,7 +395,7 @@ export function nodeToVaultDeal(node: ShopifyProductCardNode): VaultDeal {
     handle: node.handle,
     seoTitle: node.title,
     dealPrice,
-    msrp: parseFloat(parseMetafield(mf, 'original_price') || (variant?.compareAtPrice?.amount ?? '0')),
+    msrp: parseFloat((variant?.compareAtPrice?.amount ?? '') || parseMetafield(mf, 'original_price') || '0'),
     images: gateCardImages(parseImages(node.images.edges), mf),
     brand: node.vendor,
     category: parseCategory(parseMetafield(mf, 'category')),
@@ -874,7 +874,7 @@ function nodeToDeal(node: ShopifyProductNode): Deal {
     videos: parseVideos(node.media),
     ...(parseMetafield(mf, 'mood_image_url') ? { moodImageUrl: parseMetafield(mf, 'mood_image_url') } : {}),
     dealPrice: parseFloat(variant?.price.amount ?? '0'),
-    msrp: parseFloat(parseMetafield(mf, 'original_price') || (variant?.compareAtPrice?.amount ?? '0')),
+    msrp: parseFloat((variant?.compareAtPrice?.amount ?? '') || parseMetafield(mf, 'original_price') || '0'),
     wholesaleCost: parseFloat(parseMetafield(mf, 'wholesale_cost') || '0'),
     mapPrice: parseFloat(parseMetafield(mf, 'map_price') || '0'),
     brand: node.vendor,
@@ -1136,7 +1136,7 @@ async function getDealByShopifyIdUncached(id: string): Promise<Deal | null> {
     videos,
     ...(mfVal('mood_image_url') ? { moodImageUrl: mfVal('mood_image_url') } : {}),
     dealPrice: parseFloat(variant?.price ?? '0'),
-    msrp: parseFloat(mfVal('original_price') || (variant?.compare_at_price ?? '0')),
+    msrp: parseFloat((variant?.compare_at_price ?? '') || mfVal('original_price') || '0'),
     wholesaleCost: parseFloat(mfVal('wholesale_cost') || '0'),
     mapPrice: parseFloat(mfVal('map_price') || '0'),
     brand: product.vendor,
@@ -2037,7 +2037,7 @@ function nodeToFeedDeal(node: ShopifyFeedProductNode): VaultDeal {
     handle: node.handle,
     seoTitle: node.title,
     dealPrice,
-    msrp: parseFloat(originalPrice || (variant?.compareAtPrice?.amount ?? '0')),
+    msrp: parseFloat((variant?.compareAtPrice?.amount ?? '') || originalPrice || '0'),
     images: parseImages(node.images.edges),
     brand: node.vendor,
     category: parseCategory(parseMetafield(mf, 'category')),
@@ -3119,6 +3119,16 @@ export async function getProductByInventoryItemId(
   const dealScore = product.dealScoreMf?.value ? parseFloat(product.dealScoreMf.value) : NaN
   if (Number.isFinite(dealScore)) result.dealScore = dealScore
   return result
+}
+
+/**
+ * Record the xdipx launch price on a variant (owner direction 2026-09-25).
+ * Written by the pricing engine: once when first seen, and again only when
+ * the engine itself prices the variant above it. Never derived from MSRP.
+ */
+export async function setVariantLaunchPrice(variantGid: string, price: number): Promise<void> {
+  await setMetafield(variantGid, 'xdipx', 'launch_price', 'number_decimal', price.toFixed(2))
+  invalidateCache('shopify:deal:byhandle:')
 }
 
 export async function updateVariantPricing(variantGid: string, price: string, compareAtPrice: string, wholesaleCost?: string): Promise<void> {
@@ -7571,6 +7581,8 @@ export interface PricingProductSnapshot {
     compareAtPrice: number | null
     inventoryItemId: string | null
     unitCost: number | null
+    /** xdipx.launch_price variant metafield; null until the engine records it. */
+    launchPrice: number | null
   }>
   metafields: {
     nalpacSku: string | null
@@ -7606,6 +7618,7 @@ const PRICING_PRODUCTS_QUERY = `
               id
               unitCost { amount }
             }
+            launchPrice: metafield(namespace: "xdipx", key: "launch_price") { value }
           }
         }
         metafields(keys: ["xdipx.nalpac_sku", "xdipx.wholesale_cost", "xdipx.map_price", "xdipx.original_price", "xdipx.map_restricted", "xdipx.discontinued_at"], first: 10) {
@@ -7640,6 +7653,7 @@ interface PricingQueryResult {
             id: string
             unitCost: { amount: string } | null
           } | null
+          launchPrice?: { value: string } | null
         }>
       }
       metafields: { nodes: Array<{ namespace: string; key: string; value: string }> }
@@ -7676,6 +7690,7 @@ export function parsePricingSnapshot(raw: PricingQueryResult['products']['nodes'
     compareAtPrice: v.compareAtPrice != null ? parseFloat(v.compareAtPrice) : null,
     inventoryItemId: v.inventoryItem?.id ?? null,
     unitCost: v.inventoryItem?.unitCost?.amount != null ? parseFloat(v.inventoryItem.unitCost.amount) : null,
+    launchPrice: v.launchPrice?.value != null && v.launchPrice.value !== '' ? parseFloat(v.launchPrice.value) : null,
   }))
 
   if (variants.every(v => v.sku === '')) return null

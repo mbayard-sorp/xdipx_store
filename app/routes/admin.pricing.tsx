@@ -299,6 +299,7 @@ function RuleFieldsEditor({ inherited, values, onChange }: RuleFieldsEditorProps
   const effectiveTarget = values.targetMarginPct ?? inherited.targetMarginPct
   const effectiveFloor = values.marginFloorPct ?? inherited.marginFloorPct
   const effectiveMap = values.mapBehavior ?? inherited.mapBehavior ?? 'at_map'
+  const effectiveCompare = values.compareAtStrategy ?? inherited.compareAtStrategy ?? 'msrp'
 
   return (
     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
@@ -393,6 +394,37 @@ function RuleFieldsEditor({ inherited, values, onChange }: RuleFieldsEditorProps
           </select>
         ) : (
           <span className="text-muted italic">{effectiveMap}</span>
+        )}
+      </div>
+
+      {/* Compare-at (strike-through anchor) */}
+      <div>
+        <div className="flex items-center gap-1 mb-1">
+          <span className={`font-medium ${values.compareAtStrategy == null ? 'text-muted' : 'text-ink'}`}>Strike</span>
+          <button
+            onClick={() => toggleField('compareAtStrategy', inherited.compareAtStrategy)}
+            className={`text-[10px] px-1.5 py-0.5 rounded transition-colors ${
+              values.compareAtStrategy != null
+                ? 'bg-coral/10 text-coral hover:bg-coral/20'
+                : 'bg-cream-2 text-muted hover:text-ink'
+            }`}
+          >
+            {values.compareAtStrategy != null ? 'revert' : 'override'}
+          </button>
+        </div>
+        {values.compareAtStrategy != null ? (
+          <select
+            value={values.compareAtStrategy}
+            onChange={e => onChange({ ...values, compareAtStrategy: e.target.value })}
+            className="w-full border border-line rounded-lg px-2 py-1 bg-white text-ink focus:outline-none focus:ring-1 focus:ring-coral/50"
+            title="launch_price: % off the price it launched at on xdipx. msrp: % off manufacturer MSRP. none: no strike-through."
+          >
+            <option value="launch_price">launch_price</option>
+            <option value="msrp">msrp</option>
+            <option value="none">none</option>
+          </select>
+        ) : (
+          <span className="text-muted italic">{effectiveCompare}</span>
         )}
       </div>
 
@@ -1171,6 +1203,47 @@ function ClearanceLadderPanel({ ladder }: { ladder: Array<{ days: number; pct: n
 }
 
 // ---------------------------------------------------------------------------
+// Launch price panel (reset the strike-through anchor for one SKU)
+// ---------------------------------------------------------------------------
+
+function LaunchPricePanel() {
+  const fetcher = useFetcher<{ ok: boolean; error?: string; sku?: string; launchPrice?: number }>()
+  const [sku, setSku] = useState('')
+  return (
+    <section className="bg-white rounded-2xl border border-line p-5 space-y-3">
+      <div>
+        <h2 className="text-base font-semibold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
+          Launch price
+        </h2>
+        <p className="text-xs text-muted mt-0.5">
+          Each variant records the price it first went live at on xdipx. Under the launch_price strike setting, a cost drop shows as "% off" that price. Resetting sets it to the current price, which removes the strike-through until the price drops again.
+        </p>
+      </div>
+      <div className="flex flex-col gap-2 md:flex-row md:items-center">
+        <input
+          value={sku}
+          onChange={e => setSku(e.target.value)}
+          placeholder="SKU"
+          className="w-full md:w-48 text-sm border border-line rounded-lg px-2 py-1 bg-white text-ink"
+        />
+        <button
+          type="button"
+          disabled={!sku.trim() || fetcher.state !== 'idle'}
+          onClick={() => fetcher.submit(JSON.stringify({ sku: sku.trim() }), { method: 'post', action: '/api/pricing/launch-price', encType: 'application/json' })}
+          className="text-xs font-semibold px-4 py-2 bg-coral text-white rounded-full hover:opacity-90 transition-opacity disabled:opacity-50"
+        >
+          {fetcher.state !== 'idle' ? 'Resetting...' : 'Reset to current price'}
+        </button>
+      </div>
+      {fetcher.data?.ok === false && <p className="text-xs text-red-500">{fetcher.data.error}</p>}
+      {fetcher.state === 'idle' && fetcher.data?.ok && (
+        <p className="text-xs text-green-600">Launch price for {fetcher.data.sku} is now ${fetcher.data.launchPrice?.toFixed(2)}.</p>
+      )}
+    </section>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Approval mode panel
 // ---------------------------------------------------------------------------
 
@@ -1534,6 +1607,8 @@ export default function AdminPricingPage() {
       <ApprovalModePanel current={data.approvalMode} thresholds={data.modeThresholds} />
 
       <ClearanceLadderPanel ladder={data.clearanceLadder} />
+
+      <LaunchPricePanel />
 
       {/* Webhook */}
       <WebhookCard webhook={data.webhook} />

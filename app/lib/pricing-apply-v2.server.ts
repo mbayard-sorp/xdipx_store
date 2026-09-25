@@ -25,7 +25,7 @@ import {
 } from './pricing-rules.server'
 import { getGroupForProductType } from './pricing-rules.server'
 import { computeVelocityBucket } from './pricing-velocity.server'
-import { updateVariantPricing, normalizeMetafieldKey } from './shopify.server'
+import { updateVariantPricing, normalizeMetafieldKey, setVariantLaunchPrice } from './shopify.server'
 import type { VelocityBucket } from './pricing-engine-v2.server'
 
 // ---------------------------------------------------------------------------
@@ -360,6 +360,8 @@ interface VariantInput {
   price:          number
   compareAtPrice: number | null
   unitCost:       number | null
+  /** xdipx.launch_price; null until recorded. */
+  launchPrice?:   number | null
 }
 
 interface ProductInput {
@@ -443,10 +445,10 @@ async function recomputeFromData(
       ? Math.max(0, Math.floor((Date.now() - discontinuedAt.getTime()) / 86_400_000))
       : 0
     clearancePct = (ladder.find(([maxDays]) => daysDisc! <= maxDays) ?? ladder[ladder.length - 1])?.[1]
-    const result = computeDiscontinuedPrice({ cost, msrp, daysDiscontinued: daysDisc, cfg: effectiveCfg, msrpCeiling, ladder })
+    const result = computeDiscontinuedPrice({ cost, msrp, daysDiscontinued: daysDisc, cfg: effectiveCfg, msrpCeiling, ladder, launchPrice: variant.launchPrice ?? null })
     if (result) { newSell = result.sell; newCompare = result.compare_at }
   } else {
-    const result = computePrice({ cost, map, msrp, cfg: effectiveCfg, msrpCeiling })
+    const result = computePrice({ cost, map, msrp, cfg: effectiveCfg, msrpCeiling, launchPrice: variant.launchPrice ?? null })
     if (result) {
       newSell = result.sell
       newCompare = result.compare_at
@@ -587,6 +589,22 @@ async function recomputeFromData(
     }
   }
 
+  // Launch price (owner direction 2026-09-25). Recorded whatever the
+  // compare-at strategy says, so the anchor is already genuine by the time a
+  // group switches to launch_price. First sight: the price the variant is
+  // live at after this run (a price we actually charge). Later: raised only
+  // when the engine itself prices above it, so a strike-through can never sit
+  // below the current price and never grows on its own. Never set from MSRP.
+  try {
+    const liveSell = applied ? newSell : oldSell
+    const recorded = variant.launchPrice ?? null
+    if (recorded == null || (applied && newSell > recorded + 0.005)) {
+      await setVariantLaunchPrice(variantId, liveSell)
+    }
+  } catch (err) {
+    console.warn(`[pricing-apply-v2] launch_price write failed for ${sku} (ignored):`, err)
+  }
+
   return {
     status,
     auditId,
@@ -616,6 +634,7 @@ export async function recomputeVariant(
           price: string
           compareAtPrice: string | null
           inventoryItem: { unitCost: { amount: string } | null } | null
+          launchPrice: { value: string } | null
           product: {
             id: string
             handle: string
@@ -628,6 +647,7 @@ export async function recomputeVariant(
       }>(
         `query V($id:ID!){productVariant(id:$id){id sku title price compareAtPrice
           inventoryItem{unitCost{amount}}
+          launchPrice: metafield(namespace:"xdipx",key:"launch_price"){value}
           product{id handle title vendor productType
             metafields(keys:["xdipx.nalpac_sku","xdipx.wholesale_cost","xdipx.map_price","xdipx.original_price","xdipx.map_restricted","xdipx.discontinued_at"],first:10){nodes{namespace key value}}}}}`,
         { id: variantId },
@@ -661,6 +681,7 @@ export async function recomputeVariant(
       price:          parseFloat(data.price),
       compareAtPrice: data.compareAtPrice != null ? parseFloat(data.compareAtPrice) : null,
       unitCost:       data.inventoryItem?.unitCost?.amount != null ? parseFloat(data.inventoryItem.unitCost.amount) : null,
+      launchPrice:    data.launchPrice?.value ? parseFloat(data.launchPrice.value) : null,
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)

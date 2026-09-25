@@ -8,6 +8,7 @@ import {
   roundUpPsychological,
   ABSOLUTE_PRICE_FLOOR_DEFAULT,
   parseClearanceLadder,
+  compareAtFor,
   type PricingConfig,
 } from './pricing-engine-v2.server'
 
@@ -738,5 +739,40 @@ describe('clearance ladder (owner-editable)', () => {
     expect(day5.sell).toBe(17.99)
     expect(day15.sell).toBe(14.99) // 12 rounds to 11.99 but floor 10/0.7=14.29 -> 14.99
     expect(day99.sell).toBe(day15.sell)
+  })
+})
+
+describe('compare-at under compare_at_strategy=launch_price', () => {
+  const cfg = {
+    target_margin_pct: 0.45,
+    margin_floor_pct: 0.30,
+    map_behavior: 'at_map' as const,
+    compare_at_strategy: 'launch_price' as const,
+    velocity_modifier_enabled: false,
+  }
+
+  it('compareAtFor strikes the launch price only when the saving clears the badge floor', () => {
+    expect(compareAtFor({ strategy: 'launch_price', sell: 89.99, msrp: 120, launchPrice: 100 })).toBe(100)
+    expect(compareAtFor({ strategy: 'launch_price', sell: 94.99, msrp: 120, launchPrice: 100 })).toBeNull()
+    expect(compareAtFor({ strategy: 'launch_price', sell: 30, msrp: 120, launchPrice: null })).toBeNull()
+    expect(compareAtFor({ strategy: 'msrp', sell: 30, msrp: 120, launchPrice: 100 })).toBe(120)
+    expect(compareAtFor({ strategy: 'none', sell: 30, msrp: 120, launchPrice: 100 })).toBeNull()
+  })
+
+  it('computePrice never uses MSRP as the strike under launch_price', () => {
+    // cost 15 -> target 27.27 -> 26.99; launched at 100: 73% off launch, MSRP ignored
+    const r = computePrice({ cost: 15, map: null, msrp: 120, cfg, msrpCeiling: false, launchPrice: 100 })!
+    expect(r.sell).toBe(26.99)
+    expect(r.compare_at).toBe(100)
+    const fresh = computePrice({ cost: 15, map: null, msrp: 120, cfg, msrpCeiling: false, launchPrice: null })!
+    expect(fresh.compare_at).toBeNull()
+  })
+
+  it('computeDiscontinuedPrice honors launch_price when the rules ask for it, MSRP otherwise', () => {
+    const base = { cost: 10, msrp: 60, daysDiscontinued: 0, msrpCeiling: false, launchPrice: 40 }
+    const lp = computeDiscontinuedPrice({ ...base, cfg: { target_margin_pct: 0.5, margin_floor_pct: 0.3, compare_at_strategy: 'launch_price' } })!
+    const ms = computeDiscontinuedPrice({ ...base, cfg: { target_margin_pct: 0.5, margin_floor_pct: 0.3 } })!
+    expect(lp.compare_at).toBe(40)
+    expect(ms.compare_at).toBe(60)
   })
 })

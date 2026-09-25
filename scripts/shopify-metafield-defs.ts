@@ -23,6 +23,8 @@ type MetafieldDef = {
   name:        string
   description: string
   type:        string
+  /** Owner resource. Defaults to PRODUCT. */
+  ownerType?:  'PRODUCT' | 'PRODUCTVARIANT'
   validations?: Array<{ name: string; value: string }>
 }
 
@@ -176,6 +178,17 @@ const DEFS: MetafieldDef[] = [
     description: 'JSON { eyebrow, subhead, body, bannerHeadline } — Haiku-generated Emma copy for the alt "quiet endorsement" homepage template.',
     type:        'json',
   },
+  // Launch price (owner direction 2026-09-25): the sell price a variant first
+  // went live at on xdipx. The strike-through and "% off" badge anchor on it
+  // instead of MSRP. Written once by the pricing engine, raised only when the
+  // engine itself raises the price above it, never derived from MSRP.
+  {
+    key:         'launch_price',
+    name:        'Launch price (xdipx)',
+    description: 'Sell price this variant first went live at on xdipx. Reference price for the strike-through and % off badge under compare_at_strategy=launch_price. Raised automatically when the engine prices above it; never set from MSRP.',
+    type:        'number_decimal',
+    ownerType:   'PRODUCTVARIANT',
+  },
   // Clearance ladder: date the product was marked discontinued
   {
     key:         'discontinued_at',
@@ -239,8 +252,8 @@ async function gql<T>(query: string, variables: Record<string, unknown>): Promis
 }
 
 const CHECK_QUERY = `
-  query CheckDef($ns: String!, $key: String!) {
-    metafieldDefinitions(first: 1, namespace: $ns, key: $key, ownerType: PRODUCT) {
+  query CheckDef($ns: String!, $key: String!, $ownerType: MetafieldOwnerType!) {
+    metafieldDefinitions(first: 1, namespace: $ns, key: $key, ownerType: $ownerType) {
       nodes { id name access { storefront } }
     }
   }
@@ -270,7 +283,7 @@ async function ensureDef(def: MetafieldDef) {
     metafieldDefinitions: {
       nodes: Array<{ id: string; name: string; access: { storefront: string | null } }>
     }
-  }>(CHECK_QUERY, { ns, key: def.key })
+  }>(CHECK_QUERY, { ns, key: def.key, ownerType: def.ownerType ?? 'PRODUCT' })
   const node = existing.metafieldDefinitions.nodes[0]
   if (node) {
     if (node.access?.storefront !== 'PUBLIC_READ') {
@@ -285,7 +298,7 @@ async function ensureDef(def: MetafieldDef) {
         def: {
           namespace:  ns,
           key:        def.key,
-          ownerType:  'PRODUCT',
+          ownerType:  def.ownerType ?? 'PRODUCT',
           access:     { storefront: 'PUBLIC_READ' },
         },
       })
@@ -312,7 +325,7 @@ async function ensureDef(def: MetafieldDef) {
       name:        def.name,
       description: def.description,
       type:        def.type,
-      ownerType:   'PRODUCT',
+      ownerType:   def.ownerType ?? 'PRODUCT',
       validations: def.validations ?? [],
       // Expose to Storefront API — without this, storefront queries return null
       // for the metafield even when a value is set.
