@@ -64,14 +64,19 @@ LIVE vs PLANNED). CLAUDE.md is already in context; trust it for merge policy and
 
 ### Routing card
 
-Verified against the code 2026-08-12. If reality disagrees with this card, trust the code and fix
-the card.
+Verified against the code 2026-08-12; auto-approve line re-verified against live bus rows
+2026-09-25. If reality disagrees with this card, trust the code and fix the card.
 
 - **Teams:** homepage, social, ads, email, strategy, content, product, video, support. `team` is
   required on create; the API 400s without it.
-- **Auto-approve** (`{team}_team_auto_approve_suggestions`) is ON only for homepage, content,
-  product, social, strategy. A row filed under ads, email, video, or support sticks at `proposed`
-  and no scheduled session will ever triage it. If you must file there, say so in "Needs you".
+- **Auto-approve** (`{team}_team_auto_approve_suggestions`) is ON for all nine teams as of
+  2026-09-25: every row created since 2026-09-15 under every team, email included, landed with
+  `decided_by='auto'`. A fresh create therefore goes straight to `approved` whatever the team.
+  The valve is per team and owner-flippable on that team's tab of `/admin/homepage-team`, so do
+  not trust this line blindly: after filing, read the row back (`{"op":"get","id":…}`) and if it
+  sits at `proposed`, that team's valve is off and the row needs the owner's triage click; say so
+  in "Needs you". Auto-approve does not apply to a create that already carries an open `pr` link;
+  those land at `pr_open` by design.
 - **Kinds and who executes them:**
   - `code`: R-DEV claims approved rows at 14:00 and 20:00 UTC, opens a PR, QA verifies, the
     release engine merges
