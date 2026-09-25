@@ -2243,5 +2243,109 @@ this entry was written by the content-writer at retro time instead.
 
 ---
 
+## Notebook §0-H keeper — content run 1070, "Can You Bring a Sex Toy on a Plane?"
+
+`cast: priya` + FemmeFunn Ultra Bullet Rechargeable Mini Vibrator 4.3 Inches
+(`femmefunn-ultra-bullet-massager-rechargeable-silicone-vibrator`),
+`blogPost-can-you-travel-with-a-sex-toy` (category `real-talk`, routed to §0-H human hero per the §0
+router; not † health-adjacent, so the levity license and deliberate scale exaggeration were both
+available — scale exaggeration was not used, see below). Placed on the draft post (status left at
+`draft`), both gates PASS.
+
+**Casting:** brief-directed `priya`, verified against the live `castMember` doc (`active: true`,
+`approvedForUse: true`, `emotionTags`: `amused`, `lighthearted`, `delighted`, `curious`, a good match
+for the reader emotion of anticipatory exposure-anxiety with a wry edge). Clears no-repeat-within-5:
+prior five human heroes were `vivian` 09-24, `maya` 09-22, `diego` 09-18, `sofia` 09-17, `marcus`
+09-15; priya's last appearance was outside that window. `castMember.priya.editorialPhoto` is unset,
+so compositing fell back to `referencePhoto` per `editorialPhoto ?? referencePhoto` (ticket #2751 —
+same as every other cast doc on file). Gesture per the "Is this normal? / Is it just me?" row: product
+held up in one hand at eye level, head tilted toward it, brow raised, free hand palm-up asking the
+room, staged over a half-packed carry-on suitcase (folded shirt, charger cable, passport) so the
+scene reads unambiguously as pre-flight packing and clears the swap test. Route: `composeSceneFrame()`
+→ Atlas one-stage (`atlas/seedream-4.5-edit`), composite rung, two rounds (see rejects).
+
+**Rejects (round 1, both candidates):** anatomy/imagery gate passed both (all eight code-enforced
+checks), but both failed the **curatorial** product-identity-fidelity check before upload and were
+never submitted to the code gate a second time. Candidate 1 rendered the product with the pink
+accent at the wrong end (bulbous pink tip at the top, plain teal at the base) — an inverted read of
+the real packshot, which has a tapered rounded tip and a pink charging-port cap at the base near the
+hand. Candidate 2 invented a black ball-shaped attachment head that does not exist on this product at
+all (reads like a mini massage-gun head, not a bullet vibrator). Both were discarded without
+uploading. Round 1 prompt lacked an explicit shape/color breakdown of the reference plate; the round-1
+`--prompt` is preserved here for the record: "...holding the FemmeFunn Ultra Bullet Massager from
+reference 2 in hand, large and co-primary with the face, keep the product's shape, color, and finish
+exactly as reference 2..." — evidently not specific enough on its own to hold fidelity on a small,
+mostly-featureless silicone toy with no label to anchor the model.
+
+**Round 2 fix (product shape only):** corrected prompt added an explicit plain-language shape
+description ("a single smooth continuous piece of teal silicone shaped like a slim curved wand
+roughly 4 inches long: a gently tapered rounded tip at the top, no ball head, no attachment, no
+massage-gun head, and a small pink-magenta cap at the very base near her fingers where the charging
+port sits") plus matching negatives ("no black ball attachment, no massage gun, no percussive head,
+no wand-massager head shape"). Both round-2 candidates fixed the shape defect; candidate 1 was passed
+over on a **curatorial** call (not a gate failure) for a saturated full-intensity coral-into-plum
+color-block wall instead of the pale coral-soft/warm-neutral ground the doctrine's ground lock
+requires — the same failure class already logged against the `le-wand-mini-micro-wand` entry above.
+Candidate 2 sat on a clean warm-neutral wall with true window daylight, held the product faithfully,
+staged the "Is this normal?" gesture precisely, and was uploaded first
+(`image-75efe0c7c293d6b944328331a55d06e2c5fbebf3-1200x900-png`) — **then superseded, see round 3.**
+
+**`check-hero-embed-match.ts` failure and round 3 (wording, not pixels):** running the checker
+against the round-2 upload returned 2 false-positive mismatches, both sourced from the round-2
+prompt/alt wording rather than the image: (1) the literal word "pink" (used accurately, the real cap
+color) single-token-matched the catalog's separate `...-pink` color-variant SKU, corroborated by
+generic words ("rechargeable", "silicone", "bullet", "massager") the round-2 copy already contained;
+(2) the round-2 negative-prompt phrase "no attachment" put the literal word "attachment" into the
+stored copy, which combined with "tip" (accurate shape word) and "white" (from the shared scaffold's
+stock phrase "white and warm-neutral surfaces") to match all three distinctive tokens of an unrelated
+`wand-essentials-g-tip-attachment-white` SKU. Negated/negative-prompt words are not exempted by the
+matcher — it does whole-word presence matching on the full copy, blind to negation. Separately,
+round 2's copy never satisfied `heroNamesAnyProduct` for the *embedded* product on its own distinctive
+tokens (its title reduces to `["ultra", "inches"]`, both required; round 2 never said "inches" at
+all), which happened not to fire as a reported problem only because the two false-positive mismatches
+already existed on the same run. **Round 3, same picture-composition intent, sanitized wording only:**
+swapped "pink-magenta" → "magenta" (drops the color-variant collision), swapped "no attachment" → "no
+separate parts and nothing added on" (drops the accessory-SKU collision), dropped "white" from the
+stock scaffold phrase ("white and warm-neutral surfaces" → "warm-neutral surfaces"), and added
+"(a 4.3 inches long rechargeable vibrator)" so the embedded product's own two-token name is actually
+satisfied. Verified locally against the live `productPage` catalog (paginated fetch, same
+`findHeroEmbedMismatches`/`heroNamesAnyProduct` functions the checker script calls) before spending a
+third generation round: zero mismatches, `namesAnyProduct: true`. Regenerated from this sanitized
+prompt (a genuinely new `composeSceneFrame()` call, not a text edit against the round-2 file, since
+ticket #10682 requires `imagePrompt` to be the real prompt that produced the uploaded pixels).
+Candidate 1 repeated the round-1/round-2 saturated-coral-wall defect and was rejected again on the
+same curatorial ground; **candidate 2 kept the correct product shape, sat on a clean warm-neutral
+window-lit wall, and read as "caught mid-question, delighted-but-wry" close enough to the target
+register** → picked and uploaded, **superseding the round-2 asset**:
+`image-62c7a7838b9fb1d3c5308388e96653a46906abac-1200x900-png` is the asset actually referenced by
+`blogPost-can-you-travel-with-a-sex-toy.heroImage` now. `check-hero-embed-match.ts --slug
+can-you-travel-with-a-sex-toy` re-run after the round-3 upload: exit 0, "Hero prompt present and
+hero/embed coupling clean."
+
+**Lesson for future §0-H label-light products, two parts:**
+1. The critical-rules label-heavy-hero shortcut (skip ref-image, use the real Shopify photo directly)
+   is written for products with a printed label that bakes garbled text; this product has the
+   opposite problem — no label at all to anchor the model's read of its shape — and the fix that
+   worked was spelling out the geometry in plain words rather than relying on "faithful to reference
+   2" alone.
+2. **New:** whatever plain-language shape/color words get added to hold product fidelity, check them
+   against the catalog collision risk before upload, not after. A color word ("pink") or a negative-
+   prompt word ("no attachment") can silently name an unrelated SKU by accident, and the shared §0-H
+   scaffold's own boilerplate phrase ("white and warm-neutral surfaces") can do the same. Prefer a
+   local dry run of `findHeroEmbedMismatches`/`heroNamesAnyProduct` (same functions
+   `check-hero-embed-match.ts` calls, pulled from `app/lib/blog-hero-embed-audit.ts`) against candidate
+   prompt/alt wording before spending a generation round, the way this run did for round 3 — cheaper
+   than discovering it after upload.
+
+Three rounds, 6 candidates generated (all billable, anatomy-gate PASS on all six), 4 uploaded-quality
+or would-be-uploadable candidates discarded on curatorial grounds (product-shape defect twice,
+saturated-wall defect twice) without a second gate submission. Spend attributed to
+`feature: notebook-images` per the standing `gen-notebook-art.ts` hardcode (open row #11100).
+`check-hero-embed-match.ts --slug can-you-travel-with-a-sex-toy` verified clean (exit 0) after the
+round-3 upload: the hero names and holds the post's only `blogProductEmbed` product, verified ACTIVE
+with stock this run.
+
+---
+
 *Seeded 2026-07-17 from the doctrine §4 directives and the mission-brief §2 image rules.
 Owner: `media-manager` (append keepers/rejects each run); pruned monthly.*
