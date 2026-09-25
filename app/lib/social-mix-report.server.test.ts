@@ -298,6 +298,18 @@ describe('computeSocialMixReport, wide ceiling frame (§3.2c)', () => {
     expect(computeSocialMixReport(rows).lines.wideCeiling.status).toBe('ok')
   })
 
+  it('counts a wide-scale ceiling frame toward the floor (ticket #11452)', () => {
+    // The art director tags true location-establishing ceiling frames 'wide',
+    // not 'medium' -- WIDE_CEILING_SCALES used to hold only 'medium', which
+    // zeroed the floor against every real ceiling-tier asset in the library.
+    const rows = Array.from({ length: 7 }, (_, i) =>
+      row({ id: i + 1, bodyZone: 'stomach', cropScale: i === 3 ? 'wide' : 'close' }),
+    )
+    const report = computeSocialMixReport(rows)
+    expect(report.lines.wideCeiling.status).toBe('ok')
+    expect(report.lines.wideCeiling.detail).toContain('1 / 7')
+  })
+
   it('does not count a medium crop at a mid zone as a wide ceiling frame', () => {
     const rows = Array.from({ length: 7 }, (_, i) =>
       row({ id: i + 1, bodyZone: 'forearm', cropScale: 'medium' }),

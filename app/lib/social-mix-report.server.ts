@@ -204,11 +204,18 @@ export const PLUG_ZONE = 'gluteal-cleft'
 const PLUG_CAP = 1
 
 // §3.2c, same paragraph as the close-crop cap: "at least one ceiling frame per
-// rolling 7 wide enough to read a location". Wide enough = a ceiling-tier frame
-// whose crop scale is 'medium' (macro/close eat the room, which is the failure
-// the line exists to catch: ten tight crops of bare skin is a stock library).
+// rolling 7 wide enough to read a location". Wide enough = not a close crop:
+// the same complement this file already uses for CLOSE_CROP_SCALES below
+// ("'medium'/'wide' are not close crops"), and the same pairing
+// video-pipeline.server.ts uses ("drop the shot to cropScale medium or
+// wide"). Originally read `new Set(['medium'])` only, which zeroed the floor
+// against every real ceiling-tier asset in the library: the art director
+// tags true location-establishing ceiling frames 'wide' (the widest token in
+// CROP_SCALES), not 'medium', so wideCeiling had reported 0/7 for weeks
+// while assets 605/606/608/612/626-629 sat unused and the floor was
+// structurally unsatisfiable (ticket #11452).
 const WIDE_CEILING_MIN = 1
-const WIDE_CEILING_SCALES = new Set(['medium'])
+const WIDE_CEILING_SCALES = new Set(['medium', 'wide'])
 
 // §3.2b Cast: "at most 4 cast frames per rolling 14" and "no single cast member
 // appears in more than 2 of any 5 consecutive cast frames".
