@@ -13,6 +13,7 @@ import {
   PROTECTED_GLOBS,
   UNRESOLVED_PATH_GLOB,
   classifyChangedFiles,
+  getJobVerdictsForSha,
   listPullRequestFiles,
   matchProtectedGlobs,
   normalizeChangedPath,
@@ -492,6 +493,139 @@ describe('listPullRequestFiles', () => {
     expect(result.ok).toBe(false)
     expect(result.status).toBe(403)
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('getJobVerdictsForSha', () => {
+  // Ticket #11396: getChecksForRef needs the `Checks` repository permission,
+  // which fine-grained PATs cannot hold at all. This resolves the same
+  // job-level verdicts from the `Actions` permission instead, which they can.
+  const fetchMock = vi.fn()
+  const SHA = 'deadbeef'
+
+  const runsUrl = `https://api.github.com/repos/test-owner/test-repo/actions/runs?head_sha=${SHA}&per_page=50`
+  const jobsUrl = (runId: number) =>
+    `https://api.github.com/repos/test-owner/test-repo/actions/runs/${runId}/jobs?per_page=100`
+
+  function respond(map: Record<string, unknown>) {
+    fetchMock.mockImplementation(async (url: string) => {
+      const body = map[url]
+      if (body === undefined) throw new Error(`unexpected fetch: ${url}`)
+      return new Response(JSON.stringify(body), { status: 200 })
+    })
+  }
+
+  beforeEach(() => {
+    fetchMock.mockReset()
+    vi.stubGlobal('fetch', fetchMock)
+    process.env['GITHUB_TOKEN'] = 'test-token'
+    process.env['GITHUB_OWNER'] = 'test-owner'
+    process.env['GITHUB_REPO'] = 'test-repo'
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    delete process.env['GITHUB_TOKEN']
+    delete process.env['GITHUB_OWNER']
+    delete process.env['GITHUB_REPO']
+  })
+
+  it('resolves a green job verdict from the newest (only) run', async () => {
+    respond({
+      [runsUrl]: { workflow_runs: [{ id: 100, name: 'ci', status: 'completed', conclusion: 'success' }] },
+      [jobsUrl(100)]: {
+        jobs: [
+          { id: 1, run_id: 100, name: 'check', status: 'completed', conclusion: 'success', runner_id: 55, steps: [{ name: 'Test', status: 'completed', conclusion: 'success' }] },
+        ],
+      },
+    })
+
+    const result = await getJobVerdictsForSha(SHA, ['check'], 'test')
+
+    expect(result.ok).toBe(true)
+    expect(result.ok && result.data['check']).toEqual({ jobId: 1, runId: 100, status: 'completed', conclusion: 'success' })
+  })
+
+  it('resolves a failed job verdict as a real failure, not a no-verdict', async () => {
+    respond({
+      [runsUrl]: { workflow_runs: [{ id: 100, name: 'ci', status: 'completed', conclusion: 'failure' }] },
+      [jobsUrl(100)]: {
+        jobs: [
+          { id: 1, run_id: 100, name: 'check', status: 'completed', conclusion: 'failure', runner_id: 55, steps: [{ name: 'Test', status: 'completed', conclusion: 'failure' }] },
+        ],
+      },
+    })
+
+    const result = await getJobVerdictsForSha(SHA, ['check'], 'test')
+
+    expect(result.ok && result.data['check']?.conclusion).toBe('failure')
+  })
+
+  it('reports a pending job as null, not as a verdict', async () => {
+    respond({
+      [runsUrl]: { workflow_runs: [{ id: 100, name: 'ci', status: 'in_progress', conclusion: null }] },
+      [jobsUrl(100)]: {
+        jobs: [{ id: 1, run_id: 100, name: 'check', status: 'in_progress', conclusion: null, runner_id: 55, steps: [] }],
+      },
+    })
+
+    const result = await getJobVerdictsForSha(SHA, ['check'], 'test')
+
+    expect(result.ok && result.data['check']?.conclusion).toBeNull()
+  })
+
+  it('forces a runner-never-assigned job to cancelled, never green, even if GitHub reported something else', async () => {
+    respond({
+      [runsUrl]: { workflow_runs: [{ id: 100, name: 'ci', status: 'completed', conclusion: 'success' }] },
+      [jobsUrl(100)]: {
+        // GitHub can report `completed`/`success` on a job that never actually
+        // ran (runner_id 0, zero steps) — the 2026-09-24 runner-provisioning
+        // incident (ticket #11380). This must never read as green.
+        jobs: [{ id: 1, run_id: 100, name: 'check', status: 'completed', conclusion: 'success', runner_id: 0, steps: [] }],
+      },
+    })
+
+    const result = await getJobVerdictsForSha(SHA, ['check'], 'test')
+
+    expect(result.ok && result.data['check']?.conclusion).toBe('cancelled')
+  })
+
+  it('picks the newest run per workflow and never fetches the superseded one', async () => {
+    respond({
+      [runsUrl]: {
+        workflow_runs: [
+          { id: 100, name: 'ci', status: 'completed', conclusion: 'cancelled' },
+          { id: 101, name: 'ci', status: 'completed', conclusion: 'success' },
+        ],
+      },
+      [jobsUrl(101)]: {
+        jobs: [{ id: 2, run_id: 101, name: 'check', status: 'completed', conclusion: 'success', runner_id: 55, steps: [{ name: 'Test', status: 'completed', conclusion: 'success' }] }],
+      },
+      // Deliberately no entry for jobsUrl(100): fetching it would throw via
+      // `respond`'s "unexpected fetch" guard and fail the test.
+    })
+
+    const result = await getJobVerdictsForSha(SHA, ['check'], 'test')
+
+    expect(result.ok && result.data['check']?.runId).toBe(101)
+    expect(fetchMock).toHaveBeenCalledTimes(2) // one runs list + one jobs list
+  })
+
+  it('returns an empty result, not an error, when no run exists yet for the sha', async () => {
+    respond({ [runsUrl]: { workflow_runs: [] } })
+
+    const result = await getJobVerdictsForSha(SHA, ['check'], 'test')
+
+    expect(result.ok).toBe(true)
+    expect(result.ok && result.data).toEqual({})
+  })
+
+  it('short-circuits with an empty result and no fetch when no job names are requested', async () => {
+    const result = await getJobVerdictsForSha(SHA, [], 'test')
+
+    expect(result.ok).toBe(true)
+    expect(result.ok && result.data).toEqual({})
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })
 
