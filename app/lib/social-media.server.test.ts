@@ -313,6 +313,7 @@ describe('tagIncompleteVisionVerdict', () => {
     checkedAt: '2026-09-23T00:00:00.000Z',
     checkCompleted: false,
     legibleText: null,
+    skinMarks: null,
   }
 
   const completedFail: VisionVerdict = {
@@ -325,6 +326,7 @@ describe('tagIncompleteVisionVerdict', () => {
     checkedAt: '2026-09-23T00:00:00.000Z',
     checkCompleted: true,
     legibleText: '',
+    skinMarks: '',
   }
 
   it('tags an asset whose verdict never completed', async () => {
@@ -454,7 +456,7 @@ describe('generateCastComposite: billed-but-dropped candidates are named, not si
     vi.doMock('./social-vision-gate.server', () => ({
       runVisionGate: vi.fn(async () => ({
         pass: false, checks: null, notes: 'nudity: genitalia visible', checkedAt: '2026-09-25T00:00:00.000Z',
-        checkCompleted: true, legibleText: '',
+        checkCompleted: true, legibleText: '', skinMarks: '',
       })),
       recordVisionVerdict,
     }))
@@ -508,7 +510,7 @@ describe('generateCastComposite: billed-but-dropped candidates are named, not si
     vi.doMock('./social-vision-gate.server', () => ({
       runVisionGate: vi.fn(async () => ({
         pass: true, checks: null, notes: '', checkedAt: '2026-09-25T00:00:00.000Z',
-        checkCompleted: true, legibleText: '',
+        checkCompleted: true, legibleText: '', skinMarks: '',
       })),
       recordVisionVerdict: vi.fn(async () => {}),
     }))
@@ -559,7 +561,7 @@ describe('generateCastComposite: provider id on the row, crop rejects archived (
     vi.doMock('./social-vision-gate.server', () => ({
       runVisionGate: vi.fn(async () => ({
         pass: true, checks: null, notes: '', checkedAt: '2026-09-25T00:00:00.000Z',
-        checkCompleted: true, legibleText: '',
+        checkCompleted: true, legibleText: '', skinMarks: '',
       })),
       recordVisionVerdict: vi.fn(async () => {}),
     }))

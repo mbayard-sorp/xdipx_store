@@ -30,6 +30,7 @@ const CLEAN_RESPONSE = {
   },
   notes: 'clean, nothing anomalous',
   legibleText: '',
+  skinMarks: '',
 }
 
 const ANATOMY_FAIL_RESPONSE = {
@@ -46,6 +47,7 @@ const ANATOMY_FAIL_RESPONSE = {
   },
   notes: 'the cast member has three arms',
   legibleText: '',
+  skinMarks: '',
 }
 
 const NIPPLE_FAIL_RESPONSE = {
@@ -62,6 +64,7 @@ const NIPPLE_FAIL_RESPONSE = {
   },
   notes: 'nipple visible through wet fabric, top edge of frame',
   legibleText: '',
+  skinMarks: '',
 }
 
 const GENITALIA_FAIL_RESPONSE = {
@@ -78,6 +81,7 @@ const GENITALIA_FAIL_RESPONSE = {
   },
   notes: 'genitalia visible, crop ran wider than requested',
   legibleText: '',
+  skinMarks: '',
 }
 
 // Ticket #10477, the two calibration directions of `anusNotVisible`.
@@ -103,6 +107,7 @@ const LICENSED_PLUG_FRAME_RESPONSE = {
   },
   notes: 'bare buttocks, gluteal cleft reads as a line, plug lying along the cleft under its own weight, no anus visible or outlined',
   legibleText: '',
+  skinMarks: '',
 }
 
 // The failing direction: the pose parts the buttocks and the anus reads.
@@ -120,6 +125,7 @@ const PARTED_ANUS_FAIL_RESPONSE = {
   },
   notes: 'buttocks spread by the pose, anus visible and outlined at the base of the cleft',
   legibleText: '',
+  skinMarks: '',
 }
 
 const AGE_AMBIGUOUS_FAIL_RESPONSE = {
@@ -136,6 +142,7 @@ const AGE_AMBIGUOUS_FAIL_RESPONSE = {
   },
   notes: 'faceless torso crop, no reliable adult age markers visible',
   legibleText: '',
+  skinMarks: '',
 }
 
 const BRANDED_TEXT_RESPONSE = {
@@ -152,6 +159,28 @@ const BRANDED_TEXT_RESPONSE = {
   },
   notes: 'clean, product wordmark visible on the paddle handle',
   legibleText: 'TANTUS',
+  skinMarks: '',
+}
+
+// Ticket #11477, the incident that prompted the check: a bead strand laid
+// along a lower back generated unbriefed marks the vision gate's original
+// eight checks had no way to notice, because none of them concerns skin
+// condition at all.
+const SKIN_MARKS_RESPONSE = {
+  pass: true,
+  checks: {
+    limbCount: 'pass',
+    handAnatomy: 'pass',
+    faceBodyIntegrity: 'pass',
+    extraOrMergedLimbs: 'pass',
+    nippleOccluded: 'pass',
+    genitaliaAbsent: 'pass',
+    anusNotVisible: 'pass',
+    adultUnambiguous: 'pass',
+  },
+  notes: 'clean, otherwise compliant bead-strand frame',
+  legibleText: '',
+  skinMarks: 'faint pink-red streaks and blotches across the lower back and flank',
 }
 
 function deps(over: Partial<VisionGateDeps> = {}): VisionGateDeps {
@@ -204,6 +233,20 @@ describe('isValidVerdictShape', () => {
 
   it('accepts an empty-string legibleText (checked, nothing found)', () => {
     expect(isValidVerdictShape({ ...CLEAN_RESPONSE, legibleText: '' })).toBe(true)
+  })
+
+  // Ticket #11477: skinMarks is a report field, same contract as legibleText.
+  it('rejects a missing skinMarks', () => {
+    const { skinMarks: _skinMarks, ...rest } = CLEAN_RESPONSE
+    expect(isValidVerdictShape(rest)).toBe(false)
+  })
+
+  it('rejects a non-string skinMarks', () => {
+    expect(isValidVerdictShape({ ...CLEAN_RESPONSE, skinMarks: null })).toBe(false)
+  })
+
+  it('accepts an empty-string skinMarks (checked, nothing found)', () => {
+    expect(isValidVerdictShape({ ...CLEAN_RESPONSE, skinMarks: '' })).toBe(true)
   })
 
   it('lists the four doctrine hard checks plus the four imagery-ceiling checks', () => {
@@ -387,6 +430,23 @@ describe('runVisionGate', () => {
     expect(verdict.legibleText).toBe('')
   })
 
+  // Ticket #11477: skinMarks is a report field, not a check. An unbriefed
+  // mark on skin does not fail the vision gate; it just gets reported for
+  // the caller to review, per the ticket's own report-only-first DONE WHEN.
+  it('reports an unbriefed skin mark without affecting pass', async () => {
+    const d = deps({ callVision: vi.fn(async () => SKIN_MARKS_RESPONSE) })
+    const verdict = await runVisionGate('https://cdn.shopify.com/files/bead-strand.jpg', d)
+    expect(verdict.pass).toBe(true)
+    expect(verdict.skinMarks).toBe('faint pink-red streaks and blotches across the lower back and flank')
+    expect(verdict.checkCompleted).toBe(true)
+  })
+
+  it('reports an empty skinMarks when the check ran and found none', async () => {
+    const d = deps()
+    const verdict = await runVisionGate('https://cdn.shopify.com/files/clean.jpg', d)
+    expect(verdict.skinMarks).toBe('')
+  })
+
   it('fails closed when the fetch throws', async () => {
     const d = deps({ fetchImageBase64: vi.fn(async () => { throw new Error('network down') }) })
     const verdict = await runVisionGate('https://cdn.shopify.com/files/x.jpg', d)
@@ -396,9 +456,10 @@ describe('runVisionGate', () => {
     // Ticket #8830: the check never ran, so a billing caller must not treat
     // this like a genuine judged-and-rejected image.
     expect(verdict.checkCompleted).toBe(false)
-    // The legibleText check never ran either; null distinguishes "did not
-    // check" from "checked and found nothing" (empty string).
+    // The legibleText/skinMarks checks never ran either; null distinguishes
+    // "did not check" from "checked and found nothing" (empty string).
     expect(verdict.legibleText).toBeNull()
+    expect(verdict.skinMarks).toBeNull()
   })
 
   it('fails closed when the model call throws', async () => {

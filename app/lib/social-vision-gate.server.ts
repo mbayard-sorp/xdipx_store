@@ -134,13 +134,27 @@ export interface VisionVerdict {
    * path, same distinction `checkCompleted` draws for the pass/fail checks).
    */
   legibleText: string | null
+  /**
+   * Ticket #11477: transcription of any unbriefed mark, redness, bruising, or
+   * abrasion visible on skin, or `''` when the check ran and found none. A
+   * REPORT field, like `legibleText`: it never participates in `pass` and has
+   * no entry in `checks`. Report-only on purpose (the ticket's own DONE WHEN):
+   * the model already produces marks nobody briefed (asset 706, a bead strand
+   * on a bare lower back with faint unbriefed pink-red streaks and blotches),
+   * but 3.2c also requires "natural unretouched skin texture", so this needs
+   * its verdicts reviewed against a run of real on-skin assets before it can
+   * safely gate anything — a check that fails ordinary warm skin tone or
+   * texture would be worse than the problem it exists to catch. `null` means
+   * the check never ran at all, same distinction `legibleText` draws.
+   */
+  skinMarks: string | null
 }
 
 /** A verdict that fails every check, used whenever the check could not run at all. */
 function failClosedVerdict(notes: string): VisionVerdict {
   const checks = {} as Record<VisionCheckName, 'pass' | 'fail'>
   for (const name of VISION_CHECK_NAMES) checks[name] = 'fail'
-  return { pass: false, checks, notes, checkedAt: new Date().toISOString(), checkCompleted: false, legibleText: null }
+  return { pass: false, checks, notes, checkedAt: new Date().toISOString(), checkCompleted: false, legibleText: null, skinMarks: null }
 }
 
 /**
@@ -155,7 +169,7 @@ function failClosedVerdict(notes: string): VisionVerdict {
  * change.
  */
 function incompleteVerdict(notes: string): VisionVerdict {
-  return { pass: false, checks: null, notes, checkedAt: new Date().toISOString(), checkCompleted: false, legibleText: null }
+  return { pass: false, checks: null, notes, checkedAt: new Date().toISOString(), checkCompleted: false, legibleText: null, skinMarks: null }
 }
 
 /**
@@ -192,6 +206,8 @@ export function isValidVerdictShape(v: unknown): v is Omit<VisionVerdict, 'check
   // response missing it, or carrying the wrong type, did not follow the
   // expected shape and fails closed like any other malformed response.
   if (typeof o['legibleText'] !== 'string') return false
+  // Ticket #11477: skinMarks is a report field, same contract as legibleText.
+  if (typeof o['skinMarks'] !== 'string') return false
   return true
 }
 
@@ -203,7 +219,7 @@ export function isValidVerdictShape(v: unknown): v is Omit<VisionVerdict, 'check
  * second is what a well-meaning later edit produces, and the only artifact
  * that decides it is this wording.
  */
-export const VISION_SYSTEM_PROMPT = `You are a strict content-safety QA reviewer for AI-generated marketing imagery on a mainstream sexual-wellness storefront. You will be shown one image. Check these eight things, matching docs/design-doctrine.md's vision-gate hard check plus the imagery-ceiling checks, PLUS one report-only item at the end:
+export const VISION_SYSTEM_PROMPT = `You are a strict content-safety QA reviewer for AI-generated marketing imagery on a mainstream sexual-wellness storefront. You will be shown one image. Check these eight things, matching docs/design-doctrine.md's vision-gate hard check plus the imagery-ceiling checks, PLUS two report-only items at the end:
 
 1. limbCount: every person or hand visible has the correct, anatomically normal number of limbs (two arms, two legs per full figure shown).
 2. handAnatomy: every visible hand has five fingers, normally proportioned and articulated, with no fused or missing digits.
@@ -216,10 +232,12 @@ export const VISION_SYSTEM_PROMPT = `You are a strict content-safety QA reviewer
 
 REPORT ONLY, not a check, does not affect "pass": legibleText. Read the whole frame for any legible text: brand wordmarks, barcodes, shipping labels, printed ingredient text, captions, watermarks, anything with readable letters or numbers. Transcribe everything legible into one string, or return "" if there is none. This ALSO covers marks that are not cleanly readable: a molded or embossed logo area, a button, or a label surface that shows dot-and-dash shapes, garbled or partially-formed characters, or an illegible pseudo-text pattern where readable lettering is clearly attempted but the exact letters cannot be made out. Do not return "" just because you cannot read it cleanly; describe what you see instead (for example "garbled illegible marks beneath a circular button, resembling text but not readable" or "dot-and-dash pseudo-text on the product body"). Only return "" when there is truly no text or text-like mark anywhere in the frame. Never judge whether the text is acceptable; that is a policy decision made elsewhere with more context than you have (for example a manufacturer's wordmark on a product actually being sold is allowed, while a barcode or shipping label is not, and you cannot tell those apart from pixels alone in every case). Just report what you read, or what you see attempted.
 
-Respond with ONLY a JSON object, no prose before or after, in exactly this shape:
-{"pass": true|false, "checks": {"limbCount": "pass"|"fail", "handAnatomy": "pass"|"fail", "faceBodyIntegrity": "pass"|"fail", "extraOrMergedLimbs": "pass"|"fail", "nippleOccluded": "pass"|"fail", "genitaliaAbsent": "pass"|"fail", "anusNotVisible": "pass"|"fail", "adultUnambiguous": "pass"|"fail"}, "notes": "one or two sentences on what you saw, especially for any fail", "legibleText": "<transcription of any legible text found, or empty string if none>"}
+REPORT ONLY, not a check, does not affect "pass": skinMarks. Look at every patch of bare skin in the frame for a mark that was not asked for: redness, a bruise, a scrape or abrasion, a welt, or a streak or blotch of discoloration. This is NOT about ordinary skin: natural skin tone, texture, freckles, moles, veins, tan lines, and normal warmth or flush from lighting are not marks and must not be reported. Report only something that reads as an injury or an impact mark on the skin itself: for example "faint pink-red streaks and blotches across the lower back and flank" or "a red welt across the outer thigh". Describe what you see and roughly where on the body, or return "" if bare skin is visible and carries nothing of the kind, or if no skin is visible at all. Never judge whether a reported mark makes the image unacceptable; that is a policy decision made elsewhere, which is exactly why this is report-only and not one of the eight checks above.
 
-"pass" is true only when all eight checks in "checks" are "pass"; "legibleText" never affects "pass". If the image has no visible people or hands at all (a product-only shot), checks 1-4 pass trivially; checks 5-8 still apply to any depicted skin or body part even without hands or a face; legibleText still applies to any text in the frame regardless. When in doubt about a genuine anatomy defect or an exposure/age-ambiguity issue, fail the check; this gate exists specifically to catch what a fast human scroll would catch, and a false block costs one regeneration while a false pass can publish something it must not. "legibleText" is always present in your response, even when it is "".`
+Respond with ONLY a JSON object, no prose before or after, in exactly this shape:
+{"pass": true|false, "checks": {"limbCount": "pass"|"fail", "handAnatomy": "pass"|"fail", "faceBodyIntegrity": "pass"|"fail", "extraOrMergedLimbs": "pass"|"fail", "nippleOccluded": "pass"|"fail", "genitaliaAbsent": "pass"|"fail", "anusNotVisible": "pass"|"fail", "adultUnambiguous": "pass"|"fail"}, "notes": "one or two sentences on what you saw, especially for any fail", "legibleText": "<transcription of any legible text found, or empty string if none>", "skinMarks": "<description of any unbriefed mark on skin, or empty string if none>"}
+
+"pass" is true only when all eight checks in "checks" are "pass"; neither "legibleText" nor "skinMarks" ever affects "pass". If the image has no visible people or hands at all (a product-only shot), checks 1-4 pass trivially; checks 5-8 still apply to any depicted skin or body part even without hands or a face; legibleText still applies to any text in the frame regardless, and skinMarks still applies to any bare skin in the frame regardless. When in doubt about a genuine anatomy defect or an exposure/age-ambiguity issue, fail the check; this gate exists specifically to catch what a fast human scroll would catch, and a false block costs one regeneration while a false pass can publish something it must not. "legibleText" and "skinMarks" are always present in your response, even when they are "".`
 
 export interface VisionCallOpts {
   /**

@@ -24,6 +24,7 @@ const CLEAN_VERDICT = {
   },
   notes: 'clean, nothing anomalous',
   legibleText: '',
+  skinMarks: '',
 }
 
 // Shape of the real incident: an extra hand cupped beneath the gripping hand,
@@ -42,6 +43,7 @@ const THREE_HANDS_VERDICT = {
   },
   notes: 'the figure has an extra hand cupped beneath the hand gripping the bottle',
   legibleText: '',
+  skinMarks: '',
 }
 
 // Real PNG magic bytes (0x89 'P' 'N' 'G') prefixed onto fake payload bytes so
