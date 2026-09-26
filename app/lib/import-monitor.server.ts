@@ -279,7 +279,7 @@ export async function runImportMonitor(
         console.info(
           `[import-monitor] cost-sync: checked=${costSyncResult.skusChecked} ` +
           `drops=${costSyncResult.dropsDetected} repriced=${costSyncResult.variantsRepriced} ` +
-          `errors=${costSyncResult.errors.length}`,
+          `risesFlagged=${costSyncResult.increasesFlagged} errors=${costSyncResult.errors.length}`,
         )
         if (costSyncResult.errors.length > 0) {
           console.warn('[import-monitor] cost-sync errors:', costSyncResult.errors)
