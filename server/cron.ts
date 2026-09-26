@@ -1738,8 +1738,8 @@ export function createCronRoutes() {
       }
 
       let alarms: {
-        filed: string[]; closed: number[]; escalated: string[]; unreadable: string[]
-      } = { filed: [], closed: [], escalated: [], unreadable: [] }
+        filed: string[]; closed: number[]; escalated: string[]; unreadable: string[]; unblocked: number[]
+      } = { filed: [], closed: [], escalated: [], unreadable: [], unblocked: [] }
       try {
         const { reconcileCronAlarms } = await import('../app/lib/cron-liveness-tickets.server.js')
         alarms = await reconcileCronAlarms(liveness, unwatched, floors)
@@ -1819,6 +1819,8 @@ export function createCronRoutes() {
           escalated: alarms.escalated.length,
           unreadable: alarms.unreadable,
           closedIds: alarms.closed,
+          unblocked: alarms.unblocked.length,
+          unblockedIds: alarms.unblocked,
         },
         credentials: credentials.map(c => ({ key: c.key, state: c.state, detail: c.detail })),
         credentialBlockers,
