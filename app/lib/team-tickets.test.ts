@@ -110,6 +110,10 @@ import {
   createSuggestionDetailed,
   expireStaleClaims,
   findTransitionRule,
+  isDesignTicket,
+  normalizeRemedyScope,
+  REMEDY_SCOPES,
+  RECAPTURE_LINK_KIND,
   isTicketActor,
   isTransitionAllowed,
   agentRetireSuggestion,
@@ -606,6 +610,94 @@ describe('transitionSuggestion', () => {
   it('rejects a bad actor before touching the database', async () => {
     expect(await status(transitionSuggestion(42, 'verified', 'qa-reviewer' as TicketActor))).toBe(400)
     expect(h.state.selects).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Design-kind applied gate (migration 106, ticket #11084): a
+// `category:'design'` ticket needs both an instance-or-class remedyScope and
+// a dated recapture link before it may reach `applied`. Everything else is
+// untouched.
+// ---------------------------------------------------------------------------
+
+describe('design-kind applied gate', () => {
+  it('exposes the closed vocabulary', () => {
+    expect(REMEDY_SCOPES).toEqual(['instance', 'class'])
+    expect(isDesignTicket('design')).toBe(true)
+    expect(isDesignTicket('other')).toBe(false)
+    expect(isDesignTicket(null)).toBe(false)
+    expect(isDesignTicket(undefined)).toBe(false)
+    expect(normalizeRemedyScope('instance')).toBe('instance')
+    expect(normalizeRemedyScope('class')).toBe('class')
+    expect(normalizeRemedyScope('sku-only')).toBeNull()
+    expect(normalizeRemedyScope(undefined)).toBeNull()
+    expect(RECAPTURE_LINK_KIND).toBe('recapture')
+  })
+
+  it('409s a design ticket moving to applied with neither remedyScope nor a recapture link', async () => {
+    seedTicket({ status: 'verified', category: 'design' })
+    expect(await status(transitionSuggestion(42, 'applied', 'system'))).toBe(409)
+    expect(h.state.patches).toEqual([])
+  })
+
+  it('409s a design ticket with remedyScope but no recapture link', async () => {
+    seedTicket({ status: 'verified', category: 'design' })
+    expect(await status(transitionSuggestion(42, 'applied', 'system', {
+      remedyScope: 'instance',
+    }))).toBe(409)
+    expect(h.state.patches).toEqual([])
+  })
+
+  it('409s a design ticket with a recapture link but no remedyScope', async () => {
+    seedTicket({ status: 'verified', category: 'design' })
+    expect(await status(transitionSuggestion(42, 'applied', 'system', {
+      links: [{ kind: 'recapture', ref: 'https://xdipx.com/_snapshots/2026-09-26/home-375.png' }],
+    }))).toBe(409)
+    expect(h.state.patches).toEqual([])
+  })
+
+  it('409s on an unrecognised remedyScope value even with a recapture link present', async () => {
+    seedTicket({ status: 'verified', category: 'design' })
+    expect(await status(transitionSuggestion(42, 'applied', 'system', {
+      remedyScope: 'sku-only',
+      links: [{ kind: 'recapture', ref: 'https://xdipx.com/_snapshots/2026-09-26/home-375.png' }],
+    }))).toBe(409)
+    expect(h.state.patches).toEqual([])
+  })
+
+  it('applies once both a remedyScope and a dated recapture link are present', async () => {
+    seedTicket({ status: 'verified', category: 'design' })
+    await transitionSuggestion(42, 'applied', 'system', {
+      remedyScope: 'class',
+      links: [{ kind: 'recapture', ref: 'https://xdipx.com/_snapshots/2026-09-26/home-375.png' }],
+    })
+    const patch = h.state.patches[0]!
+    expect(patch['status']).toBe('applied')
+    expect(patch['remedyScope']).toBe('class')
+    expect(patch['recaptureRef']).toBe('https://xdipx.com/_snapshots/2026-09-26/home-375.png')
+    expect(patch['recaptureAt']).toBeInstanceOf(Date)
+    expect(h.state.inserts[0]).toEqual([
+      { suggestionId: 42, kind: 'recapture', ref: 'https://xdipx.com/_snapshots/2026-09-26/home-375.png', state: null },
+    ])
+  })
+
+  it('honors a remedyScope and recapture link already recorded on the row from an earlier transition', async () => {
+    seedTicket({ status: 'verified', category: 'design', remedyScope: 'class', recaptureAt: new Date() })
+    // The one extra select the gate issues to look up an existing recapture
+    // link, queued AFTER seedTicket's own ticket-row select.
+    h.state.selects.push([{ ref: 'https://xdipx.com/_snapshots/2026-09-20/home-375.png' }])
+    await transitionSuggestion(42, 'applied', 'system')
+    const patch = h.state.patches[0]!
+    expect(patch['status']).toBe('applied')
+    // Already set on the row: this call does not re-write it.
+    expect(patch['remedyScope']).toBeUndefined()
+    expect(patch['recaptureRef']).toBeUndefined()
+  })
+
+  it('does not gate a non-design ticket, even with no remedyScope or recapture link', async () => {
+    seedTicket({ status: 'verified', category: 'other', applyRef: null })
+    await transitionSuggestion(42, 'applied', 'system')
+    expect(h.state.patches[0]!['status']).toBe('applied')
   })
 })
 

@@ -1798,6 +1798,67 @@ export function normalizeBlockClass(value: unknown): string | null {
 }
 
 /**
+ * Design-kind gate on the `applied` transition (migration 106, ticket #11084:
+ * "three of four tickets marked applied were not actually fixed"). A
+ * design-critic finding that needs a code fix is filed at `kind:'process'`
+ * and rekinded to `kind:'code'` by agent-editor (REKIND_FROM_KINDS), so by
+ * the time it reaches `applied` its `kind` is indistinguishable from any
+ * other code ticket. `category:'design'` is the field design-critic /
+ * homepage-orchestrator set when filing the finding, and is what this gate
+ * keys on.
+ *
+ * The defect this closes: one applied row fixed a single named SKU when the
+ * design-critic finding described a catalog-wide class defect (an INSTANCE
+ * remedy standing in for a CLASS one), and a second was marked `applied`
+ * with no code behind it at all -- nothing on the transition asked whether
+ * the remedy matched the defect's scope, or whether anyone had looked at
+ * fresh pixels since the fix landed.
+ */
+export function isDesignTicket(category: string | null | undefined): boolean {
+  return category === 'design'
+}
+
+/**
+ * Whether a design ticket's remedy fixed one named instance or the whole
+ * defect class (migration 106). Set once, on the row, before the ticket may
+ * reach `applied`; a later transition does not overwrite an already-set
+ * value.
+ */
+export const REMEDY_SCOPES = ['instance', 'class'] as const
+export type RemedyScope = (typeof REMEDY_SCOPES)[number]
+
+export function normalizeRemedyScope(value: unknown): RemedyScope | null {
+  return typeof value === 'string' && (REMEDY_SCOPES as readonly string[]).includes(value)
+    ? (value as RemedyScope)
+    : null
+}
+
+/**
+ * Link kind for a dated, fresh screenshot re-score confirming a design fix
+ * actually shipped (migration 106). The link's own `createdAt` is the
+ * "dated" part of the requirement; no separate date field is needed on the
+ * link itself (the row also mirrors a recaptureAt/recaptureRef pair for a
+ * cheap read, set alongside this link -- see the applied-transition gate in
+ * `transitionSuggestion`).
+ */
+export const RECAPTURE_LINK_KIND = 'recapture'
+
+/**
+ * True when a dated recapture reference already exists for this ticket,
+ * either freshly attached on the current transition call or previously
+ * recorded on the row. Mirrors the read pattern in `pinVerifiedCommit`.
+ */
+async function hasRecaptureLink(id: number, incoming: readonly TicketLinkInput[]): Promise<boolean> {
+  if (incoming.some(l => l.kind === RECAPTURE_LINK_KIND && l.ref?.trim())) return true
+  const [existing] = await db
+    .select({ ref: suggestionLinks.ref })
+    .from(suggestionLinks)
+    .where(and(eq(suggestionLinks.suggestionId, id), eq(suggestionLinks.kind, RECAPTURE_LINK_KIND)))
+    .limit(1)
+  return existing != null
+}
+
+/**
  * Entry agents for the daily routines, permitted to close an inbound
  * operational row they acted on.
  *
@@ -2151,7 +2212,7 @@ export function isTransitionAllowed(
 }
 
 export interface TicketLinkInput {
-  kind: string           // pr|issue|run|url|doc|commit|deploy|note
+  kind: string           // pr|issue|run|url|doc|commit|deploy|note|recapture
   ref: string
   state?: string | undefined  // open|merged|closed|passed|failed|ready
 }
@@ -2168,6 +2229,14 @@ export interface TransitionOpts {
    * unrecognised value is dropped and a missing one is simply null.
    */
   blockClass?: string | undefined
+  /**
+   * Instance-or-class classification for a design-kind ticket's remedy
+   * (migration 106, ticket #11084). Required, together with a `recapture`
+   * link, before a `category:'design'` row may transition to `applied`;
+   * ignored on every other ticket. An unrecognised value is dropped, same
+   * shape as `blockClass`.
+   */
+  remedyScope?: string | undefined
   /** Force an attempt increment on an edge that does not always spend one. */
   incrementAttempt?: boolean | undefined
   /**
@@ -2448,6 +2517,30 @@ export async function transitionSuggestion(
     )
   }
 
+  // Design-kind applied gate (migration 106, ticket #11084): a
+  // `category:'design'` ticket may not reach `applied` -- on ANY edge, not
+  // only the ordinary release-engine one -- without both an instance-or-class
+  // remedy scope and a dated recapture reference confirming the fix was
+  // re-checked against fresh pixels. Checked before any patch is built so a
+  // rejection here leaves the row untouched, same contract as the `!rule`
+  // 409 above.
+  let gatedRemedyScope: RemedyScope | null = null
+  if (to === 'applied' && isDesignTicket(row.category)) {
+    gatedRemedyScope = normalizeRemedyScope(row.remedyScope) ?? normalizeRemedyScope(opts.remedyScope)
+    const recaptured = await hasRecaptureLink(id, opts.links ?? [])
+    if (!gatedRemedyScope || !recaptured) {
+      const missing = [
+        !gatedRemedyScope ? "remedyScope ('instance'|'class')" : null,
+        !recaptured ? `a dated recapture link (kind:'${RECAPTURE_LINK_KIND}')` : null,
+      ].filter(Boolean).join(' and ')
+      throw new Response(
+        `Conflict: design-kind suggestion ${id} cannot move '${from}' -> 'applied' without ${missing} -- `
+        + 're-score the live page from fresh pixels and record the instance/class scope before applying',
+        { status: 409 },
+      )
+    }
+  }
+
   const now = new Date()
   const patch: Record<string, unknown> = { status: to, updatedAt: now }
   if (rule.incrementAttempt || opts.incrementAttempt) {
@@ -2505,6 +2598,18 @@ export async function transitionSuggestion(
   if (to === 'applied' && !row.applyRef) {
     const pr = opts.links?.find(l => l.kind === 'pr')
     if (pr) patch['applyRef'] = pr.ref
+  }
+  // Persist the gated remedy scope + recapture evidence the check above just
+  // required, the same "fill once, never overwrite" contract as apply_ref.
+  if (to === 'applied' && gatedRemedyScope && row.remedyScope == null) {
+    patch['remedyScope'] = gatedRemedyScope
+  }
+  if (to === 'applied' && !row.recaptureAt) {
+    const recapture = opts.links?.find(l => l.kind === RECAPTURE_LINK_KIND && l.ref?.trim())
+    if (recapture) {
+      patch['recaptureRef'] = recapture.ref
+      patch['recaptureAt'] = now
+    }
   }
 
   const links: TicketLinkInput[] = [...(opts.links ?? [])]
