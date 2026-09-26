@@ -30,6 +30,7 @@ const CLEAN_RESPONSE = {
   },
   notes: 'clean, nothing anomalous',
   legibleText: '',
+  productPhysics: 'not_applicable',
 }
 
 const ANATOMY_FAIL_RESPONSE = {
@@ -46,6 +47,7 @@ const ANATOMY_FAIL_RESPONSE = {
   },
   notes: 'the cast member has three arms',
   legibleText: '',
+  productPhysics: 'not_applicable',
 }
 
 const NIPPLE_FAIL_RESPONSE = {
@@ -62,6 +64,7 @@ const NIPPLE_FAIL_RESPONSE = {
   },
   notes: 'nipple visible through wet fabric, top edge of frame',
   legibleText: '',
+  productPhysics: 'not_applicable',
 }
 
 const GENITALIA_FAIL_RESPONSE = {
@@ -78,6 +81,7 @@ const GENITALIA_FAIL_RESPONSE = {
   },
   notes: 'genitalia visible, crop ran wider than requested',
   legibleText: '',
+  productPhysics: 'not_applicable',
 }
 
 // Ticket #10477, the two calibration directions of `anusNotVisible`.
@@ -103,6 +107,7 @@ const LICENSED_PLUG_FRAME_RESPONSE = {
   },
   notes: 'bare buttocks, gluteal cleft reads as a line, plug lying along the cleft under its own weight, no anus visible or outlined',
   legibleText: '',
+  productPhysics: 'not_applicable',
 }
 
 // The failing direction: the pose parts the buttocks and the anus reads.
@@ -120,6 +125,7 @@ const PARTED_ANUS_FAIL_RESPONSE = {
   },
   notes: 'buttocks spread by the pose, anus visible and outlined at the base of the cleft',
   legibleText: '',
+  productPhysics: 'not_applicable',
 }
 
 const AGE_AMBIGUOUS_FAIL_RESPONSE = {
@@ -136,6 +142,7 @@ const AGE_AMBIGUOUS_FAIL_RESPONSE = {
   },
   notes: 'faceless torso crop, no reliable adult age markers visible',
   legibleText: '',
+  productPhysics: 'not_applicable',
 }
 
 const BRANDED_TEXT_RESPONSE = {
@@ -152,6 +159,70 @@ const BRANDED_TEXT_RESPONSE = {
   },
   notes: 'clean, product wordmark visible on the paddle handle',
   legibleText: 'TANTUS',
+  productPhysics: 'not_applicable',
+}
+
+// Ticket #11460, the three DONE WHEN cases for productPhysics. All three are
+// otherwise-clean frames (every safety check passes) so the only thing under
+// test is the new report field and, in the third case, that scale never
+// contaminates it.
+
+// Case 1: unsupported. A product adhered to a vertical surface (a shin) with
+// no hand anywhere in the frame — nothing explains why it is not falling,
+// exactly the row-308 incident this ticket cites.
+const UNSUPPORTED_PRODUCT_RESPONSE = {
+  pass: true,
+  checks: {
+    limbCount: 'pass',
+    handAnatomy: 'pass',
+    faceBodyIntegrity: 'pass',
+    extraOrMergedLimbs: 'pass',
+    nippleOccluded: 'pass',
+    genitaliaAbsent: 'pass',
+    anusNotVisible: 'pass',
+    adultUnambiguous: 'pass',
+  },
+  notes: 'product adhered to the side of a shin, vertical surface, no hand in frame',
+  legibleText: '',
+  productPhysics: 'unsupported',
+}
+
+// Case 2: supported by grip. Fingers visibly wrapped around the product.
+const GRIPPED_PRODUCT_RESPONSE = {
+  pass: true,
+  checks: {
+    limbCount: 'pass',
+    handAnatomy: 'pass',
+    faceBodyIntegrity: 'pass',
+    extraOrMergedLimbs: 'pass',
+    nippleOccluded: 'pass',
+    genitaliaAbsent: 'pass',
+    anusNotVisible: 'pass',
+    adultUnambiguous: 'pass',
+  },
+  notes: 'hand gripping the product, fingers wrapped fully around the shaft',
+  legibleText: '',
+  productPhysics: 'supported',
+}
+
+// Case 3: supported, exaggerated scale. Proves no proportion/scale reject
+// crept in: the product renders much larger than its real-world size, but the
+// grip is proper, so this must still read "supported".
+const EXAGGERATED_SCALE_GRIPPED_RESPONSE = {
+  pass: true,
+  checks: {
+    limbCount: 'pass',
+    handAnatomy: 'pass',
+    faceBodyIntegrity: 'pass',
+    extraOrMergedLimbs: 'pass',
+    nippleOccluded: 'pass',
+    genitaliaAbsent: 'pass',
+    anusNotVisible: 'pass',
+    adultUnambiguous: 'pass',
+  },
+  notes: 'product rendered at an exaggerated, larger-than-real-life scale, but hand fully wraps around it with a proper grip',
+  legibleText: '',
+  productPhysics: 'supported',
 }
 
 function deps(over: Partial<VisionGateDeps> = {}): VisionGateDeps {
@@ -204,6 +275,24 @@ describe('isValidVerdictShape', () => {
 
   it('accepts an empty-string legibleText (checked, nothing found)', () => {
     expect(isValidVerdictShape({ ...CLEAN_RESPONSE, legibleText: '' })).toBe(true)
+  })
+
+  // Ticket #11460: productPhysics is a second report field, same convention
+  // as legibleText — required as one of the three enum values, never a
+  // gate on `pass`.
+  it('rejects a missing productPhysics', () => {
+    const { productPhysics: _productPhysics, ...rest } = CLEAN_RESPONSE
+    expect(isValidVerdictShape(rest)).toBe(false)
+  })
+
+  it('rejects an invalid productPhysics value', () => {
+    expect(isValidVerdictShape({ ...CLEAN_RESPONSE, productPhysics: 'floating' })).toBe(false)
+  })
+
+  it('accepts each of the three productPhysics values', () => {
+    expect(isValidVerdictShape({ ...CLEAN_RESPONSE, productPhysics: 'supported' })).toBe(true)
+    expect(isValidVerdictShape({ ...CLEAN_RESPONSE, productPhysics: 'unsupported' })).toBe(true)
+    expect(isValidVerdictShape({ ...CLEAN_RESPONSE, productPhysics: 'not_applicable' })).toBe(true)
   })
 
   it('lists the four doctrine hard checks plus the four imagery-ceiling checks', () => {
@@ -283,6 +372,47 @@ describe('legibleText prompt calibration (garbled/illegible marks, ticket #11487
 
   it('still asks for a transcription first, garbled marks are the fallback instruction', () => {
     expect(VISION_SYSTEM_PROMPT).toContain('Transcribe everything legible into one string')
+  })
+})
+
+// Ticket #11460. productPhysics is report-only (constraint 2: ship report-
+// only first, promote to blocking only after a backtest). Its two failure
+// directions are the same shape as anusNotVisible's: missing real support,
+// and over-firing on a licensed, deliberately-exaggerated render scale. The
+// wording is asserted directly for the same reason — a later edit that
+// quietly folds scale into the judgment would not fail a single injected-
+// response test, only the prompt text catches it.
+describe('productPhysics prompt calibration (ticket #11460)', () => {
+  it('names the check as report-only, not a pass/fail check', () => {
+    expect(VISION_SYSTEM_PROMPT).toContain('REPORT ONLY, not a check, does not affect "pass": productPhysics')
+  })
+
+  it('defines support as a grip or an upward-facing resting surface', () => {
+    expect(VISION_SYSTEM_PROMPT).toContain('fingers visibly wrapped around it')
+    expect(VISION_SYSTEM_PROMPT).toContain('a palm cupped underneath it bearing its weight from below')
+    expect(VISION_SYSTEM_PROMPT).toContain('rests on a surface that faces upward')
+  })
+
+  it('names an open flat palm beside a product, and a hand resting on top, as NOT support', () => {
+    expect(VISION_SYSTEM_PROMPT).toContain('An open flat palm beside a product is not support')
+    expect(VISION_SYSTEM_PROMPT).toContain('a hand resting on top of a product is not support')
+  })
+
+  it('explicitly separates scale exaggeration from the support judgment', () => {
+    expect(VISION_SYSTEM_PROMPT).toContain('This is NOT a size or proportion check')
+    expect(VISION_SYSTEM_PROMPT).toContain('a product rendered at an exaggerated, larger-than-real-life scale is completely normal for this brand')
+    expect(VISION_SYSTEM_PROMPT).toContain('scale exaggeration and physical support are unrelated questions')
+    expect(VISION_SYSTEM_PROMPT).toContain('Only fake or missing support is the fail condition here, never scale')
+  })
+
+  it('always requires the field present, with the not_applicable escape when there is no product-on-body contact', () => {
+    expect(VISION_SYSTEM_PROMPT).toContain('answer "not_applicable"')
+    expect(VISION_SYSTEM_PROMPT).toContain('"productPhysics" is always present in your response, and is always one of "supported", "unsupported", or "not_applicable"')
+  })
+
+  it('does not add a ninth pass/fail check: the eight-check count is unchanged', () => {
+    expect(VISION_SYSTEM_PROMPT).toContain('Check these eight things')
+    expect(VISION_SYSTEM_PROMPT).toContain('"pass" is true only when all eight checks in "checks" are "pass"')
   })
 })
 
@@ -385,6 +515,45 @@ describe('runVisionGate', () => {
     const d = deps()
     const verdict = await runVisionGate('https://cdn.shopify.com/files/clean.jpg', d)
     expect(verdict.legibleText).toBe('')
+  })
+
+  // Ticket #11460, the three DONE WHEN cases. productPhysics never gates
+  // `pass`: all three frames are otherwise clean and all three verdicts read
+  // pass:true, exactly as report-only requires.
+  describe('productPhysics (report only, does not gate pass)', () => {
+    it('reads unsupported for a product on a vertical surface with no hand', async () => {
+      const d = deps({ callVision: vi.fn(async () => UNSUPPORTED_PRODUCT_RESPONSE) })
+      const verdict = await runVisionGate('https://cdn.shopify.com/files/shin-adhered.jpg', d)
+      expect(verdict.productPhysics).toBe('unsupported')
+      expect(verdict.notes).toContain('no hand in frame')
+      // Report-only: an unsupported product does not block the gate.
+      expect(verdict.pass).toBe(true)
+      expect(verdict.checkCompleted).toBe(true)
+    })
+
+    it('reads supported for a product gripped with fingers wrapped around it', async () => {
+      const d = deps({ callVision: vi.fn(async () => GRIPPED_PRODUCT_RESPONSE) })
+      const verdict = await runVisionGate('https://cdn.shopify.com/files/gripped.jpg', d)
+      expect(verdict.productPhysics).toBe('supported')
+      expect(verdict.pass).toBe(true)
+    })
+
+    it('reads supported for an exaggerated-scale product properly held, proving no proportion reject crept in', async () => {
+      const d = deps({ callVision: vi.fn(async () => EXAGGERATED_SCALE_GRIPPED_RESPONSE) })
+      const verdict = await runVisionGate('https://cdn.shopify.com/files/exaggerated-scale-held.jpg', d)
+      // A large rendered product with a proper grip must NOT be penalized for
+      // scale: this is the case that would silently break if a later edit
+      // folded a proportion judgment into productPhysics.
+      expect(verdict.productPhysics).toBe('supported')
+      expect(verdict.pass).toBe(true)
+    })
+
+    it('is null when the check never completed (fail-closed, same convention as legibleText)', async () => {
+      const d = deps({ callVision: vi.fn(async () => { throw new Error('anthropic 529') }) })
+      const verdict = await runVisionGate('https://cdn.shopify.com/files/x.jpg', d)
+      expect(verdict.productPhysics).toBeNull()
+      expect(verdict.pass).toBe(false)
+    })
   })
 
   it('fails closed when the fetch throws', async () => {

@@ -313,6 +313,7 @@ describe('tagIncompleteVisionVerdict', () => {
     checkedAt: '2026-09-23T00:00:00.000Z',
     checkCompleted: false,
     legibleText: null,
+    productPhysics: null,
   }
 
   const completedFail: VisionVerdict = {
@@ -325,6 +326,7 @@ describe('tagIncompleteVisionVerdict', () => {
     checkedAt: '2026-09-23T00:00:00.000Z',
     checkCompleted: true,
     legibleText: '',
+    productPhysics: 'not_applicable',
   }
 
   it('tags an asset whose verdict never completed', async () => {
