@@ -317,6 +317,18 @@ const SALE_PATTERNS: {
     check: 'sale-price',
     re: /\$\s?\d/,
     detail: 'Caption names a price. Instagram captions never carry a price.',
+    // Instagram only (ticket #11539), mirroring sale-discount/sale-promo-code/
+    // sale-pdp-link above: docs/store-team/social-crossplatform-strategy.md
+    // section 7 states the platform routing plainly — "X, email, SMS, /social,
+    // and the site say the number... Instagram never says the number" — and
+    // instagram-campaigns.md section 4b is the Instagram-only half of that
+    // rule. This check had no appliesTo at all (the "omitted means every
+    // platform" default), so a plain, non-discount price on an X caption BLOCKed
+    // at the publish gate on 2026-09-25 (row 311, run 1069) even though nothing
+    // about the caption was a discount/promo-code framing. The exact
+    // contradiction ticket #9537 already fixed once for sale-discount and
+    // sale-promo-code; this check was simply missed at the time.
+    appliesTo: ['instagram'],
   },
   {
     check: 'sale-discount',

@@ -643,15 +643,31 @@ describe('platform divergence', () => {
     expect(r.blocked).toBe(false)
   })
 
-  it('still blocks a price on X', async () => {
-    // sale-price is not platform-scoped; only sale-pdp-link, sale-discount, and
-    // sale-promo-code diverge (ticket #9405), and relaxing those must not
-    // relax this one.
+  it('still blocks a price on Instagram', async () => {
+    // docs/store-team/social-crossplatform-strategy.md section 7: "Instagram
+    // never says the number." Instagram removes posts that attempt to sell,
+    // and has no clickable caption link to route commerce through instead.
     const r = await runChecks({
-      caption: 'just $19.99 today', mediaUrls: GOOD_MEDIA, platform: 'x',
+      caption: 'just $19.99 today', mediaUrls: GOOD_MEDIA, platform: 'instagram',
     })
     expect(checks(r)).toContain('sale-price')
     expect(r.blocked).toBe(true)
+  })
+
+  it('allows a plain price on X (ticket #11539)', async () => {
+    // sale-price used to have no appliesTo at all, so it fired on every
+    // platform including X, contradicting docs/store-team/
+    // social-crossplatform-strategy.md section 7 ("X... say the number") and
+    // instagram-campaigns.md section 4b. This is the exact class of
+    // contradiction ticket #9537 already fixed for sale-discount and
+    // sale-promo-code below; sale-price was simply missed at the time.
+    // Reproduces row 311 / run 1069 (2026-09-25): a plain, non-discount price
+    // on an X caption BLOCKed at the gate.
+    const r = await runChecks({
+      caption: 'just $19.99 today', mediaUrls: GOOD_MEDIA, platform: 'x',
+    })
+    expect(checks(r)).not.toContain('sale-price')
+    expect(r.blocked).toBe(false)
   })
 
   it('blocks a discount and a promo code on Instagram', async () => {
