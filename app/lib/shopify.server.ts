@@ -221,6 +221,7 @@ const METAFIELDS_FRAGMENT = `
     { namespace: "xdipx", key: "endorsement_copy" }
     { namespace: "xdipx", key: "card_art_blocked" }
     { namespace: "xdipx", key: "cast_target" }
+    { namespace: "xdipx", key: "bare_product_reference" }
     { namespace: "custom", key: "original_description" }
   ]) {
     namespace key value
@@ -599,6 +600,102 @@ export function pickBareProductImage(
   return { url: fallback.url, altText: fallback.altText ?? '', index: list.indexOf(fallback), fellBack: true }
 }
 
+/**
+ * Filename signal for a synthetically-generated media entry (ticket #11474,
+ * DONE WHEN 4). Evidenced on two live SKUs: prowler-red-large-silicone-anal-beads
+ * media[1]/media[3] are `ai-generated-*.png`, magic-wand-mini-hv-135-rechargeable-massager
+ * media[1] is `ai-generated-*.jpg`. A caller walking the media list for a bare
+ * frame could otherwise select one of these and brief the model from its own
+ * prior invention rather than the real product. Filename-only by design: it
+ * is a free, code-only signal (no vision call) directly demonstrated by the
+ * ticket's own evidence, and is judged sufficient scope for this pass — see
+ * `resolveBareProductReference`'s doc comment.
+ */
+export function looksAiGenerated(image: { url: string }): boolean {
+  const filename = (image.url.split('?')[0] ?? '').split('/').pop() ?? ''
+  return /ai-generated-/i.test(filename)
+}
+
+export interface BareProductReferenceResolution {
+  /**
+   * The confirmed bare-product frame's url, or null when nothing in the
+   * media list can be trusted as one. `null` is a real, resolved verdict
+   * (instagram-campaigns.md §3.2c: this SKU is unbriefable under 3.2c until
+   * someone adds a bare frame), never "not yet checked" — that state is the
+   * metafield being entirely absent, which this function has no opinion on.
+   */
+  url: string | null
+  /** Index into the input media list the url came from, or null when url is null. */
+  index: number | null
+  /** Always present: explains the verdict either way, for the audit script
+   *  and for a human reading the stored metafield later. */
+  reason: string
+}
+
+/**
+ * Resolves the ONE bare-product reference for a product's media list, meant
+ * to be run ONCE (`scripts/resolve-bare-product-references.ts`) and stored on
+ * `xdipx.bare_product_reference` rather than recomputed per brief (ticket
+ * #11474: instagram-campaigns.md §3.2c requires briefing from a bare,
+ * text-free product reference, and nothing before this ticket detected,
+ * flagged, or stored which frame that is — a manual eyeball step on every
+ * brief that the catalog failed more often than it passed).
+ *
+ * Deliberately more conservative than `pickBareProductImage` above: that
+ * function always hands back a usable url for an already-in-flight
+ * generation (falling back to the featured frame with `fellBack: true` when
+ * nothing is confirmed bare), because its caller needs *something*
+ * immediately. This resolver exists to be trusted afterward with no live
+ * eyeball, so a real ambiguity resolves to `url: null` — a refusal signal
+ * for the social image path (see `app/routes/api.team.social-image.tsx`),
+ * never a best guess that ships anyway.
+ *
+ * Reuses the same text signals `pickBareProductImage` does
+ * (`looksLikePackaging`, the unlabeled-Nalpac-first-frame doubt) and adds two
+ * more, both scoped to THIS function only (never `pickBareProductImage`,
+ * which must still hand back something for an already-in-flight brief):
+ *
+ * - An AI-generated frame (`looksAiGenerated`) is excluded outright, so a
+ *   resolved reference can never point back at a synthetic image of the
+ *   product.
+ * - A product's SOLE media entry, when it carries no altText, is treated as
+ *   unconfirmed rather than automatically bare. Verified against this
+ *   ticket's own evidence: femmefunn-ultra-bullet-massager-...-pink's only
+ *   media entry is a plain numeric filename with no altText and no letter
+ *   suffix, so it trips neither `looksLikePackaging` nor the lettered-Nalpac
+ *   doubt below — yet the ticket's own hand check confirms it IS the retail
+ *   carton, and the SKU carries no bare frame anywhere in its media at all.
+ *   With no sibling frame to prefer instead and no text signal either way,
+ *   this resolver has no basis to call it confirmed.
+ */
+export function resolveBareProductReference(
+  media: { url: string; altText?: string | null }[] | null | undefined,
+): BareProductReferenceResolution {
+  const list = (media ?? []).filter(m => !!m?.url)
+  if (!list.length) return { url: null, index: null, reason: 'product has no media' }
+  const real = list.filter(m => !looksAiGenerated(m))
+  if (!real.length) return { url: null, index: null, reason: 'every media entry is AI-generated' }
+  const nonPackaging = real.filter(m => !looksLikePackaging(m))
+  if (!nonPackaging.length) return { url: null, index: null, reason: 'every non-AI-generated frame looks like packaging' }
+  if (list.length === 1) {
+    const only = list[0]!
+    if (!(only.altText && only.altText.trim())) {
+      return { url: null, index: null, reason: 'the only media entry has no altText and no sibling to confirm it against; not trusted as bare' }
+    }
+  }
+  const confirmedBare = nonPackaging.find(m => !isUnconfirmedNalpacFirstFrame(m))
+  if (!confirmedBare) {
+    return { url: null, index: null, reason: 'no frame is confirmed bare (only an unlabeled, possibly-carton first frame remains)' }
+  }
+  return { url: confirmedBare.url, index: list.indexOf(confirmedBare), reason: 'confirmed bare frame' }
+}
+
+/** The shape persisted onto `xdipx.bare_product_reference` (JSON metafield). */
+export interface BareProductReferenceMetafield extends BareProductReferenceResolution {
+  resolvedAt: string
+  method: 'heuristic'
+}
+
 // ─── Sensation dial v1 → v2 projection ────────────────────────────────────
 // Legacy fixed-key labels per dimension. Used only when sensation_dial_v2 is
 // absent — lets old products keep rendering while migration proceeds.
@@ -802,12 +899,14 @@ function nodeToProduct(node: ShopifyProductNode): Product {
   const sensationDialV2 = normalizeSensationDialV2(parseMetafieldJSON<unknown>(mf, 'sensation_dial_v2', null))
     ?? projectLegacyDial(parseMetafieldJSON<SensationDial>(mf, 'sensation_dial', {}) as SensationDial | undefined)
   const mapPriceRaw = parseFloat(parseMetafield(mf, 'map_price') ?? '')
+  const bareProductReference = parseMetafieldJSON<BareProductReferenceMetafield | null>(mf, 'bare_product_reference', null)
   return {
     id: node.id,
     handle: node.handle,
     title: node.title,
     images: gateCardImages(parseImages(node.images.edges), mf),
     videos: parseVideos(node.media),
+    ...(bareProductReference ? { bareProductReference } : {}),
     variants: node.variants.edges.map(e => ({
       id: e.node.id,
       title: e.node.title,
