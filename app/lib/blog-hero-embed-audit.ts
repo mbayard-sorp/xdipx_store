@@ -201,3 +201,89 @@ export function heroNamesAnyProduct(post: AuditBlogPost, catalog: CatalogProduct
     isNamedIn(distinctiveTokens(productName(p)), copyTokens, corroboratingTokens(productName(p))),
   )
 }
+
+// ---------------------------------------------------------------------------
+// Unsourced spec claims in heroImageAlt (ticket #11543)
+// ---------------------------------------------------------------------------
+
+export type SpecClaimCategory = 'dimension' | 'firmness' | 'material' | 'runtime' | 'mechanism'
+
+export interface SpecClaimHit {
+  category: SpecClaimCategory
+  /** The exact substring that triggered the match, for reviewer context. */
+  match: string
+}
+
+/**
+ * Detects a measurement, e.g. "4.3 inches" (run 1070) or "5.5 in." (run 994).
+ */
+const DIMENSION_RE = /\b\d+(?:\.\d+)?\s*(?:inches?\b|in\.(?!\w)|in\b|cm\b|mm\b)/gi
+
+/**
+ * Detects a firmness rating. Scoped to the hyphenated/compound ratings
+ * Shopify's firmness metafield actually uses ("Medium-Firm", run 994) rather
+ * than the bare words "soft"/"firm" alone, which appear constantly in ordinary
+ * marketing prose ("a soft, flexible finish") with no rating asserted.
+ */
+const FIRMNESS_RE = /\b(?:extra[- ]?soft|extra[- ]?firm|medium[- ]?firm|medium[- ]?soft|soft[- ]?firm)\b/gi
+
+/**
+ * Detects a specific material name. Deliberately excludes the generic
+ * marketing materials already in GENERIC_TOKENS ("silicone", "waterproof")
+ * that describe a whole product category rather than asserting a spec;
+ * these are the less common, more clinical material names that read as a
+ * genuine spec claim (run 1037-adjacent: "SKYN Elite ultra-thin polyisoprene
+ * condoms").
+ */
+const MATERIAL_RE = /\b(?:polyisoprene|polyurethane|borosilicate|elastomer|thermoplastic elastomer|\bTPE\b|\bTPR\b|\bABS plastic\b|stainless steel)\b/gi
+
+/**
+ * Detects a runtime or battery figure, e.g. "90 minutes of run time" or
+ * "2-hour battery life".
+ */
+const RUNTIME_RE = /\b\d+[+-]?\s*(?:minutes?|mins?|hours?|hrs?)\s*(?:of\s+)?(?:run\s*time|runtime|battery(?:\s+life)?|charge)\b/gi
+
+/**
+ * Detects a mechanism/technology-class claim about how a third-party product
+ * actually works, the highest-risk shape per the ticket (run 959 lost
+ * bloomgasm-pulsing-petals to exactly this). Named tokens plus the
+ * ribbed/textured-shaft build claim run 1037 shipped.
+ */
+const MECHANISM_RE = /\b(?:air[- ]?pulse|pleasure air|sonic|thrusting|pulsation|rotating|(?:ribbed|textured)[\s\w]{0,20}?shaft)\b/gi
+
+const SPEC_CLAIM_PATTERNS: readonly { category: SpecClaimCategory; re: RegExp }[] = [
+  { category: 'dimension', re: DIMENSION_RE },
+  { category: 'firmness', re: FIRMNESS_RE },
+  { category: 'material', re: MATERIAL_RE },
+  { category: 'runtime', re: RUNTIME_RE },
+  { category: 'mechanism', re: MECHANISM_RE },
+]
+
+/**
+ * Flags spec-shaped claims in heroImageAlt: a dimension/measurement, a
+ * firmness/material rating, a runtime/battery figure, or a mechanism/
+ * technology-class claim about a named third-party product.
+ *
+ * Unconditional, not conditioned on whether the claim happens to match the
+ * product's real spec: per the PDP-as-source rule, a title or metafield
+ * under the xdipx namespace is our own copy and carries no evidentiary
+ * weight, so there is no first-party source this module could check a claim
+ * against even when the claim is accurate. The defect is the unsourced
+ * SHAPE of the claim landing on a customer-facing, LLM-ingested string with
+ * no gate reviewing it, not any specific wrong number.
+ *
+ * Naming the product itself is explicitly NOT flagged — the hero/embed
+ * coupling check above needs the product named, and product NAME tokens
+ * (brand/model words) carry no spec claim on their own.
+ */
+export function findUnsourcedSpecClaims(heroImageAlt: string | null | undefined): SpecClaimHit[] {
+  const text = heroImageAlt ?? ''
+  if (!text.trim()) return []
+  const hits: SpecClaimHit[] = []
+  for (const { category, re } of SPEC_CLAIM_PATTERNS) {
+    for (const m of text.matchAll(re)) {
+      hits.push({ category, match: m[0] })
+    }
+  }
+  return hits
+}
