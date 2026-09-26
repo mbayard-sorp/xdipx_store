@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   distinctiveTokens,
   findHeroEmbedMismatches,
+  findUnsourcedSpecClaims,
   heroNamesAnyProduct,
   type AuditBlogPost,
   type CatalogProduct,
@@ -224,5 +225,71 @@ describe('single short distinctive token (#5397)', () => {
     expect(findHeroEmbedMismatches([{ ...post, embedHandles: ['magic-wand-mini'] }], LEWAND)).toEqual(
       [],
     )
+  })
+})
+
+// Ticket #11543, THIRD-PLUS OCCURRENCE: heroImageAlt is a customer-facing,
+// LLM-ingested string no gate reviews, and it routinely carries spec claims
+// whose only source is our own Emma-rewritten Shopify title — which the
+// PDP-as-source rule says carries no evidentiary weight. These three are the
+// live incidents the ticket names; the fourth case pins that naming the
+// product plainly, with no spec asserted, stays clean.
+describe('findUnsourcedSpecClaims', () => {
+  it('flags a dimension lifted from the title (run 1070, can-you-travel-with-a-sex-toy)', () => {
+    const hits = findUnsourcedSpecClaims('a 4.3 inches rechargeable vibrator')
+    expect(hits).toContainEqual({ category: 'dimension', match: '4.3 inches' })
+  })
+
+  it('flags a dimension and a firmness rating (run 994, what-size-dildo-should-you-start-with)', () => {
+    const hits = findUnsourcedSpecClaims('The Tantus Acute Curved Dildo 5.5 in. Medium-Firm')
+    expect(hits).toContainEqual({ category: 'dimension', match: '5.5 in.' })
+    expect(hits).toContainEqual({ category: 'firmness', match: 'Medium-Firm' })
+  })
+
+  it('flags a mechanism/build claim (run 1037, what-makes-a-great-g-spot-rabbit-vibrator)', () => {
+    const hits = findUnsourcedSpecClaims(
+      'a flexible silicone rabbit vibrator with a ribbed inner shaft resting on linen',
+    )
+    expect(hits).toContainEqual({ category: 'mechanism', match: 'ribbed inner shaft' })
+  })
+
+  it('does NOT flag run 1070\'s corrected alt: the product named, no spec asserted', () => {
+    const hits = findUnsourcedSpecClaims(
+      'Ultra Bullet Rechargeable Mini Vibrator resting in soft daylight on white linen',
+    )
+    expect(hits).toEqual([])
+  })
+
+  it('does not flag naming the product alone, even with common marketing words', () => {
+    expect(findUnsourcedSpecClaims('a waterproof silicone wand vibrator on a nightstand')).toEqual([])
+  })
+
+  it('flags a runtime/battery figure', () => {
+    const hits = findUnsourcedSpecClaims('90 minutes of run time on a single charge')
+    expect(hits).toContainEqual({ category: 'runtime', match: '90 minutes of run time' })
+  })
+
+  it('flags a named mechanism/technology-class token (run 959, bloomgasm-pulsing-petals)', () => {
+    expect(findUnsourcedSpecClaims('a Pleasure Air clitoral stimulator')).toContainEqual({
+      category: 'mechanism', match: 'Pleasure Air',
+    })
+    expect(findUnsourcedSpecClaims('an air-pulse sensation toy')).toContainEqual({
+      category: 'mechanism', match: 'air-pulse',
+    })
+  })
+
+  it('flags a specific material name distinct from generic marketing materials', () => {
+    const hits = findUnsourcedSpecClaims('SKYN Elite ultra-thin polyisoprene condoms')
+    expect(hits).toContainEqual({ category: 'material', match: 'polyisoprene' })
+  })
+
+  it('does not flag generic marketing materials on their own ("silicone", "waterproof")', () => {
+    expect(findUnsourcedSpecClaims('soft, flexible, waterproof silicone finish')).toEqual([])
+  })
+
+  it('returns empty for null/empty alt', () => {
+    expect(findUnsourcedSpecClaims(null)).toEqual([])
+    expect(findUnsourcedSpecClaims('')).toEqual([])
+    expect(findUnsourcedSpecClaims('   ')).toEqual([])
   })
 })
