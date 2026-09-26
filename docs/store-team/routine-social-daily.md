@@ -1466,6 +1466,16 @@ accent-color-band technique does not transfer to a two-tier label. Treat this SK
 until Shopify Files holds a pre-cleared asset for it, or a working frame is found that keeps the
 HYBRID band fully cropped or out of frame (not merely occluded).
 
+**B Swish Bthrilled Premium Mini Wand Noir** (`b-swish-bthrilled-premium-mini-wand-noir`) — a
+shape-risk rather than a wordmark-risk SKU: the real product has a large, clearly distinct rounded
+mushroom-cap head substantially wider than a tapered, curved handle with a visible neck/collar. Four
+independent cast-composite attempts on 2026-09-25 (run 1069) all failed product-identity on the
+head-to-handle proportion regardless of body zone or crop scale: two on the shoulder-blade zone
+(uniform-diameter body, no distinct wand head/neck), one on the inner-wrist zone (nearly cylindrical,
+reading as a bullet/lipstick vibrator), one on the X forearm zone (blunt capsule head, no neck taper,
+reads full-size not mini). Treat this SKU as **reuse-only** until Shopify Files holds a pre-cleared
+asset for it, or a working frame is found and logged in `social_media_assets`.
+
 For any SKU on this list, the `social-art-director` brief MUST
 either occlude or angle the marked region out of frame (hand-over-handle grip, band turned away,
 composite the real plate over the marked segment) OR the run prefers a clean-bodied product for that
