@@ -618,4 +618,32 @@ describe('generateCastComposite: provider id on the row, crop rejects archived (
       'request_id:d91a5b6dfdc0483c9b02c795194bb0ee',
     ]))
   })
+
+  it('runs the product-fidelity check on a held-in-hand candidate with no on-skin scene axes (#11725)', async () => {
+    const { tryIngestSocialAsset } = mockCommon('atlas', 'atlas/seedream-4.5-edit')
+    const runProductFidelityCheck = vi.fn(async () => ({
+      silhouette: 'drift' as const,
+      colour: 'match' as const,
+      finish: 'match' as const,
+      brandMark: 'not-applicable' as const,
+      notes: 'wrong cap type and body proportion vs the real packshot',
+      checkedAt: '2026-09-26T00:00:00.000Z',
+      checkCompleted: true,
+    }))
+    vi.doMock('./social-product-fidelity.server', () => ({
+      runProductFidelityCheck,
+      formatFidelityTags: (v: { checkCompleted: boolean; silhouette: string | null }) =>
+        v.checkCompleted && v.silhouette ? [`fidelity:silhouette=${v.silhouette}`] : [],
+    }))
+    vi.resetModules()
+    const { generateCastComposite } = await import('./social-media.server')
+    // CAST_OPTS carries no sceneAxes at all: the held-in-hand, wide/medium-crop
+    // case the on-skin-only scope used to skip entirely.
+    const result = await generateCastComposite(CAST_OPTS)
+
+    expect(runProductFidelityCheck).toHaveBeenCalledTimes(1)
+    expect(result.urls).toEqual(['https://cdn/rehosted.jpg'])
+    const input = tryIngestSocialAsset.mock.calls[0]![0]
+    expect(input.tags).toEqual(expect.arrayContaining(['fidelity:silhouette=drift']))
+  })
 })

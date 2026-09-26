@@ -514,26 +514,30 @@ export async function tagIncompleteVisionVerdict(assetId: number | null | undefi
  * Product-fidelity check (ticket #11487, owner: "You've got a lot of product
  * drift on the rose images. The bodyscape is fine."). Compares the rendered
  * candidate against the bare product reference the generator was actually
- * given, on the same on-skin scope as `maybeCropToZone` (`cropScale` is
- * `close` or `macro` with a real body zone briefed) — a wide/medium crop, or
- * an axis-free frame, is not the on-skin case this ticket is about, and skips
- * the check rather than spending on it.
+ * given.
  *
- * REPORT ONLY (DONE WHEN clause 2): unlike `maybeCropToZone`, this never
- * drops a candidate and never throws. A drift finding, or a check that could
- * not complete, both return `[]` when there is nothing to tag; a completed
- * check always returns its `fidelity:*` tags regardless of match or drift,
- * so the finding is queryable before anyone decides whether to gate on it.
+ * Widened to every cast-composite candidate, not only the on-skin close/macro
+ * crop `maybeCropToZone` scopes to (ticket #11725): the JO H2O Cooling and
+ * B-Swish Bthrilled Mini Wand Noir product-identity failures that motivated
+ * this widening were held-in-hand and wide/medium-crop frames, exactly the
+ * shapes the original on-skin-only scope skipped, so the one automated
+ * backstop for product identity never ran on them at all and the mismatch
+ * was only ever caught a full generation-plus-gate cycle later, at
+ * `social-publish-gate`. `sceneAxes` is still accepted (a caller may use it
+ * for tagging elsewhere) but no longer gates whether this check runs.
+ *
+ * REPORT ONLY (DONE WHEN clause 2 of #11487, unchanged by this widening):
+ * unlike `maybeCropToZone`, this never drops a candidate and never throws. A
+ * drift finding, or a check that could not complete, both return `[]` when
+ * there is nothing to tag; a completed check always returns its `fidelity:*`
+ * tags regardless of match or drift, so the finding is queryable before
+ * anyone decides whether to gate on it.
  */
 async function maybeCheckProductFidelity(
   renderedUrl: string,
   productImageUrl: string,
-  sceneAxes: SceneAxes | undefined,
+  _sceneAxes: SceneAxes | undefined,
 ): Promise<string[]> {
-  const cropScale = sceneAxes?.cropScale
-  const bodyZone = sceneAxes?.bodyZone
-  if (cropScale !== 'close' && cropScale !== 'macro') return []
-  if (!bodyZone || bodyZone === NON_SKIN_SENTINEL) return []
   try {
     const { runProductFidelityCheck, formatFidelityTags } = await import('./social-product-fidelity.server')
     const verdict = await runProductFidelityCheck(renderedUrl, productImageUrl)

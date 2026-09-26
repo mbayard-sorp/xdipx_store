@@ -1474,7 +1474,19 @@ head-to-handle proportion regardless of body zone or crop scale: two on the shou
 (uniform-diameter body, no distinct wand head/neck), one on the inner-wrist zone (nearly cylindrical,
 reading as a bullet/lipstick vibrator), one on the X forearm zone (blunt capsule head, no neck taper,
 reads full-size not mini). Treat this SKU as **reuse-only** until Shopify Files holds a pre-cleared
-asset for it, or a working frame is found and logged in `social_media_assets`.
+asset for it, or a working frame is found and logged in `social_media_assets`. **Recurred the very
+next run** (2026-09-26, run 1085, ticket #11725): the same bullet-silhouette-with-no-head/neck/taper
+failure BLOCKed again, confirming this is not a one-off and the reuse-only treatment above still
+stands.
+
+**JO H2O Cooling Water-Based Lubricant** (`jo-h2o-cooling-water-based-lubricant`, and its sized
+variants e.g. `jo-h2o-cooling-water-based-lubricant-2-oz`) — a product-identity-risk SKU distinct
+from the wordmark and shape failures above: two independent cast-composite attempts on 2026-09-26
+(run 1085, ticket #11725) both BLOCKed on the rendered bottle carrying the wrong cap type and the
+wrong body proportion versus the real packshot, with no visible label at all (neither a match nor a
+garble — the identifying surface simply did not render). Prefer the composite-the-real-plate route
+(ticket #5493 route a) or a pre-cleared library asset over further occlusion-angle generation rounds
+for this SKU, matching the treatment already given to Wicked Simply Hybrid and Botanical ON above.
 
 For any SKU on this list, the `social-art-director` brief MUST
 either occlude or angle the marked region out of frame (hand-over-handle grip, band turned away,
