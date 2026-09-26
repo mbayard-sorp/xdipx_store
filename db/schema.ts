@@ -1582,6 +1582,23 @@ export const homepageTeamSuggestions = pgTable('homepage_team_suggestions', {
   blockClass:     varchar('block_class', { length: 24 }),
   verifiedBy:     varchar('verified_by', { length: 32 }),
   verifiedAt:     timestamp('verified_at', { withTimezone: true }),
+  /**
+   * Instance-or-class classification for a design-kind ticket's remedy
+   * (migration 106, ticket #11084): 'instance' fixes one named item,
+   * 'class' fixes the whole defect the design-critic finding described.
+   * Required, together with a dated recapture, before a `category: 'design'`
+   * row may transition to `applied` -- see isDesignTicket / normalizeRemedyScope
+   * / the applied-transition gate in app/lib/team.server.ts.
+   */
+  remedyScope:    varchar('remedy_scope', { length: 8 }),
+  /**
+   * Evidence for the fresh screenshot re-score that confirmed a design fix
+   * actually shipped on the live page (migration 106). Mirrors the same
+   * evidence also recorded as a `suggestion_links` row with kind='recapture'
+   * (that link's own createdAt is the "dated" half of the requirement).
+   */
+  recaptureRef:   text('recapture_ref'),
+  recaptureAt:    timestamp('recapture_at', { withTimezone: true }),
 }, t => ({
   statusIdx:   index('idx_homepage_team_suggestions_status').on(t.status, t.createdAt),
   teamIdx:     index('idx_team_sugg_team').on(t.team, t.status, t.createdAt),
