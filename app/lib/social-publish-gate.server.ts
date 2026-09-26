@@ -36,6 +36,20 @@
  * every generator and the owner upload path; after that, membership alone
  * decides and a pasted external url that happens to start with `social-`
  * can no longer pass. A membership lookup that throws counts as not a member.
+ *
+ * Media reachability (ticket #11453). `image-provenance` and `vision-verdict`
+ * both judge a media url's NAME (does it look generated, does a library row
+ * carry a verdict for it); neither one ever asks whether the url actually
+ * resolves. Row 306 (2026-09-24) was a composed filename shaped like the
+ * library's own naming convention, built from the archetype and product
+ * handle rather than read off a real `social_media_assets` row: it 404s, but
+ * it happened to read exactly like a legacy prefix-named asset with no
+ * recorded verdict, so it was blocked by `vision-verdict` only by accident,
+ * on a finding that reads identically for a real-but-uninspected asset. A 404
+ * is a distinct, more certain failure and gets its own `media-unreachable`
+ * finding so the two are never confused in a run summary; see
+ * `defaultCheckMediaReachable` and the check inside
+ * `runDeterministicPublishChecks` below.
  */
 
 import { allMediaAreGeneratedSocialAssets, isGeneratedSocialAsset } from './social-media.server'
@@ -624,6 +638,28 @@ export function findRepeatedRun(
 }
 
 /**
+ * Default implementation of `checkMediaReachable` (ticket #11453): a cheap
+ * HEAD request, falling back to a 1-byte ranged GET only when the origin
+ * rejects HEAD outright (405/501), which some CDNs and object stores do.
+ * Never throws: a transport failure is exactly as "unreachable" as a real
+ * non-2xx status, matching every other fail-closed lookup in this module.
+ */
+export async function defaultCheckMediaReachable(url: string): Promise<boolean> {
+  try {
+    const head = await fetch(url, { method: 'HEAD' })
+    if (head.ok) return true
+    if (head.status === 405 || head.status === 501) {
+      const ranged = await fetch(url, { method: 'GET', headers: { Range: 'bytes=0-0' } })
+      return ranged.ok
+    }
+    return false
+  } catch (err) {
+    console.error(`[social-publish-gate] media reachability check failed, treating as unreachable: ${url}`, err)
+    return false
+  }
+}
+
+/**
  * Run every mechanical check. Pure except for the stock read, which is injected
  * so this stays testable without a Shopify round trip.
  *
@@ -641,6 +677,13 @@ export async function runDeterministicPublishChecks(
     isLibraryMember?: (url: string) => Promise<boolean>
     /** Recorded vision-gate verdict for a library asset (#6763). Defaults to the real lookup. */
     getVisionVerdict?: (url: string) => Promise<VisionVerdict | null>
+    /**
+     * Does this media url actually resolve (ticket #11453)? Defaults to
+     * `defaultCheckMediaReachable` (a HEAD, falling back to a ranged GET).
+     * Injected so this is testable without a real network call; a caller
+     * that never overrides it gets the real check.
+     */
+    checkMediaReachable?: (url: string) => Promise<boolean>
     /**
      * `social_media_assets.created_at` for a url, or null when no row exists
      * (#10337). Only consulted for the legacy carve-out below. A throw is
@@ -772,7 +815,43 @@ export async function runDeterministicPublishChecks(
   // provenance naming rule above.
   const poster = input.posterUrl?.trim()
   const inspectable = poster ? [...media, poster] : media
+
+  // ── Media reachability (ticket #11453) ──────────────────────────────────
+  //
+  // Independent of the two checks above: this asks only "does this url
+  // resolve", not whether it looks generated or carries a recorded verdict.
+  // A composed url that happens to collide with a library row's naming
+  // convention can otherwise clear both of those on a name match alone while
+  // pointing at nothing. Checked BEFORE the vision-verdict walk below, and a
+  // url found unreachable here is excluded from that walk entirely: asking
+  // whether a 404 "has a recorded vision-gate verdict" is a question about
+  // whatever asset a stale or colliding filename happens to name, not about
+  // the actual defect, and reporting both findings for the same url would
+  // bury the honest signal (404) under an incidental one.
+  const checkReachable = deps?.checkMediaReachable ?? defaultCheckMediaReachable
+  const unreachable = new Set<string>()
   for (const u of inspectable) {
+    let reachable = true
+    try {
+      reachable = await checkReachable(u)
+    } catch (err) {
+      console.error(`[social-publish-gate] media reachability check threw, treating as unreachable: ${u}`, err)
+      reachable = false
+    }
+    if (!reachable) unreachable.add(u)
+  }
+  if (unreachable.size > 0) {
+    findings.push({
+      check: 'media-unreachable',
+      severity: 'block',
+      detail:
+        `Media URL(s) did not resolve (non-2xx on a HEAD/ranged-GET check): ${[...unreachable].join(', ')}. ` +
+        'A composed or stale filename that does not exist in the CDN must never reach the publisher.',
+    })
+  }
+
+  for (const u of inspectable) {
+    if (unreachable.has(u)) continue
     let verdict: VisionVerdict | null = null
     try {
       verdict = await getVerdict(u)

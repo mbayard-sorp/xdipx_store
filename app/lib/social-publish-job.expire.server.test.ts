@@ -51,7 +51,15 @@ function fakeRepo(rows: PostRow[], over: Partial<PublishRepo> = {}) {
 const tick = (
   opts: Omit<Parameters<typeof runSocialPublishTick>[0], 'isVideoEnabled'> & { isVideoEnabled?: () => Promise<boolean> },
 ) =>
-  runSocialPublishTick({ removalWatch: async () => null, isVideoEnabled: async () => true, ...opts })
+  runSocialPublishTick({
+    removalWatch: async () => null,
+    isVideoEnabled: async () => true,
+    ...opts,
+    // Ticket #11453: default the media-reachability check to "always
+    // reachable" (fake CDN urls throughout this file), mirroring
+    // social-publish-job.server.test.ts's own `tick` wrapper.
+    gateDeps: { checkMediaReachable: async () => true, ...(opts.gateDeps ?? {}) },
+  })
 const enabled = async () => true
 const cap = (n: number) => async () => n
 const publishOk = vi.fn(async () => ({ ok: true as const, externalPostId: 'ig_1' }))
