@@ -5,7 +5,7 @@
 // packshots on the current pending drafts, the out-of-stock product that had to
 // be deleted from the feed on 2026-08-09, and the sale-attempt forms Meta's
 // Restricted Goods standard removes.
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import {
   runDeterministicPublishChecks as runChecksRaw,
   findRepeatedRun,
@@ -14,6 +14,7 @@ import {
   isProductSellable,
   classifyLegibleText,
   missingVisionChecks,
+  defaultCheckMediaReachable,
 } from './social-publish-gate.server'
 import { VISION_CHECK_NAMES, type VisionVerdict } from './social-vision-gate.server'
 
@@ -73,9 +74,31 @@ function runChecks(
       // describe block below overrides these directly.
       getCastTarget: async () => 'universal',
       getCastPresentations: async () => new Map(),
+      // Ticket #11453: default every call site that predates the media-
+      // reachability check to "always reachable", the same way the vision
+      // verdict above is defaulted to a pass. The dedicated
+      // describe('media reachability', ...) block overrides this directly to
+      // exercise the check itself, and this default keeps every other test
+      // from making a real network fetch against a fake CDN url.
+      checkMediaReachable: async () => true,
       ...(deps ?? {}),
     },
   )
+}
+
+/**
+ * Like `runChecksRaw` but with the same media-reachability default as
+ * `runChecks` above (ticket #11453), for the tests below this point that
+ * predate `runChecks` and call `runDeterministicPublishChecks` directly to
+ * override the vision-gate/cast-target deps themselves. Without this default
+ * every one of those call sites would exercise the real
+ * `defaultCheckMediaReachable` against a fake CDN url.
+ */
+function runRaw(
+  input: Parameters<typeof runChecksRaw>[0],
+  deps?: Parameters<typeof runChecksRaw>[1],
+): ReturnType<typeof runChecksRaw> {
+  return runChecksRaw(input, { checkMediaReachable: async () => true, ...(deps ?? {}) })
 }
 
 /** A caption with nothing wrong with it. */
@@ -158,6 +181,112 @@ describe('imagery provenance', () => {
     const r = await runChecks({ caption: CLEAN, mediaUrls: [] })
     expect(checks(r)).toContain('image-provenance')
     expect(r.blocked).toBe(true)
+  })
+})
+
+// Ticket #11453. social_posts row 306 (X, campaign, Womanizer Beauty
+// companion, drafted by run 1051) carried a media url composed from the
+// archetype and product handle rather than read off a real
+// social_media_assets row: it 404d, but it happened to read exactly like a
+// legacy prefix-named asset with no recorded verdict, so it was blocked only
+// by accident, on 'vision-verdict', a finding that is incidental (it also
+// fires for a real-but-uninspected asset) and reads identically either way.
+// This check is independent of that one: it asks only whether the url
+// resolves.
+describe('media reachability (ticket #11453)', () => {
+  const ROW_306_URL =
+    `${CDN}/social-womanizer-beauty-lilac-cast-playful-idle-20260923-2.jpg`
+
+  it('blocks a 404 media url with a distinct media-unreachable finding, not vision-verdict', async () => {
+    const r = await runChecks(
+      { caption: CLEAN, mediaUrls: [ROW_306_URL], postCreatedAt: '2026-09-23T00:00:00.000Z' },
+      {
+        // Reproduces row 306 exactly: the url looks generated (passes
+        // image-provenance) and no library row indexes it (a real gate call
+        // would get `null` back from getVisionVerdict here), but it must
+        // never reach that check at all once reachability fails it first.
+        checkMediaReachable: async (u) => u !== ROW_306_URL,
+        getVisionVerdict: async () => {
+          throw new Error('getVisionVerdict must not be consulted for a url that failed reachability')
+        },
+      },
+    )
+    expect(checks(r)).toContain('media-unreachable')
+    expect(checks(r)).not.toContain('vision-verdict')
+    expect(r.blocked).toBe(true)
+    const finding = r.findings.find(f => f.check === 'media-unreachable')
+    expect(finding?.detail).toContain(ROW_306_URL)
+  })
+
+  it('passes a reachable url through to the vision-verdict check exactly as before', async () => {
+    const r = await runChecks(
+      { caption: CLEAN, mediaUrls: GOOD_MEDIA },
+      { checkMediaReachable: async () => true },
+    )
+    expect(checks(r)).not.toContain('media-unreachable')
+    expect(r.blocked).toBe(false)
+  })
+
+  it('fails closed (unreachable) when the reachability check itself throws', async () => {
+    const r = await runChecks(
+      { caption: CLEAN, mediaUrls: GOOD_MEDIA },
+      {
+        checkMediaReachable: async () => { throw new Error('network down') },
+        getVisionVerdict: async () => {
+          throw new Error('getVisionVerdict must not be consulted for a url that failed reachability')
+        },
+      },
+    )
+    expect(checks(r)).toContain('media-unreachable')
+    expect(checks(r)).not.toContain('vision-verdict')
+    expect(r.blocked).toBe(true)
+  })
+
+  it('names every unreachable url in one finding when more than one media url fails', async () => {
+    const second = `${CDN}/social-second-bad-url-20260923-1.jpg`
+    const r = await runChecks(
+      { caption: CLEAN, mediaUrls: [ROW_306_URL, second] },
+      { checkMediaReachable: async () => false },
+    )
+    const finding = r.findings.find(f => f.check === 'media-unreachable')
+    expect(finding?.detail).toContain(ROW_306_URL)
+    expect(finding?.detail).toContain(second)
+  })
+
+  describe('defaultCheckMediaReachable', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals()
+    })
+
+    it('is reachable on a plain 200 HEAD response', async () => {
+      vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+        expect(init?.method).toBe('HEAD')
+        return new Response(null, { status: 200 })
+      }))
+      await expect(defaultCheckMediaReachable('https://cdn.example.com/a.jpg')).resolves.toBe(true)
+    })
+
+    it('is unreachable on a 404 HEAD response, matching row 306 exactly', async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 404 })))
+      await expect(defaultCheckMediaReachable('https://cdn.example.com/gone.jpg')).resolves.toBe(false)
+    })
+
+    it('falls back to a ranged GET when the origin rejects HEAD with 405', async () => {
+      const calls: string[] = []
+      vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+        calls.push(init?.method ?? 'GET')
+        if (init?.method === 'HEAD') return new Response(null, { status: 405 })
+        expect((init?.headers as Record<string, string> | undefined)?.['Range']).toBe('bytes=0-0')
+        return new Response(null, { status: 206 })
+      }))
+      await expect(defaultCheckMediaReachable('https://cdn.example.com/no-head.jpg')).resolves.toBe(true)
+      expect(calls).toEqual(['HEAD', 'GET'])
+    })
+
+    it('fails closed when fetch itself throws', async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('DNS failure') }))
+      await expect(defaultCheckMediaReachable('https://cdn.example.com/x.jpg')).resolves.toBe(false)
+    })
   })
 })
 
@@ -838,7 +967,7 @@ describe('vision-gate verdict', () => {
   const isLibraryMember = async () => true
 
   it('passes media carrying a recorded passing verdict', async () => {
-    const r = await runChecksRaw(
+    const r = await runRaw(
       { caption: CLEAN, mediaUrls: NON_PREFIX_MEDIA, postCreatedAt: null },
       { getVisionVerdict: async () => PASSING_VERDICT, isLibraryMember },
     )
@@ -864,7 +993,7 @@ describe('vision-gate verdict', () => {
       checkCompleted: true,
       legibleText: '',
     }
-    const r = await runChecksRaw(
+    const r = await runRaw(
       { caption: CLEAN, mediaUrls: NON_PREFIX_MEDIA, postCreatedAt: null },
       { getVisionVerdict: async () => failing, isLibraryMember },
     )
@@ -875,7 +1004,7 @@ describe('vision-gate verdict', () => {
   })
 
   it('blocks a non-prefix asset with no recorded verdict at all, not a silent skip', async () => {
-    const r = await runChecksRaw(
+    const r = await runRaw(
       { caption: CLEAN, mediaUrls: NON_PREFIX_MEDIA, postCreatedAt: null },
       { getVisionVerdict: async () => null, isLibraryMember },
     )
@@ -891,7 +1020,7 @@ describe('vision-gate verdict', () => {
     // synchronously at generation time, so a prefix-named url with no verdict
     // on file is legacy art from before this check existed, the same carve-out
     // the image-provenance burn-in already grants prefix-named urls above.
-    const r = await runChecksRaw(
+    const r = await runRaw(
       { caption: CLEAN, mediaUrls: GOOD_MEDIA, postCreatedAt: null },
       { getVisionVerdict: async () => null, getAssetCreatedAt: async () => new Date('2026-08-12T00:00:00.000Z') },
     )
@@ -904,7 +1033,7 @@ describe('vision-gate verdict', () => {
   // verdict is not proof of age: it is equally the signature of a write that
   // failed on an image nothing ever looked at.
   it('blocks a prefix-named asset with no verdict whose library row postdates the cutoff', async () => {
-    const r = await runChecksRaw(
+    const r = await runRaw(
       { caption: CLEAN, mediaUrls: GOOD_MEDIA, postCreatedAt: null },
       { getVisionVerdict: async () => null, getAssetCreatedAt: async () => new Date('2026-09-15T00:00:00.000Z') },
     )
@@ -916,13 +1045,13 @@ describe('vision-gate verdict', () => {
   })
 
   it('falls back to the post created_at when the asset has no library row at all', async () => {
-    const blockedResult = await runChecksRaw(
+    const blockedResult = await runRaw(
       { caption: CLEAN, mediaUrls: GOOD_MEDIA, postCreatedAt: '2026-09-19T00:00:00.000Z' },
       { getVisionVerdict: async () => null, getAssetCreatedAt: async () => null },
     )
     expect(blockedResult.blocked).toBe(true)
 
-    const legacy = await runChecksRaw(
+    const legacy = await runRaw(
       { caption: CLEAN, mediaUrls: GOOD_MEDIA, postCreatedAt: '2026-08-20T00:00:00.000Z' },
       { getVisionVerdict: async () => null, getAssetCreatedAt: async () => null },
     )
@@ -936,7 +1065,7 @@ describe('vision-gate verdict', () => {
   // "no date" never meant "old art"; it meant nobody passed one, or the
   // lookup fell over. Either way nothing looked at the pixels.
   it('blocks when the age cannot be determined at all (unchecked, not legacy)', async () => {
-    const r = await runChecksRaw(
+    const r = await runRaw(
       { caption: CLEAN, mediaUrls: GOOD_MEDIA, postCreatedAt: null },
       { getVisionVerdict: async () => null, getAssetCreatedAt: async () => { throw new Error('neon down') } },
     )
@@ -948,7 +1077,7 @@ describe('vision-gate verdict', () => {
   })
 
   it('blocks a prefix-named asset with no verdict and no date supplied', async () => {
-    const r = await runChecksRaw(
+    const r = await runRaw(
       { caption: CLEAN, mediaUrls: GOOD_MEDIA, postCreatedAt: null },
       { getVisionVerdict: async () => null, getAssetCreatedAt: async () => null },
     )
@@ -965,7 +1094,7 @@ describe('vision-gate verdict', () => {
   // publish an on-skin reel with zero pixel inspection.
   it('blocks a video final with no verdict and no library row (the Post now path)', async () => {
     const VIDEO_FINAL = ['https://blob.vercel-storage.com/video/job-8812/final-a7f3.mp4']
-    const r = await runChecksRaw(
+    const r = await runRaw(
       { caption: CLEAN, mediaUrls: VIDEO_FINAL, postCreatedAt: null },
       { getVisionVerdict: async () => null, getAssetCreatedAt: async () => null },
     )
@@ -984,7 +1113,7 @@ describe('vision-gate verdict', () => {
     const POSTER = 'https://blob.vercel-storage.com/video/job-8812/poster.jpg'
 
     it('blocks when the poster has no verdict even though the video final does', async () => {
-      const r = await runChecksRaw(
+      const r = await runRaw(
         { caption: CLEAN, mediaUrls: VIDEO_FINAL, posterUrl: POSTER, postCreatedAt: '2026-09-19T00:00:00.000Z' },
         {
           getVisionVerdict: async (url: string) => (url === POSTER ? null : PASSING_VERDICT),
@@ -999,7 +1128,7 @@ describe('vision-gate verdict', () => {
 
     it('blocks when the poster carries a failing verdict', async () => {
       const failing: VisionVerdict = { ...PASSING_VERDICT, pass: false, notes: 'anus visible at the base of the cleft' }
-      const r = await runChecksRaw(
+      const r = await runRaw(
         { caption: CLEAN, mediaUrls: VIDEO_FINAL, posterUrl: POSTER, postCreatedAt: '2026-09-19T00:00:00.000Z' },
         {
           getVisionVerdict: async (url: string) => (url === POSTER ? failing : PASSING_VERDICT),
@@ -1011,7 +1140,7 @@ describe('vision-gate verdict', () => {
     })
 
     it('passes when both the final and the poster carry passing verdicts', async () => {
-      const r = await runChecksRaw(
+      const r = await runRaw(
         { caption: CLEAN, mediaUrls: VIDEO_FINAL, posterUrl: POSTER, postCreatedAt: '2026-09-19T00:00:00.000Z' },
         { getVisionVerdict: async () => PASSING_VERDICT, isLibraryMember },
       )
@@ -1020,7 +1149,7 @@ describe('vision-gate verdict', () => {
     })
 
     it('is a no-op on a still post, which has no poster', async () => {
-      const r = await runChecksRaw(
+      const r = await runRaw(
         { caption: CLEAN, mediaUrls: GOOD_MEDIA, posterUrl: null, postCreatedAt: '2026-09-19T00:00:00.000Z' },
         { getVisionVerdict: async () => PASSING_VERDICT, isLibraryMember },
       )
@@ -1029,7 +1158,7 @@ describe('vision-gate verdict', () => {
   })
 
   it('fails closed when the verdict lookup throws', async () => {
-    const r = await runChecksRaw(
+    const r = await runRaw(
       { caption: CLEAN, mediaUrls: NON_PREFIX_MEDIA, postCreatedAt: null },
       { getVisionVerdict: async () => { throw new Error('neon down') }, isLibraryMember },
     )
@@ -1050,7 +1179,7 @@ describe('vision-gate verdict', () => {
     }
 
     it('blocks a stored pass:true verdict that predates anusNotVisible', async () => {
-      const r = await runChecksRaw(
+      const r = await runRaw(
         { caption: CLEAN, mediaUrls: NON_PREFIX_MEDIA, postCreatedAt: '2026-09-19T00:00:00.000Z' },
         { getVisionVerdict: async () => sevenCheckVerdict(), isLibraryMember },
       )
@@ -1059,7 +1188,7 @@ describe('vision-gate verdict', () => {
     })
 
     it('names the unanswered checks, so the reason is legible', async () => {
-      const r = await runChecksRaw(
+      const r = await runRaw(
         { caption: CLEAN, mediaUrls: NON_PREFIX_MEDIA, postCreatedAt: '2026-09-19T00:00:00.000Z' },
         { getVisionVerdict: async () => sevenCheckVerdict(), isLibraryMember },
       )
@@ -1073,7 +1202,7 @@ describe('vision-gate verdict', () => {
         ...PASSING_VERDICT,
         checks: { ...PASSING_VERDICT.checks, anusNotVisible: 'maybe' },
       } as unknown as VisionVerdict
-      const r = await runChecksRaw(
+      const r = await runRaw(
         { caption: CLEAN, mediaUrls: NON_PREFIX_MEDIA, postCreatedAt: '2026-09-19T00:00:00.000Z' },
         { getVisionVerdict: async () => garbled, isLibraryMember },
       )
@@ -1086,7 +1215,7 @@ describe('vision-gate verdict', () => {
     // exists disproves that premise, so an old date does not buy a partial
     // read a pass.
     it('does not let the legacy carve-out excuse a partial verdict on an old prefix-named asset', async () => {
-      const r = await runChecksRaw(
+      const r = await runRaw(
         { caption: CLEAN, mediaUrls: GOOD_MEDIA, postCreatedAt: '2026-08-01T00:00:00.000Z' },
         {
           getVisionVerdict: async () => sevenCheckVerdict(),
@@ -1098,7 +1227,7 @@ describe('vision-gate verdict', () => {
     })
 
     it('self-heals: a complete verdict passes, and completeness is read off VISION_CHECK_NAMES', async () => {
-      const r = await runChecksRaw(
+      const r = await runRaw(
         { caption: CLEAN, mediaUrls: NON_PREFIX_MEDIA, postCreatedAt: '2026-09-19T00:00:00.000Z' },
         { getVisionVerdict: async () => PASSING_VERDICT, isLibraryMember },
       )
@@ -1114,7 +1243,7 @@ describe('vision-gate verdict', () => {
   // #10281 named seven; #10477 added anusNotVisible, so the message the
   // drafter reads has to name eight or it re-briefs the wrong thing.
   it('names the eight checks accurately in the no-verdict finding (#10281, #10477)', async () => {
-    const r = await runChecksRaw(
+    const r = await runRaw(
       { caption: CLEAN, mediaUrls: NON_PREFIX_MEDIA, postCreatedAt: null },
       { getVisionVerdict: async () => null, isLibraryMember },
     )
@@ -1134,7 +1263,7 @@ describe('vision-gate verdict', () => {
 describe('legible text baked into the image', () => {
   const isLibraryMember = async () => true
   const withText = (legibleText: string | null): VisionVerdict => ({ ...PASSING_VERDICT, legibleText })
-  const run = (legibleText: string | null) => runChecksRaw(
+  const run = (legibleText: string | null) => runRaw(
     { caption: CLEAN, mediaUrls: GOOD_MEDIA, postCreatedAt: null },
     { getVisionVerdict: async () => withText(legibleText), isLibraryMember },
   )

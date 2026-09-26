@@ -73,7 +73,17 @@ const tick = (
 ) =>
   // Video valve on by default: these cases are about stills and the platform
   // valve. The double-gate has its own suite in social-publish-run.server.test.ts.
-  runSocialPublishTick({ removalWatch: async () => null, isVideoEnabled: async () => true, ...opts })
+  runSocialPublishTick({
+    removalWatch: async () => null,
+    isVideoEnabled: async () => true,
+    ...opts,
+    // Ticket #11453: default the media-reachability check to "always
+    // reachable" (fake CDN urls throughout this file), the same way every
+    // other gate dependency here is stubbed, merged so a case overriding
+    // gateDeps for its own reason (stock, pairing, casting) still gets this
+    // default unless it overrides checkMediaReachable itself.
+    gateDeps: { checkMediaReachable: async () => true, ...(opts.gateDeps ?? {}) },
+  })
 
 const enabled = async () => true
 const cap = (n: number) => async () => n
@@ -514,7 +524,10 @@ describe('an X draft with a generated asset reaches the publish call (ticket #41
     // platform: 'x', mediaUrls carried from post()'s default (a generated
     // `social-` asset), reviewStatus 'approved', and a real gate-stamp PASS —
     // exactly what the write-time guard now requires before a draft can exist.
-    // No gateDeps override: the real runDeterministicPublishChecks runs.
+    // No gateDeps override beyond `tick`'s own default stubs (media
+    // reachability; ticket #11453): the real runDeterministicPublishChecks
+    // runs otherwise, including the real vision-verdict/asset-age lookups,
+    // which fail over to the legacy carve-out in this test environment.
     const { repo, calls } = fakeRepo([post({ platform: 'x' })])
     const publish = vi.fn(async () => ({ ok: true as const, externalPostId: 'x_42' }))
     const r = await tick({ isEnabled: enabled, maxPerDay: cap(3), publish, repo })
@@ -602,6 +615,9 @@ describe('the removal watch guards the tick', () => {
     const { repo } = fakeRepo([post()])
     const r = await runSocialPublishTick({
       isEnabled: enabled, isVideoEnabled: enabled, maxPerDay: cap(3), publish: publishOk, repo,
+      // Ticket #11453: this call bypasses the `tick` wrapper's default, so it
+      // needs its own media-reachability stub (fake CDN url in `post()`).
+      gateDeps: { checkMediaReachable: async () => true },
       removalWatch: async () => ({
         checked: 3, removed: [17], removalsInWindow: 1, unknown: 0, frequencySteppedTo: 1,
       }),
