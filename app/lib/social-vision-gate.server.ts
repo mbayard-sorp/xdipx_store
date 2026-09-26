@@ -44,6 +44,28 @@
  * not-yet-uploaded candidate buffer rather than a live url, but the same
  * doctrine checks apply, so it calls the same checks directly instead of
  * forking a second implementation.
+ *
+ * Extended again (ticket #11460) with `productPhysics`, a second REPORT-ONLY
+ * field alongside `legibleText`. Every check above is a SAFETY check; none of
+ * them asks whether a depicted product is physically supported. Two live
+ * examples returned `pass:true` with nothing wrong anatomically or on
+ * exposure: social_posts row 308 (a product adhered to the side of a shin,
+ * no hand in frame) and row 304 (an open flat palm against a vertical hip,
+ * the product's handle extending past the fingers into free space; row 304
+ * shipped live to Instagram). `productPhysics` reports whether the model saw
+ * plausible support (a hand gripping the product, or a facing-up surface
+ * bearing its weight) without gating `pass`. It is intentionally NOT part of
+ * the hard checks yet: a false block on this class of judgment costs a
+ * regeneration the same way a safety false-block does, but craft calls on
+ * ambiguous crops carry a materially higher false-positive risk than a limb
+ * count, and there was no backtest data to calibrate against at ship time.
+ * Report-only first, promote to blocking only once a backtest against real
+ * on-skin assets shows it is reliable (`scripts/backtest-product-physics.ts`).
+ * Deliberately NOT a proportion or scale check: docs/design-doctrine.md
+ * section 4 item 2 licenses exaggerated product scale on purpose and states
+ * the vision gate carries no real-world-proportion reject, so the prompt
+ * text below says explicitly that scale is a separate, unrelated matter and
+ * only faked or missing support is the fail condition.
  */
 
 import { sql } from 'drizzle-orm'
@@ -94,6 +116,22 @@ export const VISION_CHECK_NAMES: readonly VisionCheckName[] = [
   'adultUnambiguous',
 ]
 
+/**
+ * Ticket #11460. `'supported'` and `'unsupported'` are only meaningful when a
+ * product is in contact with a body somewhere in the frame; `'not_applicable'`
+ * is the honest third answer for a frame with no product-on-body contact to
+ * judge (a product-only shot, or a body with no product touching it), so the
+ * report never forces a support/unsupported call onto a frame with nothing to
+ * physically judge.
+ */
+export type ProductPhysicsVerdict = 'supported' | 'unsupported' | 'not_applicable'
+
+export const PRODUCT_PHYSICS_VALUES: readonly ProductPhysicsVerdict[] = [
+  'supported',
+  'unsupported',
+  'not_applicable',
+]
+
 export interface VisionVerdict {
   /** True only when every check below passed. */
   pass: boolean
@@ -134,13 +172,24 @@ export interface VisionVerdict {
    * path, same distinction `checkCompleted` draws for the pass/fail checks).
    */
   legibleText: string | null
+  /**
+   * Ticket #11460: REPORT ONLY, same idiom as `legibleText`, does not affect
+   * `pass` and has no entry in `checks`. Whether a product depicted in
+   * contact with a body reads as physically supported: gripped by a hand, or
+   * resting on a surface facing up in the frame that could bear its weight.
+   * `'not_applicable'` when no product is in contact with a body anywhere in
+   * the frame. Explicitly NOT a proportion/scale judgment: an exaggerated
+   * render scale with a proper grip still reports `'supported'`. `null` means
+   * the check never ran at all (the fail-closed path).
+   */
+  productPhysics: ProductPhysicsVerdict | null
 }
 
 /** A verdict that fails every check, used whenever the check could not run at all. */
 function failClosedVerdict(notes: string): VisionVerdict {
   const checks = {} as Record<VisionCheckName, 'pass' | 'fail'>
   for (const name of VISION_CHECK_NAMES) checks[name] = 'fail'
-  return { pass: false, checks, notes, checkedAt: new Date().toISOString(), checkCompleted: false, legibleText: null }
+  return { pass: false, checks, notes, checkedAt: new Date().toISOString(), checkCompleted: false, legibleText: null, productPhysics: null }
 }
 
 /**
@@ -155,7 +204,7 @@ function failClosedVerdict(notes: string): VisionVerdict {
  * change.
  */
 function incompleteVerdict(notes: string): VisionVerdict {
-  return { pass: false, checks: null, notes, checkedAt: new Date().toISOString(), checkCompleted: false, legibleText: null }
+  return { pass: false, checks: null, notes, checkedAt: new Date().toISOString(), checkCompleted: false, legibleText: null, productPhysics: null }
 }
 
 /**
@@ -192,6 +241,11 @@ export function isValidVerdictShape(v: unknown): v is Omit<VisionVerdict, 'check
   // response missing it, or carrying the wrong type, did not follow the
   // expected shape and fails closed like any other malformed response.
   if (typeof o['legibleText'] !== 'string') return false
+  // Ticket #11460: productPhysics is a second report field, same convention.
+  // A real response must always carry one of the three enum values; a
+  // missing or unrecognized value did not follow the expected shape and
+  // fails closed like any other malformed response.
+  if (!PRODUCT_PHYSICS_VALUES.includes(o['productPhysics'] as ProductPhysicsVerdict)) return false
   return true
 }
 
@@ -216,10 +270,12 @@ export const VISION_SYSTEM_PROMPT = `You are a strict content-safety QA reviewer
 
 REPORT ONLY, not a check, does not affect "pass": legibleText. Read the whole frame for any legible text: brand wordmarks, barcodes, shipping labels, printed ingredient text, captions, watermarks, anything with readable letters or numbers. Transcribe everything legible into one string, or return "" if there is none. This ALSO covers marks that are not cleanly readable: a molded or embossed logo area, a button, or a label surface that shows dot-and-dash shapes, garbled or partially-formed characters, or an illegible pseudo-text pattern where readable lettering is clearly attempted but the exact letters cannot be made out. Do not return "" just because you cannot read it cleanly; describe what you see instead (for example "garbled illegible marks beneath a circular button, resembling text but not readable" or "dot-and-dash pseudo-text on the product body"). Only return "" when there is truly no text or text-like mark anywhere in the frame. Never judge whether the text is acceptable; that is a policy decision made elsewhere with more context than you have (for example a manufacturer's wordmark on a product actually being sold is allowed, while a barcode or shipping label is not, and you cannot tell those apart from pixels alone in every case). Just report what you read, or what you see attempted.
 
-Respond with ONLY a JSON object, no prose before or after, in exactly this shape:
-{"pass": true|false, "checks": {"limbCount": "pass"|"fail", "handAnatomy": "pass"|"fail", "faceBodyIntegrity": "pass"|"fail", "extraOrMergedLimbs": "pass"|"fail", "nippleOccluded": "pass"|"fail", "genitaliaAbsent": "pass"|"fail", "anusNotVisible": "pass"|"fail", "adultUnambiguous": "pass"|"fail"}, "notes": "one or two sentences on what you saw, especially for any fail", "legibleText": "<transcription of any legible text found, or empty string if none>"}
+REPORT ONLY, not a check, does not affect "pass": productPhysics. Look at whether any product depicted is in contact with a body. If no product touches a body anywhere in the frame (a product-only shot, or a body with no product against it), answer "not_applicable". Otherwise judge whether the contact is physically supported: answer "supported" when a hand is gripping the product (fingers visibly wrapped around it, or a palm cupped underneath it bearing its weight from below) OR the product rests on a surface that faces upward in the frame (so gravity could plausibly hold it there). Answer "unsupported" when neither is true: nothing in frame explains why the product is not falling, for example a product adhered to the side of a vertical surface (a shin, a hip, a wall) with no hand touching it, or an open flat palm merely laid flat beside or in front of a product with no fingers wrapped around it, or a hand resting on TOP of a product with no grip beneath or around it. An open flat palm beside a product is not support, and a hand resting on top of a product is not support; only a wrapped grip or a true underneath-cupping hold, or an upward-facing resting surface, counts. This is NOT a size or proportion check: a product rendered at an exaggerated, larger-than-real-life scale is completely normal for this brand and must still answer "supported" as long as the grip or resting surface is physically plausible; scale exaggeration and physical support are unrelated questions, and you must never answer "unsupported" because a product simply looks large relative to the body. Only fake or missing support is the fail condition here, never scale.
 
-"pass" is true only when all eight checks in "checks" are "pass"; "legibleText" never affects "pass". If the image has no visible people or hands at all (a product-only shot), checks 1-4 pass trivially; checks 5-8 still apply to any depicted skin or body part even without hands or a face; legibleText still applies to any text in the frame regardless. When in doubt about a genuine anatomy defect or an exposure/age-ambiguity issue, fail the check; this gate exists specifically to catch what a fast human scroll would catch, and a false block costs one regeneration while a false pass can publish something it must not. "legibleText" is always present in your response, even when it is "".`
+Respond with ONLY a JSON object, no prose before or after, in exactly this shape:
+{"pass": true|false, "checks": {"limbCount": "pass"|"fail", "handAnatomy": "pass"|"fail", "faceBodyIntegrity": "pass"|"fail", "extraOrMergedLimbs": "pass"|"fail", "nippleOccluded": "pass"|"fail", "genitaliaAbsent": "pass"|"fail", "anusNotVisible": "pass"|"fail", "adultUnambiguous": "pass"|"fail"}, "notes": "one or two sentences on what you saw, especially for any fail", "legibleText": "<transcription of any legible text found, or empty string if none>", "productPhysics": "supported"|"unsupported"|"not_applicable"}
+
+"pass" is true only when all eight checks in "checks" are "pass"; "legibleText" and "productPhysics" never affect "pass". If the image has no visible people or hands at all (a product-only shot), checks 1-4 pass trivially; checks 5-8 still apply to any depicted skin or body part even without hands or a face; legibleText still applies to any text in the frame regardless; productPhysics answers "not_applicable" when there is no product-on-body contact to judge. When in doubt about a genuine anatomy defect or an exposure/age-ambiguity issue, fail the check; this gate exists specifically to catch what a fast human scroll would catch, and a false block costs one regeneration while a false pass can publish something it must not. "legibleText" is always present in your response, even when it is ""; "productPhysics" is always present in your response, and is always one of "supported", "unsupported", or "not_applicable".`
 
 export interface VisionCallOpts {
   /**

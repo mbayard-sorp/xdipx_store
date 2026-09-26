@@ -28,6 +28,7 @@ const PASS_VERDICT: VisionVerdict = {
   checkedAt: '2026-09-20T00:00:00.000Z',
   checkCompleted: true,
   legibleText: '',
+  productPhysics: 'not_applicable',
 }
 
 const FAIL_VERDICT: VisionVerdict = { ...PASS_VERDICT, pass: false, notes: 'nipple visible' }

@@ -42,6 +42,7 @@ const PASSING_VERDICT: VisionVerdict = {
   checkedAt: '2026-08-31T00:00:00.000Z',
   checkCompleted: true,
   legibleText: '',
+  productPhysics: 'not_applicable',
 }
 
 /**
@@ -863,6 +864,7 @@ describe('vision-gate verdict', () => {
       checkedAt: '2026-08-30T00:00:00.000Z',
       checkCompleted: true,
       legibleText: '',
+      productPhysics: 'not_applicable',
     }
     const r = await runChecksRaw(
       { caption: CLEAN, mediaUrls: NON_PREFIX_MEDIA, postCreatedAt: null },
