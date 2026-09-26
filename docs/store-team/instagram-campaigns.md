@@ -420,6 +420,19 @@ never more than one in a day), and never run three or more faces in one campaign
 
 ### 3.2c The on-skin treatment (owner direction 2026-09-19)
 
+**A bodyscape frame is a CLOSE-UP body shot with the PRODUCT FORWARD.** Both halves bind and each
+fails independently. **Close-up:** the frame is filled by one body zone and the product. Not a
+full-body nude with a product in it, not a portrait. If the whole figure reads as the subject it is
+not a bodyscape, whatever the `cropScale` tag says. **Product forward:** the product is the subject,
+large in frame, sharp, unmistakably the thing being looked at. A product at the edge, cropped, tiny
+or incidental is a nude with a prop in it, and it fails.
+
+**This is also the primary exposure control, not only a craft rule.** A crop tight enough to be
+genuinely product-forward cannot contain a breast, a nipple or a pubic area, because they are outside
+the frame. Every exposure problem this campaign has produced came from a frame too WIDE to be a
+bodyscape. When a brief is tempted toward the whole figure, crop in; cropping in fixes the safety
+question and the product question at once.
+
 Owner, verbatim: *"Our posts are starting to get boring. Almost like we are regressing to boring
 and not staying on the edge of what's allowed to create curiosity and desire... products against
 skin on the body. I want to see the edges of breasts, the pubic mounds, bellies, backs, butt cheeks.
@@ -524,6 +537,27 @@ bullet goes at the collarbone, not the wrist, because the disguise is what peopl
 on the nipples, and they are the one product whose use zone and licensed placement are the same
 place: the stop list's test is "no nipple visible" and a pastie satisfies it BY being the product.
 A vibrator over a nipple is not settled by that and stays an owner question.
+
+**A palm-sized air-pulse rose goes in a hand.** Owner, verbatim: *"The rose is really a product best
+held in a hand."* Its whole character is that you pick it up and bring it to yourself. A rose set
+down on a thigh, a stomach or a shin is an ornament resting on a person, and it is the wrong picture
+of the product no matter how good the surface is. This generalises: **for any product whose use
+begins by picking it up, the hand IS the placement, and no resting surface is a substitute.** Roses
+and palm-sized air-pulse stimulators, bullets, small wands and anything whose selling story is grip,
+weight or discretion belong in a hand. Products whose story is line, length or graduated scale (bead
+strands along the spine) and products that are worn are the ones that legitimately rest.
+
+**Operational consequence, and it binds today.** The one thing the image pipeline currently cannot
+render is a credible grip (the render non-compliance finding in §3.2d). So until the hand-reference
+work in ticket #11464 lands, **rose and palm-held products must not be given on-skin resting frames
+as a workaround.** Take them out of the on-skin rotation and brief them some other way (product
+macro, in-scene, non-bodyscape) rather than producing another product-set-down-on-skin frame. Two
+attempts have now failed this way and both were misdiagnosed as placement problems: row 308 put a
+ROMP Rose on a shin, and a 2026-09-25 test put an inBloom Rosales on a thigh top. Neither was a
+surface choice to be corrected; both were the wrong frame concept for the product. This matters at
+scale, not just for two rows: the palm-held air-pulse class includes inBloom Rosales, the
+highest-stock SKU in the catalogue at 871 units, plus ROMP 2.0 and Womanizer Beauty, all of them
+campaign heroes.
 
 **Brief craft, from the owner's review of 40 frames on 2026-09-19. Binding.**
 
@@ -747,19 +781,30 @@ down", "thumb along the seam") and ADD the negative "no open flat palm beside th
 wrapped around it so the hand visibly carries its weight." The render returned a flat palm where the
 prompt asked for a grip.
 
+**DO THIS, physics. `social_media_assets` 704** (Prowler bead strand along the spine, generated
+2026-09-25). The first frame that genuinely obeys the §3.2c gravity rule: face down, small of the
+back as a true horizontal plane, each bead casting its own directional contact shadow sitting in the
+hollow under its own weight. Tight crop from the base of the ribs to the hip crease, nothing above or
+below, product large and centred. It is also PART 0's placement working exactly as predicted, the
+spine as the body's graduated column giving absolute scale.
+
 **NOT THIS. `social_posts` row 308, `social_media_assets` 675.** Owner-named as the example of poor
-placement ("a good example sample of the product placed poorly"). Never posted. It fails three
+placement ("a good example sample of the product placed poorly"). Never posted. It fails five
 separate rules at once, which is why it is the counter-exemplar:
 
-1. **Gravity (§3.2c).** The rose sits on the outer surface of her lower leg below the knee, a
+1. **§3.2c's bodyscape definition.** A full-body nude with a small incidental product is never a
+   bodyscape, whatever the crop scale tag says.
+2. **Exposure.** A nipple is visible at frame left, which the vision gate falsely passed (ticket
+   #11468).
+3. **Placement follows use, the rose rule.** A rose set down instead of held. A clitoral air-pulse
+   device on a shin has no relationship to how the product is used, and even perfectly held, a shin
+   says nothing about this product. This rule already existed and was broken with nothing detecting
+   it.
+4. **Gravity (§3.2c).** The rose sits on the outer surface of her lower leg below the knee, a
    convex, near-vertical plane as rendered, with no hand anywhere near it (both arms are folded
    around her knee at the top of the frame). Its contact shadow is a small hard ellipse that reads
    like a sticker rather than a weighted object settling into soft tissue.
-2. **Placement follows use (§3.2c, "Placement follows use, or it is a product on a person").** A
-   clitoral air-pulse device on a shin has no relationship to how the product is used. Even
-   perfectly held, a shin says nothing about this product. This rule already existed and was broken
-   with nothing detecting it.
-3. **Visible zone versus labelled zone (§3.2c's rotation window, "judged on the visible zone, not
+5. **Visible zone versus labelled zone (§3.2c's rotation window, "judged on the visible zone, not
    the label").** The row is tagged `bodyZone=thigh-top`; the visible zone is the shin. The rotation
    window was therefore computed against a zone that is not in the picture.
 
