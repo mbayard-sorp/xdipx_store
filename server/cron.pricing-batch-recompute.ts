@@ -167,6 +167,124 @@ async function kickContinuation(): Promise<boolean> {
 }
 
 /**
+ * How stale today's batch-cursor checkpoint must be before the watchdog below
+ * treats the self-continuation chain as dead rather than still walking.
+ * Sized well above the ~4-5 minute gap between continuations under normal
+ * operation (the 2026-09-26 incident's own continuations landed at
+ * 07:05/07:10/07:14/07:18), so a live walk never trips it, but short enough
+ * that a dead chain is caught in well under an hour instead of the 7+ hours
+ * it took a human to notice by hand.
+ */
+const WATCHDOG_STALL_MS = 20 * 60 * 1000
+
+/**
+ * Backstop for the self-continuation chain above: `kickContinuation` fires
+ * its next slice with an un-awaited `fetch` from a function that returns
+ * immediately after, so the serverless instance can freeze before the
+ * request is ever dispatched, silently dropping the rest of the day's walk
+ * with nothing to catch it (2026-09-26: 4 continuations ran cleanly, then
+ * nothing, for 7+ hours until pricing-ops manually caught it up).
+ *
+ * Rather than trying to make that fire-and-forget kick itself provably
+ * reliable, this runs on its own schedule (registered separately in
+ * vercel.json), reads the same durable checkpoint the chain writes, and when
+ * it finds today's walk undone and stale, alerts the owner the same way
+ * `alertPricingFailure` does AND resumes the walk itself with a normally
+ * awaited call — nothing fire-and-forget in this path, because this
+ * invocation is not itself already deep into its own budget the way the
+ * handler above is when it fires its kick.
+ */
+export async function handlePricingBatchWatchdog(_req: Request, res: Response): Promise<void> {
+  try {
+    const { utcDay, getPricingBatchCursorAgeMs } = await import('../app/lib/pricing-apply-v2.server.js')
+    const day = utcDay()
+    const ageMs = await getPricingBatchCursorAgeMs(day)
+    if (ageMs == null || ageMs < WATCHDOG_STALL_MS) {
+      res.json({ ok: true, skipped: ageMs == null ? 'not-stalled' : 'fresh', ageMs })
+      return
+    }
+
+    // One owner alert per stalled day, not one per 15-minute tick while it
+    // stays stalled.
+    const { kvSetNX } = await import('../app/lib/kv.server.js')
+    const alerted = await kvSetNX(`pricing-batch:stall-alerted:${day}`, '1', 24 * 60 * 60)
+    if (alerted) {
+      await alertPricingStall(ageMs)
+    }
+
+    const origin = process.env['APP_URL'] ?? process.env['VERCEL_URL']
+    const secret = process.env['CRON_SECRET']
+    let resumed = false
+    if (origin && secret) {
+      const base = origin.startsWith('http') ? origin : `https://${origin}`
+      try {
+        const r = await fetch(`${base}/cron/pricing-batch-recompute`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-cron-secret': secret },
+          body: JSON.stringify({ trigger: 'batch_continuation' }),
+        })
+        resumed = r.ok
+      } catch (err) {
+        console.error('[cron:pricing-batch-watchdog] resume fetch failed:', err)
+      }
+    } else {
+      console.warn('[cron:pricing-batch-watchdog] no APP_URL/CRON_SECRET; cannot resume')
+    }
+
+    res.json({ ok: true, stalled: true, ageMs, alerted, resumed })
+  } catch (err) {
+    console.error('[cron:pricing-batch-watchdog]', err)
+    res.status(500).json({ error: String(err) })
+  }
+}
+
+async function alertPricingStall(ageMs: number): Promise<void> {
+  const minutes = Math.round(ageMs / 60_000)
+
+  try {
+    const { Sentry } = await import('../app/lib/sentry.server.js')
+    Sentry.captureMessage(
+      `pricing batch recompute stalled: no checkpoint progress for ${minutes} min`,
+      { level: 'warning', tags: { cron: 'pricing-batch-watchdog', severity: 'P1' } },
+    )
+  } catch (e) {
+    console.error('[cron:pricing-batch-watchdog] Sentry capture failed (ignored):', e)
+  }
+
+  try {
+    const { fileDetectionTicket, makeDedupeKey, priorityFromSeverity } =
+      await import('../app/lib/detection-tickets.server.js')
+    await fileDetectionTicket({
+      detector: 'pricing-batch-watchdog',
+      // Undated: one open conversation per stall, like the failure ticket above.
+      dedupeKey: makeDedupeKey('pricing', 'batch-stall'),
+      priority: priorityFromSeverity('P1'),
+      category: 'other',
+      kind: 'code',
+      suggestion:
+        `The pricing batch recompute's self-continuation chain went quiet for ${minutes} minutes `
+        + 'with today unfinished (pricing_batch_cursor done:false, no checkpoint progress). The '
+        + 'watchdog is attempting one resume now. If this keeps recurring, the self-continuation '
+        + "kick in kickContinuation() needs a durable dispatch path of its own, not just this backstop.",
+    })
+  } catch (e) {
+    console.error('[cron:pricing-batch-watchdog] ticket filing failed (ignored):', e)
+  }
+
+  try {
+    const { sendOwnerEmail, escapeHtml } = await import('../app/lib/owner-alerts.server.js')
+    await sendOwnerEmail(
+      '[P1] xdipx pricing batch recompute stalled',
+      `<p>The pricing batch recompute stopped self-continuing ${escapeHtml(String(minutes))} minutes ago with today's catalog walk still unfinished.</p>
+       <p>The watchdog is resuming it now. Prices already computed today are unaffected; the rest of the catalog keeps yesterday's price until the walk finishes.</p>`,
+      { escalation: 'pricing-report' },
+    )
+  } catch (e) {
+    console.error('[cron:pricing-batch-watchdog] owner email failed (ignored):', e)
+  }
+}
+
+/**
  * Autopilot's replacement for the approval queue: once the day's walk is
  * complete, one email listing every applied change over the digest threshold
  * and every reject or apply error. Sent only in autopilot mode; the other
