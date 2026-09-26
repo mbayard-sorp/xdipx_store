@@ -27,6 +27,7 @@ import { nalpacPriceHistory } from '../../db/schema'
 import { getPipelineSetting } from './feed-processor.server'
 import { findVariantsBySkus, updateProductMetafield } from './shopify.server'
 import { recomputeVariant } from './pricing-apply-v2.server'
+import { fileDetectionTicket, makeDedupeKey, priorityFromSeverity } from './detection-tickets.server'
 import type { NalpacPriceSnapshot } from './nalpac-feeds.server'
 
 export interface CostSyncResult {
@@ -40,16 +41,31 @@ export interface CostSyncResult {
   /** Variants successfully pushed through updateProductMetafield +
    *  recomputeVariant without throwing. */
   variantsRepriced: number
+  /** SKUs where a material wholesale INCREASE was detected and FLAGGED via a
+   *  detection ticket (ticket #10871). Never repriced automatically -- the
+   *  drop side of this module exists to protect margin fast, but a cost rise
+   *  is a "should we eat it or pass it on" call this module does not make. */
+  increasesFlagged: number
   errors: string[]
 }
 
 const DISABLED_RESULT: CostSyncResult = {
-  enabled:          false,
-  skusChecked:      0,
-  dropsDetected:    0,
-  variantsRepriced: 0,
-  errors:           [],
+  enabled:           false,
+  skusChecked:       0,
+  dropsDetected:     0,
+  variantsRepriced:  0,
+  increasesFlagged:  0,
+  errors:            [],
 }
+
+/**
+ * Per-run ceiling on new wholesale-rise detection tickets (ticket #10871), so
+ * a broad feed-wide cost jump can't flood the product-team queue in one run.
+ * `fileDetectionTicket`'s own dedupe already keeps a persistently-elevated SKU
+ * from refiling every day while its ticket is still open; this cap is only
+ * about the first run a rise is seen across many SKUs at once.
+ */
+const MAX_WHOLESALE_RISE_FLAGS_PER_RUN = 10
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100
@@ -94,11 +110,12 @@ export async function runNalpacCostSync(opts: {
     const carriedInFeed = [...carriedSkus].filter(sku => snapshots.has(sku))
 
     const result: CostSyncResult = {
-      enabled:          true,
-      skusChecked:      carriedInFeed.length,
-      dropsDetected:    0,
-      variantsRepriced: 0,
-      errors:           [],
+      enabled:           true,
+      skusChecked:       carriedInFeed.length,
+      dropsDetected:     0,
+      variantsRepriced:  0,
+      increasesFlagged:  0,
+      errors:            [],
     }
 
     if (carriedInFeed.length === 0) return result
@@ -117,6 +134,13 @@ export async function runNalpacCostSync(opts: {
     const now = new Date()
 
     const dropSkus: string[] = []
+    // Ticket #10871: material wholesale INCREASE on a carried sku, the mirror
+    // image of wholesaleDrop below. FLAGGED only (a detection ticket for
+    // product/pricing to review), never pushed through updateProductMetafield
+    // + recomputeVariant -- unlike a drop, passing a cost rise through to the
+    // live sell price is a business call, not a mechanical margin-protection
+    // sync, so this module stops at surfacing it.
+    const riseFlags: { sku: string; priorWholesale: number; newWholesale: number }[] = []
     type HistoryRow = typeof nalpacPriceHistory.$inferInsert
     const upsertRows: HistoryRow[] = []
 
@@ -146,6 +170,15 @@ export async function runNalpacCostSync(opts: {
           const syncedToday = prior.syncedAt.toISOString().slice(0, 10) === today
           if (syncedToday) isDrop = false // already emitted this drop today; don't re-fire on a same-day retry
         }
+
+        // Wholesale only, matching the ticket's explicit scope ("material
+        // wholesale INCREASES") -- MAP rising is not the same margin-erosion
+        // risk a silent wholesale rise is. Mutually exclusive with
+        // wholesaleDrop by construction (dropPct > 0), so this never fires on
+        // a sku already queued for a drop-sync above.
+        const wholesaleRise = priorWholesale > 0 && newWholesale > 0 &&
+          newWholesale >= priorWholesale * (1 + dropPct)
+        if (wholesaleRise) riseFlags.push({ sku, priorWholesale, newWholesale })
       }
 
       if (isDrop) {
@@ -209,6 +242,39 @@ export async function runNalpacCostSync(opts: {
       }
     }
 
+    // 4b. File a FLAG-only detection ticket per material wholesale rise
+    // (ticket #10871), capped per run. `fileDetectionTicket`'s own dedupe
+    // (ON CONFLICT DO NOTHING while a same-key ticket is still open) keeps a
+    // persistently-elevated sku from refiling every day on its own; the cap
+    // here is only about a single run seeing many risers at once. Never
+    // blocks or fails the drop-sync path below.
+    for (const flag of riseFlags.slice(0, MAX_WHOLESALE_RISE_FLAGS_PER_RUN)) {
+      try {
+        const id = await fileDetectionTicket({
+          detector:   'cost-sync',
+          dedupeKey:  makeDedupeKey('cost-sync-wholesale-rise', flag.sku),
+          priority:   priorityFromSeverity('P3'),
+          category:   'other',
+          kind:       'process',
+          targetTeam: 'product',
+          suggestion:
+            `Carried SKU ${flag.sku}'s Nalpac wholesale cost rose from $${flag.priorWholesale.toFixed(2)} ` +
+            `to $${flag.newWholesale.toFixed(2)} (>= the ${Math.round(dropPct * 100)}% material-change ` +
+            `threshold this module also uses to detect a drop). This is a FLAG only: cost-sync never reprices ` +
+            `on a rise the way it does on a drop, because passing a higher cost through to the live sell price ` +
+            `is a business call, not a mechanical margin-protection sync. Confirm whether the live sell price ` +
+            `still clears margin at the new wholesale, and reprice through the normal pricing pipeline if not. ` +
+            `DONE WHEN: ${flag.sku}'s margin at its current live price is confirmed acceptable at the new ` +
+            `wholesale, or it is repriced.`,
+        })
+        if (id) result.increasesFlagged++
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        console.error(`[cost-sync] wholesale-rise flag failed for sku ${flag.sku}:`, msg)
+        result.errors.push(`${flag.sku}: rise-flag ${msg}`)
+      }
+    }
+
     if (dropSkus.length === 0) return result
 
     // 5. Resolve drop SKUs to Shopify variants, sync cost/MAP metafields, then
@@ -260,11 +326,12 @@ export async function runNalpacCostSync(opts: {
     const msg = err instanceof Error ? err.message : String(err)
     console.error('[cost-sync] runNalpacCostSync failed:', msg)
     return {
-      enabled:          true,
-      skusChecked:      0,
-      dropsDetected:    0,
-      variantsRepriced: 0,
-      errors:           [msg],
+      enabled:           true,
+      skusChecked:       0,
+      dropsDetected:     0,
+      variantsRepriced:  0,
+      increasesFlagged:  0,
+      errors:            [msg],
     }
   }
 }
