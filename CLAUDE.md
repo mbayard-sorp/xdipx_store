@@ -91,7 +91,7 @@ Build and test at 375px first. Most traffic will be mobile. Use responsive class
 
 ## Brand Design Tokens (v3 — Style Guide Nº 01, Spring 2026)
 
-> **White paper. Coral for life. Plum for emphasis.** Colors live in `app/app.css` as `@theme` variables. Tailwind utilities use the token name directly (`bg-paper`, `text-ink`, `bg-coral`). Prefer the v3 names below. The v2 names (`cream`, `cream-2`, `muted`, `coral-deep`, `sun`, `butter`, `font-script`) are kept as **legacy aliases** mapped onto the v3 palette so old utility classes still compile — do not use them in new code.
+> **White paper. Coral for life. Plum for emphasis.** Colors live in `app/app.css` as `@theme` variables. Tailwind utilities use the token name directly (`bg-paper`, `text-ink`, `bg-coral`). Prefer the v3 names below. The v2 names `cream`, `cream-2`, `muted`, `coral-deep` are true **legacy aliases** — each maps 1:1 onto a v3 token so old utility classes still compile — do not use them in new code; migration is sized and scheduled in `docs/homepage-team/v2-legacy-alias-sizing-2026-09-27.md` (ticket #11070). `sun` and `butter` are **not** aliases for anything (no v3 equivalent is defined) and are not scheduled for removal — `butter` in particular is a live customer-facing gradient treatment on the bundle hero components. `font-script` is genuinely legacy-accent, sparing-use only, per its own entry below.
 
 | Token | Value | Use |
 |---|---|---|
