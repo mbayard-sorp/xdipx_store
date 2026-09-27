@@ -68,8 +68,13 @@ If `ok:false`: post `{"op":"update","id":$RUN_ID,"update":{"status":"skipped","f
 - Cross-team activity: `POST /api/team/event {"op":"list","sinceDays":7}`.
 - Improvement bus state: `POST /api/team/suggestion {"op":"list"}`.
 - Outcomes: `daily_profit_summary` (orders/revenue/margin/AOV/ad_spend), GA4 via the
-  `google-analytics` MCP (≥300 sessions/week to weight it), `social_posts` (drafts vs posted),
-  `ad_campaigns` statuses, calendar `GET /api/team/calendar`.
+  `google-analytics` MCP when it is attached to this sandbox, else `GET /api/team/ga4-summary` over
+  the team token — a separate access path, readable even when the MCP is not attached (confirmed
+  2026-09-23, ticket #11067: ten consecutive briefs had called GA4 unreadable on the MCP-only
+  premise while the team-token endpoint returned real data on the first attempt). Try the endpoint
+  before declaring GA4 dark. Weight the numbers only at ≥300 sessions/week; below that, report them
+  as a heuristic. `social_posts` (drafts vs posted), `ad_campaigns` statuses, calendar
+  `GET /api/team/calendar`.
 - Review funnel: invite/review counts from `review_invites` + `review_aggregates` (the data behind
   `getReviewStats` in `app/lib/reviews.server.ts`). Report invites-sent and reviews-landed in the
   brief; **if orders shipped this week but invites-sent is 0 for 7 straight days, file a
