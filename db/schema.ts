@@ -2085,6 +2085,10 @@ export const videoEpisodes = pgTable('video_episodes', {
   actualCostUsd:     decimal('actual_cost_usd', { precision: 10, scale: 5 }),
 
   plannedSlotAt:     timestamp('planned_slot_at', { withTimezone: true }),
+  // The intended POST date (ticket #11153), distinct from plannedSlotAt's
+  // render-by date. fanOutVideoToSocialDrafts and the calendar's videoClips
+  // prefer this when set; claimNextEpisode still reads plannedSlotAt only.
+  postSlotAt:        timestamp('post_slot_at', { withTimezone: true }),
   postedAt:          timestamp('posted_at', { withTimezone: true }),
   measuredAt:        timestamp('measured_at', { withTimezone: true }),
 

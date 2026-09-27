@@ -5,7 +5,9 @@
  *
  * `videoClips` (video program v2, Phase 2b) lists video episodes from
  * owner-approved through posted: { episodeId, productHandle, title, speaker,
- * format, status, plannedSlotAt, postedAt?, permalink? }. Window: from/to when
+ * format, status, plannedSlotAt, postSlotAt?, postedAt?, permalink? }.
+ * plannedSlotAt is the render-by date; postSlotAt (ticket #11153) is the
+ * intended post date when it differs and is set. Window: from/to when
  * given, else 14 days back to 14 days forward; an approved clip with no slot
  * yet is always listed. `events` is unchanged for existing consumers, and a
  * failed clip lookup returns `videoClips: []` rather than failing the calendar
