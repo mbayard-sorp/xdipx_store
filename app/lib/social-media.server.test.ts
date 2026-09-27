@@ -314,6 +314,8 @@ describe('tagIncompleteVisionVerdict', () => {
     checkCompleted: false,
     legibleText: null,
     productPhysics: null,
+    handDigitCounts: null,
+    backAnatomyRead: null,
   }
 
   const completedFail: VisionVerdict = {
@@ -327,6 +329,8 @@ describe('tagIncompleteVisionVerdict', () => {
     checkCompleted: true,
     legibleText: '',
     productPhysics: 'not_applicable',
+    handDigitCounts: [],
+    backAnatomyRead: '',
   }
 
   it('tags an asset whose verdict never completed', async () => {

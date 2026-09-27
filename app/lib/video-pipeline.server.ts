@@ -2276,6 +2276,8 @@ function ownerOverrideGateResult(): VideoFrameGateResult {
     checkCompleted: false,
     legibleText: null,
     productPhysics: null,
+    handDigitCounts: null,
+    backAnatomyRead: null,
   }
   return {
     pass: true,

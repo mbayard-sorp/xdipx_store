@@ -42,6 +42,8 @@ const PASS_VERDICT: VisionVerdict = {
   checkCompleted: true,
   legibleText: '',
   productPhysics: 'not_applicable',
+  handDigitCounts: [],
+  backAnatomyRead: '',
 }
 
 const FAIL_VERDICT: VisionVerdict = {

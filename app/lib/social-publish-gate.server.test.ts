@@ -44,6 +44,8 @@ const PASSING_VERDICT: VisionVerdict = {
   checkCompleted: true,
   legibleText: '',
   productPhysics: 'not_applicable',
+  handDigitCounts: [],
+  backAnatomyRead: '',
 }
 
 /**
@@ -1010,6 +1012,8 @@ describe('vision-gate verdict', () => {
       checkCompleted: true,
       legibleText: '',
       productPhysics: 'not_applicable',
+      handDigitCounts: [],
+      backAnatomyRead: '',
     }
     const r = await runRaw(
       { caption: CLEAN, mediaUrls: NON_PREFIX_MEDIA, postCreatedAt: null },
