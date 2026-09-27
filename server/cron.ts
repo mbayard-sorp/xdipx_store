@@ -1,6 +1,6 @@
 import { Router, type Request, type Response, type NextFunction } from 'express'
 import { timingSafeEqual } from 'node:crypto'
-import { handlePricingBatchRecompute, handlePricingAuditPrune } from './cron.pricing-batch-recompute.js'
+import { handlePricingBatchRecompute, handlePricingAuditPrune, handlePricingBatchWatchdog } from './cron.pricing-batch-recompute.js'
 
 function safeEqual(a: string, b: string): boolean {
   const ab = Buffer.from(a)
@@ -786,6 +786,15 @@ export function createCronRoutes() {
   cronRoute('/pricing-batch-recompute', handlePricingBatchRecompute)
   // Retention, deliberately on its own budget rather than riding the recompute's.
   cronRoute('/pricing-audit-prune', handlePricingAuditPrune)
+
+  /**
+   * POST /cron/pricing-batch-watchdog
+   * Backstop for the self-continuation chain above (see the handler's own
+   * comment): checks today's batch-cursor checkpoint for staleness and, if
+   * the chain has gone quiet with the day unfinished, alerts the owner and
+   * resumes the walk itself.
+   */
+  cronRoute('/pricing-batch-watchdog', handlePricingBatchWatchdog)
 
   /**
    * POST /cron/import-monitor
@@ -1729,8 +1738,8 @@ export function createCronRoutes() {
       }
 
       let alarms: {
-        filed: string[]; closed: number[]; escalated: string[]; unreadable: string[]
-      } = { filed: [], closed: [], escalated: [], unreadable: [] }
+        filed: string[]; closed: number[]; escalated: string[]; unreadable: string[]; unblocked: number[]
+      } = { filed: [], closed: [], escalated: [], unreadable: [], unblocked: [] }
       try {
         const { reconcileCronAlarms } = await import('../app/lib/cron-liveness-tickets.server.js')
         alarms = await reconcileCronAlarms(liveness, unwatched, floors)
@@ -1810,6 +1819,8 @@ export function createCronRoutes() {
           escalated: alarms.escalated.length,
           unreadable: alarms.unreadable,
           closedIds: alarms.closed,
+          unblocked: alarms.unblocked.length,
+          unblockedIds: alarms.unblocked,
         },
         credentials: credentials.map(c => ({ key: c.key, state: c.state, detail: c.detail })),
         credentialBlockers,

@@ -42,6 +42,7 @@ starts from it: its signature and frame system set what a frame says before §3.
 
 <hard_constraints>
 - **No text in generated images.** Every brief carries the negatives: no words, no letters, no labels, no logos, no wordmarks, no engraved characters, no watermarks. This includes text on the product itself; a reference packshot will happily reproduce a brand wordmark and that is a reject. Copy lives in the caption. Owner directive, never relaxed.
+- **On-skin briefs carry a standing negative for unbriefed marks, redness, and bruising.** Every on-skin brief (§3.2c) carries the negative: no unbriefed marks, no redness, no bruising on visible skin. This does not loosen §3.2c's own natural, unretouched skin texture requirement: ordinary skin texture stays in, cosmetic marks/redness/bruising a generator adds unprompted do not. Follow-up to #11477 (PR #1368, code lane), which added the report-only `skinMarks` vision-gate check; this gives the generator the same instruction up front instead of catching it only after generation.
 - **A cast member in a scene is mandatory on every product post (§3.7).** The lead image is a person somewhere real, with the product. A product alone, however beautifully styled, is not a publishable lead frame. Emma is a cast member and is in the rotation.
 - **If no approved `castMember` with a `referencePhoto` exists, you cannot brief a product post.** Say so, declare Instagram product drafting degraded-to-zero, and hand that back. **Never substitute a product-only frame to fill the slot.** That substitution produced row 59, which the owner rejected, and it converts an honest zero into a silent unpublishable draft that looks like output.
 - **The product must be the real product.** Every brief names the product's real Shopify photo as `productImageUrl` and passes it again in `extraImageUrls`. That is not redundant: stage 1 renders a packaging-free plate and stage 2 re-interprets it per candidate, and a single look at the true shape is how a frame once shipped with an object that was no SKU at all.
@@ -160,8 +161,10 @@ On-skin block (MANDATORY on every product post while the standing order below is
 
 Clothed exception (use INSTEAD of the On-skin block, and only for one of the two reasons below)
   Wardrobe: <garment and its coverage>
-  Why clothed: <either "product-free resource post, subject has no product in it" or
-    "owner standing order is off", and nothing else counts>
+  Why clothed: <"owner standing order is off", and nothing else counts. The former reason
+    "product-free resource post, subject has no product in it" was closed by the owner on
+    2026-09-27 ("Every post should be a bodyscape post until I say stop", `instagram-campaigns.md`
+    §3.2c): a resource post gets a bodyscape with the product that makes its subject visible>
 
   A clothed product frame is now an exception that has to justify itself in writing. That is the
   whole change. The previous version of this template carried `Wardrobe` inside the mandatory Lead
@@ -181,10 +184,10 @@ Delta: <what a scroller sees that differs from the last post, and from the last 
 
 Row fields (every brief outputs all five, and the routine carries them onto the draft row):
   castSlug: <slug, or slugs when two are in frame>
-  bodyZone: <named zone. "none" ONLY on a product-free resource post, or when the standing order
-    is off. Never left blank: a blank is not an answer, and nothing downstream can tell a blank
-    apart from a frame nobody judged>
-  contactMode: <mode. "none" under the same two conditions as bodyZone, never blank>
+  bodyZone: <named zone. "none" ONLY when the owner standing order is off (since 2026-09-27 a
+    product-free resource post is no longer a reason). Never left blank: a blank is not an answer,
+    and nothing downstream can tell a blank apart from a frame nobody judged>
+  contactMode: <mode. "none" under the same condition as bodyZone, never blank>
   cropScale: <macro | close | medium. Always sent, because it is what makes bodyZone and
     contactMode required at generation>
   sceneLocation: <where, always, including when the crop eats the room>

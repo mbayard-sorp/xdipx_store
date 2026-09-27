@@ -989,6 +989,37 @@ export async function readPricingBatchCursor(day: string): Promise<PricingBatchC
   }
 }
 
+/**
+ * Milliseconds since today's batch-cursor checkpoint last advanced, or `null`
+ * when there is nothing to watch: no checkpoint for today yet (the missed-run
+ * alarm on the 07:00 pass already covers a walk that never started), the
+ * stored row belongs to a prior day, or today's walk is already `done`.
+ *
+ * Exists for a watchdog to tell "still walking, the next self-continuation
+ * hasn't landed yet" from "the self-continuation chain silently died" without
+ * depending on the same fire-and-forget kick it exists to catch.
+ */
+export async function getPricingBatchCursorAgeMs(
+  day: string,
+  now: () => number = Date.now,
+): Promise<number | null> {
+  try {
+    const rows = await db
+      .select({ value: pipelineSettings.value, updatedAt: pipelineSettings.updatedAt })
+      .from(pipelineSettings)
+      .where(eq(pipelineSettings.key, PRICING_BATCH_CURSOR_KEY))
+      .limit(1)
+    const row = rows[0]
+    if (!row?.value || !row.updatedAt) return null
+    const parsed = JSON.parse(row.value) as Partial<PricingBatchCursor>
+    if (parsed.day !== day || parsed.done === true) return null
+    return now() - new Date(row.updatedAt).getTime()
+  } catch (err) {
+    console.warn('[pricing-batch] cursor age read failed (ignored):', err)
+    return null
+  }
+}
+
 async function writePricingBatchCursor(state: PricingBatchCursor): Promise<void> {
   // Ephemeral run state, not a valve: deliberately not routed through the
   // audited settings setter, which would write one audit row per continuation.

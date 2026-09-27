@@ -72,8 +72,17 @@ export function remoteVisionCallVision(runId?: number): NonNullable<VisionGateDe
       throw new Error(`vision-gate route could not complete the check: ${verdict.notes}`)
     }
     return {
-      pass: verdict.pass, checks: verdict.checks, notes: verdict.notes,
-      legibleText: verdict.legibleText, skinMarks: verdict.skinMarks,
+      pass: verdict.pass,
+      checks: verdict.checks,
+      notes: verdict.notes,
+      legibleText: verdict.legibleText,
+      skinMarks: verdict.skinMarks,
+      productPhysics: verdict.productPhysics,
+      // Ticket #11029: isValidVerdictShape now requires both fields on every
+      // parsed response; omitting them here would fail-close every remote
+      // (sandbox-with-no-ANTHROPIC_API_KEY) call as a malformed shape.
+      handDigitCounts: verdict.handDigitCounts,
+      backAnatomyRead: verdict.backAnatomyRead,
     }
   }
 }

@@ -2276,6 +2276,9 @@ function ownerOverrideGateResult(): VideoFrameGateResult {
     checkCompleted: false,
     legibleText: null,
     skinMarks: null,
+    productPhysics: null,
+    handDigitCounts: null,
+    backAnatomyRead: null,
   }
   return {
     pass: true,
@@ -2594,10 +2597,12 @@ export interface FanOutResult {
  * still owns whether the finished POST ships. Nothing here posts anywhere.
  *
  * Ticket #5715 rewrote the row it writes:
- *   - scheduledAt is the REAL slot instant (episode planned_slot_at or the
- *     explicit opts value); scheduledFor dual-writes the LA calendar date of
- *     that instant for the COALESCE readers. No slot -> today (due now),
- *     preserving the pre-episode behavior.
+ *   - scheduledAt is the REAL slot instant (the explicit opts value, else the
+ *     episode's post_slot_at, else its planned_slot_at -- ticket #11153 split
+ *     the render-by date from the intended post date; planned_slot_at is the
+ *     former and stays what claimNextEpisode reads); scheduledFor dual-writes
+ *     the LA calendar date of that instant for the COALESCE readers. No slot
+ *     -> today (due now), preserving the pre-episode behavior.
  *   - altText (episode logline), castSlugs, shopifyProductId (first placement
  *     gid: its absence is why the pre-publish stock block never fired on
  *     video posts), episodeId (the learn-mode join), mediaKind 'video'.
@@ -2627,7 +2632,7 @@ export async function fanOutVideoToSocialDrafts(jobRowId: number, reviewedBy: st
     ? (await db.select().from(videoEpisodes).where(eq(videoEpisodes.id, episodeId)).limit(1))[0] ?? null
     : null
 
-  const scheduledAt = opts.scheduledAt ?? episode?.plannedSlotAt ?? null
+  const scheduledAt = opts.scheduledAt ?? episode?.postSlotAt ?? episode?.plannedSlotAt ?? null
   const scheduledFor = scheduledAt
     ? (utcIsoToLaWallClock(scheduledAt)?.date ?? scheduledAt.toISOString().slice(0, 10))
     : new Date().toISOString().slice(0, 10)

@@ -198,6 +198,32 @@ export function Footer({ socialLinks = [], footerColumns = [], brandLinks, categ
           <QuickLinkRow heading="Shop by category" links={categoryRow} />
         </nav>
 
+        {/* Legitimacy row: payment marks + a real way to reach a human.
+            Doctrine section 6, "the footer is a legitimacy document" — a
+            wary first-timer (and ad-network reviewers) read the footer
+            before trusting the card form. */}
+        <div className="border-t border-white/10 pt-6 pb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div
+            role="img"
+            aria-label="We accept Visa, Mastercard, American Express, and Discover"
+            className="flex items-center gap-1.5"
+          >
+            <PaymentMark label="Visa" />
+            <PaymentMark label="MC" />
+            <PaymentMark label="Amex" />
+            <PaymentMark label="Discover" />
+          </div>
+          <p className="text-xs text-white/50">
+            Reach a human at{' '}
+            <a
+              href="mailto:hello@xdipx.com"
+              className="text-white/70 underline underline-offset-2 hover:text-white transition-colors"
+            >
+              hello@xdipx.com
+            </a>
+          </p>
+        </div>
+
         {/* Divider */}
         <div className="border-t border-white/10 pt-6">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-white/50">
@@ -210,6 +236,21 @@ export function Footer({ socialLinks = [], footerColumns = [], brandLinks, categ
 
       </div>
     </footer>
+  )
+}
+
+/**
+ * A quiet "we accept" badge. Deliberately a monochrome text mark rather than
+ * an exact-color network logo (the SocialIcon set below reproduces official
+ * brand shapes because those are the platforms themselves; a payment network
+ * mark is closer to a claim of official partnership, so this stays generic
+ * and stateless like the rest of the footer's trust language).
+ */
+function PaymentMark({ label }: { label: string }) {
+  return (
+    <span className="inline-flex h-5 items-center rounded border border-white/20 px-1.5 text-[9px] font-bold uppercase tracking-wide text-white/50">
+      {label}
+    </span>
   )
 }
 

@@ -48,9 +48,9 @@ const POSTS: Post[] = [
 ]
 
 const TONES = {
-  coral: { bg: '#FFE6DD', fg: '#1A1418', accent: '#FF5A36' },
+  coral: { bg: '#FFE6DD', fg: '#1A1418', accent: '#C2350F' },
   plum: { bg: '#F3E8FB', fg: '#1A1418', accent: '#7A2BB8' },
-  paper: { bg: '#FFFFFF', fg: '#1A1418', accent: '#FF5A36' },
+  paper: { bg: '#FFFFFF', fg: '#1A1418', accent: '#C2350F' },
 }
 
 function slideHtml(s: Slide, n: number, total: number): string {

@@ -74,6 +74,13 @@ export interface RemovalWatchResult {
   /** Set when a clean stretch earned one step of volume back. */
   frequencyRestoredTo?: number
   valveTurnedOff?: boolean
+  /**
+   * Set when this sweep found frequency has moved at least once (a
+   * step-down or a prior recovery) but no ceiling is recorded to climb back
+   * toward — see `recoveredFrequency`'s doc comment, case 1. A fresh channel
+   * that has never been cut also has no ceiling, and that is NOT this case.
+   */
+  ceilingMissing?: boolean
 }
 
 export interface RemovalWatchDeps {
@@ -228,7 +235,14 @@ export interface RecoveryInput {
  *
  * 1. **Nothing to restore.** No recorded ceiling, or already at it. Volume never
  *    climbs above where it was before the cut: this reverses a penalty, it does
- *    not set policy.
+ *    not set policy. This function itself does not distinguish "no ceiling" from
+ *    "already at ceiling" — both are legitimately "do nothing" here — but its
+ *    caller does (see `runRemovalWatch`'s `ceilingMissing`), because only the
+ *    caller also has `lastChangeAt`, which is what tells apart a channel that
+ *    has never been cut (both null, unremarkable) from one that was cut before
+ *    the ceiling-recording write existed and now has nothing to climb back to
+ *    (ceiling null, lastChangeAt not, ticket #11454). An absent ceiling must
+ *    never silently read the same as a ratchet that already did its job.
  * 2. **Not clean.** Any platform-attributed removal in the window. Owner-removed
  *    posts are already excluded upstream by `removalSource != 'owner'`, which is
  *    why "platform-attributed" is the right word here and not "any removal".
@@ -340,11 +354,45 @@ export async function runRemovalWatch(deps: RemovalWatchDeps = {}): Promise<Remo
     const ceilingRaw = await readSetting(ceilingKey('instagram'))
     const changedRaw = await readSetting(changedAtKey('instagram'))
     const changedAt = changedRaw ? new Date(changedRaw) : null
+    const ceiling = Number.isFinite(Number(ceilingRaw)) && Number(ceilingRaw) > 0 ? Number(ceilingRaw) : null
+    const lastChangeAt = changedAt && !Number.isNaN(changedAt.getTime()) ? changedAt : null
+
+    // A missing ceiling and "already fully recovered" both make
+    // `recoveredFrequency` return null, and that collapse is fine INSIDE that
+    // function — both mean "do nothing" there. It is not fine here, because
+    // silence is exactly how the one real step-down in this account's history
+    // (08-31, before the ceiling-recording write landed 09-02) sat unfixable
+    // for weeks: nothing ever told anyone the ratchet had nothing to climb
+    // back toward (ticket #11454). `lastChangeAt` is the signal this call site
+    // has that the pure function does not: it is written on every step-down
+    // AND every recovery, so non-null `lastChangeAt` alongside a null ceiling
+    // means frequency moved at least once with nothing recorded to restore it
+    // to. A channel that has never been cut has null/null for both, and that
+    // is not a gap worth a page.
+    if (ceiling === null && lastChangeAt !== null) {
+      result.ceilingMissing = true
+      await file({
+        dedupeKey: 'ig-recovery-ceiling-missing',
+        title: 'Instagram posting frequency has no recovery ceiling recorded',
+        detail:
+          `pipeline_settings.social_freq_instagram is ${current}/day and last changed ` +
+          `${lastChangeAt.toISOString()}, but ${ceilingKey('instagram')} does not exist. ` +
+          'recoveredFrequency() has nothing to climb back toward, so volume stays at this ' +
+          'value forever until a ceiling is recorded. Per ticket #11454 the code should not ' +
+          'pick that number itself.',
+        unblocks: 'Instagram posting volume ever climbing back after this cut.',
+        whereToGo: `Decide the right value and set pipeline_settings.${ceilingKey('instagram')} (ticket #11454).`,
+        category: 'decision',
+        priority: 2,
+        source: 'agent',
+      })
+    }
+
     const restored = recoveredFrequency({
       current,
-      ceiling: Number.isFinite(Number(ceilingRaw)) && Number(ceilingRaw) > 0 ? Number(ceilingRaw) : null,
+      ceiling,
       removalsInWindow,
-      lastChangeAt: changedAt && !Number.isNaN(changedAt.getTime()) ? changedAt : null,
+      lastChangeAt,
       now,
       observed: true,
     })

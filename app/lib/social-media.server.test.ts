@@ -314,6 +314,9 @@ describe('tagIncompleteVisionVerdict', () => {
     checkCompleted: false,
     legibleText: null,
     skinMarks: null,
+    productPhysics: null,
+    handDigitCounts: null,
+    backAnatomyRead: null,
   }
 
   const completedFail: VisionVerdict = {
@@ -327,6 +330,9 @@ describe('tagIncompleteVisionVerdict', () => {
     checkCompleted: true,
     legibleText: '',
     skinMarks: '',
+    productPhysics: 'not_applicable',
+    handDigitCounts: [],
+    backAnatomyRead: '',
   }
 
   it('tags an asset whose verdict never completed', async () => {
@@ -480,6 +486,44 @@ describe('generateCastComposite: billed-but-dropped candidates are named, not si
     ])
   })
 
+  // Ticket #11022: the owner's frame feedback is keyed by provider request
+  // id, and gate-dropped candidates are the majority of on-skin submissions,
+  // so the ingested row must keep its request id even when the vision gate
+  // fails it (ingestion happens before the gate runs; only the return value
+  // drops the candidate).
+  it('keeps the provider request id on the ingested row when the vision gate fails it', async () => {
+    const composeSceneFrame = vi.fn(async () => ({
+      urls: ['https://fal/candidate.jpg'], requestIds: ['gate-fail-req-1'], costKey: 'atlas/seedream-4.5-edit',
+    }))
+    vi.doMock('./fal-video.server', () => ({ composeSceneFrame }))
+    vi.doMock('./shopify.server', () => ({
+      uploadMoodImageToShopifyFilesWithId: vi.fn(async () => ({ url: 'https://cdn/rehosted.jpg', fileId: 'gid://shopify/MediaImage/1' })),
+    }))
+    const tryIngestSocialAsset = vi.fn(async (_input: Record<string, unknown>) => ({ id: 903 }))
+    vi.doMock('./social-asset-library.server', () => ({ tryIngestSocialAsset }))
+    vi.doMock('./social-vision-gate.server', () => ({
+      runVisionGate: vi.fn(async () => ({
+        pass: false, checks: null, notes: 'nudity: genitalia visible', checkedAt: '2026-09-25T00:00:00.000Z',
+        checkCompleted: true, legibleText: '',
+      })),
+      recordVisionVerdict: vi.fn(async () => {}),
+    }))
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array([1, 2, 3]), { status: 200 })))
+    vi.resetModules()
+
+    const { generateCastComposite } = await import('./social-media.server')
+    const result = await generateCastComposite(CAST_OPTS)
+
+    // Dropped from the result exactly like any other gate failure...
+    expect(result.urls).toEqual([])
+    // ...but every ingest call (both regeneration attempts) still carried the
+    // provider request id, because ingestion runs before the gate check.
+    expect(tryIngestSocialAsset).toHaveBeenCalledTimes(2)
+    for (const call of tryIngestSocialAsset.mock.calls) {
+      expect(call[0].providerRequestId).toBe('gate-fail-req-1')
+    }
+  })
+
   it('names a rehost fetch failure distinctly from a vision-gate rejection', async () => {
     const composeSceneFrame = vi.fn(async () => ({
       urls: ['https://fal/candidate.jpg'], requestIds: ['req-1'], costKey: 'fal/flux-2-edit',
@@ -617,5 +661,33 @@ describe('generateCastComposite: provider id on the row, crop rejects archived (
       'dropped:crop_rejected:zone_miss',
       'request_id:d91a5b6dfdc0483c9b02c795194bb0ee',
     ]))
+  })
+
+  it('runs the product-fidelity check on a held-in-hand candidate with no on-skin scene axes (#11725)', async () => {
+    const { tryIngestSocialAsset } = mockCommon('atlas', 'atlas/seedream-4.5-edit')
+    const runProductFidelityCheck = vi.fn(async () => ({
+      silhouette: 'drift' as const,
+      colour: 'match' as const,
+      finish: 'match' as const,
+      brandMark: 'not-applicable' as const,
+      notes: 'wrong cap type and body proportion vs the real packshot',
+      checkedAt: '2026-09-26T00:00:00.000Z',
+      checkCompleted: true,
+    }))
+    vi.doMock('./social-product-fidelity.server', () => ({
+      runProductFidelityCheck,
+      formatFidelityTags: (v: { checkCompleted: boolean; silhouette: string | null }) =>
+        v.checkCompleted && v.silhouette ? [`fidelity:silhouette=${v.silhouette}`] : [],
+    }))
+    vi.resetModules()
+    const { generateCastComposite } = await import('./social-media.server')
+    // CAST_OPTS carries no sceneAxes at all: the held-in-hand, wide/medium-crop
+    // case the on-skin-only scope used to skip entirely.
+    const result = await generateCastComposite(CAST_OPTS)
+
+    expect(runProductFidelityCheck).toHaveBeenCalledTimes(1)
+    expect(result.urls).toEqual(['https://cdn/rehosted.jpg'])
+    const input = tryIngestSocialAsset.mock.calls[0]![0]
+    expect(input.tags).toEqual(expect.arrayContaining(['fidelity:silhouette=drift']))
   })
 })

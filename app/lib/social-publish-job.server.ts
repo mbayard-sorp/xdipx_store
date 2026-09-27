@@ -234,6 +234,8 @@ export interface PublishTickDeps {
     /** ADR-015, ticket #10730 — the cast/product casting gate's deps. */
     getCastTarget?: (handle: string) => Promise<string | null>
     getCastPresentations?: (slugs: readonly string[]) => Promise<ReadonlyMap<string, 'masculine' | 'feminine' | null>>
+    /** Ticket #11453 — the media-reachability check's dep. Defaults to the real HEAD/ranged-GET check. */
+    checkMediaReachable?: (url: string) => Promise<boolean>
   }
   /**
    * The publish-time stock guard's product lookup (ticket #2212). Defaults to

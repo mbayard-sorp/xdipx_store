@@ -217,6 +217,13 @@ const DEFS: MetafieldDef[] = [
     description: 'male | female | universal. Which cast presentation may be shown ALONE with this product in social imagery (ADR-015). Derived from product_type_dial/subtype; an explicit value here always wins. Casting metadata only, never customer-facing.',
     type:        'single_line_text_field',
   },
+  // Bare-product reference gate (ticket #11474, instagram-campaigns.md §3.2c)
+  {
+    key:         'bare_product_reference',
+    name:        'Bare product reference (social briefing)',
+    description: 'JSON { url, index, reason, resolvedAt, method }. url is the confirmed bare, text-free product frame for social briefing (never carton, never AI-generated); null = no bare frame exists. Resolved ONCE by scripts/resolve-bare-product-references.ts.',
+    type:        'json',
+  },
 ]
 
 const STORE = process.env['SHOPIFY_STORE_DOMAIN']

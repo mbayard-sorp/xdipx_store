@@ -24,6 +24,7 @@ export interface CalendarVideoClip {
   format: string | null
   status: string
   plannedSlotAt: string | null
+  postSlotAt?: string
   postedAt?: string
   permalink?: string
 }
@@ -49,18 +50,23 @@ export function clipWindow(from: string | undefined, to: string | undefined, now
 
 /**
  * Clips in the window, soonest first. A clip is in the window when its
- * posted time (else its planned slot) falls inside it. An approved clip with
- * NO slot yet and not posted is always included: it is the next thing to
- * ship, and hiding it because the owner has not picked a slot would make the
- * calendar silently miss the week's clip.
+ * posted time (else its intended post slot, else its render-by planned slot)
+ * falls inside it -- ticket #11153 split post_slot_at (the intended post
+ * date) from planned_slot_at (the render-by date claimNextEpisode reads), so
+ * a clip already rendered ahead of its post date still lands on the right
+ * week here. An approved clip with NO slot of any kind yet and not posted is
+ * always included: it is the next thing to ship, and hiding it because the
+ * owner has not picked a slot would make the calendar silently miss the
+ * week's clip.
  */
 export async function listCalendarVideoClips(from?: string, to?: string, now = new Date()): Promise<CalendarVideoClip[]> {
   const { start, endExclusive } = clipWindow(from, to, now)
-  const when = sql`coalesce(${videoEpisodes.postedAt}, ${videoEpisodes.plannedSlotAt})`
+  const when = sql`coalesce(${videoEpisodes.postedAt}, ${videoEpisodes.postSlotAt}, ${videoEpisodes.plannedSlotAt})`
   const episodes = await db.select({
     id: videoEpisodes.id,
     productionStatus: videoEpisodes.productionStatus,
     plannedSlotAt: videoEpisodes.plannedSlotAt,
+    postSlotAt: videoEpisodes.postSlotAt,
     postedAt: videoEpisodes.postedAt,
     logline: videoEpisodes.logline,
     hookText: videoEpisodes.hookText,
@@ -73,7 +79,7 @@ export async function listCalendarVideoClips(from?: string, to?: string, now = n
       inArray(videoEpisodes.productionStatus, [...CALENDAR_CLIP_STATUSES]),
       or(
         and(sql`${when} >= ${start.toISOString()}`, sql`${when} < ${endExclusive.toISOString()}`),
-        and(isNull(videoEpisodes.plannedSlotAt), isNull(videoEpisodes.postedAt)),
+        and(isNull(videoEpisodes.postSlotAt), isNull(videoEpisodes.plannedSlotAt), isNull(videoEpisodes.postedAt)),
       ),
     ))
     .orderBy(sql`${when} asc nulls last`, desc(videoEpisodes.id))
@@ -111,6 +117,7 @@ export async function listCalendarVideoClips(from?: string, to?: string, now = n
       format: episodeFormat(ep.scriptJson),
       status: ep.productionStatus,
       plannedSlotAt: ep.plannedSlotAt?.toISOString() ?? null,
+      ...(ep.postSlotAt ? { postSlotAt: ep.postSlotAt.toISOString() } : {}),
       ...(postedAt ? { postedAt: postedAt.toISOString() } : {}),
       ...(post?.permalink ? { permalink: post.permalink } : {}),
     }

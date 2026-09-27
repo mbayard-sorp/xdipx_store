@@ -268,4 +268,46 @@ describe('runRemovalWatch restores volume', () => {
     })
     expect(calls.settings.some(s => s.key.includes('autopublish'))).toBe(false)
   })
+
+  it('surfaces a missing ceiling instead of silently declining to restore', async () => {
+    // Ticket #11454: the one real step-down in this account's history
+    // (08-31) predates the write that records a ceiling alongside it
+    // (09-02), so it left `social_freq_instagram_ceiling` unset forever.
+    // Frequency HAS moved (changed_at is set) but there is nothing to climb
+    // back toward, and that must not read the same as "never touched".
+    const { calls, deps } = harness([row(1), row(2)])
+    const long_ago = new Date(FROZEN_NOW.getTime() - 40 * 86_400_000).toISOString()
+    const r = await runRemovalWatch({
+      ...deps,
+      mediaState: allLive,
+      readSetting: async (k: string) =>
+        k === 'social_freq_instagram' ? '2'
+        : k === 'social_freq_instagram_ceiling' ? null
+        : k === 'social_freq_instagram_changed_at' ? long_ago
+        : null,
+    })
+    expect(r.frequencyRestoredTo).toBeUndefined()
+    expect(r.ceilingMissing).toBe(true)
+    // Nothing writes a ceiling number on its own (DONE WHEN 3 is owner-gated).
+    expect(calls.settings).toEqual([])
+    expect(calls.blockers).toContainEqual({
+      dedupeKey: 'ig-recovery-ceiling-missing',
+      category: 'decision',
+    })
+  })
+
+  it('does not treat a channel that has never been cut as a ceiling gap', async () => {
+    // No ceiling AND no changed_at is the ordinary, unremarkable state of an
+    // account that has never had a step-down — not the historical gap.
+    const { calls, deps } = harness([row(1), row(2)])
+    const r = await runRemovalWatch({
+      ...deps,
+      mediaState: allLive,
+      readSetting: async (k: string) =>
+        k === 'social_freq_instagram' ? '4' : null,
+    })
+    expect(r.ceilingMissing).toBeUndefined()
+    expect(r.frequencyRestoredTo).toBeUndefined()
+    expect(calls.blockers).toEqual([])
+  })
 })

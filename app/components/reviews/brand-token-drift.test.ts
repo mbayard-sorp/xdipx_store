@@ -33,9 +33,12 @@ import { fileURLToPath } from 'node:url'
  *     map a PRODUCT VARIANT colour label ("sage") to a swatch hex. Those are
  *     physical product colours, not the brand token, and retinting them would
  *     misrepresent the goods.
- *   - `InviteFunnel.tsx` is an admin funnel chart whose four series colours are
- *     a data-viz ramp, not brand tokens; recolouring one of four in isolation
- *     would break the ramp. It is filed separately rather than half-fixed here.
+ *
+ * `InviteFunnel.tsx` (ticket #11069) was the admin funnel chart whose four
+ * series colours were a data-viz ramp, not brand tokens, so recolouring only
+ * the retired sage in isolation would have broken the ramp; it is now
+ * covered below, resolved as a full four-stage ramp redesign onto brand
+ * tokens (sage/coral-2/coral/plum) rather than a one-hex swap.
  */
 
 const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf-8')
@@ -49,6 +52,7 @@ const REVIEWS_SOURCES = [
   './RatingSummary.tsx',
   './ReviewForm.tsx',
   './ReviewList.tsx',
+  './InviteFunnel.tsx',
 ]
 
 describe('reviews surface — no pre-#3789 brand hexes survive', () => {
@@ -79,5 +83,16 @@ describe('reviews surface — no pre-#3789 brand hexes survive', () => {
   it('the rating histogram bar draws its fill from the sage token', () => {
     const src = read('./RatingSummary.tsx')
     expect(src).toContain("background: 'var(--color-sage)'")
+  })
+
+  // Ticket #11069: the funnel ramp must draw every stage from a brand token,
+  // never a hardcoded hex (retired or otherwise), so a future edit cannot
+  // reintroduce the old sage/orange ramp one stage at a time.
+  it('the invite funnel draws every stage from a brand token, no hardcoded hex', () => {
+    const src = read('./InviteFunnel.tsx')
+    for (const token of ['var(--color-sage)', 'var(--color-coral-2)', 'var(--color-coral)', 'var(--color-plum)']) {
+      expect(src).toContain(token)
+    }
+    expect(/color:\s*['"]#[0-9a-f]{3,6}['"]/i.test(src)).toBe(false)
   })
 })

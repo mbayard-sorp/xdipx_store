@@ -471,36 +471,63 @@ describe('cast: hand reference for held contact modes (#11476)', () => {
   })
 })
 
-/** Ticket #10341: featuredMedia is sometimes the retail carton. */
-describe('cast: bare-product reference (#10341)', () => {
-  it('walks the media list for a bare-product frame when productImageUrl is omitted', async () => {
+/**
+ * Ticket #10341, tightened by #11474: featuredMedia is sometimes the retail
+ * carton, so the route now reads the stored, once-resolved
+ * `xdipx.bare_product_reference` metafield rather than walking the media
+ * list live, and refuses (400) instead of falling back when it is null or
+ * unresolved.
+ */
+describe('cast: bare-product reference (#10341, #11474)', () => {
+  it('uses the resolved bare-product reference when productImageUrl is omitted', async () => {
     productByHandleMock.mockResolvedValue({
       images: [
         { url: 'https://cdn/96203-box-front.jpg', altText: 'Retail box' },
         { url: 'https://cdn/96203-product.jpg', altText: 'Chorus' },
       ],
+      bareProductReference: {
+        url: 'https://cdn/96203-product.jpg', index: 1, reason: 'confirmed bare frame',
+        resolvedAt: '2026-09-25T00:00:00.000Z', method: 'heuristic',
+      },
     })
     const res = await post({ ...validCast, productImageUrl: undefined })
     expect(res.status).toBe(200)
     expect(castMock).toHaveBeenCalledWith(expect.objectContaining({
       productImageUrl: 'https://cdn/96203-product.jpg',
     }))
-    expect(await res.json()).not.toHaveProperty('productImageFellBack')
   })
 
-  it('flags the fallback when every frame looks like packaging', async () => {
+  it('refuses with a clear reason when the reference resolved to no bare frame', async () => {
     productByHandleMock.mockResolvedValue({
       images: [{ url: 'https://cdn/96203-box-front.jpg', altText: 'Retail box' }],
+      bareProductReference: {
+        url: null, index: null, reason: 'every non-AI-generated frame looks like packaging',
+        resolvedAt: '2026-09-25T00:00:00.000Z', method: 'heuristic',
+      },
     })
     const res = await post({ ...validCast, productImageUrl: undefined })
-    expect((await res.json() as { productImageFellBack?: boolean }).productImageFellBack).toBe(true)
+    expect(res.status).toBe(400)
+    expect(castMock).not.toHaveBeenCalled()
+    expect(await res.text()).toContain('every non-AI-generated frame looks like packaging')
   })
 
-  it('still 400s when the product has no usable image', async () => {
+  it('refuses with a clear reason when the reference has never been resolved', async () => {
     productByHandleMock.mockResolvedValue({ images: [] })
     const res = await post({ ...validCast, productImageUrl: undefined })
     expect(res.status).toBe(400)
     expect(castMock).not.toHaveBeenCalled()
+    expect(await res.text()).toContain('has not been resolved yet')
+  })
+
+  it('never falls back to media[0]: a caller must pass productImageUrl explicitly to override', async () => {
+    productByHandleMock.mockResolvedValue({
+      images: [{ url: 'https://cdn/96203-box-front.jpg', altText: 'Retail box' }],
+    })
+    const res = await post({ ...validCast, productImageUrl: 'https://cdn/explicit-override.jpg' })
+    expect(res.status).toBe(200)
+    expect(castMock).toHaveBeenCalledWith(expect.objectContaining({
+      productImageUrl: 'https://cdn/explicit-override.jpg',
+    }))
   })
 })
 

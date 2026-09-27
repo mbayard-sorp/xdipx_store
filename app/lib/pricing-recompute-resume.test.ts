@@ -12,6 +12,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const settingsStore = new Map<string, string>()
+/** Mirrors the `updated_at` column `onConflictDoUpdate` bumps on every cursor write. */
+const settingsUpdatedAt = new Map<string, string>()
 const auditRows: Array<Record<string, unknown>> = []
 /** Set to simulate the CHECK constraint rejecting a trigger value. */
 let auditInsertFails = false
@@ -24,7 +26,7 @@ vi.mock('./db.server', () => ({
           limit: async () => {
             const key = pred?.key ?? '__unknown__'
             const value = settingsStore.get(key)
-            return value === undefined ? [] : [{ value }]
+            return value === undefined ? [] : [{ value, updatedAt: settingsUpdatedAt.get(key) }]
           },
         }),
       }),
@@ -35,6 +37,7 @@ vi.mock('./db.server', () => ({
           return {
             onConflictDoUpdate: async () => {
               settingsStore.set(String(row['key']), String(row['value']))
+              settingsUpdatedAt.set(String(row['key']), new Date().toISOString())
             },
           }
         }
@@ -103,7 +106,7 @@ vi.mock('./shopify.server', () => ({
   },
 }))
 
-import { recomputeCatalog, readPricingBatchCursor, utcDay, PRICING_BATCH_CURSOR_KEY }
+import { recomputeCatalog, readPricingBatchCursor, utcDay, PRICING_BATCH_CURSOR_KEY, getPricingBatchCursorAgeMs }
   from './pricing-apply-v2.server'
 
 /**
@@ -136,6 +139,7 @@ function product(id: string, variantCount = 1) {
 
 beforeEach(() => {
   settingsStore.clear()
+  settingsUpdatedAt.clear()
   auditRows.length = 0
   pages.length = 0
   fetchCalls.length = 0
@@ -274,5 +278,47 @@ describe('recomputeCatalog resumable walk', () => {
 
     expect(fetchCalls[0]).toBeNull()
     expect(result.done).toBe(true)
+  })
+})
+
+/**
+ * Feeds the pricing-batch-watchdog cron: whether it can tell "still walking,
+ * the next self-continuation hasn't landed yet" from "the chain silently
+ * died" using only the durable checkpoint, with no dependency on the
+ * fire-and-forget kick it exists to backstop.
+ */
+describe('getPricingBatchCursorAgeMs', () => {
+  it('returns null when there is no checkpoint for today at all', async () => {
+    expect(await getPricingBatchCursorAgeMs(utcDay())).toBeNull()
+  })
+
+  it('returns null for a checkpoint left over from a previous day', async () => {
+    settingsStore.set(
+      PRICING_BATCH_CURSOR_KEY,
+      JSON.stringify({ day: '2020-01-01', cursor: 'stale', done: false, dayTotal: 999 }),
+    )
+    settingsUpdatedAt.set(PRICING_BATCH_CURSOR_KEY, new Date().toISOString())
+    expect(await getPricingBatchCursorAgeMs(utcDay())).toBeNull()
+  })
+
+  it('returns null once today\'s walk is done, so a finished day never reads as stalled', async () => {
+    settingsStore.set(
+      PRICING_BATCH_CURSOR_KEY,
+      JSON.stringify({ day: utcDay(), cursor: null, done: true, dayTotal: 6786 }),
+    )
+    settingsUpdatedAt.set(PRICING_BATCH_CURSOR_KEY, new Date().toISOString())
+    expect(await getPricingBatchCursorAgeMs(utcDay())).toBeNull()
+  })
+
+  it('reports elapsed time since the last checkpoint write for an undone day', async () => {
+    const writtenAt = new Date('2026-09-26T07:18:00.000Z')
+    settingsStore.set(
+      PRICING_BATCH_CURSOR_KEY,
+      JSON.stringify({ day: utcDay(), cursor: 'c7', done: false, dayTotal: 4897 }),
+    )
+    settingsUpdatedAt.set(PRICING_BATCH_CURSOR_KEY, writtenAt.toISOString())
+
+    const now = () => new Date('2026-09-26T07:43:00.000Z').getTime() // 25 min later
+    expect(await getPricingBatchCursorAgeMs(utcDay(), now)).toBe(25 * 60_000)
   })
 })

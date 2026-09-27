@@ -208,6 +208,15 @@ direction 2026-08-16 to run the channel like the store's advertising and public 
 Slots A and D are the non-product 60%, B and C are the product 40%, and slot A ships even on a
 one-post day. The ratio did not change; the slate is the mechanism that holds it when volume rises.
 
+**Suspended for the picture since 2026-09-27 (owner standing order, `instagram-campaigns.md` §3.2c).**
+The "no product in the frame at all" row above governs what a post is about, not what the image
+shows: while the bodyscape order stands every Instagram and X frame carries a body zone and an
+in-stock product forward, including the education and inspiration shares. Owner, verbatim: *"Every
+post should be a bodyscape post until I say stop."* A run that reads this table as licence for a
+still life is reading a rule the owner overrode. The 60/40 caption split and "at most half the set is
+product-forward" stay as written; product-forward means the caption sells the product, not that
+the product is in the picture.
+
 When posting more than once in a day, **at most half the set is product-forward**. A follower who
 never buys anything should still be getting value from the follow; that is what makes the account a
 publication rather than a catalog, and a catalog is what Meta's Restricted Goods standard removes.

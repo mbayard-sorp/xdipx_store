@@ -22,7 +22,7 @@
  *   { op: 'mark', id, status: 'pr_open'|'applied', applyRef } -> { ok }
  *   { op: 'claim', assignee, leaseSeconds?, id?, filter? }
  *       -> { claimed: true, ...ticket } | { empty: true }
- *   { op: 'transition', id, to, actor, note?, links?, lastError? }
+ *   { op: 'transition', id, to, actor, note?, links?, lastError?, remedyScope? }
  *       -> { ok: true, suggestion }
  *     Delegated dismissal (#3573, owner-approved): an agent actor MAY
  *     transition a proposed/approved row to dismissed when the note contains
@@ -30,6 +30,12 @@
  *     replacement row (verified server-side). The event records the agent
  *     actor plus a delegated_by=owner note link. Without a verifying
  *     reference the transition 409s exactly as before.
+ *     Design-kind applied gate (migration 106, #11084): a `category:'design'`
+ *     row cannot reach `applied` on ANY edge without `remedyScope`
+ *     ('instance'|'class', set here or already on the row) AND a dated
+ *     recapture link (`links:[{kind:'recapture', ref:'<evidence path/URL>'}]`,
+ *     or already present) confirming the fix was re-checked against fresh
+ *     pixels. Missing either 409s. Non-design tickets are unaffected.
  *   { op: 'get', id } -> { suggestion, links, events }
  *   { op: 'rekind', id, kind, actor, note? } -> { ok: true, suggestion }
  *   { op: 'retire', id, actor, note, supersededById?, satisfiedBy?,
@@ -277,6 +283,11 @@ export async function action({ request }: ActionFunctionArgs) {
       // above it: this one only labels the row, it unlocks no edge. An
       // unrecognised value is dropped server-side.
       blockClass: typeof b['blockClass'] === 'string' ? b['blockClass'] : undefined,
+      // Instance-or-class remedy scope for a design-kind ticket (migration
+      // 106, #11084). Only read on a `-> applied` transition of a
+      // `category:'design'` row; an unrecognised value is dropped
+      // server-side, same shape as blockClass.
+      remedyScope: typeof b['remedyScope'] === 'string' ? b['remedyScope'] : undefined,
     })
     return Response.json({ ok: true, suggestion })
   }

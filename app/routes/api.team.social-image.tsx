@@ -8,8 +8,10 @@
  *     castSlug?, castSlugs?, productImageUrl?, extraImageUrls?, scale,
  *     count?, caller?, runId?, + the scene axes }
  *       -> GenerateCastCompositeResult { urls, filenames, costs, requestIds, plateRequestId? }
- *          plus bodyReferenceMissing?/handReferenceMissing?/warning?/productImageFellBack?
- *          (#10336, #10341, #11476)
+ *          plus bodyReferenceMissing?/handReferenceMissing?/warning?
+ *          (#10336, #10341, #11476). A handle whose bare-product reference
+ *          (xdipx.bare_product_reference) is unresolved or resolves to no
+ *          bare frame 400s instead of falling back to media[0] (#11474).
  *          plus derivedLengthInches?/derivedScaleCue? when `handle` resolves to a
  *          product carrying `xdipx.specifications` (#10981)
  *          plus ok:false/reason when every candidate across both attempts was
@@ -198,11 +200,11 @@ export async function action({ request }: ActionFunctionArgs) {
         castExtraReferenceUrls = resolved.extraReferenceUrls
       }
 
-      // Product reference (ticket #10341). featuredMedia is sometimes the
-      // retail carton, so when the caller gives a handle instead of a URL,
-      // walk the media list for a bare-product frame.
+      // Product reference (ticket #10341, tightened by #11474). featuredMedia
+      // is sometimes the retail carton, so when the caller gives a handle
+      // instead of a URL this reads the stored, once-resolved bare-product
+      // reference rather than walking the media list live.
       let productImageUrl = str(b['productImageUrl'])
-      let productImageFellBack = false
       // Real-dimension scale cue (ticket #10981). Root cause of the
       // product-size-plausibility blocks (row 285, a Womanizer Beauty
       // rendered ~2x real size on a forearm): this route asked the caller
@@ -214,14 +216,28 @@ export async function action({ request }: ActionFunctionArgs) {
       let derivedScaleCue: string | undefined
       let derivedLengthInches: number | undefined
       if (handle) {
-        const { getProductByHandle, pickBareProductImage } = await import('~/lib/shopify.server')
+        const { getProductByHandle } = await import('~/lib/shopify.server')
         const product = await getProductByHandle(handle)
         if (!productImageUrl && product) {
-          const picked = pickBareProductImage(product.images ?? [])
-          if (picked.url) {
-            productImageUrl = picked.url
-            productImageFellBack = picked.fellBack
+          // Ticket #11474: refuse rather than fall back to media[0] (or a
+          // best-guess fellBack frame) when no bare-product reference has
+          // been confirmed. SKU 96203 is the documented cost of briefing
+          // from a carton by mistake: the model reconstructed the toy from
+          // box art and invented a stalk and club that do not exist. A
+          // route refusal here costs one retry with an explicit
+          // productImageUrl; a silent carton/synthetic brief is a
+          // product-misrepresentation defect.
+          const bareRef = product.bareProductReference
+          if (!bareRef || bareRef.url == null) {
+            const why = bareRef
+              ? `xdipx.bare_product_reference resolved to no bare frame (${bareRef.reason})`
+              : 'xdipx.bare_product_reference has not been resolved yet (run scripts/resolve-bare-product-references.ts --apply)'
+            return new Response(
+              `Bad Request: no confirmed bare-product reference for "${handle}": ${why}. Pass productImageUrl explicitly to override.`,
+              { status: 400 },
+            )
           }
+          productImageUrl = bareRef.url
         }
         // `Product` (app/types/index.ts) does not declare `specifications` in
         // its type even though `nodeToProduct` populates it from
@@ -287,7 +303,6 @@ export async function action({ request }: ActionFunctionArgs) {
         ...(extraImageUrls?.length ? { extraImageUrls } : {}),
         ...(aspectRatio ? { aspectRatio } : {}),
         ...(bodyReferenceMissing ? { bodyReferenceMissing: true } : {}),
-        ...(productImageFellBack ? { productImageFellBack: true } : {}),
       })
 
       // Log spend for every billed frame (mirrors what the CLI used to do in
@@ -342,20 +357,19 @@ export async function action({ request }: ActionFunctionArgs) {
         }
       }
 
-      // Ticket #10560: the run is not blocked on a missing body reference or
-      // a product-image fallback (a route cannot refuse without killing a
-      // whole scheduled run), and the response field below was the ONLY
-      // place either condition landed — nothing read it. Record it on the
-      // caller's run timeline (readable at /admin/homepage-team) and to
-      // Sentry, so it is visible without depending on a caller that echoes
-      // and reads its own response. Both writes are non-fatal, matching
-      // `tryIngestSocialAsset`'s contract: telemetry must never fail an
-      // already-billed generation.
-      if (bodyReferenceMissing || handReferenceMissing || productImageFellBack) {
-        const parts = [
-          ...(warning ? [warning] : []),
-          ...(productImageFellBack ? ['Fell back to a packaging/retail-box frame; no bare-product image was available.'] : []),
-        ]
+      // Ticket #10560: the run is not blocked on a missing body reference (a
+      // route cannot refuse without killing a whole scheduled run), and the
+      // response field below was the ONLY place that condition landed —
+      // nothing read it. Record it on the caller's run timeline (readable at
+      // /admin/homepage-team) and to Sentry, so it is visible without
+      // depending on a caller that echoes and reads its own response. Both
+      // writes are non-fatal, matching `tryIngestSocialAsset`'s contract:
+      // telemetry must never fail an already-billed generation. (The
+      // product-image case is no longer in this list: ticket #11474 made it
+      // a pre-generation refusal instead of a post-hoc fallback warning, so
+      // it never reaches this point at all.)
+      if (bodyReferenceMissing || handReferenceMissing) {
+        const parts = warning ? [warning] : []
         const summary = `[social-image:cast] ${handle}: ${parts.join(' ')}`
         if (runId != null) {
           try {
@@ -386,7 +400,6 @@ export async function action({ request }: ActionFunctionArgs) {
         ...(bodyReferenceMissing ? { bodyReferenceMissing: true } : {}),
         ...(handReferenceMissing ? { handReferenceMissing: true } : {}),
         ...(warning ? { warning } : {}),
-        ...(productImageFellBack ? { productImageFellBack: true } : {}),
         // Ticket #10981: echoed so the run summary can quote what anchored
         // the prompt, and so a caller can assert against it in a test.
         ...(derivedLengthInches != null ? { derivedLengthInches } : {}),

@@ -146,6 +146,21 @@ export const CRON_EXPECTATIONS: readonly CronExpectation[] = [
       + '241 MB database, with no retention policy at all.',
   },
   {
+    route: '/cron/pricing-batch-watchdog',
+    plane: 'vercel',
+    schedule: '*/15 * * * *',
+    periodMinutes: EVERY_15_MIN,
+    graceMinutes: 30,
+    recorded: false,
+    moneyRelevant: true,
+    ownerTeam: 'product',
+    notes:
+      'Backstop for the recompute\'s self-continuation kick, which is an un-awaited fetch that can '
+      + 'silently drop (2026-09-26: 4 continuations, then nothing, for 7+ hours). Reads the batch '
+      + 'cursor checkpoint every 15 min; a no-op most of the day, so a KV heartbeat is enough and a '
+      + 'missed tick is not itself a money event the way a missed recompute is.',
+  },
+  {
     route: '/cron/checkout-probe',
     plane: 'vercel',
     schedule: '0 */6 * * *',

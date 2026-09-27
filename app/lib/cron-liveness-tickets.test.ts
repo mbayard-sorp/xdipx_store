@@ -169,6 +169,69 @@ describe('closing, which is what makes the undated key safe', () => {
   })
 })
 
+describe('unblocking a persistent code row on a fresh healthy read (#11614)', () => {
+  // Precise stand-in for listSuggestions that actually honours kind/status,
+  // unlike `openRowsFor` above (which only checks the dedupeKey prefix and is
+  // fine for the tier-1 `process` tests, but would let a code-tier query
+  // silently pick up a process-tier row and mask a kind/status bug here).
+  function rowsFor(match: { dedupeKeys: string[]; kinds: string[]; statuses: string[] }, ids: number[]) {
+    return async (f?: { dedupeKeys?: string[]; kinds?: string[]; statuses?: string[] }) => {
+      const sameSet = (a: string[] = [], b: string[]) => a.length === b.length && a.every(x => b.includes(x))
+      if (
+        sameSet(f?.dedupeKeys, match.dedupeKeys)
+        && sameSet(f?.kinds, match.kinds)
+        && sameSet(f?.statuses, match.statuses)
+      ) return ids.map(id => ({ id }))
+      return []
+    }
+  }
+
+  it('unblocks a blocked persistent code row once the route is healthy again, without touching a process row', async () => {
+    listSuggestions.mockImplementation(
+      rowsFor({ dedupeKeys: ['cron-failing:/cron/x:persistent'], kinds: ['code'], statuses: ['blocked'] }, [321]),
+    )
+    const out = await reconcileCronAlarms([live({ failing: false })], [])
+
+    expect(out.unblocked).toEqual([321])
+    expect(out.closed).toEqual([]) // no process row matched this run
+    expect(transitionSuggestion).toHaveBeenCalledWith(321, 'approved', 'system', expect.anything())
+  })
+
+  it('never reopens as "re-observed": the note says resolved, and the target is approved, not a bounce', async () => {
+    listSuggestions.mockImplementation(
+      rowsFor({ dedupeKeys: ['cron-breach:/cron/x:persistent'], kinds: ['code'], statuses: ['blocked'] }, [55]),
+    )
+    await reconcileCronAlarms([live({ breached: false })], [])
+
+    const call = transitionSuggestion.mock.calls.find(c => c[0] === 55)
+    expect(call).toBeDefined()
+    expect(call?.[1]).toBe('approved')
+    expect(call?.[2]).toBe('system')
+    const opts = call?.[3] as { note?: string }
+    expect(opts.note).toContain('Resolved')
+    expect(opts.note).not.toContain('Re-observed')
+  })
+
+  it('leaves a still-failing/breaching route alone: no unblock query even fires', async () => {
+    // A route absent from a fresh failing[]/breaches[] read is the healthy
+    // case this exists for; a route still failing or breached must never be
+    // queried for unblocking at all, since it has not cleared. Both signals
+    // set so every close/unblock key list this sweep builds is empty.
+    const out = await reconcileCronAlarms([live({ breached: true, failing: true, consecutiveFailures: 5 })], [])
+    expect(out.unblocked).toEqual([])
+    expect(listSuggestions).not.toHaveBeenCalled()
+  })
+
+  it('survives a 409 on one row without abandoning the rest', async () => {
+    listSuggestions.mockImplementation(
+      rowsFor({ dedupeKeys: ['cron-failing:/cron/x:persistent'], kinds: ['code'], statuses: ['blocked'] }, [1, 2]),
+    )
+    transitionSuggestion.mockRejectedValueOnce(new Error('409 conflict'))
+    const out = await reconcileCronAlarms([live({ failing: false })], [])
+    expect(out.unblocked).toEqual([2])
+  })
+})
+
 describe('what it refuses to file', () => {
   it('reports an unreadable actions-plane route instead of ticketing it', async () => {
     // A row with no cron_runs tier, no heartbeat and no external reader cannot

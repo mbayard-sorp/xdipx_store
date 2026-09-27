@@ -44,6 +44,28 @@
  * not-yet-uploaded candidate buffer rather than a live url, but the same
  * doctrine checks apply, so it calls the same checks directly instead of
  * forking a second implementation.
+ *
+ * Extended again (ticket #11460) with `productPhysics`, a second REPORT-ONLY
+ * field alongside `legibleText`. Every check above is a SAFETY check; none of
+ * them asks whether a depicted product is physically supported. Two live
+ * examples returned `pass:true` with nothing wrong anatomically or on
+ * exposure: social_posts row 308 (a product adhered to the side of a shin,
+ * no hand in frame) and row 304 (an open flat palm against a vertical hip,
+ * the product's handle extending past the fingers into free space; row 304
+ * shipped live to Instagram). `productPhysics` reports whether the model saw
+ * plausible support (a hand gripping the product, or a facing-up surface
+ * bearing its weight) without gating `pass`. It is intentionally NOT part of
+ * the hard checks yet: a false block on this class of judgment costs a
+ * regeneration the same way a safety false-block does, but craft calls on
+ * ambiguous crops carry a materially higher false-positive risk than a limb
+ * count, and there was no backtest data to calibrate against at ship time.
+ * Report-only first, promote to blocking only once a backtest against real
+ * on-skin assets shows it is reliable (`scripts/backtest-product-physics.ts`).
+ * Deliberately NOT a proportion or scale check: docs/design-doctrine.md
+ * section 4 item 2 licenses exaggerated product scale on purpose and states
+ * the vision gate carries no real-world-proportion reject, so the prompt
+ * text below says explicitly that scale is a separate, unrelated matter and
+ * only faked or missing support is the fail condition.
  */
 
 import { sql } from 'drizzle-orm'
@@ -92,6 +114,22 @@ export const VISION_CHECK_NAMES: readonly VisionCheckName[] = [
   'genitaliaAbsent',
   'anusNotVisible',
   'adultUnambiguous',
+]
+
+/**
+ * Ticket #11460. `'supported'` and `'unsupported'` are only meaningful when a
+ * product is in contact with a body somewhere in the frame; `'not_applicable'`
+ * is the honest third answer for a frame with no product-on-body contact to
+ * judge (a product-only shot, or a body with no product touching it), so the
+ * report never forces a support/unsupported call onto a frame with nothing to
+ * physically judge.
+ */
+export type ProductPhysicsVerdict = 'supported' | 'unsupported' | 'not_applicable'
+
+export const PRODUCT_PHYSICS_VALUES: readonly ProductPhysicsVerdict[] = [
+  'supported',
+  'unsupported',
+  'not_applicable',
 ]
 
 export interface VisionVerdict {
@@ -148,13 +186,49 @@ export interface VisionVerdict {
    * the check never ran at all, same distinction `legibleText` draws.
    */
   skinMarks: string | null
+  /**
+   * Ticket #11460: REPORT ONLY, same idiom as `legibleText`, does not affect
+   * `pass` and has no entry in `checks`. Whether a product depicted in
+   * contact with a body reads as physically supported: gripped by a hand, or
+   * resting on a surface facing up in the frame that could bear its weight.
+   * `'not_applicable'` when no product is in contact with a body anywhere in
+   * the frame. Explicitly NOT a proportion/scale judgment: an exaggerated
+   * render scale with a proper grip still reports `'supported'`. `null` means
+   * the check never ran at all (the fail-closed path).
+   */
+  productPhysics: ProductPhysicsVerdict | null
+  /**
+   * Ticket #11029. UNLIKE `legibleText`/`productPhysics`, this DOES participate
+   * in `pass`: one integer per hand visible anywhere in the frame (empty array
+   * when no hand is visible), enforced in code by `enforceEnumeratedAnatomy`
+   * rather than trusted from the model's own `checks.handAnatomy` self-grade.
+   * Incident: library asset 688 showed a hand with four fingers wrapped on the
+   * front, a thumb tip past the far edge, and a sixth digit hanging loose
+   * behind the handle, and the model's own `handAnatomy` read `'pass'` on it —
+   * asking it to enumerate rather than self-grade makes a five-vs-six count a
+   * fact the code can check instead of a judgment the model can miss. `null`
+   * means the check never ran at all (the fail-closed path).
+   */
+  handDigitCounts: number[] | null
+  /**
+   * Ticket #11029. REPORT field, same idiom as `legibleText`: what the model
+   * sees at the top of the gluteal cleft/sacrum and at the navel, for any
+   * back-view frame (`''` when the frame is not a back view or nothing is
+   * there). Incident: library asset 690, a back view, rendered a dense
+   * pubic-hair-like patch with a vulva-like crease where the sacrum should be,
+   * and the model's own `faceBodyIntegrity` read `'pass'`. Like
+   * `handDigitCounts`, `enforceEnumeratedAnatomy` reads this field and can
+   * force `faceBodyIntegrity` to `'fail'` rather than trusting the self-grade.
+   * `null` means the check never ran at all (the fail-closed path).
+   */
+  backAnatomyRead: string | null
 }
 
 /** A verdict that fails every check, used whenever the check could not run at all. */
 function failClosedVerdict(notes: string): VisionVerdict {
   const checks = {} as Record<VisionCheckName, 'pass' | 'fail'>
   for (const name of VISION_CHECK_NAMES) checks[name] = 'fail'
-  return { pass: false, checks, notes, checkedAt: new Date().toISOString(), checkCompleted: false, legibleText: null, skinMarks: null }
+  return { pass: false, checks, notes, checkedAt: new Date().toISOString(), checkCompleted: false, legibleText: null, skinMarks: null, productPhysics: null, handDigitCounts: null, backAnatomyRead: null }
 }
 
 /**
@@ -169,7 +243,7 @@ function failClosedVerdict(notes: string): VisionVerdict {
  * change.
  */
 function incompleteVerdict(notes: string): VisionVerdict {
-  return { pass: false, checks: null, notes, checkedAt: new Date().toISOString(), checkCompleted: false, legibleText: null, skinMarks: null }
+  return { pass: false, checks: null, notes, checkedAt: new Date().toISOString(), checkCompleted: false, legibleText: null, skinMarks: null, productPhysics: null, handDigitCounts: null, backAnatomyRead: null }
 }
 
 /**
@@ -208,6 +282,20 @@ export function isValidVerdictShape(v: unknown): v is Omit<VisionVerdict, 'check
   if (typeof o['legibleText'] !== 'string') return false
   // Ticket #11477: skinMarks is a report field, same contract as legibleText.
   if (typeof o['skinMarks'] !== 'string') return false
+  // Ticket #11460: productPhysics is a second report field, same convention.
+  // A real response must always carry one of the three enum values; a
+  // missing or unrecognized value did not follow the expected shape and
+  // fails closed like any other malformed response.
+  if (!PRODUCT_PHYSICS_VALUES.includes(o['productPhysics'] as ProductPhysicsVerdict)) return false
+  // Ticket #11029: handDigitCounts must always be an array (empty when no
+  // hand is visible), each entry a finite number — a missing or malformed
+  // array did not follow the expected shape and fails closed like any other
+  // malformed response.
+  const handDigitCounts = o['handDigitCounts']
+  if (!Array.isArray(handDigitCounts) || !handDigitCounts.every((n) => typeof n === 'number' && Number.isFinite(n))) return false
+  // backAnatomyRead is a report field, same convention as legibleText: always
+  // a string, possibly ''.
+  if (typeof o['backAnatomyRead'] !== 'string') return false
   return true
 }
 
@@ -219,11 +307,11 @@ export function isValidVerdictShape(v: unknown): v is Omit<VisionVerdict, 'check
  * second is what a well-meaning later edit produces, and the only artifact
  * that decides it is this wording.
  */
-export const VISION_SYSTEM_PROMPT = `You are a strict content-safety QA reviewer for AI-generated marketing imagery on a mainstream sexual-wellness storefront. You will be shown one image. Check these eight things, matching docs/design-doctrine.md's vision-gate hard check plus the imagery-ceiling checks, PLUS two report-only items at the end:
+export const VISION_SYSTEM_PROMPT = `You are a strict content-safety QA reviewer for AI-generated marketing imagery on a mainstream sexual-wellness storefront. You will be shown one image. Check these eight things, matching docs/design-doctrine.md's vision-gate hard check plus the imagery-ceiling checks, PLUS five report-only items at the end:
 
 1. limbCount: every person or hand visible has the correct, anatomically normal number of limbs (two arms, two legs per full figure shown).
-2. handAnatomy: every visible hand has five fingers, normally proportioned and articulated, with no fused or missing digits.
-3. faceBodyIntegrity: faces and bodies are coherent, not warped, duplicated, or melted together.
+2. handAnatomy: every visible hand has five fingers, normally proportioned and articulated, with no fused, missing, or detached digits. Do not just judge this at a glance: for EACH visible hand, actually count the fingers one by one, including any digit that appears separated from the rest of the hand or trailing behind an object the hand is holding. Fail handAnatomy if any hand's count is not exactly five, or if any digit reads as detached from the hand it belongs to, even if the rest of that hand looks normal.
+3. faceBodyIntegrity: faces and bodies are coherent, not warped, duplicated, or melted together. For any back-view frame (the camera facing the person's back), look specifically at the top of the gluteal cleft/sacrum area and at the navel: fail faceBodyIntegrity if hair, a dense patch, or a crease in that area reads as pubic hair or a vulva-like shape (a back-view body has no genitalia there; that reading is a rendering defect, not real anatomy), or if a navel is visible on a back-view frame (anatomically impossible; it means two views have merged onto one figure).
 4. extraOrMergedLimbs: no extra, duplicated, or merged limbs anywhere in the frame (including partially visible limbs at the edge of frame).
 5. nippleOccluded: no nipple or areola is visible or outlined anywhere in frame, including through sheer or wet fabric. Fail if any nipple or areola is visible or outlined.
 6. genitaliaAbsent: no labia or penis is visible or outlined, no product is depicted in contact with genitalia, and no fluid is depicted on or near genitalia. Fail if any of these is present.
@@ -234,10 +322,16 @@ REPORT ONLY, not a check, does not affect "pass": legibleText. Read the whole fr
 
 REPORT ONLY, not a check, does not affect "pass": skinMarks. Look at every patch of bare skin in the frame for a mark that was not asked for: redness, a bruise, a scrape or abrasion, a welt, or a streak or blotch of discoloration. This is NOT about ordinary skin: natural skin tone, texture, freckles, moles, veins, tan lines, and normal warmth or flush from lighting are not marks and must not be reported. Report only something that reads as an injury or an impact mark on the skin itself: for example "faint pink-red streaks and blotches across the lower back and flank" or "a red welt across the outer thigh". Describe what you see and roughly where on the body, or return "" if bare skin is visible and carries nothing of the kind, or if no skin is visible at all. Never judge whether a reported mark makes the image unacceptable; that is a policy decision made elsewhere, which is exactly why this is report-only and not one of the eight checks above.
 
-Respond with ONLY a JSON object, no prose before or after, in exactly this shape:
-{"pass": true|false, "checks": {"limbCount": "pass"|"fail", "handAnatomy": "pass"|"fail", "faceBodyIntegrity": "pass"|"fail", "extraOrMergedLimbs": "pass"|"fail", "nippleOccluded": "pass"|"fail", "genitaliaAbsent": "pass"|"fail", "anusNotVisible": "pass"|"fail", "adultUnambiguous": "pass"|"fail"}, "notes": "one or two sentences on what you saw, especially for any fail", "legibleText": "<transcription of any legible text found, or empty string if none>", "skinMarks": "<description of any unbriefed mark on skin, or empty string if none>"}
+REPORT ONLY, not a check, does not affect "pass": productPhysics. Look at whether any product depicted is in contact with a body. If no product touches a body anywhere in the frame (a product-only shot, or a body with no product against it), answer "not_applicable". Otherwise judge whether the contact is physically supported: answer "supported" when a hand is gripping the product (fingers visibly wrapped around it, or a palm cupped underneath it bearing its weight from below) OR the product rests on a surface that faces upward in the frame (so gravity could plausibly hold it there). Answer "unsupported" when neither is true: nothing in frame explains why the product is not falling, for example a product adhered to the side of a vertical surface (a shin, a hip, a wall) with no hand touching it, or an open flat palm merely laid flat beside or in front of a product with no fingers wrapped around it, or a hand resting on TOP of a product with no grip beneath or around it. An open flat palm beside a product is not support, and a hand resting on top of a product is not support; only a wrapped grip or a true underneath-cupping hold, or an upward-facing resting surface, counts. This is NOT a size or proportion check: a product rendered at an exaggerated, larger-than-real-life scale is completely normal for this brand and must still answer "supported" as long as the grip or resting surface is physically plausible; scale exaggeration and physical support are unrelated questions, and you must never answer "unsupported" because a product simply looks large relative to the body. Only fake or missing support is the fail condition here, never scale.
 
-"pass" is true only when all eight checks in "checks" are "pass"; neither "legibleText" nor "skinMarks" ever affects "pass". If the image has no visible people or hands at all (a product-only shot), checks 1-4 pass trivially; checks 5-8 still apply to any depicted skin or body part even without hands or a face; legibleText still applies to any text in the frame regardless, and skinMarks still applies to any bare skin in the frame regardless. When in doubt about a genuine anatomy defect or an exposure/age-ambiguity issue, fail the check; this gate exists specifically to catch what a fast human scroll would catch, and a false block costs one regeneration while a false pass can publish something it must not. "legibleText" and "skinMarks" are always present in your response, even when they are "".`
+REPORT, feeds handDigitCounts: for every hand visible anywhere in the frame, actually count its fingers one at a time, including any digit that trails off separated from the rest of the hand. Return one integer per visible hand, in the order encountered left to right, as "handDigitCounts". Return an empty array if no hand is visible anywhere in the frame. Do not round to 5 out of habit; report the count you actually see, even if it disagrees with your handAnatomy answer above.
+
+REPORT, feeds backAnatomyRead: for any back-view frame only (the camera facing the person's back), name exactly what you see at the top of the gluteal cleft/sacrum area and at the navel region, in one short phrase (for example "smooth skin, no navel visible" or "a dense dark patch above the cleft resembling pubic hair"). Answer "" if the frame is not a back view, or is a back view with nothing notable in that area.
+
+Respond with ONLY a JSON object, no prose before or after, in exactly this shape:
+{"pass": true|false, "checks": {"limbCount": "pass"|"fail", "handAnatomy": "pass"|"fail", "faceBodyIntegrity": "pass"|"fail", "extraOrMergedLimbs": "pass"|"fail", "nippleOccluded": "pass"|"fail", "genitaliaAbsent": "pass"|"fail", "anusNotVisible": "pass"|"fail", "adultUnambiguous": "pass"|"fail"}, "notes": "one or two sentences on what you saw, especially for any fail", "legibleText": "<transcription of any legible text found, or empty string if none>", "skinMarks": "<description of any unbriefed mark on skin, or empty string if none>", "productPhysics": "supported"|"unsupported"|"not_applicable", "handDigitCounts": [<one integer per visible hand, left to right, empty array if none>], "backAnatomyRead": "<phrase describing the cleft/sacrum/navel area on a back-view frame, or empty string>"}
+
+"pass" is true only when all eight checks in "checks" are "pass"; "legibleText", "skinMarks", "productPhysics", "handDigitCounts", and "backAnatomyRead" never affect your own "pass" answer directly (a separate deterministic check reads productPhysics/handDigitCounts/backAnatomyRead afterward, and skinMarks/legibleText are pure report fields). If the image has no visible people or hands at all (a product-only shot), checks 1-4 pass trivially; checks 5-8 still apply to any depicted skin or body part even without hands or a face; legibleText still applies to any text in the frame regardless; skinMarks still applies to any bare skin in the frame regardless; productPhysics answers "not_applicable" when there is no product-on-body contact to judge; handDigitCounts is an empty array and backAnatomyRead is "" when there is no hand or back view to report on. When in doubt about a genuine anatomy defect or an exposure/age-ambiguity issue, fail the check; this gate exists specifically to catch what a fast human scroll would catch, and a false block costs one regeneration while a false pass can publish something it must not. "legibleText" and "skinMarks" are always present in your response, even when they are ""; "productPhysics" is always present in your response, and is always one of "supported", "unsupported", or "not_applicable"; "handDigitCounts" is always present, even when it is []; "backAnatomyRead" is always present, even when it is "".`
 
 export interface VisionCallOpts {
   /**
@@ -335,6 +429,70 @@ function resolve(deps?: VisionGateDeps): Required<VisionGateDeps> {
  */
 export const EXPOSURE_CHECK_NAMES: readonly VisionCheckName[] = ['nippleOccluded', 'genitaliaAbsent', 'anusNotVisible']
 
+/**
+ * A back-view report that reads as a rendering defect rather than real
+ * anatomy: hair, a dense patch, or a crease standing in for genitalia where a
+ * back view can have none, or a navel appearing on a back-view frame at all
+ * (anatomically impossible — two views merged onto one figure). Exported for
+ * the calibration test suite, same idiom as `VISION_SYSTEM_PROMPT` (#10477).
+ */
+export function backAnatomyReadsAsDefect(read: string): boolean {
+  const text = read.trim()
+  if (!text) return false
+  if (/\b(pubic|vulva|labia|genital)/i.test(text)) return true
+  // A navel mention is significant only when reported as actually present.
+  // The prompt's own clean-case example ("no navel visible") must not trip
+  // this, so a negation word within a few words either side of the mention
+  // reads as a clean report rather than a defect.
+  const navelMatch = /\bnavel\b|\bbelly[\s-]?button\b/i.exec(text)
+  if (navelMatch) {
+    const window = text.slice(Math.max(0, navelMatch.index - 20), navelMatch.index + navelMatch[0].length + 20)
+    if (!/\b(no|not|none|absent|never|without|isn't|isnt)\b/i.test(window)) return true
+  }
+  return false
+}
+
+/**
+ * Ticket #11029. Distrusts the model's own `handAnatomy`/`faceBodyIntegrity`
+ * self-grade in favor of the enumerated `handDigitCounts`/`backAnatomyRead`
+ * report fields it was separately asked for, the same "don't just trust the
+ * boolean" idiom `confirmExposureChecks` already uses for the exposure
+ * checks. Incident: library assets 688 and 690 both read the relevant check
+ * as `'pass'` while their own free-text description (once actually looked at)
+ * described a defect the model's own boolean missed. A no-op when
+ * `checkCompleted` is false (nothing to enforce against) or when both fields
+ * read clean.
+ */
+export function enforceEnumeratedAnatomy(verdict: VisionVerdict): VisionVerdict {
+  if (!verdict.checkCompleted || !verdict.checks) return verdict
+
+  const badHandCounts = (verdict.handDigitCounts ?? []).filter((n) => n !== 5)
+  const backDefect = backAnatomyReadsAsDefect(verdict.backAnatomyRead ?? '')
+  if (badHandCounts.length === 0 && !backDefect) return verdict
+
+  const checks = { ...verdict.checks }
+  const overrides: string[] = []
+  if (badHandCounts.length > 0 && checks.handAnatomy !== 'fail') {
+    checks.handAnatomy = 'fail'
+    overrides.push(`handDigitCounts ${JSON.stringify(verdict.handDigitCounts)} includes a non-five count`)
+  }
+  if (backDefect && checks.faceBodyIntegrity !== 'fail') {
+    checks.faceBodyIntegrity = 'fail'
+    overrides.push(`backAnatomyRead "${verdict.backAnatomyRead}" reads as a genital or navel rendering defect on a back view`)
+  }
+  if (overrides.length === 0) return verdict
+
+  console.error('[social-vision-gate] enumerated anatomy report overrode the model\'s own check self-grade', {
+    overrides, handDigitCounts: verdict.handDigitCounts, backAnatomyRead: verdict.backAnatomyRead,
+  })
+  return {
+    ...verdict,
+    pass: false,
+    checks,
+    notes: `${verdict.notes} [enumerated-anatomy override: ${overrides.join('; ')}]`,
+  }
+}
+
 /** One model call, parsed into a verdict, with the existing JSON-parse-failure retry. Never throws. */
 async function getOneVerdict(
   image: { data: string; mediaType: string },
@@ -345,7 +503,7 @@ async function getOneVerdict(
     if (!isValidVerdictShape(parsed)) {
       return failClosedVerdict('Vision gate response did not match the expected verdict shape; failing closed.')
     }
-    return { ...parsed, checkedAt: new Date().toISOString(), checkCompleted: true }
+    return enforceEnumeratedAnatomy({ ...parsed, checkedAt: new Date().toISOString(), checkCompleted: true })
   } catch (err) {
     if (err instanceof VisionParseError) {
       // A prose reply is a formatting slip, not a real refusal (ticket
@@ -360,7 +518,7 @@ async function getOneVerdict(
         if (!isValidVerdictShape(retried)) {
           return failClosedVerdict('Vision gate response did not match the expected verdict shape after a strict retry; failing closed.')
         }
-        return { ...retried, checkedAt: new Date().toISOString(), checkCompleted: true }
+        return enforceEnumeratedAnatomy({ ...retried, checkedAt: new Date().toISOString(), checkCompleted: true })
       } catch (retryErr) {
         if (retryErr instanceof VisionParseError) {
           console.error('[social-vision-gate] response still not valid JSON after strict retry', {

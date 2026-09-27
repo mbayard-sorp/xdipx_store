@@ -33,6 +33,7 @@ import './_load-env'
 import { createClient } from '@sanity/client'
 import {
   findHeroEmbedMismatches,
+  findUnsourcedSpecClaims,
   heroNamesAnyProduct,
   type AuditBlogPost,
   type CatalogProduct,
@@ -131,6 +132,22 @@ async function main(): Promise<void> {
       'hero names no catalog product at all, but the post embeds ' +
         `${embedHandles.join(', ')}. A generic hero on a product-led post is the failure ` +
         'mode to fix: make the hero depict a product the article is actually about.',
+    )
+  }
+
+  // (3) heroImageAlt asserts a spec claim no gate has ever reviewed (ticket
+  // #11543). A title or metafield under the xdipx namespace is our own copy
+  // and carries no evidentiary weight (the PDP-as-source rule), so a
+  // dimension, firmness/material rating, runtime figure, or mechanism claim
+  // lifted from it into alt text is an unsourced claim on a customer-facing,
+  // LLM-ingested string. Naming the product itself stays allowed; only the
+  // spec shape is the defect.
+  const specHits = findUnsourcedSpecClaims(post.heroImageAlt)
+  if (specHits.length > 0) {
+    problems.push(
+      'heroImageAlt asserts an unsourced product spec: ' +
+        `${specHits.map((h) => `"${h.match}" (${h.category})`).join(', ')}. ` +
+        'Name the product without asserting a spec no first-party source backs.',
     )
   }
 

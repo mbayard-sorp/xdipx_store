@@ -420,6 +420,19 @@ never more than one in a day), and never run three or more faces in one campaign
 
 ### 3.2c The on-skin treatment (owner direction 2026-09-19)
 
+**A bodyscape frame is a CLOSE-UP body shot with the PRODUCT FORWARD.** Both halves bind and each
+fails independently. **Close-up:** the frame is filled by one body zone and the product. Not a
+full-body nude with a product in it, not a portrait. If the whole figure reads as the subject it is
+not a bodyscape, whatever the `cropScale` tag says. **Product forward:** the product is the subject,
+large in frame, sharp, unmistakably the thing being looked at. A product at the edge, cropped, tiny
+or incidental is a nude with a prop in it, and it fails.
+
+**This is also the primary exposure control, not only a craft rule.** A crop tight enough to be
+genuinely product-forward cannot contain a breast, a nipple or a pubic area, because they are outside
+the frame. Every exposure problem this campaign has produced came from a frame too WIDE to be a
+bodyscape. When a brief is tempted toward the whole figure, crop in; cropping in fixes the safety
+question and the product question at once.
+
 Owner, verbatim: *"Our posts are starting to get boring. Almost like we are regressing to boring
 and not staying on the edge of what's allowed to create curiosity and desire... products against
 skin on the body. I want to see the edges of breasts, the pubic mounds, bellies, backs, butt cheeks.
@@ -453,9 +466,39 @@ axes replace the room when the crop eats it, and they rotate the way §3.8 rotat
 THE OWNER SAYS STOP.** Owner, verbatim: *"The two posts that went out to IG are boring. Why weren't they
 on-skin posts? I want to see on-skin posts until I say stop. No more boring posts."* This has no end
 date. It ends when he says it ends, and until then a clothed product frame is an exception that has
-to justify itself in writing (`social-art-director.md`, Clothed exception block). The only standing
-exemption is a product-free resource post, meaning a subject with no product in it, and §3.9 already
-narrows those hard.
+to justify itself in writing (`social-art-director.md`, Clothed exception block).
+
+**STANDING ORDER, 2026-09-27: EVERY INSTAGRAM AND X POST IS A BODYSCAPE, UNTIL THE OWNER SAYS STOP.**
+The 2026-09-22 order above still exempted the product-free resource post ("a subject with no product
+in it"). That exemption is what shipped on 2026-09-26 and 2026-09-27: the active campaign carried no
+hero SKU, every on-skin product row blocked at the gate on product identity (rows 312, 313, 314,
+324), and the slot-A still lifes (row 325, a rose beside a halved lemon on a plate; row 330, a journal
+and a pressed flower on a windowsill) were the only rows left to post. Owner, verbatim: *"why are we
+back to boring social media posts? Why aren't we posting bodyscape images? We did all this work to
+not be boring and the last two instagram posts were a lemon and a flower on a plate and a journal.
+Every post should be a bodyscape post until I say stop."* So the exemption is closed:
+
+- **A product-free frame is retired as a shape while this order stands.** No still life, no
+  tableware, no empty room, no object-on-a-surface, on any slot, including slot A and slot D. A
+  resource post about a subject with no product in it (the orgasm gap, consent, communication) is
+  still written, and its picture is a bodyscape: the crop is a body zone with an in-stock product
+  forward, chosen for the feeling the caption sells (§3.9 "depict the subject"), and the caption may
+  or may not name it. "This subject has no product" is no longer a reason for a frame with no body in
+  it; it is a reason to pick the product that makes the subject visible.
+- **`bodyZone` and `contactMode` are never "none" on a new draft** while this stands. The
+  `social-art-director.md` clothed exception now has one reason left, "owner standing order is off".
+- **The mix ratio in `mission-brief.md` §6b is suspended for the picture, not for the words.** The
+  40/30/20/10 share still governs what the captions are about (resource, education, inspiration,
+  news); it no longer licenses a frame with no product in it. `mixReport`'s product-free line reads
+  from `shopify_product_id`, so it will read over band; that is expected and the run summary says so
+  rather than drafting a still life to correct it.
+- **When a bodyscape row blocks, the recovery is another bodyscape** (routine Step 6.5 rung 2 and 3):
+  a different in-stock SKU with a simpler silhouette, a different zone, a different crop. A still
+  life is never the recovery, and neither is a clothed portrait. If no bodyscape clears the gate the
+  day posts fewer times and the summary names every blocked row and check, which is what surfaces
+  the product-fidelity work (tickets #11487, #11476) instead of hiding it behind a plate of fruit.
+- **This order ends only when the owner says stop**, in his own words, in a session or on the bus.
+  Nothing in a retro, a mixReport breach, or a gate calibration note reopens the exemption.
 
 **It covers X as well as Instagram (owner answer, 2026-09-22: "Yes, on-skin applies to x too").**
 Read that as what it is: a change of DEFAULT POSITION within the existing ceiling, not a widening of
@@ -524,6 +567,27 @@ bullet goes at the collarbone, not the wrist, because the disguise is what peopl
 on the nipples, and they are the one product whose use zone and licensed placement are the same
 place: the stop list's test is "no nipple visible" and a pastie satisfies it BY being the product.
 A vibrator over a nipple is not settled by that and stays an owner question.
+
+**A palm-sized air-pulse rose goes in a hand.** Owner, verbatim: *"The rose is really a product best
+held in a hand."* Its whole character is that you pick it up and bring it to yourself. A rose set
+down on a thigh, a stomach or a shin is an ornament resting on a person, and it is the wrong picture
+of the product no matter how good the surface is. This generalises: **for any product whose use
+begins by picking it up, the hand IS the placement, and no resting surface is a substitute.** Roses
+and palm-sized air-pulse stimulators, bullets, small wands and anything whose selling story is grip,
+weight or discretion belong in a hand. Products whose story is line, length or graduated scale (bead
+strands along the spine) and products that are worn are the ones that legitimately rest.
+
+**Operational consequence, and it binds today.** The one thing the image pipeline currently cannot
+render is a credible grip (the render non-compliance finding in §3.2d). So until the hand-reference
+work in ticket #11464 lands, **rose and palm-held products must not be given on-skin resting frames
+as a workaround.** Take them out of the on-skin rotation and brief them some other way (product
+macro, in-scene, non-bodyscape) rather than producing another product-set-down-on-skin frame. Two
+attempts have now failed this way and both were misdiagnosed as placement problems: row 308 put a
+ROMP Rose on a shin, and a 2026-09-25 test put an inBloom Rosales on a thigh top. Neither was a
+surface choice to be corrected; both were the wrong frame concept for the product. This matters at
+scale, not just for two rows: the palm-held air-pulse class includes inBloom Rosales, the
+highest-stock SKU in the catalogue at 871 units, plus ROMP 2.0 and Womanizer Beauty, all of them
+campaign heroes.
 
 **Brief craft, from the owner's review of 40 frames on 2026-09-19. Binding.**
 
@@ -747,19 +811,30 @@ down", "thumb along the seam") and ADD the negative "no open flat palm beside th
 wrapped around it so the hand visibly carries its weight." The render returned a flat palm where the
 prompt asked for a grip.
 
+**DO THIS, physics. `social_media_assets` 704** (Prowler bead strand along the spine, generated
+2026-09-25). The first frame that genuinely obeys the §3.2c gravity rule: face down, small of the
+back as a true horizontal plane, each bead casting its own directional contact shadow sitting in the
+hollow under its own weight. Tight crop from the base of the ribs to the hip crease, nothing above or
+below, product large and centred. It is also PART 0's placement working exactly as predicted, the
+spine as the body's graduated column giving absolute scale.
+
 **NOT THIS. `social_posts` row 308, `social_media_assets` 675.** Owner-named as the example of poor
-placement ("a good example sample of the product placed poorly"). Never posted. It fails three
+placement ("a good example sample of the product placed poorly"). Never posted. It fails five
 separate rules at once, which is why it is the counter-exemplar:
 
-1. **Gravity (§3.2c).** The rose sits on the outer surface of her lower leg below the knee, a
+1. **§3.2c's bodyscape definition.** A full-body nude with a small incidental product is never a
+   bodyscape, whatever the crop scale tag says.
+2. **Exposure.** A nipple is visible at frame left, which the vision gate falsely passed (ticket
+   #11468).
+3. **Placement follows use, the rose rule.** A rose set down instead of held. A clitoral air-pulse
+   device on a shin has no relationship to how the product is used, and even perfectly held, a shin
+   says nothing about this product. This rule already existed and was broken with nothing detecting
+   it.
+4. **Gravity (§3.2c).** The rose sits on the outer surface of her lower leg below the knee, a
    convex, near-vertical plane as rendered, with no hand anywhere near it (both arms are folded
    around her knee at the top of the frame). Its contact shadow is a small hard ellipse that reads
    like a sticker rather than a weighted object settling into soft tissue.
-2. **Placement follows use (§3.2c, "Placement follows use, or it is a product on a person").** A
-   clitoral air-pulse device on a shin has no relationship to how the product is used. Even
-   perfectly held, a shin says nothing about this product. This rule already existed and was broken
-   with nothing detecting it.
-3. **Visible zone versus labelled zone (§3.2c's rotation window, "judged on the visible zone, not
+5. **Visible zone versus labelled zone (§3.2c's rotation window, "judged on the visible zone, not
    the label").** The row is tagged `bodyZone=thigh-top`; the visible zone is the shin. The rotation
    window was therefore computed against a zone that is not in the picture.
 
@@ -1228,6 +1303,9 @@ Rules that survive the slate, because they are what keep it a publication:
 
 - **At most half of a day's set is product-forward** (`mission-brief.md` §6b). At 4 posts that is B
   and C, and it is a ceiling, not a quota.
+- **Slot A is a bodyscape like every other slot (standing order 2026-09-27, §3.2c).** The "Product
+  in frame" column above reads **Yes** for every slot while the order stands; the resource post keeps
+  its lane and its caption and loses the right to a product-free picture.
 - **Slot A ships every day, including a one-post day.** If only one post goes out, it is the
   resource post, not the product post. A feed that drops advice first under pressure is a catalog
   that has not noticed yet.

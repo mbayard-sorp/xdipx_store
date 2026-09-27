@@ -116,8 +116,12 @@ and the publish gate; nothing here softens a verdict.
    2026-09-05 and 2026-09-06, twelve attempts) is off the table until the calibration ticket for it
    closes; do not lead a zero day with it. **While the §3.2c standing order is in force, a fallback
    stays on-skin.** The clothed precedents above are calibration for slot, format, and charge, not
-   for wardrobe. A clothed or `manual` shape is a fallback only after two different on-skin products
-   have each failed twice on product identity in the same run, and the run summary names both.
+   for wardrobe. **Since 2026-09-27 there is no clothed, `manual`, or still-life fallback at all**
+   (`instagram-campaigns.md` §3.2c standing order 2026-09-27, "Every post should be a bodyscape post
+   until I say stop"). After two different on-skin products have each failed twice on product identity
+   in the same run, the run posts fewer times, leaves the platform short, and names both products and
+   every gate check in the summary. Rows 325 and 330 (a lemon and a rose on a plate, a journal on a
+   windowsill) are the reference failure: both PASSed the gate and both were the wrong post.
 4. **Recover the campaign before recovering the caption.** A day with no active `IG: ` campaign
    is a defect, not a context (`instagram-campaigns.md` §4: there is never a day with no active
    campaign). If the active campaign was closed early (a removal, an owner deletion), activate its
@@ -882,6 +886,13 @@ scheme from `docs/store-team/instagram-campaigns.md`, then:
   defect this rule retires. This does not raise the product-forward ceilings above; it raises the
   bar for what qualifies to fill them. The X companion carries the PDP link and UTMs as
   §crossplatform already requires.
+- **Slot A is a bodyscape (owner standing order 2026-09-27, `instagram-campaigns.md` §3.2c).** The
+  slot-A-first order below still holds, and slot A is still the resource post, but its picture is a
+  close-up body zone with an in-stock product forward, never a still life, never a room, never an
+  object on a surface. Pick the product that makes the subject visible (§3.9); the caption need not
+  name it. Send `bodyZone`, `contactMode`, and `cropScale` on the slot-A draft exactly as on a product
+  post. Do not read "product-free" anywhere in this file as permission for a frame with no body in it
+  while the order stands; it means only that the caption is not selling the product.
 - **Draft slot A FIRST, before any product post (ticket #4066).** Slot A is the product-free resource
   post; it is drafted before slot B, C, or D, not after. A run that fills the day with product posts
   and then reports it could not produce slot A has the order backwards, and that is the exact drift
@@ -913,6 +924,13 @@ scheme from `docs/store-team/instagram-campaigns.md`, then:
   never a trust-boilerplate closer. A slot-A resource post is judged on its curiosity and permission
   charge, not on product innuendo it structurally cannot carry; a caption with no engagement close is
   reworked before it is drafted, not discovered at the gate.
+- **Open a product-free resource caption from the charter's pinned-anchor sentence shape, not a
+  topical narrative (ticket #11724).** Start drafting from the charter's own product-free formula
+  (`docs/emma-voice.md`: name a real state — wanting, permission, curiosity — as plain fact, one
+  sentence, no evasion) and elaborate from there, rather than improvising a topical narrative (an
+  abstract story, algospeak) and discovering the register gap only at the gate. Run 1085
+  (2026-09-26) took 8 voice-gate REVISE iterations on an abstract-narrative draft; the same slot
+  re-drafted directly from the pinned-anchor shape PASSED on the first try.
 - **Volume climbs a rung at a time, on 7 clean days** (§4 of the campaign doc). Name the rung and
   the clean-day count in the run summary. Never step the quota up yourself to compensate for an
   automated step-down.
@@ -1465,6 +1483,28 @@ specifically) while the rest of the frame reads as an unbranded generic bottle. 
 accent-color-band technique does not transfer to a two-tier label. Treat this SKU as **reuse-only**
 until Shopify Files holds a pre-cleared asset for it, or a working frame is found that keeps the
 HYBRID band fully cropped or out of frame (not merely occluded).
+
+**B Swish Bthrilled Premium Mini Wand Noir** (`b-swish-bthrilled-premium-mini-wand-noir`) — a
+shape-risk rather than a wordmark-risk SKU: the real product has a large, clearly distinct rounded
+mushroom-cap head substantially wider than a tapered, curved handle with a visible neck/collar. Four
+independent cast-composite attempts on 2026-09-25 (run 1069) all failed product-identity on the
+head-to-handle proportion regardless of body zone or crop scale: two on the shoulder-blade zone
+(uniform-diameter body, no distinct wand head/neck), one on the inner-wrist zone (nearly cylindrical,
+reading as a bullet/lipstick vibrator), one on the X forearm zone (blunt capsule head, no neck taper,
+reads full-size not mini). Treat this SKU as **reuse-only** until Shopify Files holds a pre-cleared
+asset for it, or a working frame is found and logged in `social_media_assets`. **Recurred the very
+next run** (2026-09-26, run 1085, ticket #11725): the same bullet-silhouette-with-no-head/neck/taper
+failure BLOCKed again, confirming this is not a one-off and the reuse-only treatment above still
+stands.
+
+**JO H2O Cooling Water-Based Lubricant** (`jo-h2o-cooling-water-based-lubricant`, and its sized
+variants e.g. `jo-h2o-cooling-water-based-lubricant-2-oz`) — a product-identity-risk SKU distinct
+from the wordmark and shape failures above: two independent cast-composite attempts on 2026-09-26
+(run 1085, ticket #11725) both BLOCKed on the rendered bottle carrying the wrong cap type and the
+wrong body proportion versus the real packshot, with no visible label at all (neither a match nor a
+garble — the identifying surface simply did not render). Prefer the composite-the-real-plate route
+(ticket #5493 route a) or a pre-cleared library asset over further occlusion-angle generation rounds
+for this SKU, matching the treatment already given to Wicked Simply Hybrid and Botanical ON above.
 
 For any SKU on this list, the `social-art-director` brief MUST
 either occlude or angle the marked region out of frame (hand-over-handle grip, band turned away,

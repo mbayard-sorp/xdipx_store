@@ -9,6 +9,8 @@ import {
   getVisionVerdictByUrl,
   generateWithVisionGate,
   isValidVerdictShape,
+  enforceEnumeratedAnatomy,
+  backAnatomyReadsAsDefect,
   VISION_CHECK_NAMES,
   VISION_SYSTEM_PROMPT,
   VisionParseError,
@@ -31,6 +33,9 @@ const CLEAN_RESPONSE = {
   notes: 'clean, nothing anomalous',
   legibleText: '',
   skinMarks: '',
+  productPhysics: 'not_applicable',
+  handDigitCounts: [],
+  backAnatomyRead: '',
 }
 
 const ANATOMY_FAIL_RESPONSE = {
@@ -48,6 +53,9 @@ const ANATOMY_FAIL_RESPONSE = {
   notes: 'the cast member has three arms',
   legibleText: '',
   skinMarks: '',
+  productPhysics: 'not_applicable',
+  handDigitCounts: [],
+  backAnatomyRead: '',
 }
 
 const NIPPLE_FAIL_RESPONSE = {
@@ -65,6 +73,9 @@ const NIPPLE_FAIL_RESPONSE = {
   notes: 'nipple visible through wet fabric, top edge of frame',
   legibleText: '',
   skinMarks: '',
+  productPhysics: 'not_applicable',
+  handDigitCounts: [],
+  backAnatomyRead: '',
 }
 
 const GENITALIA_FAIL_RESPONSE = {
@@ -82,6 +93,9 @@ const GENITALIA_FAIL_RESPONSE = {
   notes: 'genitalia visible, crop ran wider than requested',
   legibleText: '',
   skinMarks: '',
+  productPhysics: 'not_applicable',
+  handDigitCounts: [],
+  backAnatomyRead: '',
 }
 
 // Ticket #10477, the two calibration directions of `anusNotVisible`.
@@ -108,6 +122,9 @@ const LICENSED_PLUG_FRAME_RESPONSE = {
   notes: 'bare buttocks, gluteal cleft reads as a line, plug lying along the cleft under its own weight, no anus visible or outlined',
   legibleText: '',
   skinMarks: '',
+  productPhysics: 'not_applicable',
+  handDigitCounts: [],
+  backAnatomyRead: '',
 }
 
 // The failing direction: the pose parts the buttocks and the anus reads.
@@ -126,6 +143,9 @@ const PARTED_ANUS_FAIL_RESPONSE = {
   notes: 'buttocks spread by the pose, anus visible and outlined at the base of the cleft',
   legibleText: '',
   skinMarks: '',
+  productPhysics: 'not_applicable',
+  handDigitCounts: [],
+  backAnatomyRead: '',
 }
 
 const AGE_AMBIGUOUS_FAIL_RESPONSE = {
@@ -143,6 +163,9 @@ const AGE_AMBIGUOUS_FAIL_RESPONSE = {
   notes: 'faceless torso crop, no reliable adult age markers visible',
   legibleText: '',
   skinMarks: '',
+  productPhysics: 'not_applicable',
+  handDigitCounts: [],
+  backAnatomyRead: '',
 }
 
 const BRANDED_TEXT_RESPONSE = {
@@ -160,6 +183,9 @@ const BRANDED_TEXT_RESPONSE = {
   notes: 'clean, product wordmark visible on the paddle handle',
   legibleText: 'TANTUS',
   skinMarks: '',
+  productPhysics: 'not_applicable',
+  handDigitCounts: [],
+  backAnatomyRead: '',
 }
 
 // Ticket #11477, the incident that prompted the check: a bead strand laid
@@ -181,6 +207,81 @@ const SKIN_MARKS_RESPONSE = {
   notes: 'clean, otherwise compliant bead-strand frame',
   legibleText: '',
   skinMarks: 'faint pink-red streaks and blotches across the lower back and flank',
+  productPhysics: 'not_applicable',
+  handDigitCounts: [],
+  backAnatomyRead: '',
+}
+
+// Ticket #11460, the three DONE WHEN cases for productPhysics. All three are
+// otherwise-clean frames (every safety check passes) so the only thing under
+// test is the new report field and, in the third case, that scale never
+// contaminates it.
+
+// Case 1: unsupported. A product adhered to a vertical surface (a shin) with
+// no hand anywhere in the frame — nothing explains why it is not falling,
+// exactly the row-308 incident this ticket cites.
+const UNSUPPORTED_PRODUCT_RESPONSE = {
+  pass: true,
+  checks: {
+    limbCount: 'pass',
+    handAnatomy: 'pass',
+    faceBodyIntegrity: 'pass',
+    extraOrMergedLimbs: 'pass',
+    nippleOccluded: 'pass',
+    genitaliaAbsent: 'pass',
+    anusNotVisible: 'pass',
+    adultUnambiguous: 'pass',
+  },
+  notes: 'product adhered to the side of a shin, vertical surface, no hand in frame',
+  legibleText: '',
+  skinMarks: '',
+  productPhysics: 'unsupported',
+  handDigitCounts: [],
+  backAnatomyRead: '',
+}
+
+// Case 2: supported by grip. Fingers visibly wrapped around the product.
+const GRIPPED_PRODUCT_RESPONSE = {
+  pass: true,
+  checks: {
+    limbCount: 'pass',
+    handAnatomy: 'pass',
+    faceBodyIntegrity: 'pass',
+    extraOrMergedLimbs: 'pass',
+    nippleOccluded: 'pass',
+    genitaliaAbsent: 'pass',
+    anusNotVisible: 'pass',
+    adultUnambiguous: 'pass',
+  },
+  notes: 'hand gripping the product, fingers wrapped fully around the shaft',
+  legibleText: '',
+  skinMarks: '',
+  productPhysics: 'supported',
+  handDigitCounts: [],
+  backAnatomyRead: '',
+}
+
+// Case 3: supported, exaggerated scale. Proves no proportion/scale reject
+// crept in: the product renders much larger than its real-world size, but the
+// grip is proper, so this must still read "supported".
+const EXAGGERATED_SCALE_GRIPPED_RESPONSE = {
+  pass: true,
+  checks: {
+    limbCount: 'pass',
+    handAnatomy: 'pass',
+    faceBodyIntegrity: 'pass',
+    extraOrMergedLimbs: 'pass',
+    nippleOccluded: 'pass',
+    genitaliaAbsent: 'pass',
+    anusNotVisible: 'pass',
+    adultUnambiguous: 'pass',
+  },
+  notes: 'product rendered at an exaggerated, larger-than-real-life scale, but hand fully wraps around it with a proper grip',
+  legibleText: '',
+  skinMarks: '',
+  productPhysics: 'supported',
+  handDigitCounts: [],
+  backAnatomyRead: '',
 }
 
 function deps(over: Partial<VisionGateDeps> = {}): VisionGateDeps {
@@ -247,6 +348,24 @@ describe('isValidVerdictShape', () => {
 
   it('accepts an empty-string skinMarks (checked, nothing found)', () => {
     expect(isValidVerdictShape({ ...CLEAN_RESPONSE, skinMarks: '' })).toBe(true)
+  })
+
+  // Ticket #11460: productPhysics is a second report field, same convention
+  // as legibleText — required as one of the three enum values, never a
+  // gate on `pass`.
+  it('rejects a missing productPhysics', () => {
+    const { productPhysics: _productPhysics, ...rest } = CLEAN_RESPONSE
+    expect(isValidVerdictShape(rest)).toBe(false)
+  })
+
+  it('rejects an invalid productPhysics value', () => {
+    expect(isValidVerdictShape({ ...CLEAN_RESPONSE, productPhysics: 'floating' })).toBe(false)
+  })
+
+  it('accepts each of the three productPhysics values', () => {
+    expect(isValidVerdictShape({ ...CLEAN_RESPONSE, productPhysics: 'supported' })).toBe(true)
+    expect(isValidVerdictShape({ ...CLEAN_RESPONSE, productPhysics: 'unsupported' })).toBe(true)
+    expect(isValidVerdictShape({ ...CLEAN_RESPONSE, productPhysics: 'not_applicable' })).toBe(true)
   })
 
   it('lists the four doctrine hard checks plus the four imagery-ceiling checks', () => {
@@ -326,6 +445,47 @@ describe('legibleText prompt calibration (garbled/illegible marks, ticket #11487
 
   it('still asks for a transcription first, garbled marks are the fallback instruction', () => {
     expect(VISION_SYSTEM_PROMPT).toContain('Transcribe everything legible into one string')
+  })
+})
+
+// Ticket #11460. productPhysics is report-only (constraint 2: ship report-
+// only first, promote to blocking only after a backtest). Its two failure
+// directions are the same shape as anusNotVisible's: missing real support,
+// and over-firing on a licensed, deliberately-exaggerated render scale. The
+// wording is asserted directly for the same reason — a later edit that
+// quietly folds scale into the judgment would not fail a single injected-
+// response test, only the prompt text catches it.
+describe('productPhysics prompt calibration (ticket #11460)', () => {
+  it('names the check as report-only, not a pass/fail check', () => {
+    expect(VISION_SYSTEM_PROMPT).toContain('REPORT ONLY, not a check, does not affect "pass": productPhysics')
+  })
+
+  it('defines support as a grip or an upward-facing resting surface', () => {
+    expect(VISION_SYSTEM_PROMPT).toContain('fingers visibly wrapped around it')
+    expect(VISION_SYSTEM_PROMPT).toContain('a palm cupped underneath it bearing its weight from below')
+    expect(VISION_SYSTEM_PROMPT).toContain('rests on a surface that faces upward')
+  })
+
+  it('names an open flat palm beside a product, and a hand resting on top, as NOT support', () => {
+    expect(VISION_SYSTEM_PROMPT).toContain('An open flat palm beside a product is not support')
+    expect(VISION_SYSTEM_PROMPT).toContain('a hand resting on top of a product is not support')
+  })
+
+  it('explicitly separates scale exaggeration from the support judgment', () => {
+    expect(VISION_SYSTEM_PROMPT).toContain('This is NOT a size or proportion check')
+    expect(VISION_SYSTEM_PROMPT).toContain('a product rendered at an exaggerated, larger-than-real-life scale is completely normal for this brand')
+    expect(VISION_SYSTEM_PROMPT).toContain('scale exaggeration and physical support are unrelated questions')
+    expect(VISION_SYSTEM_PROMPT).toContain('Only fake or missing support is the fail condition here, never scale')
+  })
+
+  it('always requires the field present, with the not_applicable escape when there is no product-on-body contact', () => {
+    expect(VISION_SYSTEM_PROMPT).toContain('answer "not_applicable"')
+    expect(VISION_SYSTEM_PROMPT).toContain('"productPhysics" is always present in your response, and is always one of "supported", "unsupported", or "not_applicable"')
+  })
+
+  it('does not add a ninth pass/fail check: the eight-check count is unchanged', () => {
+    expect(VISION_SYSTEM_PROMPT).toContain('Check these eight things')
+    expect(VISION_SYSTEM_PROMPT).toContain('"pass" is true only when all eight checks in "checks" are "pass"')
   })
 })
 
@@ -447,6 +607,45 @@ describe('runVisionGate', () => {
     expect(verdict.skinMarks).toBe('')
   })
 
+  // Ticket #11460, the three DONE WHEN cases. productPhysics never gates
+  // `pass`: all three frames are otherwise clean and all three verdicts read
+  // pass:true, exactly as report-only requires.
+  describe('productPhysics (report only, does not gate pass)', () => {
+    it('reads unsupported for a product on a vertical surface with no hand', async () => {
+      const d = deps({ callVision: vi.fn(async () => UNSUPPORTED_PRODUCT_RESPONSE) })
+      const verdict = await runVisionGate('https://cdn.shopify.com/files/shin-adhered.jpg', d)
+      expect(verdict.productPhysics).toBe('unsupported')
+      expect(verdict.notes).toContain('no hand in frame')
+      // Report-only: an unsupported product does not block the gate.
+      expect(verdict.pass).toBe(true)
+      expect(verdict.checkCompleted).toBe(true)
+    })
+
+    it('reads supported for a product gripped with fingers wrapped around it', async () => {
+      const d = deps({ callVision: vi.fn(async () => GRIPPED_PRODUCT_RESPONSE) })
+      const verdict = await runVisionGate('https://cdn.shopify.com/files/gripped.jpg', d)
+      expect(verdict.productPhysics).toBe('supported')
+      expect(verdict.pass).toBe(true)
+    })
+
+    it('reads supported for an exaggerated-scale product properly held, proving no proportion reject crept in', async () => {
+      const d = deps({ callVision: vi.fn(async () => EXAGGERATED_SCALE_GRIPPED_RESPONSE) })
+      const verdict = await runVisionGate('https://cdn.shopify.com/files/exaggerated-scale-held.jpg', d)
+      // A large rendered product with a proper grip must NOT be penalized for
+      // scale: this is the case that would silently break if a later edit
+      // folded a proportion judgment into productPhysics.
+      expect(verdict.productPhysics).toBe('supported')
+      expect(verdict.pass).toBe(true)
+    })
+
+    it('is null when the check never completed (fail-closed, same convention as legibleText)', async () => {
+      const d = deps({ callVision: vi.fn(async () => { throw new Error('anthropic 529') }) })
+      const verdict = await runVisionGate('https://cdn.shopify.com/files/x.jpg', d)
+      expect(verdict.productPhysics).toBeNull()
+      expect(verdict.pass).toBe(false)
+    })
+  })
+
   it('fails closed when the fetch throws', async () => {
     const d = deps({ fetchImageBase64: vi.fn(async () => { throw new Error('network down') }) })
     const verdict = await runVisionGate('https://cdn.shopify.com/files/x.jpg', d)
@@ -510,6 +709,141 @@ describe('runVisionGateOnImage', () => {
     expect(verdict.pass).toBe(false)
     expect(verdict.notes).toContain('anthropic 529')
     expect(fetchImageBase64).not.toHaveBeenCalled()
+  })
+
+  // Ticket #11029, end to end: the enumerated fields ride all the way through
+  // getOneVerdict into the final verdict object, and a bad count fails the
+  // whole gate even when the model's own checks self-graded clean.
+  it('carries handDigitCounts/backAnatomyRead through to the final verdict and enforces a bad count', async () => {
+    const callVision = vi.fn(async () => ({ ...CLEAN_RESPONSE, handDigitCounts: [6], backAnatomyRead: '' }))
+    const verdict = await runVisionGateOnImage({ data: 'ZmFrZQ==', mediaType: 'image/jpeg' }, { callVision })
+    expect(verdict.handDigitCounts).toEqual([6])
+    expect(verdict.pass).toBe(false)
+    expect(verdict.checks!.handAnatomy).toBe('fail')
+  })
+})
+
+// Ticket #11029. bodyscape image test 4 (2026-09-23) found the vision gate
+// passing the exact reject class the owner named ('odd looking hands', 'body
+// distortion') because the model self-graded handAnatomy/faceBodyIntegrity
+// without ever being asked to enumerate what it saw. These reproduce the two
+// named incidents from mocked, enumerated model responses (no live model
+// call available to re-gate the real library rows from this suite; see the
+// PR body for what that means for DONE WHEN items 1-3 on the ticket).
+describe('backAnatomyReadsAsDefect (ticket #11029)', () => {
+  it('flags a hair/pubic-reading patch on the back', () => {
+    expect(backAnatomyReadsAsDefect('a dense dark patch above the cleft resembling pubic hair')).toBe(true)
+  })
+
+  it('flags a vulva-like crease reading', () => {
+    expect(backAnatomyReadsAsDefect('a crease reading as vulva-like just above the sacrum')).toBe(true)
+  })
+
+  it('flags a navel appearing on a back view', () => {
+    expect(backAnatomyReadsAsDefect('a navel is visible just above the waistline')).toBe(true)
+  })
+
+  it('does not flag a clean back read using the prompt\'s own clean-case example wording', () => {
+    expect(backAnatomyReadsAsDefect('smooth skin, no navel visible')).toBe(false)
+  })
+
+  it('does not flag a clean back read phrased the other way round', () => {
+    expect(backAnatomyReadsAsDefect('the navel is not visible from this angle')).toBe(false)
+  })
+
+  it('does not flag an empty read (not a back view, or nothing there)', () => {
+    expect(backAnatomyReadsAsDefect('')).toBe(false)
+  })
+})
+
+describe('enforceEnumeratedAnatomy (ticket #11029)', () => {
+  const CLEAN_ENUMERATED: VisionVerdict = {
+    ...CLEAN_RESPONSE,
+    checkedAt: '2026-09-27T00:00:00.000Z',
+    checkCompleted: true,
+  } as VisionVerdict
+
+  it('is a no-op on a clean verdict with normal counts and a clean back read', () => {
+    const result = enforceEnumeratedAnatomy({ ...CLEAN_ENUMERATED, handDigitCounts: [5, 5], backAnatomyRead: '' })
+    expect(result).toEqual({ ...CLEAN_ENUMERATED, handDigitCounts: [5, 5], backAnatomyRead: '' })
+  })
+
+  it('is a no-op when checkCompleted is false (nothing to enforce against)', () => {
+    const incomplete: VisionVerdict = { ...CLEAN_ENUMERATED, checkCompleted: false, checks: null, handDigitCounts: null, backAnatomyRead: null }
+    expect(enforceEnumeratedAnatomy(incomplete)).toEqual(incomplete)
+  })
+
+  // Incident 1: library asset 688 (femmefunn-ultra-wand-mini, cast jade). Four
+  // fingers wrapped on the front, a thumb tip past the far edge, and a sixth
+  // digit hanging loose behind the handle — the model's own handAnatomy read
+  // 'pass'. Enumerating counts (here: one hand, six digits) lets the code
+  // force the fail the model's self-grade missed.
+  it('forces handAnatomy to fail when a hand reports six digits, even though the model self-graded pass (asset 688 shape)', () => {
+    const verdict: VisionVerdict = {
+      ...CLEAN_ENUMERATED,
+      handDigitCounts: [6],
+      backAnatomyRead: '',
+      notes: 'hand gripping the wand looks fine',
+    }
+    const result = enforceEnumeratedAnatomy(verdict)
+    expect(result.pass).toBe(false)
+    expect(result.checks!.handAnatomy).toBe('fail')
+    expect(result.notes).toContain('enumerated-anatomy override')
+    expect(result.notes).toContain('[6]')
+  })
+
+  it('forces handAnatomy to fail when any one of multiple hands has a bad count', () => {
+    const verdict: VisionVerdict = { ...CLEAN_ENUMERATED, handDigitCounts: [5, 4], backAnatomyRead: '' }
+    const result = enforceEnumeratedAnatomy(verdict)
+    expect(result.pass).toBe(false)
+    expect(result.checks!.handAnatomy).toBe('fail')
+  })
+
+  // Incident 2: library asset 690 (zola-rechargeable-silicone-mini-wand, cast
+  // sofia). The top of the gluteal cleft above the sheet rendered as a dense
+  // pubic-style hair patch with a vulva-like crease, on the back — the
+  // model's own faceBodyIntegrity read 'pass'.
+  it('forces faceBodyIntegrity to fail when backAnatomyRead reads as a genital-like patch, even though the model self-graded pass (asset 690 shape)', () => {
+    const verdict: VisionVerdict = {
+      ...CLEAN_ENUMERATED,
+      handDigitCounts: [],
+      backAnatomyRead: 'a dense pubic-style hair patch with a vulva-like crease above the cleft',
+    }
+    const result = enforceEnumeratedAnatomy(verdict)
+    expect(result.pass).toBe(false)
+    expect(result.checks!.faceBodyIntegrity).toBe('fail')
+    expect(result.notes).toContain('enumerated-anatomy override')
+  })
+
+  it('forces faceBodyIntegrity to fail when a navel is reported on a back-view frame', () => {
+    const verdict: VisionVerdict = { ...CLEAN_ENUMERATED, handDigitCounts: [], backAnatomyRead: 'a navel is clearly visible' }
+    const result = enforceEnumeratedAnatomy(verdict)
+    expect(result.pass).toBe(false)
+    expect(result.checks!.faceBodyIntegrity).toBe('fail')
+  })
+
+  it('applies both overrides together and does not clobber an already-failing check', () => {
+    const verdict: VisionVerdict = {
+      ...CLEAN_ENUMERATED,
+      checks: { ...CLEAN_ENUMERATED.checks!, faceBodyIntegrity: 'fail' },
+      handDigitCounts: [6],
+      backAnatomyRead: 'pubic-like patch',
+      pass: false,
+    }
+    const result = enforceEnumeratedAnatomy(verdict)
+    expect(result.checks!.handAnatomy).toBe('fail')
+    expect(result.checks!.faceBodyIntegrity).toBe('fail')
+    // Only the hand override needed to fire new; faceBodyIntegrity was
+    // already failing, so it is not named again in the override note.
+    expect(result.notes).toContain('handDigitCounts')
+  })
+
+  // DONE WHEN item 3: 691 and 689 (same shoot, same product family, clean
+  // shots) must still pass — normal five-fingered counts and no back-view
+  // defect must never trip the new enforcement.
+  it('does not fire on the clean sibling shots (689/691 shape: normal counts, no back view)', () => {
+    const verdict: VisionVerdict = { ...CLEAN_ENUMERATED, handDigitCounts: [5], backAnatomyRead: '' }
+    expect(enforceEnumeratedAnatomy(verdict)).toEqual(verdict)
   })
 })
 
@@ -655,14 +989,14 @@ describe('JSON parse failure retry', () => {
 describe('recordVisionVerdict', () => {
   it('persists the verdict via the injected writer', async () => {
     const update = vi.fn(async () => {})
-    await recordVisionVerdict(42, { ...CLEAN_RESPONSE, checkedAt: '2026-08-31T00:00:00Z' } as VisionVerdict, { updateVerdict: update })
+    await recordVisionVerdict(42, { ...CLEAN_RESPONSE, checkedAt: '2026-08-31T00:00:00Z', checkCompleted: true } as VisionVerdict, { updateVerdict: update })
     expect(update).toHaveBeenCalledWith(42, expect.objectContaining({ pass: true }))
   })
 
   it('never throws when the writer fails (non-fatal by contract)', async () => {
     const update = vi.fn(async () => { throw new Error('neon down') })
     await expect(
-      recordVisionVerdict(42, { ...CLEAN_RESPONSE, checkedAt: '2026-08-31T00:00:00Z' } as VisionVerdict, { updateVerdict: update }),
+      recordVisionVerdict(42, { ...CLEAN_RESPONSE, checkedAt: '2026-08-31T00:00:00Z', checkCompleted: true } as VisionVerdict, { updateVerdict: update }),
     ).resolves.toBeUndefined()
   })
 })
@@ -698,7 +1032,7 @@ describe('regateAsset (ticket #10511)', () => {
 
 describe('getVisionVerdictByUrl', () => {
   it('strips the query string before looking up', async () => {
-    const lookup = vi.fn(async () => ({ ...CLEAN_RESPONSE, checkedAt: '2026-08-31T00:00:00Z' }) as VisionVerdict)
+    const lookup = vi.fn(async () => ({ ...CLEAN_RESPONSE, checkedAt: '2026-08-31T00:00:00Z', checkCompleted: true }) as VisionVerdict)
     await getVisionVerdictByUrl('https://cdn.shopify.com/files/x.jpg?v=123', { lookupVerdictByUrl: lookup })
     expect(lookup).toHaveBeenCalledWith('https://cdn.shopify.com/files/x.jpg')
   })

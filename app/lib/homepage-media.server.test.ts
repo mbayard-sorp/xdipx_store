@@ -42,6 +42,9 @@ const PASS_VERDICT: VisionVerdict = {
   checkCompleted: true,
   legibleText: '',
   skinMarks: '',
+  productPhysics: 'not_applicable',
+  handDigitCounts: [],
+  backAnatomyRead: '',
 }
 
 const FAIL_VERDICT: VisionVerdict = {

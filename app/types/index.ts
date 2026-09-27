@@ -350,6 +350,22 @@ export interface Product {
    * `DiscoveryProduct.totalInventory` in `~/types/discovery`.
    */
   totalInventory?: number | null
+  /**
+   * xdipx.bare_product_reference (ticket #11474). Resolved ONCE by
+   * `scripts/resolve-bare-product-references.ts` and read verbatim by the
+   * social image path (instagram-campaigns.md §3.2c: brief only from a bare,
+   * text-free product reference — never the retail carton, never an
+   * AI-generated frame). `url: null` is an explicit, resolved verdict that no
+   * bare frame exists anywhere in this product's media — distinct from the
+   * field being entirely absent (never resolved yet).
+   */
+  bareProductReference?: {
+    url: string | null
+    index: number | null
+    reason: string
+    resolvedAt: string
+    method: 'heuristic'
+  }
 }
 
 /**

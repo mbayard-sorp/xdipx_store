@@ -79,6 +79,9 @@ export interface AlarmOutcome {
   escalated: string[]
   /** Alarms suppressed because the route cannot produce evidence at all. */
   unreadable: string[]
+  /** Blocked tier-2 (`:persistent`) code rows unblocked this sweep because a
+   *  fresh liveness read found the condition healthy (ticket #11614). */
+  unblocked: number[]
 }
 
 /** An alarm-worthy condition, reduced to the fields a ticket needs. */
@@ -241,6 +244,51 @@ async function closeResolved(keys: string[], reason: string, nowIso: string): Pr
   return closed
 }
 
+/**
+ * Unblock every `blocked` tier-2 (`:persistent`) `code` row holding one of
+ * these base keys, because THIS sweep's fresh liveness read says the route is
+ * healthy again (ticket #11614).
+ *
+ * `code` has no system-reachable self-close edge to `applied` (only `process`
+ * does, via `DETECTOR_SELF_CLOSE_KINDS` in `team.server.ts`), so this cannot
+ * retire the row outright -- doing so would need a new transition edge, which
+ * is exactly the "loosen the transition map" move the playbook forbids. What
+ * IS already permitted, unconditionally, for a `system` actor is `blocked ->
+ * approved` (the same edge the owner uses to unblock by hand). Landing there
+ * accomplishes the thing that actually mattered: the row leaves `blocked`
+ * BEFORE any future sweep's dedupe collision could otherwise call
+ * `reopenBlockedOnRepeatObservation` on it and stamp a "re-observed" note over
+ * a condition that had already cleared. An agent still disposes of it (a
+ * clean evidence-retire, now backed by this sweep's own fresh healthy read
+ * instead of a manual re-check), but that costs one deliberate close instead
+ * of the claim-to-discover-it-was-already-fine cycle tickets #11158/#11159
+ * paid for.
+ */
+async function unblockResolvedPersistent(keys: string[], reason: string, nowIso: string): Promise<number[]> {
+  if (keys.length === 0) return []
+  const persistentKeys = keys.map(k => `${k}:persistent`)
+  const unblocked: number[] = []
+  try {
+    const blockedRows = await listSuggestions({ dedupeKeys: persistentKeys, kinds: ['code'], statuses: ['blocked'] })
+    const note =
+      `Resolved ${nowIso}: ${reason} Unblocked automatically by /cron/janitor-sweep -- the fresh ` +
+      'read this sweep took says the condition has cleared, so this was never reopened as still-broken. ' +
+      'Evidence-retire (or re-verify) before further action.'
+    for (const row of blockedRows) {
+      try {
+        await transitionSuggestion(row.id, 'approved', 'system', { note })
+        unblocked.push(row.id)
+      } catch (err) {
+        if (String(err).includes('409')) continue
+        console.warn(`${LOG} could not unblock #${row.id} (ignored)`, err)
+      }
+    }
+  } catch (err) {
+    console.warn(`${LOG} unblock pass failed (ignored)`, err)
+  }
+  return unblocked
+}
+
 async function file(a: Alarm, kind: 'process' | 'code', detector: string): Promise<boolean> {
   try {
     const id = await fileDetectionTicket({
@@ -279,7 +327,7 @@ export async function reconcileCronAlarms(
   now = new Date(),
 ): Promise<AlarmOutcome> {
   const nowIso = now.toISOString()
-  const out: AlarmOutcome = { filed: [], closed: [], escalated: [], unreadable: [] }
+  const out: AlarmOutcome = { filed: [], closed: [], escalated: [], unreadable: [], unblocked: [] }
 
   // A route with no row, no heartbeat and no external reader cannot ever
   // satisfy its own floor. That is a manifest bug and it is reported as one;
@@ -317,6 +365,15 @@ export async function reconcileCronAlarms(
   out.closed.push(...await closeResolved(healthyFloorKeys, 'the lane produced inside its floor again.', nowIso))
   out.closed.push(...await closeResolved(healthyFailKeys, 'the route completed without failing again.', nowIso))
   if (watchedLaneKeys.length) out.closed.push(...await closeResolved(watchedLaneKeys, 'the lane is watched again.', nowIso))
+
+  // Tier-2 (`:persistent`) `code` rows have no self-close edge (only `process`
+  // does), so a blocked one would otherwise sit until some later sweep's
+  // dedupe collision "reopened" it -- on a fresh failure, correctly, but with
+  // no way to tell that apart from a stale re-observation of a condition that
+  // had already cleared. Unblock it here, on the same fresh read that closes
+  // the tier-1 rows above, so it leaves `blocked` on its own terms.
+  out.unblocked.push(...await unblockResolvedPersistent(healthyBreachKeys, 'the route reported evidence of life inside its floor again.', nowIso))
+  out.unblocked.push(...await unblockResolvedPersistent(healthyFailKeys, 'the route completed without failing again.', nowIso))
 
   for (const l of readable) {
     if (!l.breached) await clearCounter(makeDedupeKey('cron-breach', l.route))
