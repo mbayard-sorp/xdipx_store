@@ -11,11 +11,17 @@ function pct(numerator: number, denominator: number): string {
 }
 
 export function InviteFunnel({ sent, opened, clicked, completed }: InviteFunnelProps) {
+  // Sequential brand-token ramp (ticket #11069): the retired sage/orange hexes
+  // this funnel shipped with are replaced with a quiet-to-emphasis read of the
+  // v3 palette — sage for the top-of-funnel base state, warming through coral,
+  // and plum (the brand's emphasis color) for the completed stage — rather
+  // than a literal find-and-replace of the old ramp's hues, since two of the
+  // four (#FF6A3D, #FF4B1F) are orange, which CLAUDE.md bans reintroducing.
   const stages = [
-    { label: 'Sent',      count: sent,      pctOf: sent,      color: '#7C8F78' },
-    { label: 'Opened',    count: opened,    pctOf: sent,      color: '#F5B841' },
-    { label: 'Clicked',   count: clicked,   pctOf: opened,    color: '#FF6A3D' },
-    { label: 'Reviewed',  count: completed, pctOf: clicked,   color: '#FF4B1F' },
+    { label: 'Sent',      count: sent,      pctOf: sent,      color: 'var(--color-sage)' },
+    { label: 'Opened',    count: opened,    pctOf: sent,      color: 'var(--color-coral-2)' },
+    { label: 'Clicked',   count: clicked,   pctOf: opened,    color: 'var(--color-coral)' },
+    { label: 'Reviewed',  count: completed, pctOf: clicked,   color: 'var(--color-plum)' },
   ]
 
   const maxCount = sent || 1
