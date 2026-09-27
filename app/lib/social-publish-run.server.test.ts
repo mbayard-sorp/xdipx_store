@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { instagramTickDeps, xTickDeps, VIDEO_TICK_VALVE_KEY } from './social-publish-run.server'
+import { instagramTickDeps, xTickDeps, VIDEO_TICK_VALVE_KEY, mediaForPost } from './social-publish-run.server'
 import {
   runSocialPublishTick,
   MAX_PER_TICK,
@@ -72,6 +72,50 @@ function post(over: Partial<PostRow> = {}): PostRow {
     ...over,
   } as PostRow
 }
+
+describe('mediaForPost (ticket #11155, durationSec/sizeBytes onto PublishMedia)', () => {
+  function videoPost(over: Partial<PostRow> = {}): PostRow {
+    return post({
+      mediaKind: 'video',
+      mediaUrls: ['https://cdn.example/clip.mp4'],
+      posterUrl: 'https://cdn.example/poster.jpg',
+      ...over,
+    })
+  }
+
+  it('passes durationSec and sizeBytes through when both are set on the row', () => {
+    const result = mediaForPost(videoPost({ durationSec: '141.00', sizeBytes: 12_345_678 }))
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error('expected ok')
+    expect(result.media).toMatchObject({ kind: 'video', durationSec: 141, sizeBytes: 12_345_678 })
+  })
+
+  it('converts the decimal-as-string durationSec to a number (drizzle decimal convention)', () => {
+    const result = mediaForPost(videoPost({ durationSec: '12.50' }))
+    if (!result.ok) throw new Error('expected ok')
+    expect(result.media).toMatchObject({ durationSec: 12.5 })
+  })
+
+  it('omits durationSec/sizeBytes when the row predates migration 108 (both null)', () => {
+    const result = mediaForPost(videoPost({ durationSec: null, sizeBytes: null }))
+    if (!result.ok) throw new Error('expected ok')
+    expect(result.media).not.toHaveProperty('durationSec')
+    expect(result.media).not.toHaveProperty('sizeBytes')
+  })
+
+  it('never throws on an unparseable durationSec and simply omits it', () => {
+    const result = mediaForPost(videoPost({ durationSec: 'not-a-number' as unknown as string }))
+    if (!result.ok) throw new Error('expected ok')
+    expect(result.media).not.toHaveProperty('durationSec')
+  })
+
+  it('leaves an image post untouched (no durationSec/sizeBytes on the image/carousel shapes)', () => {
+    const result = mediaForPost(post({ mediaUrls: ['https://cdn.example/photo.jpg'], durationSec: '99.00', sizeBytes: 999 }))
+    if (!result.ok) throw new Error('expected ok')
+    expect(result.media).not.toHaveProperty('durationSec')
+    expect(result.media).not.toHaveProperty('sizeBytes')
+  })
+})
 
 describe('publishViaRegistry (the scheduled tick publish closure)', () => {
   beforeEach(() => publishMock.mockReset())

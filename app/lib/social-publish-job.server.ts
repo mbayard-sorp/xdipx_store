@@ -33,7 +33,7 @@ import { isTickEligible, preserveGateStamp } from './social-publish-approve.serv
 import { runRemovalWatch, type RemovalWatchResult } from './social-removal-watch.server'
 import { checkLinkedProductStock } from './social-publish/stock-guard.server'
 import { resolvePostProductHandle } from './social-publish/product-handle.server'
-import { estimateXPostCostUsd, estimateXSpendUsd } from './social-publish/x-limits'
+import { estimateXPostCostUsd, estimateXSpendUsd, isRetryFutileXError } from './social-publish/x-limits'
 import { permalinkFor } from './social-permalink.server'
 import { formatLaSlot } from './social-schedule'
 import { fileBlocker } from './owner-blockers.server'
@@ -948,7 +948,12 @@ export async function runSocialPublishTick(deps: PublishTickDeps): Promise<Publi
     // error and returns the row to the queue, and a row that already carries an
     // error message is on its second try and goes terminal. A publish path that
     // retries forever against a live API is worse than one that stops.
-    const terminal = !!post.errorMessage
+    //
+    // Ticket #11155: a duration/size pre-flight refusal is deterministic —
+    // computed from the row's own stored duration/size, it refuses identically
+    // on every retry — so it goes terminal on the FIRST failure rather than
+    // spending a second attempt to confirm what is already certain.
+    const terminal = !!post.errorMessage || isRetryFutileXError(result.detail)
     await repo.markFailed(post.id, result.detail, terminal)
     attempts.push({
       postId: post.id,

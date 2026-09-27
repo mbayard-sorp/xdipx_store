@@ -300,6 +300,14 @@ export const socialPosts = pgTable('social_posts', {
       findings: { check: string; verdict: 'pass' | 'revise' | 'block' | 'hold'; note?: string }[]
     }
   }>(),
+  // Video duration/size (migration 108, ticket #11155). Populated by
+  // fanOutVideoToSocialDrafts from the video job's final asset so
+  // mediaForPost can pass a real duration/size onto PublishMedia, letting
+  // the X adapter's own 140s pre-flight (app/lib/social-publish/x.server.ts)
+  // actually fire instead of always reading undefined. Nullable: absent on
+  // every non-video row and on any video row created before this migration.
+  durationSec: decimal('duration_sec', { precision: 6, scale: 2 }),
+  sizeBytes:   integer('size_bytes'),
 })
 
 /**

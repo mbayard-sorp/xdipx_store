@@ -579,6 +579,30 @@ describe('failure handling', () => {
     expect(calls.failed).toEqual([{ id: 1, terminal: true }])
     expect(r.attempts[0]?.detail).toContain('terminal')
   })
+
+  it('ticket #11155: goes terminal on the FIRST failure when X refuses a video on duration/size, not the second', async () => {
+    // No pre-existing errorMessage: this is the row's first attempt. A
+    // duration/size pre-flight refusal is computed from the row's own stored
+    // duration, so a second attempt would refuse identically -- spending it
+    // teaches nothing and only delays the terminal state a full tick.
+    const { repo, calls } = fakeRepo([post({ errorMessage: null })])
+    const r = await tick({
+      isEnabled: enabled, maxPerDay: cap(3), repo,
+      publish: async () => ({ ok: false, detail: 'Video is 141s; X accepts at most 140s. Trim it or post it on Instagram only.' }),
+    })
+    expect(calls.failed).toEqual([{ id: 1, terminal: true }])
+    expect(r.attempts[0]?.detail).toContain('terminal')
+  })
+
+  it('an ordinary first failure with no duration/size phrase still gets its retry', async () => {
+    const { repo, calls } = fakeRepo([post({ errorMessage: null })])
+    const r = await tick({
+      isEnabled: enabled, maxPerDay: cap(3), repo,
+      publish: async () => ({ ok: false, detail: 'Video upload failed for https://cdn.example.com/clip.mp4: rate limited (429).' }),
+    })
+    expect(calls.failed).toEqual([{ id: 1, terminal: false }])
+    expect(r.attempts[0]?.detail).toContain('will retry')
+  })
 })
 
 describe('the owner edit wins', () => {

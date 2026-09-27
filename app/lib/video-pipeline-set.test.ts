@@ -495,3 +495,81 @@ describe('render gate: awaiting_render_approval', () => {
     expect(terminal).toMatchObject({ status: 'awaiting_render_approval', visionGateOverrideAt: null })
   })
 })
+
+describe('fanOutVideoToSocialDrafts: duration/size onto the social draft (ticket #11155)', () => {
+  const doneJob = {
+    id: 20,
+    jobId: 'job-duration-test',
+    productHandle: 'inbloom-rosales-sucking-vibrator',
+    shopifyProductGid: null,
+    formula: 'myth-busting',
+    presenter: 'none',
+    scriptJson: { hook: 'hook text', cta: 'cta text', captions: { instagram: 'caption for ig' } },
+    aiDisclosure: true,
+    modelTier: 'kling25-pro',
+    targetPlatforms: ['instagram'],
+    stage: 'done',
+    status: 'done',
+    providerRequestIds: {},
+    sceneFrameAssetId: null,
+    finalAssetId: 90,
+    posterAssetId: null, // null so the best-effort library-ingest branch never fires
+    scenesJson: null,
+    sceneStateJson: null,
+    costUsd: '1.20',
+    metricsJson: null,
+    variantGroupId: null,
+    variantAxes: null,
+    error: null,
+    team: 'video',
+    runId: null,
+    episodeId: null as number | null,
+    visionGateOverrideAt: null as Date | null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    completedAt: null,
+  }
+
+  it('reads duration from the final asset and size from a HEAD request onto the inserted row', async () => {
+    state.selectResults = [
+      [doneJob],
+      [{ id: 90, blobUrl: 'https://blob.test/video/job-duration-test/final.mp4', durationSeconds: '141.00' }],
+    ]
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      headers: { get: (h: string) => (h === 'content-length' ? '5242880' : null) },
+    })))
+
+    const result = await fanOutVideoToSocialDrafts(20, 'mike')
+
+    expect(result.created).toEqual([{ id: 1, platform: 'instagram' }])
+    expect(state.inserts[0]).toMatchObject({ durationSec: '141', sizeBytes: 5242880 })
+    vi.unstubAllGlobals()
+  })
+
+  it('is non-fatal when the HEAD request fails: duration still lands, size stays null', async () => {
+    state.selectResults = [
+      [doneJob],
+      [{ id: 90, blobUrl: 'https://blob.test/video/job-duration-test/final.mp4', durationSeconds: '8.00' }],
+    ]
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('network down') }))
+
+    const result = await fanOutVideoToSocialDrafts(20, 'mike')
+
+    expect(result.created).toEqual([{ id: 1, platform: 'instagram' }])
+    expect(state.inserts[0]).toMatchObject({ durationSec: '8', sizeBytes: null })
+    vi.unstubAllGlobals()
+  })
+
+  it('writes a null durationSec (not a "NaN" string) when the final asset has no recorded duration', async () => {
+    state.selectResults = [
+      [doneJob],
+      [{ id: 90, blobUrl: 'https://blob.test/video/job-duration-test/final.mp4', durationSeconds: null }],
+    ]
+    vi.stubGlobal('fetch', vi.fn(async () => ({ headers: { get: () => null } })))
+
+    await fanOutVideoToSocialDrafts(20, 'mike')
+
+    expect(state.inserts[0]).toMatchObject({ durationSec: null, sizeBytes: null })
+    vi.unstubAllGlobals()
+  })
+})

@@ -34,6 +34,20 @@ export const X_VIDEO_MAX_DURATION_SEC = 140
 export const X_VIDEO_MAX_SIZE_BYTES = 512 * 1024 * 1024
 
 /**
+ * True when a publish failure detail is the video duration/size pre-flight
+ * in `x.server.ts` refusing the upload before it started (ticket #11155).
+ * Matches both `Video is <n>s; X accepts at most <max>s...` and
+ * `Video is <n> bytes; X accepts at most <max>...`: both are computed from
+ * the row's own stored duration/size and refuse identically on a retry, so
+ * the job should not spend a second attempt confirming that. A transient
+ * upload or API error never contains this phrase and keeps its normal
+ * retry-then-terminal handling.
+ */
+export function isRetryFutileXError(detail: string): boolean {
+  return detail.includes('X accepts at most')
+}
+
+/**
  * Every link on X is rewritten through t.co and billed against the character
  * count at a fixed width regardless of the real URL's length. A 90-character
  * PDP URL therefore costs 23, and a naive `caption.length` would reject posts X
