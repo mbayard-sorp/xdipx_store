@@ -480,6 +480,44 @@ describe('generateCastComposite: billed-but-dropped candidates are named, not si
     ])
   })
 
+  // Ticket #11022: the owner's frame feedback is keyed by provider request
+  // id, and gate-dropped candidates are the majority of on-skin submissions,
+  // so the ingested row must keep its request id even when the vision gate
+  // fails it (ingestion happens before the gate runs; only the return value
+  // drops the candidate).
+  it('keeps the provider request id on the ingested row when the vision gate fails it', async () => {
+    const composeSceneFrame = vi.fn(async () => ({
+      urls: ['https://fal/candidate.jpg'], requestIds: ['gate-fail-req-1'], costKey: 'atlas/seedream-4.5-edit',
+    }))
+    vi.doMock('./fal-video.server', () => ({ composeSceneFrame }))
+    vi.doMock('./shopify.server', () => ({
+      uploadMoodImageToShopifyFilesWithId: vi.fn(async () => ({ url: 'https://cdn/rehosted.jpg', fileId: 'gid://shopify/MediaImage/1' })),
+    }))
+    const tryIngestSocialAsset = vi.fn(async (_input: Record<string, unknown>) => ({ id: 903 }))
+    vi.doMock('./social-asset-library.server', () => ({ tryIngestSocialAsset }))
+    vi.doMock('./social-vision-gate.server', () => ({
+      runVisionGate: vi.fn(async () => ({
+        pass: false, checks: null, notes: 'nudity: genitalia visible', checkedAt: '2026-09-25T00:00:00.000Z',
+        checkCompleted: true, legibleText: '',
+      })),
+      recordVisionVerdict: vi.fn(async () => {}),
+    }))
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array([1, 2, 3]), { status: 200 })))
+    vi.resetModules()
+
+    const { generateCastComposite } = await import('./social-media.server')
+    const result = await generateCastComposite(CAST_OPTS)
+
+    // Dropped from the result exactly like any other gate failure...
+    expect(result.urls).toEqual([])
+    // ...but every ingest call (both regeneration attempts) still carried the
+    // provider request id, because ingestion runs before the gate check.
+    expect(tryIngestSocialAsset).toHaveBeenCalledTimes(2)
+    for (const call of tryIngestSocialAsset.mock.calls) {
+      expect(call[0].providerRequestId).toBe('gate-fail-req-1')
+    }
+  })
+
   it('names a rehost fetch failure distinctly from a vision-gate rejection', async () => {
     const composeSceneFrame = vi.fn(async () => ({
       urls: ['https://fal/candidate.jpg'], requestIds: ['req-1'], costKey: 'fal/flux-2-edit',
