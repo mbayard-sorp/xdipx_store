@@ -59,6 +59,8 @@ function row(over: Partial<NonNullable<Row>> = {}): NonNullable<Row> {
     cropScale: null,
     lastPublishGateCheckJson: null,
     pairingNoneReason: null,
+    durationSec: null,
+    sizeBytes: null,
     ...over,
   }
 }

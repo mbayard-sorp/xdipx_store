@@ -11,10 +11,13 @@ import {
   captionHasLink,
   estimateXPostCostUsd,
   estimateXSpendUsd,
+  isRetryFutileXError,
   X_CAPTION_MAX,
   T_CO_LENGTH,
   X_COST_PER_POST_USD,
   X_COST_PER_LINKED_POST_USD,
+  X_VIDEO_MAX_DURATION_SEC,
+  X_VIDEO_MAX_SIZE_BYTES,
 } from './x-limits'
 
 const PDP = 'https://xdipx.com/products/some-quite-long-product-handle-here'
@@ -90,5 +93,30 @@ describe('cost', () => {
     // The whole reason the tiers are modelled rather than averaged. If this
     // ratio ever collapses, the spend guard is over-engineered and can go.
     expect(X_COST_PER_LINKED_POST_USD / X_COST_PER_POST_USD).toBeGreaterThan(13)
+  })
+})
+
+describe('isRetryFutileXError (ticket #11155)', () => {
+  it('matches the duration pre-flight refusal verbatim', () => {
+    const detail = `Video is 141s; X accepts at most ${X_VIDEO_MAX_DURATION_SEC}s. Trim it or post it on Instagram only.`
+    expect(isRetryFutileXError(detail)).toBe(true)
+  })
+
+  it('matches the size pre-flight refusal verbatim', () => {
+    const detail = `Video is ${X_VIDEO_MAX_SIZE_BYTES + 1} bytes; X accepts at most ${X_VIDEO_MAX_SIZE_BYTES}.`
+    expect(isRetryFutileXError(detail)).toBe(true)
+  })
+
+  it('does not match a transient upload failure', () => {
+    expect(isRetryFutileXError('Video upload failed for https://cdn.example.com/clip.mp4: rate limited (429). Not posting without the video.')).toBe(false)
+  })
+
+  it('does not match a caption-length rejection', () => {
+    expect(isRetryFutileXError(`Post is 300 characters as X counts them (limit ${X_CAPTION_MAX}). Links count as ${T_CO_LENGTH} regardless of real length.`)).toBe(false)
+  })
+
+  it('does not match an empty or unrelated detail', () => {
+    expect(isRetryFutileXError('')).toBe(false)
+    expect(isRetryFutileXError('Media upload failed for https://cdn.example.com/img.jpg. Not posting without the image.')).toBe(false)
   })
 })

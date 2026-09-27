@@ -71,9 +71,23 @@ export function mediaForPost(post: PostRow):
 
   const isVideo = isVideoPost(post)
   if (isVideo) {
+    // Ticket #11155: durationSec/sizeBytes let the platform adapter's own
+    // pre-flight (app/lib/social-publish/x.server.ts's 140s check) actually
+    // fire instead of always reading undefined. Drizzle returns the decimal
+    // column as a string; Number() matches the conversion already used at
+    // admin.video-studio.render.tsx:316. A row from before migration 108, or
+    // one whose duration was never recorded, has null here and the adapter's
+    // own "unknown size/duration is not a gap" fallback applies unchanged.
+    const durationSec = post.durationSec != null ? Number(post.durationSec) : null
     return {
       ok: true,
-      media: { kind: 'video', videoUrl: first, ...(post.posterUrl ? { posterUrl: post.posterUrl } : {}) },
+      media: {
+        kind: 'video',
+        videoUrl: first,
+        ...(post.posterUrl ? { posterUrl: post.posterUrl } : {}),
+        ...(durationSec != null && Number.isFinite(durationSec) ? { durationSec } : {}),
+        ...(post.sizeBytes != null ? { sizeBytes: post.sizeBytes } : {}),
+      },
     }
   }
   return {

@@ -2642,6 +2642,25 @@ export async function fanOutVideoToSocialDrafts(jobRowId: number, reviewedBy: st
   const captions = (job.scriptJson.captions ?? {}) as Record<string, string>
   const fallbackCaption = [job.scriptJson.hook, job.scriptJson.cta].filter(Boolean).join(' ')
 
+  // Ticket #11155. finalAsset.durationSeconds is the video job's own probe
+  // (set wherever the clip asset itself was recorded); size is a best-effort
+  // HEAD read of the hosted blob, since no asset field carries it yet. Both
+  // are computed once, outside the per-platform loop, and a failure on
+  // either never blocks the fan-out: they are pre-flight inputs for the
+  // platform adapters (app/lib/social-publish/x.server.ts), not requirements
+  // of the row itself.
+  const durationSecValue = finalAsset.durationSeconds != null ? Number(finalAsset.durationSeconds) : null
+  const durationSec = durationSecValue != null && Number.isFinite(durationSecValue) ? String(durationSecValue) : null
+  let sizeBytes: number | null = null
+  try {
+    const headRes = await fetch(finalAsset.blobUrl, { method: 'HEAD' })
+    const len = headRes.headers.get('content-length')
+    const n = len ? Number(len) : NaN
+    if (Number.isFinite(n) && n > 0) sizeBytes = n
+  } catch (err) {
+    console.error(`[video-pipeline] fanOutVideoToSocialDrafts: HEAD for size_bytes failed (non-fatal): ${finalAsset.blobUrl}`, err)
+  }
+
   const created: FanOutResult['created'] = []
   const skipped: FanOutResult['skipped'] = []
   for (const platform of job.targetPlatforms) {
@@ -2663,6 +2682,8 @@ export async function fanOutVideoToSocialDrafts(jobRowId: number, reviewedBy: st
       videoJobId: job.id,
       episodeId,
       mediaKind: 'video',
+      durationSec,
+      sizeBytes,
       altText,
       castSlugs,
       shopifyProductId: productGid,
