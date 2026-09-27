@@ -589,6 +589,24 @@ export const LANE_COVERAGE_EXEMPT: ReadonlyArray<{ team: string; runType: string
       + 'watching both names would make an inconsistency read as coverage; the fix belongs in the '
       + 'social lane\'s prompt and is filed as a ticket there.',
   },
+  {
+    team: 'content',
+    runType: 'manual',
+    why:
+      'A dumping ground fed by at least two distinct routines, not one lane with a schedule. '
+      + '(1) The seo-curator historical rows (847, 970 and earlier) documented in '
+      + '`docs/store-team/routine-seo-curation.md` Step 1: two passes wrote `manual` instead of the '
+      + 'literal `seo-curation`, runType is immutable after `op:start`, and that doc already says a '
+      + 'future recurrence gets filed as a code fix rather than worked around -- these rows are '
+      + 'permanent, harmless debris, not an ongoing outage. (2) `.claude/agents/podcast-reviewer.md:23` '
+      + 'itself posts `{op:"start", team:"content", runType:"manual"}` on every run (e.g. runs 1029, '
+      + '901, 774, 653), while `ROUTINE_CADENCES` watches `content|podcast` for the same "Weekly '
+      + 'podcast review" routine -- the exact social-trend-scout dual-runType pattern above, so that '
+      + 'watched entry never actually matches a real row either. Exempting `content/manual` here (agent '
+      + 'defs are agent-editor\'s lane, not this file\'s) rather than adding a `content|podcast` cadence '
+      + 'that would just be a second name for the same unwatched reality; the real fix (change the '
+      + 'agent def to post `runType:"podcast"`) is filed as an instructions suggestion for agent-editor.',
+  },
 ]
 
 export interface LaneCoverageGap {
