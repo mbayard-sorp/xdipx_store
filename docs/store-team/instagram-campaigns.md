@@ -466,9 +466,39 @@ axes replace the room when the crop eats it, and they rotate the way §3.8 rotat
 THE OWNER SAYS STOP.** Owner, verbatim: *"The two posts that went out to IG are boring. Why weren't they
 on-skin posts? I want to see on-skin posts until I say stop. No more boring posts."* This has no end
 date. It ends when he says it ends, and until then a clothed product frame is an exception that has
-to justify itself in writing (`social-art-director.md`, Clothed exception block). The only standing
-exemption is a product-free resource post, meaning a subject with no product in it, and §3.9 already
-narrows those hard.
+to justify itself in writing (`social-art-director.md`, Clothed exception block).
+
+**STANDING ORDER, 2026-09-27: EVERY INSTAGRAM AND X POST IS A BODYSCAPE, UNTIL THE OWNER SAYS STOP.**
+The 2026-09-22 order above still exempted the product-free resource post ("a subject with no product
+in it"). That exemption is what shipped on 2026-09-26 and 2026-09-27: the active campaign carried no
+hero SKU, every on-skin product row blocked at the gate on product identity (rows 312, 313, 314,
+324), and the slot-A still lifes (row 325, a rose beside a halved lemon on a plate; row 330, a journal
+and a pressed flower on a windowsill) were the only rows left to post. Owner, verbatim: *"why are we
+back to boring social media posts? Why aren't we posting bodyscape images? We did all this work to
+not be boring and the last two instagram posts were a lemon and a flower on a plate and a journal.
+Every post should be a bodyscape post until I say stop."* So the exemption is closed:
+
+- **A product-free frame is retired as a shape while this order stands.** No still life, no
+  tableware, no empty room, no object-on-a-surface, on any slot, including slot A and slot D. A
+  resource post about a subject with no product in it (the orgasm gap, consent, communication) is
+  still written, and its picture is a bodyscape: the crop is a body zone with an in-stock product
+  forward, chosen for the feeling the caption sells (§3.9 "depict the subject"), and the caption may
+  or may not name it. "This subject has no product" is no longer a reason for a frame with no body in
+  it; it is a reason to pick the product that makes the subject visible.
+- **`bodyZone` and `contactMode` are never "none" on a new draft** while this stands. The
+  `social-art-director.md` clothed exception now has one reason left, "owner standing order is off".
+- **The mix ratio in `mission-brief.md` §6b is suspended for the picture, not for the words.** The
+  40/30/20/10 share still governs what the captions are about (resource, education, inspiration,
+  news); it no longer licenses a frame with no product in it. `mixReport`'s product-free line reads
+  from `shopify_product_id`, so it will read over band; that is expected and the run summary says so
+  rather than drafting a still life to correct it.
+- **When a bodyscape row blocks, the recovery is another bodyscape** (routine Step 6.5 rung 2 and 3):
+  a different in-stock SKU with a simpler silhouette, a different zone, a different crop. A still
+  life is never the recovery, and neither is a clothed portrait. If no bodyscape clears the gate the
+  day posts fewer times and the summary names every blocked row and check, which is what surfaces
+  the product-fidelity work (tickets #11487, #11476) instead of hiding it behind a plate of fruit.
+- **This order ends only when the owner says stop**, in his own words, in a session or on the bus.
+  Nothing in a retro, a mixReport breach, or a gate calibration note reopens the exemption.
 
 **It covers X as well as Instagram (owner answer, 2026-09-22: "Yes, on-skin applies to x too").**
 Read that as what it is: a change of DEFAULT POSITION within the existing ceiling, not a widening of
@@ -1273,6 +1303,9 @@ Rules that survive the slate, because they are what keep it a publication:
 
 - **At most half of a day's set is product-forward** (`mission-brief.md` §6b). At 4 posts that is B
   and C, and it is a ceiling, not a quota.
+- **Slot A is a bodyscape like every other slot (standing order 2026-09-27, §3.2c).** The "Product
+  in frame" column above reads **Yes** for every slot while the order stands; the resource post keeps
+  its lane and its caption and loses the right to a product-free picture.
 - **Slot A ships every day, including a one-post day.** If only one post goes out, it is the
   resource post, not the product post. A feed that drops advice first under pressure is a catalog
   that has not noticed yet.

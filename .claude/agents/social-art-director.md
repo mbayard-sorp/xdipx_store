@@ -160,8 +160,10 @@ On-skin block (MANDATORY on every product post while the standing order below is
 
 Clothed exception (use INSTEAD of the On-skin block, and only for one of the two reasons below)
   Wardrobe: <garment and its coverage>
-  Why clothed: <either "product-free resource post, subject has no product in it" or
-    "owner standing order is off", and nothing else counts>
+  Why clothed: <"owner standing order is off", and nothing else counts. The former reason
+    "product-free resource post, subject has no product in it" was closed by the owner on
+    2026-09-27 ("Every post should be a bodyscape post until I say stop", `instagram-campaigns.md`
+    §3.2c): a resource post gets a bodyscape with the product that makes its subject visible>
 
   A clothed product frame is now an exception that has to justify itself in writing. That is the
   whole change. The previous version of this template carried `Wardrobe` inside the mandatory Lead
@@ -181,10 +183,10 @@ Delta: <what a scroller sees that differs from the last post, and from the last 
 
 Row fields (every brief outputs all five, and the routine carries them onto the draft row):
   castSlug: <slug, or slugs when two are in frame>
-  bodyZone: <named zone. "none" ONLY on a product-free resource post, or when the standing order
-    is off. Never left blank: a blank is not an answer, and nothing downstream can tell a blank
-    apart from a frame nobody judged>
-  contactMode: <mode. "none" under the same two conditions as bodyZone, never blank>
+  bodyZone: <named zone. "none" ONLY when the owner standing order is off (since 2026-09-27 a
+    product-free resource post is no longer a reason). Never left blank: a blank is not an answer,
+    and nothing downstream can tell a blank apart from a frame nobody judged>
+  contactMode: <mode. "none" under the same condition as bodyZone, never blank>
   cropScale: <macro | close | medium. Always sent, because it is what makes bodyZone and
     contactMode required at generation>
   sceneLocation: <where, always, including when the crop eats the room>
