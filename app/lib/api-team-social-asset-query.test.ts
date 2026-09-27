@@ -51,6 +51,7 @@ const ROW = {
   visionVerdict: { pass: true },
   visionVerdictAt: new Date('2026-08-18T00:05:00Z'),
   generationBatchId: 'batch-abc123',
+  providerRequestId: 'req-xyz789',
 }
 
 beforeEach(() => {
@@ -82,7 +83,19 @@ describe('search', () => {
       visionVerdict: { pass: true },
       visionVerdictAt: ROW.visionVerdictAt.toISOString(),
       generationBatchId: 'batch-abc123',
+      providerRequestId: 'req-xyz789',
     }])
+  })
+
+  it('returns null providerRequestId when the row has none (pre-#11548 rows)', async () => {
+    listLibraryAssetsMock.mockResolvedValueOnce({
+      assets: [{ ...ROW, providerRequestId: null }],
+      nextBefore: null,
+      facets: { tags: [], products: [], casts: [], archetypes: [], sources: [] },
+    })
+    const res = await post({ op: 'search' })
+    const body = await res.json() as { assets: { providerRequestId: string | null }[] }
+    expect(body.assets[0]?.providerRequestId).toBeNull()
   })
 
   it('returns null generationBatchId when the row has none (pre-#11009 rows)', async () => {
@@ -122,6 +135,27 @@ describe('search', () => {
   it('honours an explicit picked:true request', async () => {
     await post({ op: 'search', picked: true })
     expect(listLibraryAssetsMock).toHaveBeenCalledWith(expect.objectContaining({ picked: true }))
+  })
+
+  // Ticket #11022: the owner's frame feedback is keyed by provider request
+  // id, and the majority of on-skin candidates are gate-dropped, so a
+  // requestId lookup must reach a row regardless of the reuse-first
+  // picked/dropped defaults.
+  it('resolves a requestId to q, and bypasses picked/dropped defaults', async () => {
+    await post({ op: 'search', requestId: 'req-xyz789' })
+    expect(listLibraryAssetsMock).toHaveBeenCalledWith(expect.objectContaining({
+      q: 'req-xyz789',
+      picked: null,
+      dropped: true,
+    }))
+  })
+
+  it('honours an explicit picked filter alongside a requestId lookup', async () => {
+    await post({ op: 'search', requestId: 'req-xyz789', picked: true })
+    expect(listLibraryAssetsMock).toHaveBeenCalledWith(expect.objectContaining({
+      q: 'req-xyz789',
+      picked: true,
+    }))
   })
 
   it('caps limit at 50 and clamps a garbage value to at least 1', async () => {
