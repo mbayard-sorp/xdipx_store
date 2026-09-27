@@ -713,12 +713,16 @@ function MeetEmma({ photoUrl, photoAlt }: { photoUrl?: string | null; photoAlt?:
           </Reveal>
           {/* `fade`, not `scale`: doctrine §5 scopes scale to hero-adjacent
               plates, and a 3% scale on a 128px box is sub-pixel theatre. The
-              ring holds at ~2% of rendered width at every breakpoint, because a
+              mat holds at ~2% of rendered width at every breakpoint, because a
               fixed 6px mat turns into a chunky avatar border as the plate
               shrinks. Radius steps down to the chip token on mobile for the
-              same reason: 22px on a 128px plate reads halfway to a circle. */}
+              same reason: 22px on a 128px plate reads halfway to a circle.
+              A real `border`, not a `ring` (Tailwind rings render as
+              box-shadow, which design-critic run 1034 read as a drop shadow
+              at the plate's left edge — doctrine §3 wants cards on a hairline
+              border-line, not a shadow, of any kind). */}
           <Reveal variant="fade" index={2} className="mb-6 w-[128px] md:mb-0 md:w-full">
-            <div className="aspect-[4/5] w-full overflow-hidden rounded-[var(--radius-sm)] bg-paper-3 ring-2 ring-sage/20 md:rounded-[var(--radius-lg)] md:ring-4 md:ring-sage/15">
+            <div className="aspect-[4/5] w-full overflow-hidden rounded-[var(--radius-sm)] bg-paper-3 border-2 border-sage/20 md:rounded-[var(--radius-lg)] md:border-4 md:border-sage/15">
               <OptimizedImage
                 src={src}
                 alt={alt}
