@@ -924,6 +924,13 @@ scheme from `docs/store-team/instagram-campaigns.md`, then:
   never a trust-boilerplate closer. A slot-A resource post is judged on its curiosity and permission
   charge, not on product innuendo it structurally cannot carry; a caption with no engagement close is
   reworked before it is drafted, not discovered at the gate.
+- **Open a product-free resource caption from the charter's pinned-anchor sentence shape, not a
+  topical narrative (ticket #11724).** Start drafting from the charter's own product-free formula
+  (`docs/emma-voice.md`: name a real state — wanting, permission, curiosity — as plain fact, one
+  sentence, no evasion) and elaborate from there, rather than improvising a topical narrative (an
+  abstract story, algospeak) and discovering the register gap only at the gate. Run 1085
+  (2026-09-26) took 8 voice-gate REVISE iterations on an abstract-narrative draft; the same slot
+  re-drafted directly from the pinned-anchor shape PASSED on the first try.
 - **Volume climbs a rung at a time, on 7 clean days** (§4 of the campaign doc). Name the rung and
   the clean-day count in the run summary. Never step the quota up yourself to compensate for an
   automated step-down.
