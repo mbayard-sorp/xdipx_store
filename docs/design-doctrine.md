@@ -122,9 +122,30 @@ is **retired on customer pages**; it exists only as a legacy alias.
 ## 3. Color — coral is the accent, plum is emphasis
 
 The palette lives in `app/app.css` `@theme`. Use the **v3 token names**
-(`paper`, `ink`, `coral`, `plum`, `sage`); the v2 aliases (`cream`, `sun`,
-`butter`, `coral-deep`) are legacy and banned in new work. **No gradients. No
-reintroduced orange. No old-cream backgrounds.**
+(`paper`, `ink`, `coral`, `plum`, `sage`). **No gradients. No reintroduced
+orange. No old-cream backgrounds.**
+
+Two different things used to be lumped together here as "v2 aliases, banned
+in new work," and ticket #11070 (2026-09-23) split them because the
+conflation kept costing sizing debates every design cycle:
+
+- **`cream`, `cream-2`, `muted`, `coral-deep` are true compatibility
+  aliases**: each maps 1:1 onto a v3 token in `app.css` (`cream`→`paper`,
+  `cream-2`→`paper-2`, `muted`→`ink-3`, `coral-deep`→`plum-2`) and every
+  existing use already renders the correct v3 color. Legacy, banned in new
+  work, migrate opportunistically on touch — see
+  `docs/homepage-team/v2-legacy-alias-sizing-2026-09-27.md` for the sizing and
+  the scheduled migration plan.
+- **`sun` and `butter` are not aliases for anything** — `app.css` marks both
+  "unchanged", and they carry no v3 equivalent. `butter` in particular is a
+  live, customer-facing warm-amber gradient treatment on the bundle hero
+  components (`EndorsementHero`, `PairBundleHero`, `PairBundleFullBleedHero`),
+  not dead compatibility debt. Calling them "banned" invited exactly the
+  confusion the tracker above documents: they are not scheduled for removal
+  and are not new-code violations by existing. A genuine decision to retire
+  the amber accent (replace it with a v3 color, or keep it as a deliberate
+  fourth accent) is a design call for whoever owns the bundle hero visual
+  language, not a token-hygiene sweep.
 
 > **Hex values here track `app/app.css`, which is the source of truth.** Coral,
 > sage and `ink-4` were darkened by ticket #3789 (2026-08-19) to clear WCAG AA
