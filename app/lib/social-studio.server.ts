@@ -319,6 +319,16 @@ export interface LibraryFilters {
   dropped: boolean
   /** #11551: owner feedback filter. loved = heart, rejected = thumbs-down, unrated = neither. */
   feedback?: FeedbackFilter | null
+  /**
+   * #11954: excludes rows the publish gate BLOCKed on product-identity
+   * (`social_media_assets.product_identity_failed_at is not null`). Optional
+   * and defaults to off, so the admin library grid keeps showing these rows
+   * (the owner may still want to see/retag them) — only
+   * `api.team.social-asset-query.tsx`'s reuse-first search sets it, since an
+   * asset that failed product-identity once can never ship for that SKU and
+   * should never be offered again.
+   */
+  excludeProductIdentityBlocked?: boolean
 }
 
 export function parseLibraryFilters(url: URL): LibraryFilters {
@@ -372,6 +382,7 @@ export async function listLibraryAssets(f: LibraryFilters): Promise<LibraryPage>
     conds.push(sql`not exists (select 1 from ${socialAssetFeedback} fb where fb.asset_id = ${socialMediaAssets.id})`)
   }
   if (f.before) conds.push(lt(socialMediaAssets.id, f.before))
+  if (f.excludeProductIdentityBlocked) conds.push(isNull(socialMediaAssets.productIdentityFailedAt))
   // Always applied, not conditional on a truthy value: the default
   // (archived=false) must actively exclude archived rows, which is the
   // entire point of the archive feature (#5426).

@@ -137,6 +137,13 @@ describe('search', () => {
     expect(listLibraryAssetsMock).toHaveBeenCalledWith(expect.objectContaining({ picked: true }))
   })
 
+  it('always excludes product-identity-blocked assets, unconditionally (#11954)', async () => {
+    await post({ op: 'search' })
+    expect(listLibraryAssetsMock).toHaveBeenCalledWith(expect.objectContaining({
+      excludeProductIdentityBlocked: true,
+    }))
+  })
+
   // Ticket #11022: the owner's frame feedback is keyed by provider request
   // id, and the majority of on-skin candidates are gate-dropped, so a
   // requestId lookup must reach a row regardless of the reuse-first

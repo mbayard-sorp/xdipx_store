@@ -65,9 +65,9 @@
  * it was, which is exactly today's behaviour, not a regression of it.
  */
 
-import { and, desc, eq } from 'drizzle-orm'
+import { and, desc, eq, or, sql } from 'drizzle-orm'
 import { db } from './db.server'
-import { socialPosts } from '../../db/schema'
+import { socialPosts, socialMediaAssets } from '../../db/schema'
 import {
   runDeterministicPublishChecks,
   type GateFinding,
@@ -489,6 +489,12 @@ export interface ApplyDeps {
    * means the column is left as it was.
    */
   resolveProductIdByHandle?: (handle: string) => Promise<string | null>
+  /**
+   * Flags a reused library asset that got a product-identity BLOCK (#11954).
+   * Defaults to `markAssetsProductIdentityBlocked`'s live `social_media_assets`
+   * write. Injectable so a test can assert the call without a live DB.
+   */
+  markProductIdentityBlocked?: (urls: string[], note: string) => Promise<void>
 }
 
 /**
@@ -541,6 +547,41 @@ export const dbApproveRepo: ApproveRepo = {
   write: async (id, patch) => {
     await db.update(socialPosts).set(patch).where(eq(socialPosts.id, id))
   },
+}
+
+/**
+ * Strips the query string and fragment off a media url, the same "bare url"
+ * convention `social-vision-gate.server.ts`'s `lookupVerdictByUrl` uses to
+ * resolve a post's `mediaUrls` back to a `social_media_assets` row (the
+ * schema comment on that table calls it out explicitly). Returns null for an
+ * empty/whitespace-only input so callers can filter it out.
+ */
+function bareUrl(url: string): string | null {
+  const trimmed = url.trim()
+  return trimmed ? trimmed.split('#')[0]!.split('?')[0]! : null
+}
+
+/**
+ * Marks every `social_media_assets` row matching one of `urls` as having
+ * failed the publish gate's product-identity check (#11954), so
+ * `social-asset-query`'s reuse-first search stops offering an asset that can
+ * never ship for this SKU. Never clears the flag: the fix is a fresh,
+ * correctly-identified asset, not rehabilitating this row. Best-effort: a url
+ * with no matching library row (not every posted image was ingested into the
+ * library) is silently a no-op.
+ */
+export async function markAssetsProductIdentityBlocked(urls: string[], note: string): Promise<void> {
+  const bare = [...new Set(urls.map(bareUrl).filter((u): u is string => u !== null))]
+  if (bare.length === 0) return
+  const conds = bare.map(u => sql`split_part(split_part(${socialMediaAssets.url}, '?', 1), '#', 1) = ${u}`)
+  await db
+    .update(socialMediaAssets)
+    .set({
+      productIdentityFailedAt: new Date(),
+      lastGateBlock: note.trim().slice(0, 2000) || null,
+      updatedAt: new Date(),
+    })
+    .where(or(...conds))
 }
 
 /**
@@ -634,6 +675,19 @@ export async function applyPublishGateVerdict(
       gateStatusForVerdict(input.verdict),
       findings,
     )
+    // #11954: a product-identity BLOCK means this exact asset can never ship
+    // for this SKU, no matter how many times reuse-first offers it again.
+    // Flag the library row(s) so social-asset-query stops surfacing it; a
+    // best-effort side write that never overturns the verdict already
+    // recorded above.
+    const identityBlock = findings.find(f => f.check === 'product-identity' && f.verdict === 'block')
+    if (identityBlock) {
+      const markBlocked = deps.markProductIdentityBlocked ?? markAssetsProductIdentityBlocked
+      const urls = [...(post.mediaUrls ?? []), ...(post.posterUrl ? [post.posterUrl] : [])]
+      await markBlocked(urls, identityBlock.note?.trim() || input.notes).catch(err => {
+        console.error('[publish-gate] product-identity asset flag failed, continuing:', err)
+      })
+    }
     return { ok: true, reviewStatus }
   }
 
