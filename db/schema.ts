@@ -363,6 +363,17 @@ export const socialMediaAssets = pgTable('social_media_assets', {
   // never a silent skip. See app/lib/social-vision-gate.server.ts.
   visionVerdict:     jsonb('vision_verdict').$type<VisionVerdict>(),
   visionVerdictAt:   timestamp('vision_verdict_at', { withTimezone: true }),
+  // Publish-gate product-identity BLOCK (migration 109, ticket #11954). Set
+  // when a reused library asset gets a `product-identity` BLOCK from the
+  // publish gate (applyPublishGateVerdict), so reuse-first stops offering an
+  // asset that visionVerdict.pass=true alone does not catch (visionVerdict
+  // judges the frame in isolation; product-identity compares it against the
+  // actual SKU). NULL means never blocked this way; never cleared once set,
+  // since a fix means generating a fresh, correctly-identified asset, not
+  // rehabilitating this one. lastGateBlock carries the finding note/gate
+  // notes for whoever looks at the row next.
+  productIdentityFailedAt: timestamp('product_identity_failed_at', { withTimezone: true }),
+  lastGateBlock:           text('last_gate_block'),
 }, t => ({
   createdIdx:  index('idx_social_media_assets_created').on(t.createdAt),
   productIdx:  index('idx_social_media_assets_product').on(t.productHandle),

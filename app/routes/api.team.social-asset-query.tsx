@@ -46,6 +46,15 @@
  * applies those checks before treating a candidate as usable, exactly as the
  * routine already requires for any reused asset. Read-only, so there is no
  * money gate here — no spend happens on this route.
+ *
+ * `excludeProductIdentityBlocked` (#11954): always on, unconditionally.
+ * Reuse-first burned gate attempts on assets 720/728/730 (B-Swish Bthrilled
+ * wand) that had a passing `visionVerdict` but got a publish-gate BLOCK on
+ * product-identity every time they were offered — a mismatch the frame-only
+ * vision check can't see, since it never compares against the actual SKU.
+ * `applyPublishGateVerdict` now stamps such a BLOCK back onto the asset row
+ * (`product_identity_failed_at`), and this route excludes any row carrying
+ * that stamp, unlike `/admin/socials/library`, which still shows it.
  */
 import type { ActionFunctionArgs } from 'react-router'
 import { assertTeamAuth } from '~/lib/team.server'
@@ -89,6 +98,11 @@ export async function action({ request }: ActionFunctionArgs) {
       archived: false,
       generationBatchId: str(b['generationBatchId']),
       dropped: requestId ? true : false,
+      // #11954: this route is reuse-first by its own contract (see the module
+      // doc above), so an asset the publish gate has already BLOCKed on
+      // product-identity is never a valid candidate — it can't ship for this
+      // SKU regardless of how many times it's offered.
+      excludeProductIdentityBlocked: true,
     })
 
     const assets = page.assets.slice(0, limit).map(a => ({

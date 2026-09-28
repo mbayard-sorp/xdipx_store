@@ -146,4 +146,22 @@ describe('listLibraryAssets WHERE clause', () => {
     expect(rendered).toContain('archived_at')
     expect(rendered).toContain('is not null')
   })
+
+  it('does not filter on product_identity_failed_at by default (admin grid still shows blocked rows)', async () => {
+    whereCalls.length = 0
+    await listLibraryAssets(parseLibraryFilters(new URL('https://x.test/admin/socials/library')))
+    const rendered = renderWhere(whereCalls[0])
+    expect(rendered).not.toContain('product_identity_failed_at')
+  })
+
+  it('excludes product-identity-blocked rows when excludeProductIdentityBlocked is set (#11954)', async () => {
+    whereCalls.length = 0
+    await listLibraryAssets({
+      ...parseLibraryFilters(new URL('https://x.test/admin/socials/library')),
+      excludeProductIdentityBlocked: true,
+    })
+    const rendered = renderWhere(whereCalls[0])
+    expect(rendered).toContain('product_identity_failed_at')
+    expect(rendered).toContain('is null')
+  })
 })

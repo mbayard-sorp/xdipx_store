@@ -52,6 +52,8 @@ function fakeRow(row: SocialMediaAssetInsert, id = 7): SocialMediaAssetRow {
     visionVerdict: row.visionVerdict ?? null,
     visionVerdictAt: row.visionVerdictAt ?? null,
     providerRequestId: row.providerRequestId ?? null,
+    productIdentityFailedAt: null,
+    lastGateBlock: null,
   }
 }
 

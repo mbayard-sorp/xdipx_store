@@ -6,6 +6,26 @@
 // reach publish time, a PASS that says nothing, and a verdict landing on a row
 // that was not waiting for one.
 import { describe, it, expect, vi } from 'vitest'
+import { PgDialect } from 'drizzle-orm/pg-core'
+
+// markAssetsProductIdentityBlocked (#11954) is the only thing in this module
+// that reaches a live DB directly rather than through the injectable `repo`;
+// every other test below drives applyPublishGateVerdict through fakeRepo and
+// never touches this mock.
+const updateCalls = vi.hoisted(() => [] as { patch: Record<string, unknown>; cond: unknown }[])
+vi.mock('./db.server', () => ({
+  db: {
+    update: () => ({
+      set: (patch: Record<string, unknown>) => ({
+        where: (cond: unknown) => {
+          updateCalls.push({ patch, cond })
+          return Promise.resolve()
+        },
+      }),
+    }),
+  },
+}))
+
 import {
   parsePublishGateVerdict,
   applyPublishGateVerdict,
@@ -22,12 +42,18 @@ import {
   isTickEligible,
   gateStatusForVerdict,
   normaliseAgentFindings,
+  markAssetsProductIdentityBlocked,
   type ApprovePatch,
   type ApproveRepo,
   type PostRow,
   type ReworkRepo,
   type ReworkPatch,
 } from './social-publish-approve.server'
+
+const dialect = new PgDialect()
+function renderCond(cond: unknown): { sql: string; params: unknown[] } {
+  return dialect.sqlToQuery(cond as Parameters<PgDialect['sqlToQuery']>[0])
+}
 
 const REAL_NOTES = 'Opened both frames, checked the bullet against the packshot, read the last 12 captions.'
 
@@ -288,6 +314,101 @@ describe('applyPublishGateVerdict', () => {
       expect(writes[0]?.reviewStatus).toBe(status)
       expect(writes[0]?.gateCheckedAt).toBeInstanceOf(Date)
     }
+  })
+
+  // ── Product-identity BLOCKs flag the reused asset (#11954) ─────────────────
+
+  it('flags a product-identity BLOCK back onto the asset, by the post media urls', async () => {
+    const calls: { urls: string[]; note: string }[] = []
+    const { repo } = fakeRepo(row({ mediaUrls: [`${CDN}/bswish-bthrilled-1.jpg`], posterUrl: null }))
+    const v = verdict({
+      verdict: 'BLOCK',
+      notes: 'foam massager head, not the real silicone wand',
+      findings: [{ check: 'product-identity', verdict: 'block', note: 'foam vs silicone' }],
+    })
+    await applyPublishGateVerdict(7, v, {
+      repo, ...inStock,
+      markProductIdentityBlocked: async (urls, note) => { calls.push({ urls, note }) },
+    })
+    expect(calls).toEqual([{ urls: [`${CDN}/bswish-bthrilled-1.jpg`], note: 'foam vs silicone' }])
+  })
+
+  it('includes posterUrl alongside mediaUrls when flagging a product-identity BLOCK', async () => {
+    const calls: { urls: string[] }[] = []
+    const { repo } = fakeRepo(row({
+      mediaUrls: [`${CDN}/clip.mp4`],
+      posterUrl: `${CDN}/clip-poster.jpg`,
+    }))
+    const v = verdict({
+      verdict: 'BLOCK',
+      notes: 'wrong product',
+      findings: [{ check: 'product-identity', verdict: 'block' }],
+    })
+    await applyPublishGateVerdict(7, v, {
+      repo, ...inStock,
+      markProductIdentityBlocked: async (urls) => { calls.push({ urls }) },
+    })
+    expect(calls[0]?.urls).toEqual([`${CDN}/clip.mp4`, `${CDN}/clip-poster.jpg`])
+  })
+
+  it('falls back to the verdict notes when the finding carries no note of its own', async () => {
+    const calls: { note: string }[] = []
+    const { repo } = fakeRepo(row())
+    const v = verdict({
+      verdict: 'BLOCK',
+      notes: 'top-level notes explaining the mismatch',
+      findings: [{ check: 'product-identity', verdict: 'block' }],
+    })
+    await applyPublishGateVerdict(7, v, {
+      repo, ...inStock,
+      markProductIdentityBlocked: async (_urls, note) => { calls.push({ note }) },
+    })
+    expect(calls[0]?.note).toBe('top-level notes explaining the mismatch')
+  })
+
+  it('never flags an asset on a BLOCK for any other check', async () => {
+    const calls: unknown[] = []
+    const { repo } = fakeRepo(row())
+    const v = verdict({
+      verdict: 'BLOCK',
+      notes: 'baked-in text on the packshot',
+      findings: [{ check: 'baked-in-text', verdict: 'block' }],
+    })
+    await applyPublishGateVerdict(7, v, {
+      repo, ...inStock,
+      markProductIdentityBlocked: async (...args) => { calls.push(args) },
+    })
+    expect(calls).toHaveLength(0)
+  })
+
+  it('never flags an asset on a non-BLOCK verdict, even one that names product-identity', async () => {
+    const calls: unknown[] = []
+    const { repo } = fakeRepo(row())
+    const v = verdict({
+      verdict: 'REVISE',
+      notes: 'close, worth a second look',
+      findings: [{ check: 'product-identity', verdict: 'revise' }],
+    })
+    await applyPublishGateVerdict(7, v, {
+      repo, ...inStock,
+      markProductIdentityBlocked: async (...args) => { calls.push(args) },
+    })
+    expect(calls).toHaveLength(0)
+  })
+
+  it('does not let the asset-flag write fail the gate verdict itself', async () => {
+    const { repo, writes } = fakeRepo(row())
+    const v = verdict({
+      verdict: 'BLOCK',
+      notes: 'wrong product',
+      findings: [{ check: 'product-identity', verdict: 'block' }],
+    })
+    const r = await applyPublishGateVerdict(7, v, {
+      repo, ...inStock,
+      markProductIdentityBlocked: async () => { throw new Error('db unreachable') },
+    })
+    expect(r).toEqual({ ok: true, reviewStatus: 'rejected' })
+    expect(writes[0]?.reviewStatus).toBe('rejected')
   })
 
   it('stores the findings the agent itemised, in the stored shape', async () => {
@@ -984,5 +1105,32 @@ describe('normaliseAgentFindings', () => {
   })
   it('400s a non-array findings field', () => {
     expect(parsePublishGateVerdict(pass({ findings: 'x' })).ok).toBe(false)
+  })
+})
+
+describe('markAssetsProductIdentityBlocked', () => {
+  it('matches by bare url, stripping query string and fragment, and writes the flag', async () => {
+    updateCalls.length = 0
+    await markAssetsProductIdentityBlocked([`${CDN}/bswish-bthrilled-1.jpg?v=2#frag`], 'foam vs silicone')
+    expect(updateCalls).toHaveLength(1)
+    const { sql, params } = renderCond(updateCalls[0]!.cond)
+    expect(sql).toContain('split_part')
+    expect(params).toContain(`${CDN}/bswish-bthrilled-1.jpg`)
+    expect(updateCalls[0]!.patch['productIdentityFailedAt']).toBeInstanceOf(Date)
+    expect(updateCalls[0]!.patch['lastGateBlock']).toBe('foam vs silicone')
+  })
+
+  it('dedupes repeated urls into one OR condition', async () => {
+    updateCalls.length = 0
+    const url = `${CDN}/bswish-bthrilled-1.jpg`
+    await markAssetsProductIdentityBlocked([url, `${url}?v=2`], 'note')
+    const { params } = renderCond(updateCalls[0]!.cond)
+    expect(params.filter(p => p === url)).toHaveLength(1)
+  })
+
+  it('is a no-op for an empty or blank url list', async () => {
+    updateCalls.length = 0
+    await markAssetsProductIdentityBlocked(['', '   '], 'note')
+    expect(updateCalls).toHaveLength(0)
   })
 })
