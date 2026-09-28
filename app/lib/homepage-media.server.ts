@@ -55,6 +55,14 @@ export interface GenerateAndPlaceHomepageImageOpts {
   docId?: string
   /** Free-form origin for the cost row, e.g. 'media-manager/wayfinder'. */
   caller?: string
+  /**
+   * The calling homepage-team run's id (the CLI's `--run-id`). Passed through
+   * to the vision gate so a fallback to the server-side route (ticket #11856)
+   * gates on the homepage team's own lock/budget instead of the unrelated
+   * content team's — omitting it does not exclude anything, it only changes
+   * which team's run_in_progress lock the remote check is evaluated against.
+   */
+  runId?: number
   /** Extra generateImage() overrides (e.g. `only: 'fal'`). */
   gen?: Partial<GenerateImageOpts>
 }
@@ -111,7 +119,7 @@ export async function generateAndPlaceHomepageImage(
   let rejectNotes = ''
   let gated = false
   for (let attempt = 1; attempt <= HOMEPAGE_VISION_MAX_ATTEMPTS; attempt++) {
-    const verdict = await gateImageBuffer(candidate)
+    const verdict = await gateImageBuffer(candidate, undefined, opts.runId, 'homepage')
     if (verdict.pass) {
       gated = true
       break

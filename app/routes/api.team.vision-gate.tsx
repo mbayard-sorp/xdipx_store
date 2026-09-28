@@ -18,12 +18,21 @@
  * sandbox POSTs here and the privileged call runs SERVER-SIDE, where the key
  * already lives, so no secret ever reaches the sandbox.
  *
- * Gated on the CONTENT team budget (`gate('content', runId)`), the way
- * api.team.social-image.tsx gates on 'social' — defense in depth on a
- * model-spend surface reachable with a team token. This route only judges an
- * already-generated candidate; it never generates or bills image spend
- * itself, so there is no image-cap check here (unlike the generate op on
- * api.team.social-image.tsx).
+ * Gated on the CALLING team's budget (`gate(team, runId)`, `team` from the
+ * request body, defaulting to 'content' for back-compat with the original
+ * Notebook hero caller), the way api.team.social-image.tsx gates on 'social'
+ * — defense in depth on a model-spend surface reachable with a team token.
+ * This route only judges an already-generated candidate; it never generates
+ * or bills image spend itself, so there is no image-cap check here (unlike
+ * the generate op on api.team.social-image.tsx).
+ *
+ * The hardcoded `gate('content', runId)` this used to run unconditionally
+ * broke the homepage path (ticket #11856, run 1099 2026-09-27): a homepage
+ * generation posts its OWN runId, but that id belongs to the homepage team,
+ * so it never excluded the sibling CONTENT run actually holding the lock —
+ * every homepage vision-gate call failed closed whenever any unrelated
+ * content-team run was in progress. `team` lets each caller gate on its own
+ * lock instead of content's.
  *
  * Returns the VisionVerdict from runVisionGateOnImage / runVisionGate
  * unchanged, including `checkCompleted`, so a caller can tell a real anatomy
@@ -41,7 +50,7 @@
  * candidates have no asset row yet to record against).
  */
 import type { ActionFunctionArgs } from 'react-router'
-import { assertTeamAuth, gate } from '~/lib/team.server'
+import { assertTeamAuth, gate, isTeamId, type TeamId } from '~/lib/team.server'
 import { apiError } from '~/lib/api-error.server'
 
 function str(v: unknown): string | undefined {
@@ -65,8 +74,12 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     // Money gate: the check is a Sonnet vision call, so it gates the same as
-    // every other model-spend surface reachable with a team token.
-    const gateResult = await gate('content', num(b['runId']))
+    // every other model-spend surface reachable with a team token. `team`
+    // (ticket #11856) is the CALLER's own team, defaulting to 'content' for
+    // the original Notebook hero caller, which never sends one.
+    const teamParam = str(b['team'])
+    const team: TeamId = teamParam && isTeamId(teamParam) ? teamParam : 'content'
+    const gateResult = await gate(team, num(b['runId']))
     if (!gateResult.ok) {
       return Response.json({ error: 'gated', reason: gateResult.reason, gate: gateResult }, { status: 403 })
     }

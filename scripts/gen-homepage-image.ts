@@ -162,11 +162,18 @@ async function main() {
   //      cost when it doesn't need to). ──────────────────────────────────────
   const { generateAndPlaceHomepageImage } = await import('~/lib/homepage-media.server')
 
+  // Ticket #11856: thread --run-id through to the vision gate so a fallback
+  // to the server-side route gates on the homepage team's own lock/budget
+  // instead of the unrelated content team's (see homepage-media.server.ts's
+  // GenerateAndPlaceHomepageImageOpts.runId doc comment).
+  const runIdNum = runId && /^\d+$/.test(runId) ? Number(runId) : undefined
+
   const manifest = await generateAndPlaceHomepageImage({
     prompt,
     alt,
     target,
     ...(docId ? { docId } : {}),
+    ...(runIdNum !== undefined ? { runId: runIdNum } : {}),
     caller,
     ...(only || refImage || imageSize
       ? {
