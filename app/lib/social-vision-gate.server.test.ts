@@ -32,6 +32,7 @@ const CLEAN_RESPONSE = {
   },
   notes: 'clean, nothing anomalous',
   legibleText: '',
+  skinMarks: '',
   productPhysics: 'not_applicable',
   handDigitCounts: [],
   backAnatomyRead: '',
@@ -51,6 +52,7 @@ const ANATOMY_FAIL_RESPONSE = {
   },
   notes: 'the cast member has three arms',
   legibleText: '',
+  skinMarks: '',
   productPhysics: 'not_applicable',
   handDigitCounts: [],
   backAnatomyRead: '',
@@ -70,6 +72,7 @@ const NIPPLE_FAIL_RESPONSE = {
   },
   notes: 'nipple visible through wet fabric, top edge of frame',
   legibleText: '',
+  skinMarks: '',
   productPhysics: 'not_applicable',
   handDigitCounts: [],
   backAnatomyRead: '',
@@ -89,6 +92,7 @@ const GENITALIA_FAIL_RESPONSE = {
   },
   notes: 'genitalia visible, crop ran wider than requested',
   legibleText: '',
+  skinMarks: '',
   productPhysics: 'not_applicable',
   handDigitCounts: [],
   backAnatomyRead: '',
@@ -117,6 +121,7 @@ const LICENSED_PLUG_FRAME_RESPONSE = {
   },
   notes: 'bare buttocks, gluteal cleft reads as a line, plug lying along the cleft under its own weight, no anus visible or outlined',
   legibleText: '',
+  skinMarks: '',
   productPhysics: 'not_applicable',
   handDigitCounts: [],
   backAnatomyRead: '',
@@ -137,6 +142,7 @@ const PARTED_ANUS_FAIL_RESPONSE = {
   },
   notes: 'buttocks spread by the pose, anus visible and outlined at the base of the cleft',
   legibleText: '',
+  skinMarks: '',
   productPhysics: 'not_applicable',
   handDigitCounts: [],
   backAnatomyRead: '',
@@ -156,6 +162,7 @@ const AGE_AMBIGUOUS_FAIL_RESPONSE = {
   },
   notes: 'faceless torso crop, no reliable adult age markers visible',
   legibleText: '',
+  skinMarks: '',
   productPhysics: 'not_applicable',
   handDigitCounts: [],
   backAnatomyRead: '',
@@ -175,6 +182,31 @@ const BRANDED_TEXT_RESPONSE = {
   },
   notes: 'clean, product wordmark visible on the paddle handle',
   legibleText: 'TANTUS',
+  skinMarks: '',
+  productPhysics: 'not_applicable',
+  handDigitCounts: [],
+  backAnatomyRead: '',
+}
+
+// Ticket #11477, the incident that prompted the check: a bead strand laid
+// along a lower back generated unbriefed marks the vision gate's original
+// eight checks had no way to notice, because none of them concerns skin
+// condition at all.
+const SKIN_MARKS_RESPONSE = {
+  pass: true,
+  checks: {
+    limbCount: 'pass',
+    handAnatomy: 'pass',
+    faceBodyIntegrity: 'pass',
+    extraOrMergedLimbs: 'pass',
+    nippleOccluded: 'pass',
+    genitaliaAbsent: 'pass',
+    anusNotVisible: 'pass',
+    adultUnambiguous: 'pass',
+  },
+  notes: 'clean, otherwise compliant bead-strand frame',
+  legibleText: '',
+  skinMarks: 'faint pink-red streaks and blotches across the lower back and flank',
   productPhysics: 'not_applicable',
   handDigitCounts: [],
   backAnatomyRead: '',
@@ -202,6 +234,7 @@ const UNSUPPORTED_PRODUCT_RESPONSE = {
   },
   notes: 'product adhered to the side of a shin, vertical surface, no hand in frame',
   legibleText: '',
+  skinMarks: '',
   productPhysics: 'unsupported',
   handDigitCounts: [],
   backAnatomyRead: '',
@@ -222,6 +255,7 @@ const GRIPPED_PRODUCT_RESPONSE = {
   },
   notes: 'hand gripping the product, fingers wrapped fully around the shaft',
   legibleText: '',
+  skinMarks: '',
   productPhysics: 'supported',
   handDigitCounts: [],
   backAnatomyRead: '',
@@ -244,6 +278,7 @@ const EXAGGERATED_SCALE_GRIPPED_RESPONSE = {
   },
   notes: 'product rendered at an exaggerated, larger-than-real-life scale, but hand fully wraps around it with a proper grip',
   legibleText: '',
+  skinMarks: '',
   productPhysics: 'supported',
   handDigitCounts: [],
   backAnatomyRead: '',
@@ -299,6 +334,20 @@ describe('isValidVerdictShape', () => {
 
   it('accepts an empty-string legibleText (checked, nothing found)', () => {
     expect(isValidVerdictShape({ ...CLEAN_RESPONSE, legibleText: '' })).toBe(true)
+  })
+
+  // Ticket #11477: skinMarks is a report field, same contract as legibleText.
+  it('rejects a missing skinMarks', () => {
+    const { skinMarks: _skinMarks, ...rest } = CLEAN_RESPONSE
+    expect(isValidVerdictShape(rest)).toBe(false)
+  })
+
+  it('rejects a non-string skinMarks', () => {
+    expect(isValidVerdictShape({ ...CLEAN_RESPONSE, skinMarks: null })).toBe(false)
+  })
+
+  it('accepts an empty-string skinMarks (checked, nothing found)', () => {
+    expect(isValidVerdictShape({ ...CLEAN_RESPONSE, skinMarks: '' })).toBe(true)
   })
 
   // Ticket #11460: productPhysics is a second report field, same convention
@@ -541,6 +590,23 @@ describe('runVisionGate', () => {
     expect(verdict.legibleText).toBe('')
   })
 
+  // Ticket #11477: skinMarks is a report field, not a check. An unbriefed
+  // mark on skin does not fail the vision gate; it just gets reported for
+  // the caller to review, per the ticket's own report-only-first DONE WHEN.
+  it('reports an unbriefed skin mark without affecting pass', async () => {
+    const d = deps({ callVision: vi.fn(async () => SKIN_MARKS_RESPONSE) })
+    const verdict = await runVisionGate('https://cdn.shopify.com/files/bead-strand.jpg', d)
+    expect(verdict.pass).toBe(true)
+    expect(verdict.skinMarks).toBe('faint pink-red streaks and blotches across the lower back and flank')
+    expect(verdict.checkCompleted).toBe(true)
+  })
+
+  it('reports an empty skinMarks when the check ran and found none', async () => {
+    const d = deps()
+    const verdict = await runVisionGate('https://cdn.shopify.com/files/clean.jpg', d)
+    expect(verdict.skinMarks).toBe('')
+  })
+
   // Ticket #11460, the three DONE WHEN cases. productPhysics never gates
   // `pass`: all three frames are otherwise clean and all three verdicts read
   // pass:true, exactly as report-only requires.
@@ -589,9 +655,10 @@ describe('runVisionGate', () => {
     // Ticket #8830: the check never ran, so a billing caller must not treat
     // this like a genuine judged-and-rejected image.
     expect(verdict.checkCompleted).toBe(false)
-    // The legibleText check never ran either; null distinguishes "did not
-    // check" from "checked and found nothing" (empty string).
+    // The legibleText/skinMarks checks never ran either; null distinguishes
+    // "did not check" from "checked and found nothing" (empty string).
     expect(verdict.legibleText).toBeNull()
+    expect(verdict.skinMarks).toBeNull()
   })
 
   it('fails closed when the model call throws', async () => {

@@ -173,6 +173,20 @@ export interface VisionVerdict {
    */
   legibleText: string | null
   /**
+   * Ticket #11477: transcription of any unbriefed mark, redness, bruising, or
+   * abrasion visible on skin, or `''` when the check ran and found none. A
+   * REPORT field, like `legibleText`: it never participates in `pass` and has
+   * no entry in `checks`. Report-only on purpose (the ticket's own DONE WHEN):
+   * the model already produces marks nobody briefed (asset 706, a bead strand
+   * on a bare lower back with faint unbriefed pink-red streaks and blotches),
+   * but 3.2c also requires "natural unretouched skin texture", so this needs
+   * its verdicts reviewed against a run of real on-skin assets before it can
+   * safely gate anything — a check that fails ordinary warm skin tone or
+   * texture would be worse than the problem it exists to catch. `null` means
+   * the check never ran at all, same distinction `legibleText` draws.
+   */
+  skinMarks: string | null
+  /**
    * Ticket #11460: REPORT ONLY, same idiom as `legibleText`, does not affect
    * `pass` and has no entry in `checks`. Whether a product depicted in
    * contact with a body reads as physically supported: gripped by a hand, or
@@ -214,7 +228,7 @@ export interface VisionVerdict {
 function failClosedVerdict(notes: string): VisionVerdict {
   const checks = {} as Record<VisionCheckName, 'pass' | 'fail'>
   for (const name of VISION_CHECK_NAMES) checks[name] = 'fail'
-  return { pass: false, checks, notes, checkedAt: new Date().toISOString(), checkCompleted: false, legibleText: null, productPhysics: null, handDigitCounts: null, backAnatomyRead: null }
+  return { pass: false, checks, notes, checkedAt: new Date().toISOString(), checkCompleted: false, legibleText: null, skinMarks: null, productPhysics: null, handDigitCounts: null, backAnatomyRead: null }
 }
 
 /**
@@ -229,7 +243,7 @@ function failClosedVerdict(notes: string): VisionVerdict {
  * change.
  */
 function incompleteVerdict(notes: string): VisionVerdict {
-  return { pass: false, checks: null, notes, checkedAt: new Date().toISOString(), checkCompleted: false, legibleText: null, productPhysics: null, handDigitCounts: null, backAnatomyRead: null }
+  return { pass: false, checks: null, notes, checkedAt: new Date().toISOString(), checkCompleted: false, legibleText: null, skinMarks: null, productPhysics: null, handDigitCounts: null, backAnatomyRead: null }
 }
 
 /**
@@ -266,6 +280,8 @@ export function isValidVerdictShape(v: unknown): v is Omit<VisionVerdict, 'check
   // response missing it, or carrying the wrong type, did not follow the
   // expected shape and fails closed like any other malformed response.
   if (typeof o['legibleText'] !== 'string') return false
+  // Ticket #11477: skinMarks is a report field, same contract as legibleText.
+  if (typeof o['skinMarks'] !== 'string') return false
   // Ticket #11460: productPhysics is a second report field, same convention.
   // A real response must always carry one of the three enum values; a
   // missing or unrecognized value did not follow the expected shape and
@@ -291,7 +307,7 @@ export function isValidVerdictShape(v: unknown): v is Omit<VisionVerdict, 'check
  * second is what a well-meaning later edit produces, and the only artifact
  * that decides it is this wording.
  */
-export const VISION_SYSTEM_PROMPT = `You are a strict content-safety QA reviewer for AI-generated marketing imagery on a mainstream sexual-wellness storefront. You will be shown one image. Check these eight things, matching docs/design-doctrine.md's vision-gate hard check plus the imagery-ceiling checks, PLUS three report-only items at the end:
+export const VISION_SYSTEM_PROMPT = `You are a strict content-safety QA reviewer for AI-generated marketing imagery on a mainstream sexual-wellness storefront. You will be shown one image. Check these eight things, matching docs/design-doctrine.md's vision-gate hard check plus the imagery-ceiling checks, PLUS five report-only items at the end:
 
 1. limbCount: every person or hand visible has the correct, anatomically normal number of limbs (two arms, two legs per full figure shown).
 2. handAnatomy: every visible hand has five fingers, normally proportioned and articulated, with no fused, missing, or detached digits. Do not just judge this at a glance: for EACH visible hand, actually count the fingers one by one, including any digit that appears separated from the rest of the hand or trailing behind an object the hand is holding. Fail handAnatomy if any hand's count is not exactly five, or if any digit reads as detached from the hand it belongs to, even if the rest of that hand looks normal.
@@ -304,6 +320,8 @@ export const VISION_SYSTEM_PROMPT = `You are a strict content-safety QA reviewer
 
 REPORT ONLY, not a check, does not affect "pass": legibleText. Read the whole frame for any legible text: brand wordmarks, barcodes, shipping labels, printed ingredient text, captions, watermarks, anything with readable letters or numbers. Transcribe everything legible into one string, or return "" if there is none. This ALSO covers marks that are not cleanly readable: a molded or embossed logo area, a button, or a label surface that shows dot-and-dash shapes, garbled or partially-formed characters, or an illegible pseudo-text pattern where readable lettering is clearly attempted but the exact letters cannot be made out. Do not return "" just because you cannot read it cleanly; describe what you see instead (for example "garbled illegible marks beneath a circular button, resembling text but not readable" or "dot-and-dash pseudo-text on the product body"). Only return "" when there is truly no text or text-like mark anywhere in the frame. Never judge whether the text is acceptable; that is a policy decision made elsewhere with more context than you have (for example a manufacturer's wordmark on a product actually being sold is allowed, while a barcode or shipping label is not, and you cannot tell those apart from pixels alone in every case). Just report what you read, or what you see attempted.
 
+REPORT ONLY, not a check, does not affect "pass": skinMarks. Look at every patch of bare skin in the frame for a mark that was not asked for: redness, a bruise, a scrape or abrasion, a welt, or a streak or blotch of discoloration. This is NOT about ordinary skin: natural skin tone, texture, freckles, moles, veins, tan lines, and normal warmth or flush from lighting are not marks and must not be reported. Report only something that reads as an injury or an impact mark on the skin itself: for example "faint pink-red streaks and blotches across the lower back and flank" or "a red welt across the outer thigh". Describe what you see and roughly where on the body, or return "" if bare skin is visible and carries nothing of the kind, or if no skin is visible at all. Never judge whether a reported mark makes the image unacceptable; that is a policy decision made elsewhere, which is exactly why this is report-only and not one of the eight checks above.
+
 REPORT ONLY, not a check, does not affect "pass": productPhysics. Look at whether any product depicted is in contact with a body. If no product touches a body anywhere in the frame (a product-only shot, or a body with no product against it), answer "not_applicable". Otherwise judge whether the contact is physically supported: answer "supported" when a hand is gripping the product (fingers visibly wrapped around it, or a palm cupped underneath it bearing its weight from below) OR the product rests on a surface that faces upward in the frame (so gravity could plausibly hold it there). Answer "unsupported" when neither is true: nothing in frame explains why the product is not falling, for example a product adhered to the side of a vertical surface (a shin, a hip, a wall) with no hand touching it, or an open flat palm merely laid flat beside or in front of a product with no fingers wrapped around it, or a hand resting on TOP of a product with no grip beneath or around it. An open flat palm beside a product is not support, and a hand resting on top of a product is not support; only a wrapped grip or a true underneath-cupping hold, or an upward-facing resting surface, counts. This is NOT a size or proportion check: a product rendered at an exaggerated, larger-than-real-life scale is completely normal for this brand and must still answer "supported" as long as the grip or resting surface is physically plausible; scale exaggeration and physical support are unrelated questions, and you must never answer "unsupported" because a product simply looks large relative to the body. Only fake or missing support is the fail condition here, never scale.
 
 REPORT, feeds handDigitCounts: for every hand visible anywhere in the frame, actually count its fingers one at a time, including any digit that trails off separated from the rest of the hand. Return one integer per visible hand, in the order encountered left to right, as "handDigitCounts". Return an empty array if no hand is visible anywhere in the frame. Do not round to 5 out of habit; report the count you actually see, even if it disagrees with your handAnatomy answer above.
@@ -311,9 +329,9 @@ REPORT, feeds handDigitCounts: for every hand visible anywhere in the frame, act
 REPORT, feeds backAnatomyRead: for any back-view frame only (the camera facing the person's back), name exactly what you see at the top of the gluteal cleft/sacrum area and at the navel region, in one short phrase (for example "smooth skin, no navel visible" or "a dense dark patch above the cleft resembling pubic hair"). Answer "" if the frame is not a back view, or is a back view with nothing notable in that area.
 
 Respond with ONLY a JSON object, no prose before or after, in exactly this shape:
-{"pass": true|false, "checks": {"limbCount": "pass"|"fail", "handAnatomy": "pass"|"fail", "faceBodyIntegrity": "pass"|"fail", "extraOrMergedLimbs": "pass"|"fail", "nippleOccluded": "pass"|"fail", "genitaliaAbsent": "pass"|"fail", "anusNotVisible": "pass"|"fail", "adultUnambiguous": "pass"|"fail"}, "notes": "one or two sentences on what you saw, especially for any fail", "legibleText": "<transcription of any legible text found, or empty string if none>", "productPhysics": "supported"|"unsupported"|"not_applicable", "handDigitCounts": [<one integer per visible hand, left to right, empty array if none>], "backAnatomyRead": "<phrase describing the cleft/sacrum/navel area on a back-view frame, or empty string>"}
+{"pass": true|false, "checks": {"limbCount": "pass"|"fail", "handAnatomy": "pass"|"fail", "faceBodyIntegrity": "pass"|"fail", "extraOrMergedLimbs": "pass"|"fail", "nippleOccluded": "pass"|"fail", "genitaliaAbsent": "pass"|"fail", "anusNotVisible": "pass"|"fail", "adultUnambiguous": "pass"|"fail"}, "notes": "one or two sentences on what you saw, especially for any fail", "legibleText": "<transcription of any legible text found, or empty string if none>", "skinMarks": "<description of any unbriefed mark on skin, or empty string if none>", "productPhysics": "supported"|"unsupported"|"not_applicable", "handDigitCounts": [<one integer per visible hand, left to right, empty array if none>], "backAnatomyRead": "<phrase describing the cleft/sacrum/navel area on a back-view frame, or empty string>"}
 
-"pass" is true only when all eight checks in "checks" are "pass"; "legibleText", "productPhysics", "handDigitCounts", and "backAnatomyRead" never affect your own "pass" answer directly (a separate deterministic check reads them afterward). If the image has no visible people or hands at all (a product-only shot), checks 1-4 pass trivially; checks 5-8 still apply to any depicted skin or body part even without hands or a face; legibleText still applies to any text in the frame regardless; productPhysics answers "not_applicable" when there is no product-on-body contact to judge; handDigitCounts is an empty array and backAnatomyRead is "" when there is no hand or back view to report on. When in doubt about a genuine anatomy defect or an exposure/age-ambiguity issue, fail the check; this gate exists specifically to catch what a fast human scroll would catch, and a false block costs one regeneration while a false pass can publish something it must not. "legibleText" is always present in your response, even when it is ""; "productPhysics" is always present in your response, and is always one of "supported", "unsupported", or "not_applicable"; "handDigitCounts" is always present, even when it is []; "backAnatomyRead" is always present, even when it is "".`
+"pass" is true only when all eight checks in "checks" are "pass"; "legibleText", "skinMarks", "productPhysics", "handDigitCounts", and "backAnatomyRead" never affect your own "pass" answer directly (a separate deterministic check reads productPhysics/handDigitCounts/backAnatomyRead afterward, and skinMarks/legibleText are pure report fields). If the image has no visible people or hands at all (a product-only shot), checks 1-4 pass trivially; checks 5-8 still apply to any depicted skin or body part even without hands or a face; legibleText still applies to any text in the frame regardless; skinMarks still applies to any bare skin in the frame regardless; productPhysics answers "not_applicable" when there is no product-on-body contact to judge; handDigitCounts is an empty array and backAnatomyRead is "" when there is no hand or back view to report on. When in doubt about a genuine anatomy defect or an exposure/age-ambiguity issue, fail the check; this gate exists specifically to catch what a fast human scroll would catch, and a false block costs one regeneration while a false pass can publish something it must not. "legibleText" and "skinMarks" are always present in your response, even when they are ""; "productPhysics" is always present in your response, and is always one of "supported", "unsupported", or "not_applicable"; "handDigitCounts" is always present, even when it is []; "backAnatomyRead" is always present, even when it is "".`
 
 export interface VisionCallOpts {
   /**
