@@ -454,11 +454,24 @@ export async function readHomepagePayloadA(): Promise<HomepagePayloadA | null> {
  * Write the payload to BOTH KV and Neon. Guards against overwriting a good blob
  * with a degraded one unless force=true (rotation forces — the deal/content
  * genuinely changed). Never writes a payload that fails the JSON round-trip.
+ *
+ * Returns whether the write actually happened (ticket #11857): the
+ * degraded-clobber guard below can silently skip the write and return with no
+ * error, and `warmHomepagePayloadA`'s caller (the cron route, and the
+ * merchandising team's own re-warm-after-publish step in
+ * docs/homepage-team/routine-daily-merchandise.md Step 7) used to have no way
+ * to tell that skip apart from a genuine successful refresh — both looked
+ * identical from the outside (a resolved promise, a plausible rails count
+ * logged from the just-built payload). A team publish landing on Sanity while
+ * every following warm quietly skips because the discovery index happened to
+ * be degraded during those cycles reproduces exactly the ticket's symptom:
+ * an origin MISS still serving the pre-publish blob with nothing in the logs
+ * or the response to say why.
  */
 export async function writeHomepagePayloadA(
   payload: HomepagePayloadA,
   opts: { force?: boolean } = {},
-): Promise<void> {
+): Promise<boolean> {
   assertJsonSafe(payload)
 
   // Degraded-clobber guard: a non-forced warm must not replace a good blob with
@@ -467,7 +480,7 @@ export async function writeHomepagePayloadA(
     const existing = await readHomepagePayloadA()
     if (existing && !existing.degraded) {
       console.warn('[homepage-payload] skipping degraded write over a good blob (use force to override)')
-      return
+      return false
     }
   }
 
@@ -497,20 +510,26 @@ export async function writeHomepagePayloadA(
     // warm retries). Surface it but don't throw into the cron/rotation path.
     console.error('[homepage-payload] Neon upsert failed (KV still written):', err)
   }
+  return true
 }
 
 /**
  * Build + write (force) + return. Convenience used by the cron warm route, the
  * rotation hook, and cold-miss self-heal. force defaults to true because an
  * explicit warm intends to refresh.
+ *
+ * `written` (ticket #11857) tells the caller whether the fresh build actually
+ * replaced the stored blob, or was silently discarded by
+ * `writeHomepagePayloadA`'s degraded-clobber guard — the two used to be
+ * indistinguishable from the return value alone.
  */
 export async function warmHomepagePayloadA(
   opts: { force?: boolean } = {},
-): Promise<HomepagePayloadA> {
+): Promise<{ payload: HomepagePayloadA; written: boolean }> {
   const force = opts.force ?? true
   const payload = await buildHomepagePayloadA()
-  await writeHomepagePayloadA(payload, { force })
-  return payload
+  const written = await writeHomepagePayloadA(payload, { force })
+  return { payload, written }
 }
 
 /** Bust both cache tiers (admin invalidation path). */
@@ -749,17 +768,21 @@ export async function readHomepagePayloadB(): Promise<HomepagePayloadB | null> {
  * Write to BOTH KV and Neon, with the same degraded-clobber guard as Variant A:
  * a non-forced warm must never replace a good blob with an empty-rails one.
  */
+// Returns whether the write actually happened — see writeHomepagePayloadA's
+// doc comment (ticket #11857) for why this matters: the degraded-clobber
+// guard below can silently no-op, and callers used to have no way to tell
+// that apart from a genuine fresh write.
 export async function writeHomepagePayloadB(
   payload: HomepagePayloadB,
   opts: { force?: boolean } = {},
-): Promise<void> {
+): Promise<boolean> {
   assertJsonSafeB(payload)
 
   if (payload.degraded && !opts.force) {
     const existing = await readHomepagePayloadB()
     if (existing && !existing.degraded) {
       console.warn('[homepage-payload:b] skipping degraded write over a good blob (use force to override)')
-      return
+      return false
     }
   }
 
@@ -785,6 +808,7 @@ export async function writeHomepagePayloadB(
   } catch (err) {
     console.error('[homepage-payload:b] Neon upsert failed (KV still written):', err)
   }
+  return true
 }
 
 /** Bust both cache tiers (admin invalidation path). */

@@ -1344,10 +1344,15 @@ export function createCronRoutes() {
   cronRoute('/warm-homepage', async (_req, res) => {
     try {
       const { warmHomepagePayloadA } = await import('../app/lib/homepage-payload.server.js')
-      const p = await warmHomepagePayloadA({ force: true })
+      // force:true always writes (ticket #11857's degraded-clobber guard only
+      // ever skips a non-forced write), so `written` is always true here —
+      // included for parity with /cron/warm's non-forced calls, where it is
+      // not always true.
+      const { payload: p, written } = await warmHomepagePayloadA({ force: true })
       res.json({
         ok: true,
         degraded: p.degraded,
+        written,
         bytes: JSON.stringify(p).length,
         sections: p.sections.length,
         rails: p.rails.length,
@@ -1368,10 +1373,16 @@ export function createCronRoutes() {
   cronRoute('/warm-homepage-b', async (_req, res) => {
     try {
       const { warmHomepagePayloadB } = await import('../app/lib/storefront-home.server.js')
-      const p = await warmHomepagePayloadB({ force: true })
+      // force:true always writes; `written` is always true here (see
+      // /warm-homepage's comment, ticket #11857) — included for parity with
+      // /cron/warm's non-forced calls, and so the team's own warm-after-publish
+      // step (docs/homepage-team/routine-daily-merchandise.md Step 7) has a
+      // field to assert on rather than trusting a 200 alone.
+      const { payload: p, written } = await warmHomepagePayloadB({ force: true })
       res.json({
         ok: true,
         degraded: p.degraded,
+        written,
         bytes: JSON.stringify(p).length,
         rails: p.rails.length,
         total: p.total,
@@ -1441,11 +1452,20 @@ export function createCronRoutes() {
       // blob with a degraded one; rotation is the forced refresh.
       let homepageBytes = 0
       let homepageRails = 0
+      // true unless a warm actually ran and was skipped below (ticket #11857):
+      // an exception leaves this true rather than falsely reporting a skip.
+      let homepageWritten = true
       try {
         const { warmHomepagePayloadA } = await import('../app/lib/homepage-payload.server.js')
-        const p = await warmHomepagePayloadA({ force: false })
+        const { payload: p, written } = await warmHomepagePayloadA({ force: false })
         homepageBytes = JSON.stringify(p).length
         homepageRails = p.rails.length
+        homepageWritten = written
+        // force:false means a degraded build (cold/timed-out discovery index)
+        // silently keeps the OLD blob — the exact "technically successful,
+        // content invisible" gap the ticket describes. Previously nothing here
+        // could tell a real refresh apart from a discarded one.
+        if (!written) console.warn('[cron:warm] homepage payload build was degraded; blob NOT updated, still serving the prior write')
       } catch (err) {
         console.warn('[cron:warm] homepage payload warm failed:', err)
       }
@@ -1455,11 +1475,14 @@ export function createCronRoutes() {
       // live assembly, which reads the entire 2.7 MB discovery index.
       let storefrontBytes = 0
       let storefrontRails = 0
+      let storefrontWritten = true
       try {
         const { warmHomepagePayloadB } = await import('../app/lib/storefront-home.server.js')
-        const p = await warmHomepagePayloadB({ force: false })
+        const { payload: p, written } = await warmHomepagePayloadB({ force: false })
         storefrontBytes = JSON.stringify(p).length
         storefrontRails = p.rails.length
+        storefrontWritten = written
+        if (!written) console.warn('[cron:warm] storefront payload build was degraded; blob NOT updated, still serving the prior write')
       } catch (err) {
         console.warn('[cron:warm] storefront payload warm failed:', err)
       }
@@ -1505,8 +1528,8 @@ export function createCronRoutes() {
         discoveryProducts: discoveryCount,
         discoverySkipped,
         pagesWarmed,
-        homepageBytes, homepageRails,
-        storefrontBytes, storefrontRails,
+        homepageBytes, homepageRails, homepageWritten,
+        storefrontBytes, storefrontRails, storefrontWritten,
       })
     } catch (err) {
       console.error('[cron:warm]', err)

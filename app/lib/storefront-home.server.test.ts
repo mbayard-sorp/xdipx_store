@@ -30,7 +30,7 @@ vi.mock('~/lib/homepage-payload.server', async () => {
     // Default to a blob MISS so assembleStorefrontHome takes the live-build
     // path and the upstream stubs below are the thing under test.
     readHomepagePayloadB: vi.fn(() => Promise.resolve(null)),
-    writeHomepagePayloadB: vi.fn(() => Promise.resolve()),
+    writeHomepagePayloadB: vi.fn(() => Promise.resolve(true)),
     triggerHomepageWarmB: vi.fn(),
   }
 })
@@ -58,14 +58,16 @@ import {
   RAIL_SEED_BUCKET_MS,
   STOREFRONT_EDGE_CACHE_HEADERS,
   hydrateStorefrontPayloadB,
+  warmHomepagePayloadB,
 } from './storefront-home.server'
-import { getDiscoveryRails, getDiscoveryIndex } from '~/lib/discovery.server'
 import {
   buildHomeContentBlocksLean,
   readHomepagePayloadB,
+  writeHomepagePayloadB,
   HOMEPAGE_PAYLOAD_B_VERSION,
   type HomepagePayloadB,
 } from '~/lib/homepage-payload.server'
+import { getDiscoveryRails, getDiscoveryIndex } from '~/lib/discovery.server'
 import { getCuriosityShelfData } from '~/lib/curiosity-shelf.server'
 import { getEmmaHeroSettings, getBlogPosts, getEditor } from '~/lib/sanity.server'
 import { getProductByHandle } from '~/lib/shopify.server'
@@ -490,5 +492,51 @@ describe('assembleStorefrontHome — pinned-headliner out-of-stock gate', () => 
     const data = await assembleStorefrontHome()
 
     expect(data.featured[0]!.handle).toBe('healthy')
+  })
+})
+
+// Ticket #11857: before this, warmHomepagePayloadB returned the freshly-built
+// payload unconditionally, so a caller (the cron route's own logging, and the
+// homepage team's warm-after-publish check in
+// docs/homepage-team/routine-daily-merchandise.md Step 7) could not tell a
+// real blob refresh apart from one the degraded-clobber guard silently
+// discarded — both looked like a resolved promise with a plausible rails
+// count. `written` makes that outcome explicit.
+describe('warmHomepagePayloadB — written flag (ticket #11857)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(readHomepagePayloadB).mockResolvedValue(null)
+    vi.mocked(getDiscoveryRails).mockResolvedValue({
+      rails: [], total: 0, available: { moods: [], audiences: [], matters: [] },
+    } as unknown as Awaited<ReturnType<typeof getDiscoveryRails>>)
+    vi.mocked(getEmmaHeroSettings).mockResolvedValue(null)
+    vi.mocked(getBlogPosts).mockResolvedValue({ posts: [], total: 0 })
+    vi.mocked(getEditor).mockResolvedValue(null)
+    vi.mocked(getCuriosityShelfData).mockResolvedValue(null)
+    vi.mocked(buildHomeContentBlocksLean).mockResolvedValue({
+      sections: [], carouselProductMap: {},
+    } as unknown as Awaited<ReturnType<typeof buildHomeContentBlocksLean>>)
+  })
+
+  it('reports written:true when the underlying write actually happens', async () => {
+    vi.mocked(writeHomepagePayloadB).mockResolvedValue(true)
+
+    const { written } = await warmHomepagePayloadB({ force: false })
+
+    expect(written).toBe(true)
+  })
+
+  it('reports written:false when the degraded-clobber guard silently skips the write', async () => {
+    // Simulates a cold/timed-out discovery index on a non-forced warm: the
+    // build succeeds (no throw) but writeHomepagePayloadB declines to clobber
+    // a good blob with this degraded one.
+    vi.mocked(writeHomepagePayloadB).mockResolvedValue(false)
+
+    const { payload, written } = await warmHomepagePayloadB({ force: false })
+
+    expect(written).toBe(false)
+    // The caller still gets the built payload back (for byte/rail-count
+    // logging) even though it was never actually stored.
+    expect(payload.variant).toBe('b')
   })
 })
