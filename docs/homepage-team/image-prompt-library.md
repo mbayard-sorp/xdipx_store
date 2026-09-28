@@ -338,6 +338,39 @@ property, never all of them; the packshot is the third resort, never the second.
     frame, and the droplet does the work the packaging shot cannot: it says what is inside the
     bottle. Reusable on any lube, gel, or serum hero.
 
+- Magic Wand Original Corded Personal Massager (`magic-wand-original-hv-260-massager`), `guides`
+  category, sincere staging, no accent prop, post `do-vibrator-modes-actually-matter` ("Do More
+  Vibration Modes Actually Matter?", content run 1123). Thesis: mode counts are marketing, what
+  changes a session is intensity range and how fast a thumb reaches the setting it wants — hero
+  stages the unhurried low-end moment before use, product resting still, not in use. **Ref-image
+  note:** `images[0]` (`53906A…`) is a box-plus-device composite carrying heavy printed packaging
+  copy ("magicwand ORIGINAL", "LEGENDARY PLUG-IN POWER") — used `images[3]` (`53906D…`, clean
+  unpackaged three-quarter device shot on a plain seamless ground, no box in frame, dramatic warm
+  shadow) as `--ref-image` instead, per the WINX/Magic Wand HV-270/Tantus precedent above. The
+  device's own small molded/printed "magicwand ORIGINAL" control-panel wordmark carried through
+  faithfully — real product branding replicated correctly, not invented/garbled text, so not a
+  vision-gate reject. One round via Atlas `seedream-4.5-edit` (Atlas primary, landscape_4_3,
+  ref-image path), 2 candidates, no retry needed:
+  - **Candidate 1 rejected at the vision gate on ground lock:** a two-tone coral/sage gradient
+    band ran across the top third of the frame (not the flat, pale, uniform coral-soft `#FFE6DD`
+    tint the ground lock requires) — the same two-tone-blend failure class already logged against
+    the Magic Wand HV-270 and Tantus cockring entries above, this time surviving into the final
+    render despite the hardened "no gradient, no two-tone blend" prompt language already being
+    present from generation. Product identity, scale, and palette on the *lower* two-thirds were
+    faithful; the reject is ground-lock only.
+  - **Candidate 2 kept:** flat, uniform pale coral-soft ground edge to edge, no gradient, no
+    two-tone band, even warm daylight with gentle falloff, product large and unmistakably the
+    subject at a confident diagonal filling most of the frame, cord coiled neatly to one side
+    (not tangled, not in use), control panel and "ORIGINAL" wordmark faithful to reference,
+    generous quiet negative space in the upper-left third for the headline →
+    `image-722406540f24b77d08419ae1e7f12053ab56e139-2304x1728-jpg`.
+  - **Precedent:** confirms the two-tone-gradient-background failure can still land in one
+    candidate of a round even when the corrected "flat/uniform/no gradient" prompt language is
+    present from the start — this is a per-candidate roll, not purely a prompt-correction fix, so
+    always generate 2+ candidates on this ground-lock-sensitive Atlas ref-image path and pick
+    rather than trusting one candidate on the strength of the prompt alone.
+  - **cast:** none
+
 - Glow Pleasure Air Clitoral Stimulator (`romp-glow`), `comparisons` category, archetype B
   (color-block still), no second-product accent prop, post "Air Pulse vs Clitoral Suction: Are
   They the Same?" (`air-pulse-vs-clitoral-suction`, content-writer run 590). Thesis: the two
