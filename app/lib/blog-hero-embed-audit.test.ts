@@ -19,6 +19,11 @@ const CATALOG: CatalogProduct[] = [
   { handle: 'magic-wand-mini', title: 'Magic Wand Mini' },
   { handle: 'magic-wand-rechargeable', title: 'Magic Wand Rechargeable' },
   { handle: 'satisfyer-pro-2', title: 'Satisfyer Pro 2' },
+  // ticket #11731: no brand/model word at all, title is entirely generic
+  // category words plus a plain colour — the run-1087 shape
+  // ("femmefunn-ultra-bullet-massager-rechargeable-silicone-vibrator-pink",
+  // matched on "pink" alone).
+  { handle: 'rechargeable-bullet-vibrator-pink', title: 'Rechargeable Bullet Vibrator Pink' },
 ]
 
 describe('distinctiveTokens', () => {
@@ -117,6 +122,22 @@ describe('findHeroEmbedMismatches — precision guardrails', () => {
   it('returns nothing for an empty hero copy', () => {
     const posts: AuditBlogPost[] = [
       { slug: 'p', heroImageAlt: null, imagePrompt: null, embedHandles: ['magic-wand-mini'] },
+    ]
+    expect(findHeroEmbedMismatches(posts, CATALOG)).toEqual([])
+  })
+
+  // ticket #11731 (second occurrence, runs 1037 and 1087): a bare colour word
+  // is not distinctive on its own, so a hero alt naming only a colour plus
+  // generic category words must not match an unrelated SKU whose title
+  // happens to end in that colour.
+  it('does not flag a hero alt naming only a colour plus generic words against a colour-suffixed SKU', () => {
+    const posts: AuditBlogPost[] = [
+      {
+        slug: 'p',
+        heroImageAlt: 'a pale pink rechargeable bullet vibrator resting in warm daylight',
+        imagePrompt: null,
+        embedHandles: ['magic-wand-mini'],
+      },
     ]
     expect(findHeroEmbedMismatches(posts, CATALOG)).toEqual([])
   })

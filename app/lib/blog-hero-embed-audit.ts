@@ -59,6 +59,15 @@ const GENERIC_TOKENS = new Set<string>([
   'mini', 'max', 'pro', 'plus', 'lite', 'xl', 'deluxe',
   'rechargeable', 'silicone', 'waterproof', 'wireless', 'remote', 'app',
   'adult', 'wellness', 'product', 'toy', 'toys', 'pleasure', 'couples',
+  // Colour words (ticket #11731, second occurrence: runs 1037 and 1087).
+  // Shopify titles in this catalog routinely end in a plain colour (e.g.
+  // "Retro Rechargeable Bullet Vibrator Purple"), and a doctrine-compliant
+  // warm-palette hero prompt is actively encouraged to name one, so treating
+  // a bare colour as a distinctive brand/model token collides with an
+  // arbitrary unrelated SKU that happens to share it.
+  'pink', 'purple', 'blue', 'teal', 'black', 'noir', 'onyx', 'magenta',
+  'coral', 'rose', 'red', 'green', 'grey', 'gray', 'white', 'silver', 'gold',
+  'peach', 'lilac', 'violet', 'aqua', 'ombre',
 ])
 
 /** Lowercase, replace non-alphanumerics with spaces, collapse whitespace. */
