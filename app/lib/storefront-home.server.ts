@@ -476,12 +476,21 @@ export async function buildHomepagePayloadB(): Promise<HomepagePayloadB> {
 /**
  * Build + write (force) + return. Used by the warm cron and by admin
  * invalidation. Mirrors `warmHomepagePayloadA`.
+ *
+ * `written` (ticket #11857) tells the caller whether the fresh build actually
+ * replaced the stored blob, or was silently discarded by
+ * `writeHomepagePayloadB`'s degraded-clobber guard. Before this, a warm that
+ * built a perfectly good payload but hit a degraded (empty-rails) build on a
+ * NON-forced call returned that same good-looking payload either way, so a
+ * cron log or a team publish check reading the return value could not tell a
+ * real refresh from a silently-discarded one — exactly the "technically
+ * successful, content invisible" failure class in the ticket.
  */
 export async function warmHomepagePayloadB(
   opts: { force?: boolean } = {},
-): Promise<HomepagePayloadB> {
+): Promise<{ payload: HomepagePayloadB; written: boolean }> {
   const force = opts.force ?? true
   const payload = await buildHomepagePayloadB()
-  await writeHomepagePayloadB(payload, { force })
-  return payload
+  const written = await writeHomepagePayloadB(payload, { force })
+  return { payload, written }
 }
