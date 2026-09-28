@@ -85,6 +85,10 @@ describe('describeCommentsApiError', () => {
 
 describe('ingestRecentComments', () => {
   it('degrades to a clear detail, no crash, when the token is not configured', async () => {
+    // #11384: explicitly unset, not ambient absence — a populated .env in the
+    // worktree (scripts/setup-worktree.sh's normal state) must not change
+    // this test's premise.
+    vi.stubEnv('IG_GRAPH_ACCESS_TOKEN', '')
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
 
@@ -181,8 +185,20 @@ describe('postCommentReply', () => {
   })
 
   it('degrades to a clear detail when the token is not configured', async () => {
+    // #11384: this test previously stubbed neither the env var nor fetch, so
+    // it only passed because CI runs with no .env — in a worktree with .env
+    // symlinked (scripts/setup-worktree.sh's normal state) it sent a live,
+    // unstubbed write-shaped request to the production Instagram Graph API
+    // against @hello_xdipx. Explicitly unset the token and stub fetch so the
+    // premise (no token) is real and no network call is possible either way.
+    vi.stubEnv('IG_GRAPH_ACCESS_TOKEN', '')
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
     const result = await postCommentReply('c1', 'hi')
+
     expect(result).toEqual({ ok: false, detail: 'IG_GRAPH_ACCESS_TOKEN is not configured' })
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('surfaces a Graph API error via describeCommentsApiError', async () => {
