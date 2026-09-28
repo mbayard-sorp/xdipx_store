@@ -1180,3 +1180,72 @@ export async function markSocialPostRemovalOwner(
   await repo.write(id, { removalSource: 'owner' })
   return { ok: true }
 }
+
+// ── Closing a stale bounced draft (ticket #11758) ───────────────────────────
+
+export interface MarkStaleRejectedRepo {
+  load: (id: number) => Promise<PostRow | null>
+  write: (id: number, patch: {
+    reviewStatus: 'rejected'
+    feedback: string
+    reviewedBy: string
+    reviewedAt: Date
+    updatedAt: Date
+  }) => Promise<void>
+}
+
+export const dbMarkStaleRejectedRepo: MarkStaleRejectedRepo = {
+  load: dbApproveRepo.load,
+  write: async (id, patch) => {
+    await db.update(socialPosts).set(patch).where(eq(socialPosts.id, id))
+  },
+}
+
+export type MarkStaleRejectedResult =
+  | { ok: true }
+  | { ok: false; status: 404 | 409; error: string }
+
+/**
+ * Closes a stale `needs_changes` draft as `rejected`, with a caller-supplied
+ * reason, WITHOUT fabricating a publish-gate verdict for a gate call that
+ * never happened.
+ *
+ * routine-social-daily.md Step 2.5 (ticket #11144) instructs the routine to
+ * reject a `needs_changes` row whose `scheduledFor` is more than 7 days past
+ * AND whose campaign has since closed. The only existing writer of
+ * `review_status='rejected'` was `{op:'gate'}` (`applyPublishGateVerdict`),
+ * which requires a real `PublishGateVerdictInput` — and the same playbook
+ * explicitly forbids inventing one for a gate call that was never made. Run
+ * 1093 hit exactly this wall on 8 qualifying rows and reported it honestly
+ * instead of faking a verdict. This is the narrow non-gate path that
+ * transition needed: only a `needs_changes` row, only to `rejected`, stamped
+ * distinctly from a real gate verdict (`[stale-reject ...]`, never
+ * `[publish-gate ...]`) so a later reader can never mistake this for a gate
+ * call that happened.
+ */
+export async function markStaleSocialPostRejected(
+  id: number,
+  reason: string,
+  deps: { repo?: MarkStaleRejectedRepo; now?: () => Date; actor?: string | undefined } = {},
+): Promise<MarkStaleRejectedResult> {
+  const repo = deps.repo ?? dbMarkStaleRejectedRepo
+  const post = await repo.load(id)
+  if (!post) return { ok: false, status: 404, error: `No social post ${id}` }
+  if (post.reviewStatus !== 'needs_changes') {
+    return {
+      ok: false,
+      status: 409,
+      error: `Post ${id} is ${post.reviewStatus}, not needs_changes. Only a bounced draft can be closed as stale.`,
+    }
+  }
+  const now = deps.now?.() ?? new Date()
+  const actor = (deps.actor ?? 'agent:social').slice(0, 60)
+  await repo.write(id, {
+    reviewStatus: 'rejected',
+    feedback: `[stale-reject by ${actor} on ${now.toISOString().slice(0, 10)}]\n${reason}`,
+    reviewedBy: actor,
+    reviewedAt: now,
+    updatedAt: now,
+  })
+  return { ok: true }
+}

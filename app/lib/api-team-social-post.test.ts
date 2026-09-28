@@ -15,6 +15,7 @@ const createDraftMock = vi.hoisted(() => vi.fn())
 const voiceGateMock = vi.hoisted(() => vi.fn())
 const reworkParseMock = vi.hoisted(() => vi.fn())
 const reworkMock = vi.hoisted(() => vi.fn())
+const markStaleMock = vi.hoisted(() => vi.fn())
 
 const getValveMock = vi.hoisted(() => vi.fn().mockResolvedValue(false))
 
@@ -51,6 +52,7 @@ vi.mock('~/lib/social-publish-approve.server', () => ({
   parsePublishGateVerdict: vi.fn(),
   parseReworkInput: reworkParseMock,
   reworkSocialPost: reworkMock,
+  markStaleSocialPostRejected: markStaleMock,
 }))
 vi.mock('~/lib/social-engagement.server', () => ({
   captureSocialEngagement: vi.fn().mockResolvedValue([]),
@@ -540,6 +542,57 @@ describe('rework op — wiring (#4351)', () => {
     const res = await post({ op: 'rework', id: 61, tweetText: 'x', pairingNoneReason: 'external-only' })
     expect(res.status).toBe(200)
     expect(reworkParseMock).toHaveBeenCalledWith(expect.objectContaining({ pairingNoneReason: 'external-only' }))
+  })
+})
+
+// Ticket #11758: a non-gate write path to close a stale needs_changes row,
+// distinct from op:'gate' — never accepts or implies a publish-gate verdict.
+describe('stale op — wiring (#11758)', () => {
+  it('rejects with no id', async () => {
+    const res = await post({ op: 'stale', reason: 'campaign closed' })
+    expect(res.status).toBe(400)
+    expect(await res.text()).toMatch(/id required/)
+    expect(markStaleMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects with no reason', async () => {
+    const res = await post({ op: 'stale', id: 131 })
+    expect(res.status).toBe(400)
+    expect(await res.text()).toMatch(/reason required/)
+    expect(markStaleMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects a blank reason', async () => {
+    const res = await post({ op: 'stale', id: 131, reason: '   ' })
+    expect(res.status).toBe(400)
+    expect(markStaleMock).not.toHaveBeenCalled()
+  })
+
+  it('passes the trimmed id/reason/actor to markStaleSocialPostRejected and returns ok', async () => {
+    markStaleMock.mockResolvedValue({ ok: true })
+    const res = await post({ op: 'stale', id: 131, reason: '  16 days past, campaign closed  ', actor: 'agent:social' })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: true })
+    expect(markStaleMock).toHaveBeenCalledWith(131, '16 days past, campaign closed', { actor: 'agent:social' })
+  })
+
+  it('omits actor when not supplied', async () => {
+    markStaleMock.mockResolvedValue({ ok: true })
+    await post({ op: 'stale', id: 131, reason: 'stale' })
+    expect(markStaleMock).toHaveBeenCalledWith(131, 'stale', { actor: undefined })
+  })
+
+  it('relays a 409 (e.g. the row is not needs_changes) from markStaleSocialPostRejected', async () => {
+    markStaleMock.mockResolvedValue({ ok: false, status: 409, error: 'Post 131 is draft/approved, not needs_changes.' })
+    const res = await post({ op: 'stale', id: 131, reason: 'stale' })
+    expect(res.status).toBe(409)
+    expect((await res.json()).error).toMatch(/needs_changes/)
+  })
+
+  it('relays a 404 from markStaleSocialPostRejected', async () => {
+    markStaleMock.mockResolvedValue({ ok: false, status: 404, error: 'No social post 999' })
+    const res = await post({ op: 'stale', id: 999, reason: 'stale' })
+    expect(res.status).toBe(404)
   })
 })
 
