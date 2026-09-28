@@ -96,3 +96,42 @@ describe('reviews surface — no pre-#3789 brand hexes survive', () => {
     expect(/color:\s*['"]#[0-9a-f]{3,6}['"]/i.test(src)).toBe(false)
   })
 })
+
+/**
+ * Ticket #11858: a second, DIFFERENT hardcoded-orange class found while
+ * verifying #11069 — #FF4B1F/#FF6A3D are not one of RETIRED_BRAND_HEXES above
+ * (that grep is for the pre-#3789 brand coral, #FF5A36), so the #3789/#9681
+ * sweeps could not have caught them. StarRating's star-fill gradient renders
+ * on every product page and review list showing a rating; site.webmanifest's
+ * theme_color tints the PWA/home-screen-install chrome on every visit.
+ */
+const HARDCODED_ORANGE_HEXES = ['#FF4B1F', '#FF6A3D']
+
+describe('StarRating — no hardcoded orange, draws from the coral tokens (ticket #11858)', () => {
+  it('carries no hardcoded orange hex', () => {
+    const src = read('./StarRating.tsx')
+    for (const hex of HARDCODED_ORANGE_HEXES) {
+      expect(
+        src.toUpperCase().includes(hex),
+        `StarRating.tsx still hardcodes ${hex}; use var(--color-coral) / var(--color-coral-2) so app.css stays the source of truth.`,
+      ).toBe(false)
+    }
+  })
+
+  it('the star-fill gradient draws its two stops from the coral tokens', () => {
+    const src = read('./StarRating.tsx')
+    expect(src).toContain('var(--color-coral)')
+    expect(src).toContain('var(--color-coral-2)')
+  })
+})
+
+describe('site.webmanifest — no hardcoded orange theme_color (ticket #11858)', () => {
+  it('theme_color is the brand coral token value, not the retired-orange hardcode', () => {
+    const manifest = JSON.parse(read('../../../public/site.webmanifest')) as { theme_color?: string }
+    expect(manifest.theme_color?.toUpperCase()).not.toBe('#FF4B1F')
+    // Keep this in sync with --color-coral in app/app.css — webmanifest JSON
+    // cannot reference a CSS custom property, so the hex is duplicated here
+    // on purpose and this assertion is what catches the two drifting apart.
+    expect(manifest.theme_color?.toUpperCase()).toBe('#C2350F')
+  })
+})
