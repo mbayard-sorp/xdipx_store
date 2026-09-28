@@ -72,6 +72,16 @@
  *     REVISE that swaps an on-skin frame for a different zone or crop must move
  *     or the rotation windows keep reading the replaced frame. Only a
  *     needs_changes row is a target, so #4069's duplicate-draft guard is intact.
+ *   { op: 'stale', id, reason, actor? } -> { ok } | 404 | 409
+ *     Close a stale `needs_changes` row as `rejected` (ticket #11758,
+ *     routine-social-daily.md Step 2.5 / ticket #11144: a needs_changes row
+ *     whose scheduledFor is >7 days past AND whose campaign has since closed).
+ *     Distinct from `op:'gate'`: this never accepts or implies a publish-gate
+ *     verdict, so the routine is never forced to fabricate one for a gate call
+ *     it did not make. `reason` is a required plain-text note stamped onto
+ *     `feedback` as `[stale-reject ...]`, never `[publish-gate ...]`, so a
+ *     later reader can never mistake this for a real gate verdict. Only a
+ *     needs_changes row is a target; anything else 409s.
  *   { op: 'engagement' } -> { report: [{ postId, externalPostId, metrics?, error? }],
  *                             account: { account?: { followersCount, ... }, error? } }
  *     Live Instagram insights (reach/likes/comments/saves) for the most
@@ -136,7 +146,7 @@ import {
 } from '~/lib/team.server'
 import { SOCIAL_PLATFORMS, SOCIAL_REVIEW_STATUSES } from '~/lib/team-keys'
 import { parseVoiceGateVerdict } from '~/lib/social-voice-gate.server'
-import { applyPublishGateVerdict, parsePublishGateVerdict, reworkSocialPost, parseReworkInput } from '~/lib/social-publish-approve.server'
+import { applyPublishGateVerdict, parsePublishGateVerdict, reworkSocialPost, parseReworkInput, markStaleSocialPostRejected } from '~/lib/social-publish-approve.server'
 import { captureSocialEngagement, captureInstagramAccount, rankBySaves } from '~/lib/social-engagement.server'
 import { getSocialMixReport, formatSocialMixReportLines } from '~/lib/social-mix-report.server'
 import { parseSceneAxes } from '~/lib/social-scene-vocab'
@@ -339,6 +349,26 @@ export async function action({ request }: ActionFunctionArgs) {
       return Response.json({ error: result.error }, { status: result.status })
     }
     return Response.json({ ok: true, reviewStatus: result.reviewStatus })
+  }
+
+  // Close a stale bounced draft (ticket #11758, split from #11144's Step 2.5
+  // staleness sweep). Distinct from `op:'gate'`: this never accepts or implies
+  // a publish-gate verdict, so the routine never has to fabricate one for a
+  // gate call it did not make. Scoped server-side to `needs_changes` rows
+  // only — see markStaleSocialPostRejected.
+  if (b['op'] === 'stale') {
+    if (typeof b['id'] !== 'number' || !Number.isFinite(b['id'])) {
+      return new Response('Bad Request: id required', { status: 400 })
+    }
+    if (typeof b['reason'] !== 'string' || !b['reason'].trim()) {
+      return new Response('Bad Request: reason required (a non-empty string)', { status: 400 })
+    }
+    const actor = typeof b['actor'] === 'string' && b['actor'].trim() ? b['actor'].trim() : undefined
+    const result = await markStaleSocialPostRejected(b['id'], b['reason'].trim(), { actor })
+    if (!result.ok) {
+      return Response.json({ error: result.error }, { status: result.status })
+    }
+    return Response.json({ ok: true })
   }
 
   // Engagement readback (tickets #2742 IG, #3734 X). Fetches live numbers for
