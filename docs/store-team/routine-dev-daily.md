@@ -450,6 +450,19 @@ git fetch origin main >/dev/null && git grep -n "<file/flag/symbol from the tick
    lived-experience guard, so it did not catch it. Any test added for a voice-rule fix asserts the
    adjacent rules too, not just the one named in the ticket.
 
+3h. **The cloud sandbox has `DATABASE_URL` but no `ANTHROPIC_API_KEY`.** A ticket whose DONE WHEN
+   needs a live model call from inside this run (e.g. `runVisionGate()`, or any script that calls
+   the Claude API directly rather than reading already-written rows) cannot execute that call here
+   and will fail with a missing-credential error, not a code defect. Confirmed twice: ticket #11468
+   (`scripts/audit-vision-verdicts.ts`) and ticket #11029 (`scripts/regate-verify-11029.ts`) were
+   both written and committed unrun for this reason. Write and ship the script or code fix as
+   normal, but do not spend a claim trying to also execute it here; say in the PR body that live
+   verification needs to run elsewhere (a session with the key, or the owner). Note also that
+   `app/lib/vision-gate-buffer.server.ts`'s `visionDepsForEnv()` is a working remote fallback for
+   *other* callers reading already-deployed production behavior (`scripts/gen-notebook-art.ts`,
+   ticket #8989) but does not help verify unmerged local changes on this branch, since the remote
+   route runs whatever is currently deployed, not the branch under test.
+
 4. Verify locally, all three, and do not skip one because it "cannot be affected":
 
 ```bash
