@@ -131,4 +131,31 @@ describe('generateAndPlaceHomepageImage vision gate (ticket #10483)', () => {
     expect(manifest.provider).toBe('fal')
     expect(manifest.reason).toContain('sanity upload 500')
   })
+
+  // Ticket #11856: the vision gate route hardcoded gate('content', runId) for
+  // every caller, so a homepage candidate was judged against the unrelated
+  // content team's run_in_progress lock. gateImageBuffer must be called with
+  // the homepage team's own runId and 'homepage' so the remote fallback gates
+  // on the right team.
+  it('passes opts.runId and team "homepage" through to gateImageBuffer', async () => {
+    generateImage.mockResolvedValue({ buffers: [Buffer.from('img1')], provider: 'fal', model: 'fal/flux-dev' })
+    gateImageBuffer.mockResolvedValue(PASS_VERDICT)
+    uploadBufferToSanity.mockResolvedValue({ assetId: 'asset-1', url: 'https://cdn.sanity.io/asset-1.png' })
+
+    const { generateAndPlaceHomepageImage } = await import('./homepage-media.server')
+    await generateAndPlaceHomepageImage({ prompt: 'p', alt: 'a', target: TARGET, runId: 1099 })
+
+    expect(gateImageBuffer).toHaveBeenCalledWith(expect.any(Buffer), undefined, 1099, 'homepage')
+  })
+
+  it('still gates with team "homepage" when no runId is given', async () => {
+    generateImage.mockResolvedValue({ buffers: [Buffer.from('img1')], provider: 'fal', model: 'fal/flux-dev' })
+    gateImageBuffer.mockResolvedValue(PASS_VERDICT)
+    uploadBufferToSanity.mockResolvedValue({ assetId: 'asset-1', url: 'https://cdn.sanity.io/asset-1.png' })
+
+    const { generateAndPlaceHomepageImage } = await import('./homepage-media.server')
+    await generateAndPlaceHomepageImage({ prompt: 'p', alt: 'a', target: TARGET })
+
+    expect(gateImageBuffer).toHaveBeenCalledWith(expect.any(Buffer), undefined, undefined, 'homepage')
+  })
 })

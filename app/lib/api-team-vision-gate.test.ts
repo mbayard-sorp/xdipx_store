@@ -13,9 +13,11 @@ const runVisionGateMock = vi.hoisted(() => vi.fn())
 const runVisionGateOnImageMock = vi.hoisted(() => vi.fn())
 const regateAssetMock = vi.hoisted(() => vi.fn())
 
+const TEAM_IDS = ['homepage', 'social', 'ads', 'email', 'strategy', 'content', 'product', 'video', 'support']
 vi.mock('~/lib/team.server', () => ({
   assertTeamAuth: vi.fn(),
   gate: gateMock,
+  isTeamId: (v: unknown): boolean => typeof v === 'string' && TEAM_IDS.includes(v),
 }))
 vi.mock('~/lib/social-vision-gate.server', () => ({
   runVisionGate: runVisionGateMock,
@@ -108,5 +110,41 @@ describe('money gate', () => {
     const res = await post({ imageUrl: 'https://cdn.shopify.com/files/x.jpg' })
     expect(res.status).toBe(403)
     expect(runVisionGateMock).not.toHaveBeenCalled()
+  })
+})
+
+// Ticket #11856: the route used to hardcode gate('content', runId) for every
+// caller, so a homepage-team candidate was judged against the unrelated
+// content team's run_in_progress lock and failed closed whenever any content
+// run happened to be active (run 1099, 2026-09-27: 4 slots attempted, 0
+// placed). `team` in the body picks which team's lock/budget gate() checks.
+describe('calling team (ticket #11856)', () => {
+  it('defaults to gate("content", ...) when no team is given, for back-compat', async () => {
+    const res = await post({ imageUrl: 'https://cdn.shopify.com/files/x.jpg', runId: 42 })
+    expect(res.status).toBe(200)
+    expect(gateMock).toHaveBeenCalledWith('content', 42)
+  })
+
+  it('gates on the given team instead of content', async () => {
+    const res = await post({ imageUrl: 'https://cdn.shopify.com/files/x.jpg', runId: 7, team: 'homepage' })
+    expect(res.status).toBe(200)
+    expect(gateMock).toHaveBeenCalledWith('homepage', 7)
+  })
+
+  it('falls back to content on an unrecognised team value rather than passing it through unchecked', async () => {
+    const res = await post({ imageUrl: 'https://cdn.shopify.com/files/x.jpg', team: 'not-a-real-team' })
+    expect(res.status).toBe(200)
+    expect(gateMock).toHaveBeenCalledWith('content', undefined)
+  })
+
+  it('a content run in progress no longer blocks a homepage-team call', async () => {
+    gateMock.mockImplementation(async (team: string) =>
+      team === 'content'
+        ? { ok: false, reason: 'run_in_progress', blockingRun: { id: 900, runType: 'dev', idleMinutes: 2 } }
+        : { ok: true },
+    )
+    const res = await post({ imageUrl: 'https://cdn.shopify.com/files/x.jpg', runId: 1099, team: 'homepage' })
+    expect(res.status).toBe(200)
+    expect(runVisionGateMock).toHaveBeenCalled()
   })
 })

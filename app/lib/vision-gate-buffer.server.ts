@@ -15,6 +15,7 @@
 
 import type { VisionGateDeps, VisionVerdict } from './social-vision-gate.server'
 import { runVisionGateOnImage } from './social-vision-gate.server'
+import type { TeamId } from './team-keys'
 
 /**
  * Sniff the real container format from a candidate buffer's magic bytes.
@@ -50,8 +51,19 @@ export function sniffImageMediaType(buf: Buffer): 'image/jpeg' | 'image/png' | '
  * treats the throw exactly like a local auth/transport failure and produces
  * the same fail-closed verdict, so a route outage degrades the same way a
  * missing key always has, never as a silent pass.
+ *
+ * `team` tells the route which team's budget/run-lock to gate on. Omit it to
+ * keep the original content-team default (the Notebook hero path,
+ * scripts/gen-notebook-art.ts, never passes one). The homepage path
+ * (app/lib/homepage-media.server.ts) passes 'homepage' so a homepage
+ * candidate is judged against the homepage team's own lock instead of
+ * failing closed whenever an unrelated content-team run happens to be in
+ * progress. The route used to hardcode gate('content', runId) for every
+ * caller, so a homepage --run-id could never exclude the sibling run that
+ * was actually blocking it, since that sibling was a content run with a
+ * different id (run 1099, 2026-09-27: 4 slots attempted, 0 placed).
  */
-export function remoteVisionCallVision(runId?: number): NonNullable<VisionGateDeps['callVision']> {
+export function remoteVisionCallVision(runId?: number, team?: TeamId): NonNullable<VisionGateDeps['callVision']> {
   const BASE_URL = (process.env['BASE_URL'] ?? 'https://xdipx.com').replace(/\/$/, '')
   const TEAM_TOKEN = process.env['TEAM_TOKEN'] ?? process.env['HOMEPAGE_TEAM_TOKEN'] ?? process.env['CRON_SECRET'] ?? ''
   return async (imageBase64, mediaType) => {
@@ -59,12 +71,14 @@ export function remoteVisionCallVision(runId?: number): NonNullable<VisionGateDe
     const res = await fetch(`${BASE_URL}/api/team/vision-gate`, {
       method: 'POST',
       headers: { 'x-team-secret': TEAM_TOKEN, 'content-type': 'application/json' },
-      // runId lets the route's gate('content', runId) exclude the caller's OWN
-      // in-progress content run from the run_in_progress blocking-run check
-      // (mirrors the already-proven --run-id plumbing in gen-social-image.ts).
-      // Without it, a content-run-scheduled hero generation always sees itself
-      // as the blocking sibling run and the gate fails closed on every call.
-      body: JSON.stringify({ imageBase64, mediaType, ...(runId !== undefined ? { runId } : {}) }),
+      // runId lets the route's gate(team, runId) exclude the caller's OWN
+      // in-progress run (on its own team) from the run_in_progress
+      // blocking-run check (mirrors the already-proven --run-id plumbing in
+      // gen-social-image.ts). Without it, a run-scheduled generation always
+      // sees itself as the blocking sibling run and the gate fails closed on
+      // every call. `team` picks which team's lock/budget that check runs
+      // against; the route defaults to 'content' when omitted.
+      body: JSON.stringify({ imageBase64, mediaType, ...(runId !== undefined ? { runId } : {}), ...(team ? { team } : {}) }),
     })
     if (!res.ok) throw new Error(`vision-gate route HTTP ${res.status}`)
     const verdict = (await res.json()) as VisionVerdict
@@ -95,13 +109,15 @@ export function remoteVisionCallVision(runId?: number): NonNullable<VisionGateDe
  * `deps` — every test that exercises this passes its own `callVision` and is
  * unaffected by which branch this returns.
  */
-export function visionDepsForEnv(runId?: number): VisionGateDeps | undefined {
-  return process.env['ANTHROPIC_API_KEY']?.trim() ? undefined : { callVision: remoteVisionCallVision(runId) }
+export function visionDepsForEnv(runId?: number, team?: TeamId): VisionGateDeps | undefined {
+  return process.env['ANTHROPIC_API_KEY']?.trim() ? undefined : { callVision: remoteVisionCallVision(runId, team) }
 }
 
 /** Base64-encode a candidate buffer and run it through the shared anatomy /
  *  imagery-ceiling vision gate. Never throws — same fail-closed contract as
- *  the social and Notebook-hero paths. */
-export async function gateImageBuffer(buf: Buffer, deps?: VisionGateDeps, runId?: number): Promise<VisionVerdict> {
-  return runVisionGateOnImage({ data: buf.toString('base64'), mediaType: sniffImageMediaType(buf) }, deps ?? visionDepsForEnv(runId))
+ *  the social and Notebook-hero paths. `team` (default: the route's own
+ *  'content' default) picks which team's budget/run-lock the remote check
+ *  gates on when it has to fall back to the server-side route. */
+export async function gateImageBuffer(buf: Buffer, deps?: VisionGateDeps, runId?: number, team?: TeamId): Promise<VisionVerdict> {
+  return runVisionGateOnImage({ data: buf.toString('base64'), mediaType: sniffImageMediaType(buf) }, deps ?? visionDepsForEnv(runId, team))
 }
