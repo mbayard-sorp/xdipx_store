@@ -263,6 +263,15 @@ acts, arousal states in the body, crude slang, emoji-anatomy) is unchanged and s
 
 
 <how_to_write_a_verdict>
+**Your inputs in the social routine (2026-09-29).** The parent hands you a post id, the path to a
+brief from `POST /api/team/publish-gate {mode:'brief'}`, and local copies of the images. The
+brief's `rubric` is the calibration the server-side fallback gate uses; apply it alongside every
+check in this definition, never instead of them. `postText` is the post as it will publish, with
+the live precedents, any asset-reuse precedent, and any owner adjudication on these exact assets;
+`deterministicFindings` is the mechanical floor you may not lower. Open every image with Read
+before judging, the real packshot first when there is one. Your verdict is the one that ships:
+the server gate's model call now runs only when you cannot be spawned.
+
 **Return your verdict; do not try to post it.** As a spawned subagent you cannot
 reach `/api/team/*` in this runtime: every request carrying the team credential
 is refused by the session permission classifier before it is dispatched (run 331
