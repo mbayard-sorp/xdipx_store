@@ -273,6 +273,26 @@ the row text and its links are the only carriers, so the conventions are the con
    `approved`/`in_progress`/`pr_open`) for the target route or file path. If an existing ticket already
    covers the same route and feature, set `blockedById` against it (or fold the new finding into it as
    a note) instead of filing a fresh, unlinked duplicate.
+   **The grep target is the file, not just the feature name.** (#11734) Two tickets can name
+   different features and still collide: #11460 (`productPhysics`, a report-only field) and #11477
+   (`skinMarks`, a different report-only field) each edited the same `VisionVerdict` interface,
+   return literals, and shared test fixtures in `app/lib/social-vision-gate.server.ts`, with no
+   feature-name overlap to catch on a text search. Both PRs independently verified clean, so this
+   was not a logic conflict, just an undetected same-file chain. Match on the target file path
+   itself, not only on whether the described feature sounds the same, and set `blockedById` when an
+   open or `in_progress` ticket already touches the same file or function region.
+9. **A split-off row checks recent merged history for its parent's own incident before filing.**
+   (#11957) Whatever process splits a blocked/needs-split parent ticket into `SPLIT-N-of-M` rows —
+   an owner-directed split, or an agent doing it — greps recent merged commits (case-insensitively)
+   for a distinctive phrase from the parent ticket's own incident (a reproduction asset id, a named
+   symbol) once, at split time, rather than leaving each split clause to be independently
+   re-diagnosed downstream. Two of three rows split from #11487 (#11921, #11922) turned out to be
+   full duplicates of already-merged work from ticket #11544/PR #1354, which had shipped the same
+   fix two days earlier citing the same incident (ROMP 2.0, `social_media_assets` 675 vs 97829B.jpg).
+   R-DEV's own staleness guard (rule 8's grep, run at claim time) caught both and blocked them as
+   superseded before any code was duplicated, but two of five claims in that pass were burned
+   confirming work that already existed. Running the same check once at split time, before any
+   split row is filed, is cheaper than N downstream claims independently rediscovering it.
 
 ### Playbook-authoring conventions
 
