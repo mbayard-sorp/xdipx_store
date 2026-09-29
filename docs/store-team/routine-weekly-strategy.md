@@ -181,9 +181,23 @@ a six-line verdict in the weekly brief, one yes/no per line, where **yes is the 
 6. Every maker engagement (like/reply/reshare) was flagged to `offsite-scout`. A week with no maker
    engagement is a yes, said plainly.
 
-Every "no" becomes a suggestion row filed the same run at the team that owns it, with a
-`dedupeKey`, never a narrative-only note. Migration 079 has landed (ticket #3536): the check reads
-the engagement op (`captureInstagramEngagement`) and names the week's best and worst theme by saves.
+   **Verify the instrument before reading `social_comments` as "no maker engagement" (ticket
+   #12077).** An empty `social_comments` table is consistent with two very different realities: a
+   genuinely quiet week, or `/cron/instagram-comments-ingest` not writing at all — measured
+   2026-09-28 at 72 consecutive `succeeded` cron runs against a permanently-empty table while real
+   comments existed on the account. Before answering yes on an empty table, check that route's
+   recent `cron_runs` rows: a `failed` row (a missing/under-scoped `IG_GRAPH_ACCESS_TOKEN`, or a
+   Graph API response shape this parser doesn't recognize) or a run whose `result.detail` is set
+   means the ingest itself is broken, not that the week was quiet — report **UNMEASURED** for this
+   line instead of yes, and file the ingest failure to R-DEV if it isn't already an open ticket. A
+   `succeeded` run with `result.postsChecked > 0` and `result.fetched === 0` is the genuine "checked
+   real posts, found nothing" case and stays a plain yes; a `skipped` run (`result.skipped` set,
+   `postsChecked: 0`) means there were no eligible posts to check at all this week, also a yes.
+
+Every "no" (and every UNMEASURED) becomes a suggestion row filed the same run at the team that owns
+it, with a `dedupeKey`, never a narrative-only note. Migration 079 has landed (ticket #3536): the
+check reads the engagement op (`captureInstagramEngagement`) and names the week's best and worst
+theme by saves.
 
 **State plainly, every week, which metric the engagement line is steering by.** Reach is not a
 reliable Instagram proxy at this account's follower count: Meta applies privacy thresholding and

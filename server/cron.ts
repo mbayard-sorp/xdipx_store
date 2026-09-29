@@ -1298,10 +1298,19 @@ export function createCronRoutes() {
    * Schedule: hourly. Instagram comment support lane, phase 1 (ticket #2027).
    * Pulls comments for every Instagram post from the last 14 days via the
    * Graph API and upserts them into social_comments at status 'inbound'.
-   * Never fails loudly on a missing/under-scoped token: `ingestRecentComments`
-   * reports `ok:false` with a `detail` the admin queue renders as a banner,
-   * so a token problem degrades to "nothing new ingested, here's why" rather
-   * than a 500 or a silent empty result.
+   * `ingestRecentComments` never throws on a missing/under-scoped token or a
+   * Graph API error: it reports `ok:false` with a `detail` the admin queue
+   * renders as a banner, so a token problem degrades to "nothing new
+   * ingested, here's why" rather than an unhandled exception.
+   *
+   * The response status below still has to carry that `ok:false` into the
+   * HTTP layer (ticket #12077): `cron_runs` classification
+   * (`classifyCronOutcome`) only ever looks at the status code and a
+   * `skipped` field, never the JSON body's own `ok`, so returning 200 on an
+   * `ok:false` result recorded every one of 72 real failures (a broken
+   * token) as 'succeeded' for three straight days while social_comments
+   * stayed permanently empty. A genuine `ok:true` empty result (nothing to
+   * check, or posts checked with zero comments found) still answers 200.
    */
   cronRoute('/instagram-comments-ingest', async (_req, res) => {
     const { kvSetNX, kvDel, kvSet } = await import('../app/lib/kv.server.js')
@@ -1317,7 +1326,7 @@ export function createCronRoutes() {
       // token is missing or under-scoped, instead of the page silently
       // showing zero new comments with no explanation.
       await kvSet('social-comments-ingest:last', { ...result, checkedAt: new Date().toISOString() }, 3600 * 6)
-      res.json(result)
+      res.status(result.ok ? 200 : 502).json(result)
     } catch (err) {
       console.error('[cron:instagram-comments-ingest]', err)
       res.status(500).json({ error: String(err) })
