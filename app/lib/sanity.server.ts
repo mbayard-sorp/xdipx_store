@@ -1805,6 +1805,9 @@ export async function getBlogPost(slug: string, preview = false): Promise<BlogPo
           deck,
           sources[]{ label, url },
           reviewedNote,
+          "reviewer": reviewer->{
+            name, credentials, bio, active, "photoUrl": photo.asset->url, "slug": slug.current
+          },
           seriesOrder,
           "series": series->{
             title, "slug": slug.current, kicker,
