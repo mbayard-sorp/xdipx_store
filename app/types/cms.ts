@@ -675,12 +675,26 @@ export interface Comparison extends ComparisonCard {
   noIndex?: boolean
 }
 
+// E-E-A-T human expert reviewer (ticket #12096, additive healthReviewer doc
+// type). Referenced by blogPostExtras.reviewer, never invented on a post: a
+// value here means a named real person with real credentials reviewed this
+// specific piece, per docs/store-team/health-review-workflow.md.
+export interface HealthReviewer {
+  name: string
+  credentials: string
+  bio?: string
+  photoUrl?: string
+  slug?: string
+  active?: boolean
+}
+
 // Notebook redesign — optional per-post extras from the additive
 // blogPostExtras doc type (deck, sources, series membership).
 export interface BlogPostExtras {
   deck?: string
   sources?: { label: string; url?: string }[]
   reviewedNote?: string
+  reviewer?: HealthReviewer | null
   series?: BlogSeriesRef | null
   seriesOrder?: number
 }

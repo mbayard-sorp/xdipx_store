@@ -66,6 +66,9 @@ import researchBrief      from '../schemas/researchBrief.js'
 import trendTopicBrief    from '../schemas/trendTopicBrief.js'
 // Multi-author voice profiles for AI-generated content (Emma + future agents).
 import editorialAuthor    from '../schemas/authors/editorialAuthor.js'
+// E-E-A-T human expert reviewer identity (additive; separate from
+// editorialAuthor, which is an AI voice profile, not a human reviewer).
+import healthReviewer     from '../schemas/healthReviewer.js'
 import collectionPage     from '../schemas/collectionPage.js'
 import collectionsHub     from '../schemas/collectionsHub.js'
 // Phase 6d — Manufacturer specs data layer (additive; does not touch existing schemas).
@@ -209,6 +212,8 @@ export const schemaTypes = [
   trendTopicBrief,
   // Editorial authors — voice profiles for Emma + future AI authors.
   editorialAuthor,
+  // E-E-A-T human expert reviewer identity (real people, real credentials).
+  healthReviewer,
   // PLP SEO — editorial overrides per Shopify collection (intro copy, FAQs,
   // related collections). Additive — Shopify is still source of truth for
   // products; Sanity wins for SEO meta when present.

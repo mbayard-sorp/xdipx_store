@@ -14,6 +14,7 @@ import { RelatedPosts } from '~/components/blog/RelatedPosts'
 import { ReadingProgress } from '~/components/blog/ReadingProgress'
 import { PostPagination } from '~/components/blog/PostPagination'
 import { SeriesNav } from '~/components/blog/SeriesNav'
+import { ReviewerByline } from '~/components/blog/ReviewerByline'
 import { NotebookSubscribe } from '~/components/blog/NotebookSubscribe'
 import { SanityImage } from '~/components/common/SanityImage'
 import { Reveal } from '~/components/motion/Reveal'
@@ -138,7 +139,7 @@ export default function NotebookPostPage() {
           <BlogBody body={post.body ?? []} productMap={productMap} />
 
           {/* Sources & review — the trust footer (art direction §7) */}
-          {(sources.length > 0 || post.extras?.reviewedNote) && (
+          {(sources.length > 0 || post.extras?.reviewedNote || post.extras?.reviewer) && (
             <Reveal variant="fade" as="section" className="mt-8 bg-paper-2 rounded-lg p-5 md:p-6">
               <p className="kicker mb-2.5">Sources &amp; review</p>
               <p className="text-sm text-ink-3 leading-[1.55]">
@@ -165,6 +166,7 @@ export default function NotebookPostPage() {
                   ))}
                 </ul>
               )}
+              <ReviewerByline reviewer={post.extras?.reviewer} />
             </Reveal>
           )}
 

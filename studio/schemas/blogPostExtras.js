@@ -43,6 +43,13 @@ export default {
       description: 'Optional trust line, e.g. fact-check or review provenance. No medical claims.',
     },
     {
+      name: 'reviewer',
+      title: 'Reviewed by',
+      type: 'reference',
+      to: [{type: 'healthReviewer'}],
+      description: 'Only set this when the named person has actually reviewed THIS post. See docs/store-team/health-review-workflow.md.',
+    },
+    {
       name: 'series',
       title: 'Series',
       type: 'reference',
