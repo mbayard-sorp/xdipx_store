@@ -1124,6 +1124,23 @@ export const discoveryRules = pgTable('discovery_rules', {
   activeTypeIdx: index('idx_discovery_rules_active_type').on(t.active, t.ruleType),
 }))
 
+/**
+ * The PM-chat pricing-proposal / human-approval queue. NOT retired (ADR-007
+ * decision 4, ticket #12455 design decision, 2026-09-29), despite being v1's
+ * original write target: ticket #12097 repointed the Nalpac cost-change
+ * webhook off this table entirely (it reprices through recomputeVariant /
+ * pricing_audit_log now), which was this table's only hazardous, unmonitored
+ * use. What's left is a distinct, working, human-gated feature with no
+ * overlap with pricing_audit_log's schema or purpose: app/lib/pm-chat-tools.server.ts's
+ * `propose_pricing_changes` tool writes a pending row here, and
+ * app/routes/api.pricing.approve.tsx + app/lib/pricing-agent.server.ts's
+ * `applyApprovedChange`/`rejectChange` approve or reject it (MAP-floor
+ * clamped on apply). `pricing_audit_log` is an ENGINE audit trail with no
+ * pending/approved/rejected human-approval concept to migrate this onto, so
+ * folding the two tables together would blur two genuinely different
+ * concerns rather than converge them. Keep this table; do not attempt to
+ * retire, migrate, or drop it. See docs/adr/ADR-007-pricing-engine-convergence.md.
+ */
 export const pricingChanges = pgTable('pricing_changes', {
   id:           bigserial('id', { mode: 'number' }).primaryKey(),
   proposedAt:   timestamp('proposed_at', { withTimezone: true }).notNull().defaultNow(),

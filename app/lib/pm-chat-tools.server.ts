@@ -535,8 +535,10 @@ export async function dispatchPmTool(
         }
 
         // Resolve productId + the actual variant GID via Shopify (confirms the
-        // SKU is carried). variantId must be a real ProductVariant GID — the
-        // pricing-apply path reads pricingChanges.variantId directly.
+        // SKU is carried). variantId must be a real ProductVariant GID —
+        // pricing-agent.server.ts's applyApprovedChange (called from
+        // api.pricing.approve.tsx on the owner's approve click) reads
+        // pricingChanges.variantId directly when it applies the price.
         const productId = await findProductBySKU(sku)
         const variantId = await findVariantBySKU(sku)
         if (!productId || !variantId) {
