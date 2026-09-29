@@ -91,6 +91,27 @@ const KINDS = ['process', 'strategy', 'instructions', 'agent-def', 'config', 'co
 const RISKS = ['low', 'med', 'high'] as const
 const ORDER_BY = ['priority', 'age', 'created'] as const
 
+/**
+ * `'medium'` is not one of `RISKS` (the accepted middle token is the
+ * abbreviation `'med'`), so `RISKS.includes('medium')` failed silently and
+ * every filer who wrote out the natural word had their real cxRisk coerced
+ * to the 'low' default with no error, no warning, and no note on the row
+ * (ticket #12092: measured 2,222 of 2,326 bus rows at 'low' vs 25 at 'med',
+ * a distribution a silent coercion produces, not real risk — confirmed live
+ * on rows #12082/#12088, both filed as 'medium' and persisted as 'low').
+ * Nothing in docs/ or .claude/ enumerates the accepted values, so an agent
+ * writing the natural word had no way to know it silently loses; normalize
+ * the synonym here rather than only writing it down, since the accepted
+ * values are now also documented in docs/store-team/improvement-loop.md.
+ */
+const RISK_SYNONYMS: Record<string, (typeof RISKS)[number]> = { medium: 'med' }
+
+function normalizeRisk(v: unknown): (typeof RISKS)[number] | undefined {
+  if (typeof v !== 'string') return undefined
+  if ((RISKS as readonly string[]).includes(v)) return v as (typeof RISKS)[number]
+  return RISK_SYNONYMS[v]
+}
+
 /** Accepts a scalar or an array; returns the members that pass `ok`. */
 function stringList(v: unknown, ok: (s: string) => boolean): string[] | undefined {
   const raw = Array.isArray(v) ? v : v === undefined ? [] : [v]
@@ -159,9 +180,7 @@ export async function action({ request }: ActionFunctionArgs) {
       return new Response('Bad Request: category and suggestion required', { status: 400 })
     }
     const kind = typeof b['kind'] === 'string' && KINDS.includes(b['kind']) ? b['kind'] : 'process'
-    const cxRisk = (RISKS as readonly string[]).includes(b['cxRisk'] as string)
-      ? (b['cxRisk'] as (typeof RISKS)[number])
-      : 'low'
+    const cxRisk = normalizeRisk(b['cxRisk']) ?? 'low'
     const priority = typeof b['priority'] === 'number' && b['priority'] >= 1 && b['priority'] <= 5
       ? Math.round(b['priority'])
       : undefined

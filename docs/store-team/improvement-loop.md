@@ -162,6 +162,28 @@ If a row **bundles** an owner decision with executable work, **split it into two
 row that half-executes. `agent-editor`'s Step 1.5 hygiene pass (rekind/retire) is the cleanup for
 rows already misfiled; this rule is meant to stop them being created.
 
+## The `cxRisk` values
+
+`POST /api/team/suggestion {op:'create', ...}` accepts exactly three `cxRisk` tokens
+(`app/routes/api.team.suggestion.tsx`, `RISKS`):
+
+| value | Meaning |
+|---|---|
+| `low` | cosmetic, internal-only, or no customer-facing effect |
+| `med` | a real but bounded customer-facing risk (the middle tier — write `med`, not `medium`) |
+| `high` | a money-path, safety, or brand-charter risk |
+
+**Write `med`, never `medium`.** Nothing else validates or normalizes this field beyond an exact
+match against the three tokens above, and `'medium'` is not one of them (ticket #12092): a filing
+that spelled out the natural word had its `cxRisk` silently coerced to the `low` default, with no
+error and no note on the row. Measured blast radius before the fix: 2,222 of 2,326 bus rows sat at
+`low` against only 25 at `med`, a distribution a silent coercion produces, not real risk — confirmed
+live on rows #12082/#12088, both filed as `'medium'` and persisted as `'low'`. The route now
+normalizes the literal string `'medium'` to `'med'` as a stopgap, but that is a courtesy for exactly
+one known misspelling, not a general case-insensitive or synonym-matching parser: any other token
+outside the three above still falls back to `low` silently. Cite this table in any agent definition
+that files suggestions with an explicit `cxRisk`, and use `med` in prose and in the field alike.
+
 ## Auto-approving triage (per team)
 
 Each team has an independent `{team}_team_auto_approve_suggestions` valve (migration

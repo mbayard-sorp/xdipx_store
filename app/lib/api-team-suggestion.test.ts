@@ -158,6 +158,37 @@ describe('op:create/transition coerce a top-level `pr` shorthand (#5054)', () =>
   })
 })
 
+// Ticket #12092: the accepted middle cxRisk token is the abbreviation 'med',
+// but nothing told filers that, so an agent writing the natural word
+// 'medium' had it silently coerced to the 'low' default -- no error, no
+// note. Confirmed live: rows #12082/#12088 were both filed as 'medium' and
+// persisted as 'low'.
+describe('op:create normalizes the cxRisk "medium" synonym (#12092)', () => {
+  it('persists cxRisk "medium" as "med", never silently as "low"', async () => {
+    await post({
+      op: 'create', team: 'content', category: 'bug', kind: 'code',
+      suggestion: 'x', cxRisk: 'medium',
+    })
+    const input = mocks.createSuggestionDetailed.mock.calls[0]![0] as Record<string, unknown>
+    expect(input['cxRisk']).toBe('med')
+  })
+
+  it('still accepts the literal "med"/"low"/"high" tokens unchanged', async () => {
+    for (const risk of ['med', 'low', 'high']) {
+      await post({ op: 'create', team: 'content', category: 'bug', kind: 'code', suggestion: 'x', cxRisk: risk })
+    }
+    const risks = mocks.createSuggestionDetailed.mock.calls.map(c => (c[0] as Record<string, unknown>)['cxRisk'])
+    expect(risks).toEqual(['med', 'low', 'high'])
+  })
+
+  it('still falls back to "low" for an unrecognized value or a missing one', async () => {
+    await post({ op: 'create', team: 'content', category: 'bug', kind: 'code', suggestion: 'x', cxRisk: 'critical' })
+    await post({ op: 'create', team: 'content', category: 'bug', kind: 'code', suggestion: 'x' })
+    const risks = mocks.createSuggestionDetailed.mock.calls.map(c => (c[0] as Record<string, unknown>)['cxRisk'])
+    expect(risks).toEqual(['low', 'low'])
+  })
+})
+
 describe('op:list returns total (#2071)', () => {
   it('returns suggestions and the untruncated total for the same filter', async () => {
     mocks.listSuggestions.mockResolvedValueOnce([{ id: 12 }])
