@@ -85,7 +85,7 @@ export interface PromoDecision {
   ok: boolean
   /**
    * 'ok' | 'not-applicable' | 'map-conflict-flagged' | 'map-not-confirmed' |
-   * 'no-code' | 'no-depth' | 'no-explicit-window' | 'invalid-window'
+   * 'no-code' | 'no-depth' | 'ambiguous-window' | 'invalid-window'
    */
   reason: string
 }
@@ -153,8 +153,23 @@ export function extractPromoCode(text: string): string | null {
   if (line?.[1]) return line[1].trim()
 
   // \u2014 is the em-dash, matched by codepoint so this source stays em-dash-free.
-  const header = text.match(/\bpromo\b[^\u2014\n]*(?:\u2014|-)\s*([A-Z][A-Z0-9]{3,39})\b/i)
-  if (header?.[1] && !CODE_STOPWORDS.has(header[1].toUpperCase())) return header[1]
+  // Anchor on "promo" case-insensitively (real briefs write both "PROMO N"
+  // and prose like "the promo-execute cron"), but everything AFTER that
+  // anchor is matched CASE-SENSITIVELY and NON-GREEDILY: a real code is
+  // always written in the brief's own original uppercase, and the delimiter
+  // search must stop at the NEAREST hyphen/em-dash after "promo", not the
+  // last one anywhere in the whole brief. P0 ticket #12076: the old /i flag
+  // on the whole pattern let [A-Z][A-Z0-9]{3,39} match lowercase prose, and
+  // the old greedy [^\u2014\n]* backtracked all the way to the LAST hyphen in
+  // the entire brief -- in row #10874 that hyphen sat inside
+  // "machine-parseable", far from "promo" (which only appeared in "...the
+  // promo-execute cron..."), minting a live Shopify discount code literally
+  // named `parseable`.
+  const promoAt = text.search(/\bpromo\b/i)
+  if (promoAt !== -1) {
+    const header = text.slice(promoAt).match(/^[^\u2014\n]*?(?:\u2014|-)\s*([A-Z][A-Z0-9]{3,39})\b/)
+    if (header?.[1] && !CODE_STOPWORDS.has(header[1])) return header[1]
+  }
 
   for (const m of text.matchAll(/\b([A-Z][A-Z0-9]{3,39})\b/g)) {
     const tok = m[1] as string
@@ -198,6 +213,42 @@ export function extractPromoCode(text: string): string | null {
  */
 const SKU_MARGIN_LIST_RE = /(\d{4,6})[^\d$;\n]*\$[\d.]+\s*->\s*[\d.]+%/g
 
+/** One ISO date, bare (YYYY-MM-DD) or a full ISO-8601 timestamp
+ *  (YYYY-MM-DDTHH:MM:SSZ, optional fractional seconds). */
+const ISO_DATE_ATOM = String.raw`\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)?`
+
+/**
+ * The window, matched ONLY from a labelled "window ... to ..." construct
+ * (P0 ticket #12076). The old implementation took the first two bare ISO
+ * dates anywhere in the document, in document order -- exactly what let two
+ * incidental dates elsewhere in a brief (a MAP-check date, a
+ * live-price-as-of date) get minted as the real window while the brief's own
+ * actual, later-stated, full-timestamp window went unmatched entirely: row
+ * #10874 wrote its real window as "2026-09-28T00:00:00Z to
+ * 2026-10-04T23:59:59Z", and `\b` does not match between a digit and "T", so
+ * that timestamp was invisible to the old bare-date-only regex while the two
+ * earlier incidental dates ("2026-09-21", "2026-09-22") were taken instead.
+ * "to"/"through"/a hyphen/an em-dash are all real separators live briefs use
+ * between the two boundary dates (LIVE_BRIEF_51 in the test file uses
+ * "through"; #10874/#9322 use "to").
+ */
+// \u2014 is the em-dash, matched by codepoint so this source stays em-dash-free.
+const WINDOW_RE = new RegExp(
+  String.raw`\bwindow\b\s*:?\s*(${ISO_DATE_ATOM})\s*(?:to|through|\u2014|-)\s*(${ISO_DATE_ATOM})`,
+  'i',
+)
+
+/**
+ * Normalize one matched window boundary into a full ISO instant: a bare date
+ * gets the existing start-of-day/end-of-day convention; a full timestamp (the
+ * brief already stated the exact instant) passes through unchanged rather
+ * than having a second, wrong start/end-of-day suffix appended to it.
+ */
+function toIsoBoundary(raw: string, edge: 'start' | 'end'): string {
+  if (raw.includes('T')) return raw
+  return edge === 'start' ? `${raw}T00:00:00Z` : `${raw}T23:59:59Z`
+}
+
 export function extractSkus(text: string): string[] {
   const skus = new Set<string>()
   for (const m of text.matchAll(/\bskus?\b\s*:?\s*(\d[\d,/\s]*\d)/gi)) {
@@ -221,11 +272,13 @@ export function parsePromoBrief(text: string): ParsedPromo {
   const depthNum = depth?.[1] ? parseInt(depth[1], 10) : NaN
   const percentage = Number.isFinite(depthNum) && depthNum >= 1 && depthNum <= 99 ? depthNum : null
 
-  // Window: the two dated boundaries. Require ISO YYYY-MM-DD so "explicit" is
-  // unambiguous; a brief without two ISO dates is treated as having no window.
-  const isoDates = [...text.matchAll(/\b(\d{4}-\d{2}-\d{2})\b/g)].map(m => m[1] as string)
-  const startsAt = isoDates.length >= 2 && isoDates[0] ? `${isoDates[0]}T00:00:00Z` : null
-  const endsAt = isoDates.length >= 2 && isoDates[1] ? `${isoDates[1]}T23:59:59Z` : null
+  // Window: only a labelled "window ... to ..." construct counts (see
+  // WINDOW_RE above) -- a brief with ISO-shaped dates elsewhere but no such
+  // construct is treated as having no window, same as one with no dates at
+  // all, rather than having its incidental dates mistaken for one.
+  const windowMatch = text.match(WINDOW_RE)
+  const startsAt = windowMatch?.[1] ? toIsoBoundary(windowMatch[1], 'start') : null
+  const endsAt = windowMatch?.[2] ? toIsoBoundary(windowMatch[2], 'end') : null
 
   const handles = [...text.matchAll(/\/products\/([a-z0-9][a-z0-9-]*)/gi)]
     .map(m => (m[1] as string).toLowerCase())
@@ -266,14 +319,28 @@ const DISCOUNT_CODE_CANDIDATE_RE = /\d{1,2}\s*%/
  * safety-critical refusal (a MAP conflict) is reported, then the structural
  * requirements.
  */
-export function decidePromo(parsed: ParsedPromo, fullText: string): PromoDecision {
+export function decidePromo(parsed: ParsedPromo, fullText: string, now: Date = new Date()): PromoDecision {
   if (!DISCOUNT_CODE_CANDIDATE_RE.test(fullText)) return { ok: false, reason: 'not-applicable' }
   if (detectMapConflict(fullText)) return { ok: false, reason: 'map-conflict-flagged' }
   if (!parsed.code) return { ok: false, reason: 'no-code' }
   if (parsed.percentage == null) return { ok: false, reason: 'no-depth' }
-  if (!parsed.startsAt || !parsed.endsAt) return { ok: false, reason: 'no-explicit-window' }
+  // 'ambiguous-window' (P0 ticket #12076, replaces the old 'no-explicit-window'):
+  // now that the window is only ever read from a labelled construct (WINDOW_RE
+  // above), failing to find one means the brief's window is genuinely
+  // ambiguous, not merely "not yet stated" the way document-order date
+  // parsing used to leave it.
+  if (!parsed.startsAt || !parsed.endsAt) return { ok: false, reason: 'ambiguous-window' }
   if (new Date(parsed.endsAt).getTime() <= new Date(parsed.startsAt).getTime()) {
     return { ok: false, reason: 'invalid-window' }
+  }
+  // Second half of ticket #12076's incident: row #10874 minted a code whose
+  // window had already fully expired by the time the mint actually ran. The
+  // parsed window there was also wrong (see WINDOW_RE), but even a
+  // correctly-parsed window must still be checked against the clock -- a
+  // promo approved late, or whose execution pass runs late, can carry a real,
+  // well-formed window that is simply stale by mint time.
+  if (new Date(parsed.startsAt).getTime() < now.getTime()) {
+    return { ok: false, reason: 'ambiguous-window' }
   }
   // Fail-closed: mint only when MAP compliance is explicitly stated, never on the
   // mere absence of a conflict word.
@@ -463,13 +530,14 @@ async function refuse(
 export async function executeApprovedPromo(
   row: { id: number; suggestion: string },
   deps: PromoExecuteDeps,
+  now: Date = new Date(),
 ): Promise<PromoExecuteResult> {
   if (!promoExecuteEnabled(await deps.getSetting(PROMO_EXECUTE_VALVE))) {
     return { minted: false, reason: 'valve-off' }
   }
 
   const parsed = parsePromoBrief(row.suggestion)
-  const decision = decidePromo(parsed, row.suggestion)
+  const decision = decidePromo(parsed, row.suggestion, now)
   if (!decision.ok) {
     return refuse(row, parsed, decision.reason, 0, deps)
   }
@@ -576,6 +644,7 @@ export interface PromoExecutionPassResult {
  */
 export async function runPromoExecutionPass(
   deps: PromoExecuteDeps = defaultPromoExecuteDeps(),
+  now: Date = new Date(),
 ): Promise<PromoExecutionPassResult> {
   const rows = await listSuggestions({
     team: 'strategy',
@@ -593,7 +662,7 @@ export async function runPromoExecutionPass(
       console.log(`[promo-execute] #${row.id} already handled. Skipping.`)
       continue
     }
-    const res = await executeApprovedPromo({ id: row.id, suggestion: row.suggestion }, deps)
+    const res = await executeApprovedPromo({ id: row.id, suggestion: row.suggestion }, deps, now)
     if (res.minted) {
       minted++
       console.log(`[promo-execute] #${row.id} minted ${res.code} (${res.discountId}).`)
