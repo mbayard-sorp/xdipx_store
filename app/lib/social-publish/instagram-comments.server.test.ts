@@ -98,7 +98,12 @@ describe('ingestRecentComments', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('reports zero work when there are no recent Instagram posts', async () => {
+  // Ticket #12077: this is "nothing to check", not "checked and found
+  // nothing" — the explicit `skipped` reason is what lets classifyCronOutcome
+  // (app/lib/cron-runs.server.ts) record this as a 'skipped' cron run rather
+  // than a blank 'succeeded' indistinguishable from a real, completed,
+  // zero-comment check.
+  it('reports an explicit skipped reason when there are no recent Instagram posts', async () => {
     vi.stubEnv('IG_GRAPH_ACCESS_TOKEN', 'tok')
     h.state.selects.push([]) // recentInstagramMediaIds
     const fetchMock = vi.fn()
@@ -106,7 +111,13 @@ describe('ingestRecentComments', () => {
 
     const result = await ingestRecentComments()
 
-    expect(result).toEqual({ ok: true, postsChecked: 0, fetched: 0, inserted: 0 })
+    expect(result).toEqual({
+      ok: true,
+      postsChecked: 0,
+      fetched: 0,
+      inserted: 0,
+      skipped: 'no Instagram posts in the last 14 days to check for comments',
+    })
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
@@ -153,6 +164,44 @@ describe('ingestRecentComments', () => {
     expect(result.ok).toBe(false)
     expect(result.detail).toContain('instagram_manage_comments')
     expect(result.postsChecked).toBe(1)
+  })
+
+  // Ticket #12077, the actual money-path incident: 72 consecutive runs
+  // reported `ok:true` and wrote zero rows while real comments existed on
+  // the account. A comment item missing id/text is exactly the shape this
+  // reproduces -- every fetched item is silently dropped, `inserted` stays
+  // 0, and nothing ever threw, so the old code had no way to tell this apart
+  // from a quiet week with no comments at all.
+  it('fails loudly when comments were fetched but every one is missing id/text, none stored', async () => {
+    vi.stubEnv('IG_GRAPH_ACCESS_TOKEN', 'tok')
+    h.state.selects.push([{ externalPostId: 'media-1' }])
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      jsonResponse({ data: [{ username: 'alice', timestamp: '2026-09-01T00:00:00Z' }] }), // no id, no text
+    ))
+
+    const result = await ingestRecentComments()
+
+    expect(result.ok).toBe(false)
+    expect(result.fetched).toBe(1)
+    expect(result.inserted).toBe(0)
+    expect(result.detail).toContain('lacked an id or text field')
+    expect(h.state.insertedValues).toHaveLength(0)
+  })
+
+  // Contrast case: every fetched comment is well-formed but already known
+  // (the ordinary steady state of re-fetching an already-ingested window).
+  // This must stay a healthy `ok:true`, not the loud failure above.
+  it('does not fail loudly when every fetched comment is a known duplicate', async () => {
+    vi.stubEnv('IG_GRAPH_ACCESS_TOKEN', 'tok')
+    h.state.selects.push([{ externalPostId: 'media-1' }])
+    h.state.insertReturns.push([]) // onConflictDoNothing: already exists
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      jsonResponse({ data: [{ id: 'c1', text: 'already ingested', username: 'alice' }] }),
+    ))
+
+    const result = await ingestRecentComments()
+
+    expect(result).toEqual({ ok: true, postsChecked: 1, fetched: 1, inserted: 0 })
   })
 })
 
