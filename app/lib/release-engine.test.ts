@@ -52,6 +52,7 @@ vi.mock('~/lib/release-ticket-autofile.server', () => ({
 }))
 
 import { classifyChangedFiles } from '~/lib/github.server'
+import { isPagingClass, isSuppressibleByQueue } from '~/lib/owner-escalation'
 import {
   AGENT_EDITOR_ALLOWLIST_RE,
   CI_ABSENT_GRACE_MS,
@@ -59,6 +60,7 @@ import {
   CONDITIONAL_UNDRAFT_MIN_AGE_MS,
   CONDITIONAL_UNDRAFT_PREFIXES,
   DEFAULT_MAX_MERGES_PER_DAY,
+  ESCALATION_KIND_TO_CLASS,
   MAX_TICKET_ATTEMPTS,
   NEEDS_OWNER_LABEL,
   REQUIRED_CHECK,
@@ -979,6 +981,44 @@ describe('attempt accounting', () => {
     expect(shouldBlockForAttempts(2)).toBe(false)
     expect(shouldBlockForAttempts(3)).toBe(true)
     expect(shouldBlockForAttempts(4)).toBe(true)
+  })
+})
+
+describe('escalation class mapping (#12093)', () => {
+  // Regression: `escalate()` used to hardcode `escalation: 'protected-merge'`
+  // for every kind, so once `owner_queue_enabled` came on (2026-09-02) any
+  // kind other than 'protected' was silently swallowed by sendOwnerEmail's
+  // queue-suppression guard, since none of these kinds are actually rendered
+  // by computeOwnerQueue(). Most importantly, a ticket exhausting the
+  // 3-strikes retry ladder ('attempts') never reached the owner's inbox,
+  // which is why the attempt_count=0 blocked pile (tracker e1-blocked) never
+  // drained: nobody was ever told to look at it.
+  it('gives the ticket-exhausted escalation its own class, not protected-merge', () => {
+    expect(ESCALATION_KIND_TO_CLASS['attempts']).toBe('ticket-exhausted')
+    expect(ESCALATION_KIND_TO_CLASS['attempts']).not.toBe('protected-merge')
+  })
+
+  it('maps every engine escalation kind to a real, non-paging vocabulary class', () => {
+    for (const cls of Object.values(ESCALATION_KIND_TO_CLASS)) {
+      // A release-engine escalation is serious but never the money-path/
+      // storefront-down pager: it must never resolve to a class tsc would
+      // otherwise stop `sendOwnerSms` from accepting.
+      expect(isPagingClass(cls)).toBe(false)
+    }
+  })
+
+  it('only maps to a class computeOwnerQueue() actually renders, so nothing goes silent under the queue valve', () => {
+    // Every mapped class is queue-suppressible once owner_queue_enabled is on.
+    // That is fine ONLY for 'protected-merge', which computeOwnerQueue() does
+    // render per-PR. The other classes ('ticket-exhausted', 'ci-stuck',
+    // 'engine-down') are not rendered by computeOwnerQueue() today, so this
+    // fix restores correct labelling but the underlying emails would still be
+    // suppressed once the valve is on -- flagged here rather than silently
+    // assumed fixed, since closing that gap is a separate piece of work than
+    // this ticket's fix (mislabelling every kind as 'protected-merge').
+    for (const cls of Object.values(ESCALATION_KIND_TO_CLASS)) {
+      expect(isSuppressibleByQueue(cls)).toBe(true)
+    }
   })
 })
 

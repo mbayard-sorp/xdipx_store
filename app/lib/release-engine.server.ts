@@ -77,6 +77,7 @@ import { checkUrl, runCheckoutProbe } from '~/lib/checkout-probe.server'
 import { getPipelineSetting } from '~/lib/feed-processor.server'
 import { KV_KEYS, kvDel, kvGet, kvIncr, kvSet, kvSetNX } from '~/lib/kv.server'
 import { escapeHtml, sendOwnerEmail } from '~/lib/owner-alerts.server'
+import type { EscalationClassName } from '~/lib/owner-escalation'
 import {
   getTicket,
   isMissingConflictTarget,
@@ -1535,6 +1536,38 @@ async function loadTicketFacts(id: number): Promise<TicketFacts | null> {
 type EscalationKind = 'protected' | 'attempts' | 'merge-attempts' | 'revert-ci' | 'circuit' | 'ci-stuck' | 'no-deploy'
 
 /**
+ * Maps this engine's own internal escalation reasons onto the shared
+ * `owner-escalation.ts` vocabulary, so `sendOwnerEmail`'s suppression guard
+ * (queue-suppressible vs not) is applied to the class the email actually is,
+ * not to whichever class `escalate()` happened to hardcode.
+ *
+ * Ticket #12093: every kind below was previously sent as `'protected-merge'`
+ * regardless of `kind` (a copy-paste from this function's first caller, the
+ * protected-path escalation, which is the one case where that string was
+ * correct). Since `owner_queue_enabled` has been on since 2026-09-02 and
+ * `'protected-merge'` is a queue-suppressible class, every OTHER kind here
+ * — most importantly `'attempts'` (a ticket exhausting the 3-strikes retry
+ * ladder) — was silently swallowed by `sendOwnerEmail`'s suppression guard,
+ * even though none of these classes are actually rendered by
+ * `computeOwnerQueue()`. The owner never received a ticket-exhausted email,
+ * so nothing ever prompted them to unblock those rows, which is why the
+ * `attempt_count = 0` blocked pile (tracker `e1-blocked`) only grew.
+ * `'circuit'`, `'merge-attempts'`, `'revert-ci'`, and `'no-deploy'` have no
+ * exact vocabulary match; they map to `'engine-down'`, the closest existing
+ * class for "the release engine's own operation is stuck and needs a human",
+ * rather than inventing a new `ESCALATION_CLASSES` entry for this fix.
+ */
+export const ESCALATION_KIND_TO_CLASS: Record<EscalationKind, EscalationClassName> = {
+  protected: 'protected-merge',
+  attempts: 'ticket-exhausted',
+  'ci-stuck': 'ci-stuck',
+  'merge-attempts': 'engine-down',
+  'revert-ci': 'engine-down',
+  circuit: 'engine-down',
+  'no-deploy': 'engine-down',
+}
+
+/**
  * One email per PR per escalation kind, deduped in KV for a week. Without this
  * a protected PR that sits open for a day emails the owner 144 times.
  */
@@ -1554,7 +1587,10 @@ async function escalate(
     console.log(`${LOG} escalation (${kind}) already sent for ${dedupeKey}, not re-sending`)
     return false
   }
-  const res = await sendOwnerEmail(subject, html, { escalation: 'protected-merge', fromName: 'xdipx release engine' })
+  const res = await sendOwnerEmail(subject, html, {
+    escalation: ESCALATION_KIND_TO_CLASS[kind],
+    fromName: 'xdipx release engine',
+  })
   if (!res.sent) console.warn(`${LOG} escalation email not sent: ${res.error}`)
   return res.sent
 }
