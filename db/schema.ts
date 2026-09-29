@@ -2216,6 +2216,31 @@ export const outreachMessages = pgTable('outreach_messages', {
   messageIdIdx: index('idx_outreach_messages_message_id').on(t.messageId),
 }))
 
+/**
+ * Ticket #12095 (tracker p2-4-support): the inbound-support-email pipeline
+ * `app/lib/support-inbox.server.ts` polls hello@xdipx.com over IMAP the same
+ * read-only way `outreach-inbox.server.ts` does, and stores every genuine
+ * (non-outreach-thread) inbound message here along with the draft-only reply
+ * `customer-service-emma`'s system prompt produced. Draft-only by design: no
+ * row here ever gets sent or acted on automatically. `sentAt` is nullable
+ * because a drafted reply has not gone out; it exists so a later "graduate to
+ * send" feature has a place to record it without a schema change.
+ */
+export const supportMessages = pgTable('support_messages', {
+  id:               serial('id').primaryKey(),
+  messageId:        text('message_id').notNull(), // RFC 5322 Message-ID, or the imap:<uidvalidity>:<uid> fallback
+  fromEmail:        text('from_email'),
+  subject:          text('subject'),
+  bodyText:         text('body_text'),
+  draftReply:       text('draft_reply').notNull(),
+  needsHumanReview: boolean('needs_human_review').notNull().default(false),
+  receivedAt:       timestamp('received_at', { withTimezone: true }),
+  sentAt:           timestamp('sent_at', { withTimezone: true }),
+  createdAt:        timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => ({
+  messageIdIdx: uniqueIndex('idx_support_messages_message_id').on(t.messageId),
+}))
+
 
 /**
  * The owner blocker list (078): one row per thing only the owner can clear.
