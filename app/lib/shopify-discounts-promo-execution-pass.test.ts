@@ -48,6 +48,12 @@ Window: 2026-08-12 to 2026-08-19
 Products: https://xdipx.com/products/ferri
 MAP check result: clean, all named SKUs are MAP=0`
 
+// Ticket #12076: executeApprovedPromo now checks the parsed window's startsAt
+// against the clock, so a test that expects a mint must pin `now` before
+// CLEAN_BRIEF's window, or the suite goes flaky as real time marches past
+// 2026-08-12.
+const BEFORE_TEST_WINDOW = new Date('2026-07-01T00:00:00Z')
+
 beforeEach(() => {
   listSuggestionsMock.mockReset()
   executeMock.mockReset()
@@ -62,7 +68,7 @@ describe('runPromoExecutionPass', () => {
     executeMock.mockResolvedValue([]) // neither row has a handled note yet
 
     const deps = makeDeps()
-    const result = await runPromoExecutionPass(deps)
+    const result = await runPromoExecutionPass(deps, BEFORE_TEST_WINDOW)
 
     expect(result).toEqual({ total: 2, minted: 2, refused: 0, skipped: 0 })
     expect(deps.createDiscount).toHaveBeenCalledTimes(2)

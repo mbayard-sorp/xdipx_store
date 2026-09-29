@@ -61,6 +61,58 @@ const MAP_EXCLUSION_RATIONALE_BRIEF =
   '75267 Intimate Earth Mojo Clove Anal Glide, 77096 LELO Water-Based Moisturizer). ' +
   '42 SKUs remain, all map_price null -> fully discountable, MAP CHECK CLEAN.'
 
+// Ticket #12076: decidePromo/executeApprovedPromo now check the parsed
+// window's startsAt against the clock (a real defect: row #10874 minted a
+// code whose window had already expired by mint time), so any test that
+// exercises a mint or an ok decision must pin `now` before every fixture's
+// window below, or the suite goes flaky as real time marches past 2026.
+const BEFORE_ALL_TEST_WINDOWS = new Date('2026-07-01T00:00:00Z')
+
+// Real live suggestion #10874 (BULLETWEEK20 v3), reproduced verbatim,
+// including its own trailing note explaining that its SKU line was written to
+// satisfy extractSkus. This is the P0 incident (ticket #12076): the real
+// window is stated as full ISO timestamps ("window 2026-09-28T00:00:00Z to
+// 2026-10-04T23:59:59Z"), but the old document-order date parser instead
+// picked up two earlier, incidental bare dates ("2026-09-21", "2026-09-22",
+// from the MAP-check and margin-computed-as-of sentences), and the old
+// case-insensitive/greedy code-header regex matched "parseable" out of
+// "...the promo-execute cron (this row's machine-parseable SKU line...)" —
+// together minting a live Shopify discount literally named `parseable`,
+// scoped to a window that had already expired, instead of BULLETWEEK20.
+const SUGGESTION_10874_BRIEF =
+  `BULLETWEEK20 v3 ${EM} supersedes #9321 (REFUSED no-eligible-products 09-14) and #8023 ` +
+  '(stale, still approved, must be dismissed). 20% off code BULLETWEEK20, window ' +
+  '2026-09-28T00:00:00Z to 2026-10-04T23:59:59Z. MAP check: all map_price=0.0 (Nalpac feed ' +
+  'confirmed, 2026-09-21), fully discountable, MAP CHECK CLEAN. Margins computed against ' +
+  'live Shopify price as of 2026-09-22, wholesale_cost confirmed synced to current Nalpac ' +
+  'feed same date (pricing_audit_log batch rows, no drops-only staleness found): SKUs: ' +
+  `99352,98578,99662,96768,76970,76963,76964,94262,74849,84141,93182 ${EM} 99352 Camtoyz Fouria ` +
+  '$53.99->30.5%(stk44); 98578 Syntra Bullet $21.99->28.9%(stk650); 99662 Minnie\'s Wink Aqua ' +
+  '$37.99->29.4%(stk23); 96768 Mini\'s Leopard Print $30.99->29.2%(stk85); 76970 Prints ' +
+  'Charming Buzzed Mini $25.99->30.3%(stk281); 76963 Prints Charming Canna Queen ' +
+  '$34.99->31.2%(stk124); 76964 Prints Charming Bullet $34.99->31.2%(stk259); 94262 Prowler ' +
+  'RED Anal Plug $22.99->29.5%(stk133); 74849 Beat Rechargeable Bullet $30.99->29.4%(stk33); ' +
+  '84141 ROMP Riot $26.99->30.5%(stk84); 93182 WINX Star Tickles $20.99->28.8%(stk227). ' +
+  'Price range post-discount $16.79-$43.19. DROPPED from #9321\'s 12: 99388 Shine On Glowing ' +
+  'Pink, stock fell 12->9 units (below the brief\'s own 10-unit floor) between 09-14 and ' +
+  '09-21; re-add only if restocked and reverified. Channels/copy unchanged from #9321/#8023: ' +
+  'email brief states code+depth, X/SMS state code+depth, site announcementBar/promoBanner on ' +
+  'bullet collection, Instagram carries theme only per standing split. DONE WHEN: ' +
+  'BULLETWEEK20 live per codeDiscountNodes, startsAt 2026-09-28, endsAt 2026-10-04, scoped to ' +
+  'exactly these 11 SKUs, minted by 2026-09-25 via the promo-execute cron (this row\'s ' +
+  'machine-parseable SKU line is written specifically to satisfy the current unfixed ' +
+  'extractSkus regex so it resolves without waiting on #9319).'
+
+// A row whose only ISO-shaped dates are incidental (a MAP-check date, a
+// live-price-as-of date) and which never states a labelled window at all —
+// the class of defect #10874 exhibits once the window itself is also
+// mis-parsed. Must be refused, never minted, however confident every other
+// field is.
+const INCIDENTAL_DATES_ONLY_BRIEF =
+  'FOO20 -- 20% off code FOO20. MAP check: all map_price=0.0 (Nalpac feed confirmed, ' +
+  '2026-09-21), fully discountable, MAP CHECK CLEAN. Margins computed against live Shopify ' +
+  'price as of 2026-09-22. Products: https://xdipx.com/products/ferri'
+
 describe('promoExecuteEnabled', () => {
   it('is off unless the setting is exactly "true"', () => {
     expect(promoExecuteEnabled(null)).toBe(false)
@@ -128,6 +180,32 @@ describe('extractPromoCode', () => {
   })
   it('never returns a section label as a code', () => {
     expect(extractPromoCode('PROMO plan. DEPTH and WINDOW only, no code here.')).toBeNull()
+  })
+
+  // P0 ticket #12076: the old /i flag on the "PROMO ... <code>" header regex
+  // let [A-Z][A-Z0-9]{3,39} match lowercase prose, and the old greedy
+  // [^—\n]* backtracked to the LAST hyphen in the whole brief rather than
+  // the nearest one after "promo" -- together minting a live Shopify discount
+  // named `parseable` from "...the promo-execute cron (this row's
+  // machine-parseable SKU line...)". Neither hyphen here is followed by a
+  // real uppercase code, so branch B must now find nothing and fall through
+  // to branch C, which picks up the real code from earlier in the text.
+  it('does not coerce a lowercase word after a later hyphen into a code', () => {
+    const text = 'BULLETWEEK20: minted by the promo-execute cron (this row is machine-parseable).'
+    expect(extractPromoCode(text)).toBe('BULLETWEEK20')
+  })
+
+  it('reproduces the exact #10874 defect shape and yields BULLETWEEK20, never `parseable`', () => {
+    const code = extractPromoCode(SUGGESTION_10874_BRIEF)
+    expect(code).toBe('BULLETWEEK20')
+    expect(code).not.toBe('parseable')
+  })
+
+  it('still finds a real hyphen-delimited code nearest the PROMO header, not a stopword or lowercase match further away', () => {
+    // "propose-only" sits between "PROMO" and the real "— FIRSTLOOK10"
+    // delimiter; its hyphen must be rejected (lowercase text follows) in
+    // favor of the next one, not accepted as a false match.
+    expect(extractPromoCode(LIVE_BRIEF_51)).toBe('FIRSTLOOK10')
   })
 })
 
@@ -244,43 +322,87 @@ describe('parsePromoBrief', () => {
     expect(p.startsAt).toBeNull()
     expect(p.endsAt).toBeNull()
   })
+
+  // P0 ticket #12076 regression, DONE WHEN (3): #10874 verbatim must yield
+  // code BULLETWEEK20 and the real, full-timestamp window it actually states
+  // (2026-09-28 to 2026-10-04), never the incidental MAP-check/live-price
+  // dates ("2026-09-21"/"2026-09-22") the old document-order parser took
+  // instead, and never the fake `parseable` code the old header regex minted.
+  it('parses #10874 verbatim to the real code and window, not the incidental dates or the fake code', () => {
+    const p = parsePromoBrief(SUGGESTION_10874_BRIEF)
+    expect(p.code).toBe('BULLETWEEK20')
+    expect(p.startsAt).toBe('2026-09-28T00:00:00Z')
+    expect(p.endsAt).toBe('2026-10-04T23:59:59Z')
+  })
+
+  it('leaves the window null when only incidental dates are present, with no labelled window at all', () => {
+    const p = parsePromoBrief(INCIDENTAL_DATES_ONLY_BRIEF)
+    expect(p.startsAt).toBeNull()
+    expect(p.endsAt).toBeNull()
+  })
+
+  it('accepts "through" as the window separator, not just "to"', () => {
+    // LIVE_BRIEF_51's own window ("WINDOW: 2026-07-27 through 2026-08-09")
+    // already covers this via the test above; this asserts it directly.
+    const p = parsePromoBrief('Code: X10\nDepth: 10%\nWindow: 2026-08-12 through 2026-08-19')
+    expect(p.startsAt).toBe('2026-08-12T00:00:00Z')
+    expect(p.endsAt).toBe('2026-08-19T23:59:59Z')
+  })
 })
 
 describe('decidePromo', () => {
   it('passes a clean, complete brief', () => {
     const p = parsePromoBrief(CLEAN_BRIEF)
-    expect(decidePromo(p, CLEAN_BRIEF)).toEqual({ ok: true, reason: 'ok' })
+    expect(decidePromo(p, CLEAN_BRIEF, BEFORE_ALL_TEST_WINDOWS)).toEqual({ ok: true, reason: 'ok' })
   })
   it('passes the live MAP-clean brief #51', () => {
     const p = parsePromoBrief(LIVE_BRIEF_51)
-    expect(decidePromo(p, LIVE_BRIEF_51)).toEqual({ ok: true, reason: 'ok' })
+    expect(decidePromo(p, LIVE_BRIEF_51, BEFORE_ALL_TEST_WINDOWS)).toEqual({ ok: true, reason: 'ok' })
   })
   it('refuses a MAP-flagged brief first', () => {
     const p = parsePromoBrief(MAP_FLAGGED_BRIEF)
-    expect(decidePromo(p, MAP_FLAGGED_BRIEF)).toEqual({ ok: false, reason: 'map-conflict-flagged' })
+    expect(decidePromo(p, MAP_FLAGGED_BRIEF, BEFORE_ALL_TEST_WINDOWS)).toEqual({ ok: false, reason: 'map-conflict-flagged' })
   })
   it('refuses a structurally complete brief that never confirms MAP', () => {
     const text = 'Code: X10\nDepth: 10%\nWindow: 2026-08-12 to 2026-08-19\nProducts: https://xdipx.com/products/ferri'
-    expect(decidePromo(parsePromoBrief(text), text)).toEqual({ ok: false, reason: 'map-not-confirmed' })
+    expect(decidePromo(parsePromoBrief(text), text, BEFORE_ALL_TEST_WINDOWS)).toEqual({ ok: false, reason: 'map-not-confirmed' })
   })
+  // 'ambiguous-window' replaces the old 'no-explicit-window' (ticket #12076):
+  // the window is now read only from a labelled construct, so failing to
+  // find one is the same "genuinely ambiguous" signal whether that's because
+  // nothing dated appears at all or, as here, a label is present but
+  // incomplete.
   it('refuses when the window is not explicit', () => {
     const text = 'Code: X10\nDepth: 10%\nWindow: starts 2026-08-12'
-    expect(decidePromo(parsePromoBrief(text), text)).toEqual({ ok: false, reason: 'no-explicit-window' })
+    expect(decidePromo(parsePromoBrief(text), text)).toEqual({ ok: false, reason: 'ambiguous-window' })
+  })
+  it('refuses when only incidental dates are present, with no labelled window at all (#10874-class defect)', () => {
+    const p = parsePromoBrief(INCIDENTAL_DATES_ONLY_BRIEF)
+    expect(decidePromo(p, INCIDENTAL_DATES_ONLY_BRIEF)).toEqual({ ok: false, reason: 'ambiguous-window' })
   })
   it('refuses when the end is not after the start', () => {
     const text = 'Code: X10\nDepth: 10%\nWindow: 2026-08-19 to 2026-08-12'
-    expect(decidePromo(parsePromoBrief(text), text)).toEqual({ ok: false, reason: 'invalid-window' })
+    expect(decidePromo(parsePromoBrief(text), text, BEFORE_ALL_TEST_WINDOWS)).toEqual({ ok: false, reason: 'invalid-window' })
+  })
+  // Second half of ticket #12076's incident: row #10874 minted a code whose
+  // window had already fully expired by the time the mint actually ran. A
+  // correctly-parsed, well-formed window is still refused if its start has
+  // already passed by `now`.
+  it('refuses a well-formed window whose start has already passed by mint time', () => {
+    const p = parsePromoBrief(CLEAN_BRIEF) // window 2026-08-12 to 2026-08-19
+    const afterStart = new Date('2026-08-15T00:00:00Z')
+    expect(decidePromo(p, CLEAN_BRIEF, afterStart)).toEqual({ ok: false, reason: 'ambiguous-window' })
   })
   it('refuses a missing code or depth', () => {
     const noCode = 'Depth: 10%\nWindow: 2026-08-12 to 2026-08-19'
-    expect(decidePromo(parsePromoBrief(noCode), noCode).reason).toBe('no-code')
+    expect(decidePromo(parsePromoBrief(noCode), noCode, BEFORE_ALL_TEST_WINDOWS).reason).toBe('no-code')
     // Depth: 0% is a percentage-code candidate (matches the bare NN% check)
     // whose stated depth is out of the valid 1-99 range, so parsePromoBrief
     // still resolves percentage to null and this is a real 'no-depth' case,
     // not 'not-applicable' — a brief with literally zero percent anywhere
     // (the old fixture here) is the not-applicable case, tested below.
     const noDepth = 'Code: X10\nWindow: 2026-08-12 to 2026-08-19\nDepth: 0%'
-    expect(decidePromo(parsePromoBrief(noDepth), noDepth).reason).toBe('no-depth')
+    expect(decidePromo(parsePromoBrief(noDepth), noDepth, BEFORE_ALL_TEST_WINDOWS).reason).toBe('no-depth')
   })
 
   // Ticket #9366 (split from #9319, defect C): a brief describing a
@@ -348,7 +470,7 @@ describe('executeApprovedPromo', () => {
 
   it('mints a live code, emails the owner, and records the code on the ticket', async () => {
     const deps = makeDeps()
-    const res = await executeApprovedPromo({ id: 50, suggestion: CLEAN_BRIEF }, deps)
+    const res = await executeApprovedPromo({ id: 50, suggestion: CLEAN_BRIEF }, deps, BEFORE_ALL_TEST_WINDOWS)
     expect(res.minted).toBe(true)
     expect(res.code).toBe('SLOWEVENING15')
     expect(res.discountId).toBe('gid://shopify/DiscountCodeNode/9')
@@ -361,7 +483,7 @@ describe('executeApprovedPromo', () => {
 
   it('mints the live MAP-clean brief #51 end to end, resolving SKUs to products', async () => {
     const deps = makeDeps()
-    const res = await executeApprovedPromo({ id: 51, suggestion: LIVE_BRIEF_51 }, deps)
+    const res = await executeApprovedPromo({ id: 51, suggestion: LIVE_BRIEF_51 }, deps, BEFORE_ALL_TEST_WINDOWS)
     expect(res.minted).toBe(true)
     expect(res.code).toBe('FIRSTLOOK10')
     // resolveProductGids is asked for the parsed SKUs, not /products/ handles.
@@ -402,7 +524,7 @@ describe('executeApprovedPromo', () => {
 
   it('refuses rather than minting a catalog-wide code when no product resolves', async () => {
     const deps = makeDeps({ resolveProductGids: vi.fn(async () => []) })
-    const res = await executeApprovedPromo({ id: 52, suggestion: CLEAN_BRIEF }, deps)
+    const res = await executeApprovedPromo({ id: 52, suggestion: CLEAN_BRIEF }, deps, BEFORE_ALL_TEST_WINDOWS)
     expect(res.refused).toBe(true)
     expect(res.reason).toBe('no-eligible-products')
     expect(deps.createDiscount).not.toHaveBeenCalled()
@@ -416,7 +538,7 @@ describe('executeApprovedPromo', () => {
   // empty. This asserts the SKUs actually reach resolveProductGids now.
   it('mints BULLETWEEK20 end to end, resolving all 12 real SKUs (#9321)', async () => {
     const deps = makeDeps()
-    const res = await executeApprovedPromo({ id: 9321, suggestion: BULLETWEEK20_BRIEF }, deps)
+    const res = await executeApprovedPromo({ id: 9321, suggestion: BULLETWEEK20_BRIEF }, deps, BEFORE_ALL_TEST_WINDOWS)
     expect(res.minted).toBe(true)
     expect(res.code).toBe('BULLETWEEK20')
     const sel = (deps.resolveProductGids as any).mock.calls[0][0]
@@ -429,7 +551,7 @@ describe('executeApprovedPromo', () => {
 
   it('mints COUPLESCONTROL20 end to end, resolving all 8 real SKUs (#9322)', async () => {
     const deps = makeDeps()
-    const res = await executeApprovedPromo({ id: 9322, suggestion: COUPLESCONTROL20_BRIEF }, deps)
+    const res = await executeApprovedPromo({ id: 9322, suggestion: COUPLESCONTROL20_BRIEF }, deps, BEFORE_ALL_TEST_WINDOWS)
     expect(res.minted).toBe(true)
     const sel = (deps.resolveProductGids as any).mock.calls[0][0]
     expect(sel.skus).toEqual([
@@ -438,11 +560,27 @@ describe('executeApprovedPromo', () => {
     expect(deps.createDiscount).toHaveBeenCalledOnce()
   })
 
+  // P0 ticket #12076 end-to-end regression: #10874 must mint as BULLETWEEK20
+  // with its real window, never as `parseable` scoped to an already-expired
+  // window, given a `now` that is before the real window's start (the actual
+  // incident processed this row on 2026-09-23, well before 2026-09-28).
+  it('mints #10874 verbatim as BULLETWEEK20 with its real window, never as `parseable`', async () => {
+    const deps = makeDeps()
+    const mintTime = new Date('2026-09-23T00:00:00Z')
+    const res = await executeApprovedPromo({ id: 10874, suggestion: SUGGESTION_10874_BRIEF }, deps, mintTime)
+    expect(res.minted).toBe(true)
+    expect(res.code).toBe('BULLETWEEK20')
+    expect(res.code).not.toBe('parseable')
+    const variables = (deps.createDiscount as any).mock.calls[0][0]
+    expect(variables.basicCodeDiscount.startsAt).toBe('2026-09-28T00:00:00Z')
+    expect(variables.basicCodeDiscount.endsAt).toBe('2026-10-04T23:59:59Z')
+  })
+
   it('reports a Shopify userError without throwing and does not claim a mint', async () => {
     const deps = makeDeps({
       createDiscount: vi.fn(async () => ({ id: null, userErrors: [{ message: 'Code has already been taken' }] })),
     })
-    const res = await executeApprovedPromo({ id: 53, suggestion: CLEAN_BRIEF }, deps)
+    const res = await executeApprovedPromo({ id: 53, suggestion: CLEAN_BRIEF }, deps, BEFORE_ALL_TEST_WINDOWS)
     expect(res.minted).toBe(false)
     expect(res.reason).toContain('shopify-user-error')
     expect(deps.addNote).toHaveBeenCalledOnce()
@@ -451,7 +589,7 @@ describe('executeApprovedPromo', () => {
 
   it('reports a thrown Shopify error', async () => {
     const deps = makeDeps({ createDiscount: vi.fn(async () => { throw new Error('429') }) })
-    const res = await executeApprovedPromo({ id: 54, suggestion: CLEAN_BRIEF }, deps)
+    const res = await executeApprovedPromo({ id: 54, suggestion: CLEAN_BRIEF }, deps, BEFORE_ALL_TEST_WINDOWS)
     expect(res.minted).toBe(false)
     expect(res.reason).toContain('shopify-error')
   })
