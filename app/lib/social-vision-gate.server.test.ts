@@ -981,8 +981,11 @@ describe('JSON parse failure retry', () => {
 
     expect(callVision).toHaveBeenCalledTimes(1)
     expect(verdict.checkCompleted).toBe(false)
-    // A real transport/auth failure keeps the pre-existing fail-closed shape.
-    expect(VISION_CHECK_NAMES.every(n => verdict.checks![n] === 'fail')).toBe(true)
+    // Ticket #11889: a transport/auth failure never reached a model response
+    // to judge, so `checks` reports null (not judged) rather than the
+    // all-'fail' shape a genuine anatomy read would produce.
+    expect(verdict.checks).toBeNull()
+    expect(verdict.pass).toBe(false)
   })
 })
 

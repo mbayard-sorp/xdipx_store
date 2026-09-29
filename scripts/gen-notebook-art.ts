@@ -30,9 +30,13 @@
  *   # Step 2 — after review, upload the chosen file and patch the target doc.
  *   # --prompt is REQUIRED here (ticket #10682): repeat the exact prompt from
  *   # Step 1, or the upload is refused rather than silently writing the
- *   # generic surface-default prompt to imagePrompt.
+ *   # generic surface-default prompt to imagePrompt. On the hero surface,
+ *   # --run-id is required too (same note as Step 1 above): the upload path
+ *   # runs the same remote anatomy vision-gate call, so a content-run-scheduled
+ *   # upload without it fails closed on the same run_in_progress self-block.
  *   npx tsx scripts/gen-notebook-art.ts --surface category --slug care \
- *     --upload .notebook-art/category-care-1.png --alt "..." --prompt "..."
+ *     --upload .notebook-art/category-care-1.png --alt "..." --prompt "..." \
+ *     [--run-id <contentRunId>]
  *
  *   # Hero cast-plus-product composite (--cast <castSlug> on --surface hero):
  *   # routes through composeSceneFrame() (packaging-strip + identity-hold), NOT
@@ -500,9 +504,21 @@ async function upload(surface: Surface, slug: string | undefined, filePath: stri
   if (surface === 'hero') {
     heroVerdict = await gateHeroBuffer(buffer, undefined, runId)
     if (!heroVerdict.pass) {
-      console.error(`[gen-notebook-art] BLOCKED: this candidate failed the anatomy vision gate and will not be uploaded.`)
-      console.error(`checks: ${JSON.stringify(heroVerdict.checks)}`)
-      console.error(`notes: ${heroVerdict.notes}`)
+      // checkCompleted:false means the gate never reached a real verdict on
+      // this candidate at all (a transport/auth error, or the remote route
+      // refusing the call, e.g. run_in_progress with no --run-id) — that is
+      // not a judged anatomy failure, so it must not be reported as one
+      // (ticket #11889). Only a checkCompleted:true, pass:false verdict is a
+      // genuine anatomy read; the fail-closed *upload block* itself is
+      // unchanged either way.
+      if (!heroVerdict.checkCompleted) {
+        console.error(`[gen-notebook-art] UPLOAD REFUSED: the anatomy vision gate did not evaluate this candidate, so the upload is blocked rather than shipped unchecked.`)
+        console.error(`reason: ${heroVerdict.notes}`)
+      } else {
+        console.error(`[gen-notebook-art] BLOCKED: this candidate failed the anatomy vision gate and will not be uploaded.`)
+        console.error(`checks: ${JSON.stringify(heroVerdict.checks)}`)
+        console.error(`notes: ${heroVerdict.notes}`)
+      }
       process.exit(1)
     }
   }

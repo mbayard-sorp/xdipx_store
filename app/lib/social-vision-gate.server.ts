@@ -136,13 +136,18 @@ export interface VisionVerdict {
   /** True only when every check below passed. */
   pass: boolean
   /**
-   * `null` only on the specific `checkCompleted: false` case where the model
-   * never returned a parseable verdict at all, even after a retry (ticket
-   * #10990/#11004): there is no per-check read to report, real or fail-closed,
-   * so the field says so rather than claiming a "fail" reading against pixels
-   * nobody actually judged. Every other `checkCompleted: false` path (fetch
-   * error, model-call error, malformed shape) keeps the pre-existing
-   * all-`'fail'` fail-closed shape, unchanged.
+   * `null` on every `checkCompleted: false` path where the model never
+   * returned a parseable verdict at all: a JSON-parse failure even after a
+   * retry (ticket #10990/#11004), or a transport/auth/gate-refusal error that
+   * threw before any model response existed to parse (ticket #11889, e.g.
+   * `remoteVisionCallVision`'s route call rejected with `run_in_progress`).
+   * In all of these there is no per-check read to report, real or
+   * fail-closed, so the field says so rather than claiming a "fail" reading
+   * against pixels nobody actually judged. The one `checkCompleted: false`
+   * path that keeps the all-`'fail'` shape instead is a malformed-but-present
+   * response (the model answered, just not in the expected shape) — the
+   * distinction `isValidVerdictShape` draws from a response that never
+   * arrived at all.
    */
   checks: Record<VisionCheckName, 'pass' | 'fail'> | null
   /** Free-text reasoning, always present so a block finding can explain itself. */
@@ -224,7 +229,14 @@ export interface VisionVerdict {
   backAnatomyRead: string | null
 }
 
-/** A verdict that fails every check, used whenever the check could not run at all. */
+/**
+ * A verdict that fails every check, used only when the model DID answer but
+ * its response did not match the expected shape (ticket #11889 narrowed this
+ * from its original, broader use covering any `checkCompleted: false` path —
+ * see `incompleteVerdict` below for the "never got a response to judge at
+ * all" cases, which now report `checks: null` instead of this all-`'fail'`
+ * shape).
+ */
 function failClosedVerdict(notes: string): VisionVerdict {
   const checks = {} as Record<VisionCheckName, 'pass' | 'fail'>
   for (const name of VISION_CHECK_NAMES) checks[name] = 'fail'
@@ -232,15 +244,19 @@ function failClosedVerdict(notes: string): VisionVerdict {
 }
 
 /**
- * A verdict for the one case that is not "checked and it's fine" nor "checked
- * and it failed": the model answered in prose instead of JSON, twice (ticket
- * #10990/#11004). `failClosedVerdict` reports `checks: {...all 'fail'}`, which
- * reads as a genuine anatomy read to anything that inspects individual checks
- * instead of `checkCompleted`; this verdict reports `checks: null` instead, so
- * a caller that only looks at `checks` cannot mistake "never judged" for "judged
- * and rejected". `pass`/`checkCompleted` still fail closed exactly like
- * `failClosedVerdict`, so nothing that only reads those two fields needs to
- * change.
+ * A verdict for "not checked and it's fine" and "checked and it failed":
+ * every case where no model verdict was ever reached to judge, real or
+ * fail-closed. Originally just the model-answered-in-prose-twice case
+ * (ticket #10990/#11004); ticket #11889 extended it to any transport, auth,
+ * or gate-refusal error that threw before a model response existed to parse
+ * at all (`remoteVisionCallVision`'s route call rejecting with, for example,
+ * `run_in_progress`). `failClosedVerdict` reports `checks: {...all 'fail'}`,
+ * which reads as a genuine anatomy read to anything that inspects individual
+ * checks instead of `checkCompleted`; this verdict reports `checks: null`
+ * instead, so a caller that only looks at `checks` cannot mistake "never
+ * judged" for "judged and rejected". `pass`/`checkCompleted` still fail
+ * closed exactly like `failClosedVerdict`, so nothing that only reads those
+ * two fields needs to change.
  */
 function incompleteVerdict(notes: string): VisionVerdict {
   return { pass: false, checks: null, notes, checkedAt: new Date().toISOString(), checkCompleted: false, legibleText: null, skinMarks: null, productPhysics: null, handDigitCounts: null, backAnatomyRead: null }
@@ -530,12 +546,29 @@ async function getOneVerdict(
           // read against pixels nobody actually judged.
           return incompleteVerdict(`Vision gate check could not parse a JSON verdict after a strict retry: ${retryErr.message}`)
         }
+        // Ticket #11889: a transport/auth/gate-refusal error (the retry never
+        // even reached a model response to parse) is the same "never judged"
+        // case as the parse-failure branch above, not a genuine anatomy read,
+        // so it gets the same checks:null shape rather than the misleading
+        // all-'fail' stamp `failClosedVerdict` produces.
         const message = retryErr instanceof Error ? retryErr.message : String(retryErr)
-        return failClosedVerdict(`Vision gate check could not complete: ${message}`)
+        return incompleteVerdict(`Vision gate check could not complete: ${message}`)
       }
     }
+    // Same reasoning as the retry branch above: `d.callVision` throwing here
+    // (network/transport failure, auth failure, or a remote route refusing
+    // the call, e.g. `remoteVisionCallVision`'s `!res.ok` on a gate refusal
+    // like run_in_progress) means the check never ran at all — no per-check
+    // read exists to report, real or fail-closed. Reporting it with the same
+    // all-'fail' shape as a genuine anatomy fail actively misdescribes what
+    // happened: ticket #11889 traced a content-run gate refusal (missing
+    // --run-id) rendering as "BLOCKED: failed the anatomy vision gate" with
+    // all eight checks stamped 'fail', which reads as a real anatomy defect
+    // and pushes the operator to discard good art instead of re-running with
+    // one more flag. `checkCompleted`/`pass` still fail closed exactly as
+    // before; only the misleading per-check shape changes.
     const message = err instanceof Error ? err.message : String(err)
-    return failClosedVerdict(`Vision gate check could not complete: ${message}`)
+    return incompleteVerdict(`Vision gate check could not complete: ${message}`)
   }
 }
 
