@@ -7,6 +7,8 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
+  PUBLISH_GATE_SYSTEM,
+  buildPublishGateBrief,
   buildPublishGateUserContent,
   buildVoiceGateUserContent,
   computePublishGateContentHash,
@@ -643,5 +645,54 @@ describe('describeAssetAdjudications (ticket #10503)', () => {
     expect(block).toContain('age-ambiguity')
     expect(block).toContain('b.jpg')
     expect(block).toContain('baked-in-text')
+  })
+})
+
+describe('buildPublishGateBrief (Max-subscription subagent path)', () => {
+  it('returns a final prep as a ready verdict to relay, with no rubric', () => {
+    const gate = {
+      verdict: 'BLOCK' as const,
+      reviewer: 'publish-gate' as const,
+      notes: 'Deterministic check(s) blocked before any judgment pass ran: link-on-instagram.',
+      featuresProduct: false,
+      findings: [{ check: 'link-on-instagram', verdict: 'block' as const }],
+    }
+    const brief = buildPublishGateBrief({ kind: 'final', source: 'deterministic-block', result: { id: 7, gate } })
+    expect(brief).toEqual({ id: 7, final: true, source: 'deterministic-block', gate })
+  })
+
+  it('hands a judge prep to the subagent with the same rubric and user text the model call gets', () => {
+    const content = buildPublishGateUserContent({
+      platform: 'instagram',
+      tweetText: 'A caption.',
+      altText: null,
+      deterministicHeld: false,
+      recentCaptionsBlock: 'precedents',
+      registerPrecedentsBlock: 'register',
+      featuresProduct: true,
+      mediaUrls: ['https://cdn.example/a.jpg'],
+      packshotUrl: 'https://cdn.example/packshot.jpg',
+    })
+    const brief = buildPublishGateBrief({
+      kind: 'judge',
+      postId: 9,
+      platform: 'instagram',
+      featuresProduct: true,
+      productHandle: 'some-handle',
+      referencePackshotUrl: null,
+      packshotUrl: 'https://cdn.example/packshot.jpg',
+      mediaUrls: ['https://cdn.example/a.jpg'],
+      deterministicFindings: [],
+      contentHash: 'h',
+      content,
+    })
+    expect(brief.final).toBe(false)
+    if (brief.final) return
+    expect(brief.rubric).toBe(PUBLISH_GATE_SYSTEM)
+    expect(brief.postText).toBe((content[0] as { text: string }).text)
+    expect(brief.postText).toContain('A caption.')
+    expect(brief.packshotUrl).toBe('https://cdn.example/packshot.jpg')
+    expect(brief.mediaUrls).toEqual(['https://cdn.example/a.jpg'])
+    expect(brief.productHandle).toBe('some-handle')
   })
 })

@@ -38,6 +38,14 @@
  * the doc-comment on `runPublishGateCheck` for the exact list. Those remain
  * real gaps versus the subagent this replaces, and are named rather than
  * quietly dropped so a future ticket can close them.
+ *
+ * Billing, 2026-09-29. Cloud routines can spawn subagents again (the content
+ * routine's accuracy gate ran as an `Agent` subagent on 2026-09-28), so the
+ * social routine now spawns `emma-empathy-reviewer` and `social-publish-gate`
+ * on the Max subscription first. The publish gate's subagent judges from
+ * `buildPublishGateBrief`, which carries the same inputs this module's model
+ * call is given. The model calls below remain as the API-key fallback for a
+ * run that cannot spawn a subagent.
  */
 import Anthropic from '@anthropic-ai/sdk'
 import { createHash } from 'node:crypto'
@@ -732,10 +740,35 @@ export function verdictConsistencyCheck(
  * takes priority over the `productHandle`-resolved packshot and marks the
  * post as product-featuring even if `shopifyProductId` is null.
  */
-export async function runPublishGateCheck(
+/**
+ * Everything the publish gate does before its judgment call, split out so the
+ * same inputs can feed either this module's own model call (the API-key path)
+ * or a `social-publish-gate` subagent spawned by the social routine on the Max
+ * subscription (the brief path, `POST /api/team/publish-gate {mode:'brief'}`).
+ * `final` means no judgment is needed: the deterministic floor already blocked,
+ * or an unchanged row has a cached verdict. `judge` carries the assembled
+ * user turn plus the pieces the model-call path needs afterwards.
+ */
+export type PublishGatePrep =
+  | { kind: 'final'; source: 'deterministic-block' | 'cache'; result: PublishGateOutput }
+  | {
+      kind: 'judge'
+      postId: number
+      platform: GatePlatform
+      featuresProduct: boolean
+      productHandle: string | null
+      referencePackshotUrl: string | null
+      packshotUrl: string | null
+      mediaUrls: string[]
+      deterministicFindings: PublishGateFinding[]
+      contentHash: string
+      content: Anthropic.ContentBlockParam[]
+    }
+
+export async function preparePublishGate(
   postId: number,
   opts?: { referencePackshotUrl?: string },
-): Promise<PublishGateOutput> {
+): Promise<PublishGatePrep> {
   const referencePackshotUrl = opts?.referencePackshotUrl?.trim() || null
   const [post] = await db
     .select({
@@ -811,14 +844,18 @@ export async function runPublishGateCheck(
   // outcome, so skip the spend and return the mechanical verdict directly.
   if (deterministic.blocked) {
     return {
-      id: postId,
-      gate: {
-        verdict: 'BLOCK',
-        reviewer: 'publish-gate',
-        notes: `Deterministic check(s) blocked before any judgment pass ran: ${deterministic.findings.map(f => f.check).join(', ')}.`,
-        featuresProduct,
-        ...(productHandle ? { productHandle } : {}),
-        findings: deterministicFindings,
+      kind: 'final',
+      source: 'deterministic-block',
+      result: {
+        id: postId,
+        gate: {
+          verdict: 'BLOCK',
+          reviewer: 'publish-gate',
+          notes: `Deterministic check(s) blocked before any judgment pass ran: ${deterministic.findings.map(f => f.check).join(', ')}.`,
+          featuresProduct,
+          ...(productHandle ? { productHandle } : {}),
+          findings: deterministicFindings,
+        },
       },
     }
   }
@@ -846,14 +883,18 @@ export async function runPublishGateCheck(
   if (cached && cached.contentHash === contentHash) {
     console.error(`[publish-gate] post ${postId}: serving cached verdict (unmodified since ${cached.checkedAt}), skipping model call`)
     return {
-      id: postId,
-      gate: {
-        verdict: cached.gate.verdict,
-        reviewer: 'publish-gate',
-        notes: cached.gate.notes,
-        featuresProduct,
-        ...(productHandle ? { productHandle } : {}),
-        findings: [...deterministicFindings, ...cached.gate.findings],
+      kind: 'final',
+      source: 'cache',
+      result: {
+        id: postId,
+        gate: {
+          verdict: cached.gate.verdict,
+          reviewer: 'publish-gate',
+          notes: cached.gate.notes,
+          featuresProduct,
+          ...(productHandle ? { productHandle } : {}),
+          findings: [...deterministicFindings, ...cached.gate.findings],
+        },
       },
     }
   }
@@ -906,6 +947,77 @@ export async function runPublishGateCheck(
     assetPrecedentBlock: describeAssetReusePrecedent(assetPrecedent),
     adjudicationBlock: describeAssetAdjudications(adjudications),
   })
+
+  return {
+    kind: 'judge',
+    postId,
+    platform,
+    featuresProduct,
+    productHandle,
+    referencePackshotUrl,
+    packshotUrl,
+    mediaUrls: [...media],
+    deterministicFindings,
+    contentHash,
+    content,
+  }
+}
+
+/**
+ * The brief a `social-publish-gate` subagent judges from (Max subscription,
+ * no API-key spend): the same rubric and user turn the model call below is
+ * given, with the images as URLs the subagent downloads and opens itself.
+ * A `final` prep is returned as a ready verdict to relay, no judgment needed.
+ */
+export type PublishGateBrief =
+  | { id: number; final: true; source: 'deterministic-block' | 'cache'; gate: PublishGateOutput['gate'] }
+  | {
+      id: number
+      final: false
+      platform: GatePlatform
+      featuresProduct: boolean
+      productHandle: string | null
+      rubric: string
+      postText: string
+      packshotUrl: string | null
+      mediaUrls: string[]
+      deterministicFindings: PublishGateFinding[]
+    }
+
+export function buildPublishGateBrief(prep: PublishGatePrep): PublishGateBrief {
+  if (prep.kind === 'final') {
+    return { id: prep.result.id, final: true, source: prep.source, gate: prep.result.gate }
+  }
+  const text = prep.content.find((b): b is Anthropic.TextBlockParam => b.type === 'text')?.text ?? ''
+  return {
+    id: prep.postId,
+    final: false,
+    platform: prep.platform,
+    featuresProduct: prep.featuresProduct,
+    productHandle: prep.productHandle,
+    rubric: PUBLISH_GATE_SYSTEM,
+    postText: text,
+    packshotUrl: prep.packshotUrl,
+    mediaUrls: prep.mediaUrls,
+    deterministicFindings: prep.deterministicFindings,
+  }
+}
+
+export async function runPublishGateCheck(
+  postId: number,
+  opts?: { referencePackshotUrl?: string },
+): Promise<PublishGateOutput> {
+  const prep = await preparePublishGate(postId, opts)
+  if (prep.kind === 'final') return prep.result
+  const {
+    content,
+    contentHash,
+    featuresProduct,
+    productHandle,
+    referencePackshotUrl,
+    packshotUrl,
+    deterministicFindings,
+  } = prep
 
   let modelResult = await callPublishGateModel(postId, content)
 

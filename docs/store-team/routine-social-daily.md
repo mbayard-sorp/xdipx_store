@@ -1174,10 +1174,28 @@ Gate Instagram/TikTok/X drafts against the **social addendum**, LinkedIn drafts 
 **LinkedIn addendum** (brand byline, industry-first, professional register). Neither lane is gated
 against the owned-channel product-copy register.
 
-**Call `POST /api/team/voice-gate` for the verdict (ticket #6916).** This execution context has no
-Task/Agent subagent-invocation tool (confirmed on runs 331, 623, 624), so `emma-empathy-reviewer`
-can never be spawned here; the routine calls the equivalent server-side model call instead, the
-same way it already calls every other `/api/team/*` route:
+**Spawn `emma-empathy-reviewer` for the verdict first; call the endpoint only as the fallback
+(owner direction 2026-09-29).** The subagent runs on the Max subscription at no API-key cost. The
+endpoint below runs the same review as a model call on the store's Anthropic API key, which is
+metered spend. From ticket #6916 until 2026-09-29 the endpoint was the only path, because runs 331,
+623 and 624 had no Task/Agent tool; cloud routines have it again (the content routine's accuracy
+gate ran as an `Agent` subagent on 2026-09-28).
+
+1. **Subagent (default).** Spawn `emma-empathy-reviewer` with the `Agent` tool (named `Task` in
+   older runtimes). Give it only: the exact caption, the platform, which addendum to read
+   (`social` for Instagram/TikTok/X, `linkedin` for LinkedIn), and the instruction to review it as a
+   social draft and end with its one-line final verdict. Never pass your drafting notes, your
+   reasons for thinking it complies, or earlier verdicts on other captions: that reasoning is what
+   is under test. Map its answer to `{"verdict":"PASS|REVISE|BLOCK","reviewer":"emma-empathy-reviewer",
+   "notes":"<its per-string reason, verbatim>"}`: `SHIP-READY` with the string at PASS is `PASS`, a
+   REVISE on the string is `REVISE`, any BLOCK is `BLOCK`. A fresh caption after a REVISE gets a
+   fresh subagent, never a follow-up message to the one that judged the previous version.
+2. **Endpoint (fallback only).** Use it when this run has no `Agent`/`Task` tool, or when the spawn
+   itself errors (not when you dislike the verdict: a subagent REVISE or BLOCK is final for that
+   caption, and re-asking the endpoint to get a different answer is gate shopping). Post one
+   `decision` event the first time a run falls back, naming the reason, so the API spend it causes
+   is visible. (Subagent tokens are Max spend: include them in the run's final `social-drafts`
+   spend log, never as API-key rows.)
 
 ```bash
 curl -s -X POST "$BASE_URL/api/team/voice-gate" \
@@ -1196,15 +1214,16 @@ for "too few hashtags" before this ticket. Omit `platform` only for LinkedIn dra
 
 Use `"addendum":"linkedin"` for LinkedIn drafts, omit or send `"social"` for everything else. This
 call runs independently, server-side, with no visibility into why you believe the caption is
-compliant — the same independence property the subagent it replaces was built to hold.
+compliant, the same independence property the subagent holds.
 
 This gate is enforced at the write, not on the honour system (ticket #3208). Step 6's `draft` op
 **requires** a `voiceGate` verdict `{ verdict, reviewer }`, and the server refuses (400, no row
 written) unless the verdict is a `PASS` from a named reviewer. Pass the endpoint's response straight
-through as `voiceGate`. So a draft cannot reach `pending_review` without a real voice-gate PASS
-asserted for it, and **if the endpoint cannot be reached this run (a 5xx, a network failure), you
-cannot draft** — you have no PASS to send. Do not substitute a self-check: report the gate as
-unreachable and draft nothing, exactly as the fail-closed rule requires.
+through as `voiceGate`, whichever path produced it. So a draft cannot reach `pending_review`
+without a real voice-gate PASS asserted for it, and **if neither the subagent nor the endpoint can
+return a verdict this run, you cannot draft**: you have no PASS to send. Do not substitute a
+self-check: report the gate as unreachable and draft nothing, exactly as the fail-closed rule
+requires.
 
 **4b — Platform-policy gate.** Self-check every draft against `docs/ads-policy.md` §Organic social
 and §Creative, and record the verdict in the draft's event summary. Any single "yes" is a BLOCK,
@@ -2115,13 +2134,45 @@ Platforms with no publisher (LinkedIn, TikTok, Facebook, YouTube) never go to th
 one leaves a row that ships stale copy the day a publisher lands, which is the trap Step 2 item 6
 describes. The server 409s them, and the owner acts on those in `/admin/socials`.
 
-**Call `POST /api/team/publish-gate`, one call per draft you wrote this run (ticket #6916).** This
-execution context has no Task/Agent subagent-invocation tool (confirmed on runs 331, 623, 624), so
-`social-publish-gate` can never be spawned here; the routine calls the equivalent server-side model
-call instead. Independence is still load-bearing: the endpoint runs its own model call against the
-finished caption and media with no visibility into your reasoning about why the post is compliant,
-the same property the subagent it replaces was built to hold — you are not handing it your context,
-you are handing it a post id.
+**Get each verdict from a `social-publish-gate` subagent first, one per draft; the endpoint's model
+call is the fallback only (owner direction 2026-09-29).** Same reasons and same fallback rule as
+Step 4a: the subagent runs on the Max subscription, the endpoint's default mode is metered
+API-key spend, and a subagent verdict is final for that row (never re-ask the endpoint to get a
+different one). Independence is still load-bearing on both paths: the judge sees the finished post
+and the server-assembled inputs, never your reasoning about why it complies.
+
+**Subagent path (default), per row:**
+
+1. Fetch the brief. `mode:"brief"` runs the full server-side preparation (deterministic floor,
+   verdict cache, packshot lookup, asset-reuse precedent, owner adjudications) and makes **no**
+   model call:
+
+   ```bash
+   curl -s -X POST "$BASE_URL/api/team/publish-gate" \
+     -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
+     -d '{"postId":<post id>,"mode":"brief","referencePackshotUrl":"<optional, same rule as below>"}' \
+     > "${SCRATCH:-/tmp}/gate-brief-<post id>.json"
+   ```
+
+2. If the brief says `"final": true`, the verdict already exists (a deterministic BLOCK, or the
+   cached verdict for an unchanged row). Relay its `gate` object exactly as below; spawn nothing.
+3. Otherwise download the packshot (`packshotUrl`, when present) and every `mediaUrls` image into
+   `${SCRATCH:-/tmp}/gate-<post id>/` with `curl -sL`, then spawn `social-publish-gate` with the `Agent`
+   tool (named `Task` in older runtimes). Its prompt carries only: the post id, the brief's file
+   path, the downloaded image paths (packshot labeled as the real product photo, listed first),
+   and this instruction: *"Judge this one post under your agent definition. The brief's `rubric`
+   is the calibration the server gate uses; apply it together with your own checks. `postText`
+   is the post as it will publish plus the live precedents; `deterministicFindings` is the
+   mechanical floor, which you may not lower. Open every image with Read before judging. Return
+   exactly the JSON shape in your definition's how-to-write-a-verdict section, with `reviewer`
+   `social-publish-gate`."* Add nothing about the draft's intent, the campaign pitch, or earlier
+   verdicts.
+4. Relay the returned `gate` object via `op:"gate"` below. A subagent that returns no parseable
+   verdict gets one fresh respawn; a second failure is a fallback case.
+
+**Endpoint fallback (no `Agent`/`Task` tool this run, or the spawn errors):** call the default
+mode, which runs the same preparation plus a server-side model call, and post one `decision` event
+naming the reason the first time a run falls back:
 
 ```bash
 curl -s -X POST "$BASE_URL/api/team/publish-gate" \
@@ -2146,7 +2197,8 @@ and un-lowered — a mechanical block short-circuits straight to a BLOCK verdict
 then a vision pass judging what needs judgment: image/caption match, product proportion, baked-in
 text, anatomy/age ambiguity, the withholding test, "does it read as selling" (Instagram), and the
 charter's graphic-detail and vocabulary fences, read against `docs/ads-policy.md` fresh each call.
-**Known gap, stated rather than silently assumed away:** this first cut does not read the active
+**Known gap in the endpoint fallback, stated rather than silently assumed away** (the subagent path
+closes it, because `social-publish-gate.md` reads these itself): the endpoint does not read the active
 Instagram campaign's locked visual scheme, does not do cast-roster rotation accounting
 (`instagram-campaigns.md` §3.8), and does not clause-match a rework against its source row's
 `feedback` (`owner-feedback-unmet`) — it judges the last ~12 captions on the platform for repetition,
@@ -2176,8 +2228,8 @@ of never-gated rows and push all of it at a live, rented, loseable account insid
 exactly the risk the gate exists to prevent. Five a run clears a normal backlog in a few days while
 keeping each run's blast radius small.
 
-**This adds reach, not leniency.** Every swept row still gets its own independent
-`POST /api/team/publish-gate` call with no shared context (below), the verdict is still relayed
+**This adds reach, not leniency.** Every swept row still gets its own independent gate verdict
+(its own subagent, or its own endpoint call on the fallback) with no shared context, the verdict is still relayed
 verbatim, and a BLOCK still terminates the row exactly as it does for a row drafted this run.
 Nothing about the gate itself changes; only which rows reach it does.
 
@@ -2191,7 +2243,7 @@ The gate that runs works; the problem this sweep fixes is coverage, not the gate
 
 **Also sweep fanned-out video rows (ticket #3733).** List Instagram `pending_review` drafts
 (`{op:'list', status:'draft', reviewStatus:'pending_review'}`) and gate any row carrying a
-`videoJobId` exactly the same way, one `POST /api/team/publish-gate` call per row. These are Reels
+`videoJobId` exactly the same way, one gate verdict per row. These are Reels
 the owner approved in the Video Studio; that approval reviewed the video, not the finished post, so
 they wait here for the same verdict your own drafts get. Skipping them strands them: no other pass
 gates a video row, and an ungated row can never publish. **Carve-out (clip days, Step 2.8):** until
@@ -2199,23 +2251,25 @@ the Phase 3 valve double-gate merges and the owner flips `video_team_autopublish
 `videoJobId` reel row here. It stays at `pending_review` for the owner's manual Post now in
 `/admin/socials/queue`, and on its clip day it counts toward Step 1b's done for Instagram.
 
-Give it only the post id. It gathers its own inputs server-side: the caption as it will publish,
-every media URL, the charter as it reads today, and the ads policy (see the known-gap note above for
-what it does not yet read).
+Give the endpoint only the post id. It gathers its own inputs server-side: the caption as it will
+publish, every media URL, the charter as it reads today, and the ads policy (see the known-gap note
+above for what the fallback does not yet read).
 
-**You relay the verdict, the endpoint does not write it.** `POST /api/team/publish-gate` returns a
-`gate` object; it does not itself set `review_status`. That write still goes through the same relay
+**You relay the verdict; neither the subagent nor the endpoint writes it.** Both return a `gate`
+object; neither sets `review_status`. That write still goes through the same relay
 step this routine has always used, unchanged:
 
 ```bash
 curl -s -X POST "$BASE_URL/api/team/social-post" \
   -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
   -d '{"op":"gate","id":<post id>,"gate":{"verdict":"PASS|REVISE|BLOCK|HOLD",
-        "reviewer":"publish-gate","notes":"<its notes, verbatim>",
+        "reviewer":"social-publish-gate|publish-gate","notes":"<its notes, verbatim>",
         "featuresProduct":true|false,"productHandle":"<handle when featuresProduct>"}}'
 ```
 
-Pass the `gate` object straight through from the `publish-gate` response.
+Pass the `gate` object straight through from whichever path produced it, `reviewer` included:
+`social-publish-gate` marks a Max-subscription verdict and `publish-gate` an API-key one, which is
+how the fallback rate stays measurable from the rows alone.
 
 Verbatim is the whole contract. You are a courier here, not a reviewer: you do not soften a REVISE,
 do not upgrade a HOLD, and never invent a verdict for a gate call you did not actually make. This is
@@ -2223,8 +2277,8 @@ the same trust model Step 4a already runs on, where you relay the voice gate's P
 backed the same way: the server re-runs the deterministic checks on a PASS and refuses it if they
 block, so a relayed verdict cannot carry a post past a hard rule even if the relay is wrong.
 
-If the gate call fails (a 5xx, a network failure), you have no verdict to relay. See the fail-closed
-rule below.
+If both paths fail (no subagent verdict and the endpoint 5xxs or is unreachable), you have no
+verdict to relay. See the fail-closed rule below.
 
 What you do with the outcome:
 
