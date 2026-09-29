@@ -2,8 +2,16 @@
 // Orchestrates the v2 pricing pipeline:
 //   resolvePricingConfig -> velocity -> computePrice -> decideStatus -> audit log -> Shopify apply
 //
-// Coexists with pricing-apply.server.ts (legacy) until cutover.
-// Does NOT modify pricing-apply.server.ts.
+// The only pricing engine now for auto-applied repricing (ADR-007 decision 4,
+// ticket #12097): the legacy pricing-apply.server.ts (decideAndApply, its
+// only caller) has been deleted, and the real Nalpac cost-change webhook
+// (app/lib/pricing-webhook.server.ts) reprices through recomputeVariant here,
+// same as the WS3 cost-sync path (app/lib/cost-sync.server.ts). The
+// `pricing_changes` table itself is NOT retired: it still backs a separate,
+// still-live PM-chat pricing-proposal/approval feature
+// (app/lib/pm-chat-tools.server.ts's propose_pricing_changes +
+// app/routes/api.pricing.approve.tsx) that never went through decideAndApply
+// and is out of scope here -- see the follow-up ticket this PR files.
 
 import { db } from './db.server'
 import { pricingAuditLog, pipelineSettings } from '../../db/schema'

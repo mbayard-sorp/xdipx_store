@@ -94,3 +94,26 @@ converge on v2 before drift causes a MAP incident"); `pricing-apply-v2.server.ts
   price-drop SKU proposed for an auto-publishing homepage/email surface must pass a live-price MAP
   check (`mapAllowsAdvertisedDiscount`) before it is eligible (WS3c). Until convergence, a MAP incident
   is possible only if someone arms v1 by hand — which this ADR exists to prevent.
+
+---
+
+## Status update, 2026-09-29 (ticket #12097)
+
+Decision 4's direct-apply half is done: the real Nalpac cost-change webhook
+(`app/lib/pricing-webhook.server.ts`'s `processNalpacCostChanges`) now reprices through
+`recomputeVariant` (v2) exactly like the WS3 cost-sync path, `decideAndApply` has zero remaining
+callers, and `app/lib/pricing-apply.server.ts` (v1's direct-apply module) is deleted.
+
+**Not done, and larger than this decision's text implied:** "retire `pricing_changes` (or migrate
+its rows into `pricing_audit_log`)". `pricing_changes` is not only the webhook's old write target —
+it also backs a separate, still-live PM-chat pricing-proposal/approval feature
+(`app/lib/pm-chat-tools.server.ts`'s `propose_pricing_changes` tool, `app/routes/api.pricing.approve.tsx`,
+`app/lib/pricing-agent.server.ts`'s `applyApprovedChange`/`rejectChange`) that never went through
+`decideAndApply` and has its own pending/approved/rejected lifecycle with no v2 equivalent today.
+Retiring or migrating the table means redesigning that feature onto `pricing_audit_log` (which has no
+"pending, awaiting human approval" state) or another mechanism — real product-feature work, not a
+mechanical rename. Filed as a follow-up `code` ticket rather than attempted here or blocked outright;
+`computeTargetPrice`/`pricing-engine.server.ts` (the "fold v1 tiers into v2" half) is also retained for
+the same reason — it is still called by `pm-chat-tools.server.ts`, `pricing-agent.server.ts`,
+`import-monitor.server.ts`, and two probe scripts, none of which are the hazardous auto-apply path this
+ADR was written to contain.
