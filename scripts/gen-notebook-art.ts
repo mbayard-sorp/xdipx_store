@@ -38,6 +38,15 @@
  *     --upload .notebook-art/category-care-1.png --alt "..." --prompt "..." \
  *     [--run-id <contentRunId>]
  *
+ *   # Preflight (ticket #12371) — a cheap check that the hero anatomy vision
+ *   # gate's one Anthropic dependency can actually complete a check, meant to
+ *   # run right after a routine's own budget gate and before it spends a
+ *   # whole draft on a post that would end up heroless regardless. Exits 0
+ *   # when the check completes; exits 1 with a classified reason
+ *   # ('no-credential' | 'no-credit' | 'unknown') printed as JSON when it
+ *   # cannot. No --surface required.
+ *   npx tsx scripts/gen-notebook-art.ts --preflight [--run-id <contentRunId>]
+ *
  *   # Hero cast-plus-product composite (--cast <castSlug> on --surface hero):
  *   # routes through composeSceneFrame() (packaging-strip + identity-hold), NOT
  *   # generateImage, so a supplier's branded carton never lands in frame.
@@ -81,8 +90,9 @@ import {
   remoteVisionCallVision,
   visionDepsForEnv as heroVisionDeps,
   gateImageBuffer as gateHeroBuffer,
+  runVisionGatePreflight,
 } from '../app/lib/vision-gate-buffer.server'
-export { sniffImageMediaType, remoteVisionCallVision, heroVisionDeps, gateHeroBuffer }
+export { sniffImageMediaType, remoteVisionCallVision, heroVisionDeps, gateHeroBuffer, runVisionGatePreflight }
 
 // ─── Anatomy vision gate for the hero surface (ticket #8691) ─────────────────
 //
@@ -619,8 +629,20 @@ async function main() {
   const runIdArg = arg('run-id')
   const runId = runIdArg && /^\d+$/.test(runIdArg) ? Number(runIdArg) : undefined
 
+  // Ticket #12371: a cheap check that the hero anatomy vision gate's one
+  // Anthropic dependency can actually complete a check, meant to run right
+  // after a routine's own budget gate and before it spends a whole draft on
+  // a post that would end up heroless regardless. No --surface required.
+  // Exits 0 when the check completes; exits 1 with a classified reason
+  // ('no-credential' | 'no-credit' | 'unknown') when it cannot.
+  if (hasFlag('preflight')) {
+    const result = await runVisionGatePreflight(runId)
+    console.log(JSON.stringify({ preflight: true, ...result }))
+    process.exit(result.ok ? 0 : 1)
+  }
+
   if (!surface || !(surface in SURFACES)) {
-    console.error('Usage: gen-notebook-art.ts --surface masthead|category|series|hero|spot [--slug <slug>] [--prompt <p>] [--alt <a>] [--count N] [--save-dir <dir>] [--upload <file>] [--only fal|imagen] [--ref-image <url>] [--cast <castSlug>] [--run-id <n>] [--dry-run]')
+    console.error('Usage: gen-notebook-art.ts --surface masthead|category|series|hero|spot [--slug <slug>] [--prompt <p>] [--alt <a>] [--count N] [--save-dir <dir>] [--upload <file>] [--only fal|imagen] [--ref-image <url>] [--cast <castSlug>] [--run-id <n>] [--dry-run]\n   or: gen-notebook-art.ts --preflight [--run-id <n>]')
     process.exit(1)
   }
   if (cast && surface !== 'hero') {

@@ -121,3 +121,59 @@ export function visionDepsForEnv(runId?: number, team?: TeamId): VisionGateDeps 
 export async function gateImageBuffer(buf: Buffer, deps?: VisionGateDeps, runId?: number, team?: TeamId): Promise<VisionVerdict> {
   return runVisionGateOnImage({ data: buf.toString('base64'), mediaType: sniffImageMediaType(buf) }, deps ?? visionDepsForEnv(runId, team))
 }
+
+/**
+ * Ticket #12371. Two content runs (818, 1142) each drafted, dual-gated, and
+ * only THEN discovered the hero anatomy gate's one Anthropic dependency could
+ * not complete a check — once because `ANTHROPIC_API_KEY` was absent, once
+ * because the account behind it had run out of credit. Different proximate
+ * causes, same structural gap: the dependency is checked last, after the run
+ * has spent its whole budget, so a routine learns it cannot publish at the
+ * most expensive possible moment. This classifies a failed check's message
+ * into a reason a caller can act on differently: a missing credential is an
+ * env-var fix, an empty balance is a billing top-up, and neither is the
+ * other. Matches on the underlying Anthropic error text regardless of how
+ * many `Vision gate check could not complete: ...` / `vision-gate route
+ * could not complete the check: ...` wrapper layers it passed through, since
+ * both `getOneVerdict` (this module's own default `callVision`) and the
+ * remote route (`remoteVisionCallVision`) nest the original message rather
+ * than replacing it.
+ */
+export type VisionPreflightReason = 'no-credential' | 'no-credit' | 'unknown'
+
+export function classifyVisionPreflightFailure(message: string): VisionPreflightReason {
+  const m = message.toLowerCase()
+  if (/credit balance|insufficient_quota|purchase credits|plans\s*(&|and)\s*billing/.test(m)) return 'no-credit'
+  if (/authentication|api[\s_-]?key|unauthorized|x-api-key/.test(m)) return 'no-credential'
+  return 'unknown'
+}
+
+export interface VisionPreflightResult {
+  ok: boolean
+  reason?: VisionPreflightReason
+  message?: string
+}
+
+// Smallest possible valid PNG (1x1, transparent). The preflight only cares
+// whether the check completes, never what it sees, so there is no reason to
+// spend more than the cheapest possible payload on it.
+const PREFLIGHT_PNG_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
+
+/**
+ * A cheap, minimal vision-gate call whose only purpose is to prove the hero
+ * path's Anthropic dependency can actually complete a check, with the
+ * failure reason classified. Meant to run right after a routine's own
+ * budget/lock gate and before it spends a draft's worth of work on a post
+ * that would end up heroless regardless — see the module doc comment above
+ * for the two incidents this replaces a 40-minutes-late discovery for.
+ * Never throws: `gateImageBuffer` itself never throws, and a `checkCompleted:
+ * false` verdict here is the expected shape for "could not tell", not an
+ * exceptional path.
+ */
+export async function runVisionGatePreflight(runId?: number, team?: TeamId): Promise<VisionPreflightResult> {
+  const verdict = await gateImageBuffer(Buffer.from(PREFLIGHT_PNG_BASE64, 'base64'), undefined, runId, team)
+  if (verdict.checkCompleted) return { ok: true }
+  const message = verdict.notes ?? 'vision gate did not complete'
+  return { ok: false, reason: classifyVisionPreflightFailure(message), message }
+}
