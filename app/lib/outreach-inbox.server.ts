@@ -40,7 +40,7 @@ const LOOKBACK_DAYS = 14
 // Shared IMAP config + client, used by both the poller and the probe
 // ---------------------------------------------------------------------------
 
-interface ImapConfig {
+export interface ImapConfig {
   host: string
   port: number
   user: string
@@ -51,8 +51,12 @@ interface ImapConfig {
  * One resolution path for every IMAP consumer: OUTREACH_IMAP_* with fallback
  * to the Zoho SMTP account, defaults imap.zoho.com:993. Null when no usable
  * credentials are configured.
+ *
+ * Exported (ticket #12095) so `support-inbox.server.ts` can poll the same
+ * hello@xdipx.com mailbox without a second, drifting copy of this
+ * credential-resolution logic. Same mailbox, same read-only contract.
  */
-function resolveImapConfig(): ImapConfig | null {
+export function resolveImapConfig(): ImapConfig | null {
   const host = process.env['OUTREACH_IMAP_HOST'] ?? 'imap.zoho.com'
   const port = parseInt(process.env['OUTREACH_IMAP_PORT'] ?? '993', 10)
   const user = process.env['OUTREACH_IMAP_USER'] ?? process.env['ZOHO_SMTP_USER']
@@ -61,10 +65,10 @@ function resolveImapConfig(): ImapConfig | null {
   return { host, port, user, pass }
 }
 
-type ImapClient = import('imapflow').ImapFlow
+export type ImapClient = import('imapflow').ImapFlow
 
 /** Identical client setup for the poller and the probe: implicit TLS, no logging. */
-async function createImapClient(cfg: ImapConfig): Promise<ImapClient> {
+export async function createImapClient(cfg: ImapConfig): Promise<ImapClient> {
   const { ImapFlow } = await import('imapflow')
   return new ImapFlow({
     host: cfg.host,
@@ -232,7 +236,7 @@ export async function pollOutreachInbox(): Promise<OutreachPollResult> {
 }
 
 /** Pull one header's value out of a raw HEADER.FIELDS blob (unfolded). */
-function headerValue(raw: string, name: string): string | null {
+export function headerValue(raw: string, name: string): string | null {
   const unfolded = raw.replace(/\r?\n[ \t]+/g, ' ')
   const re = new RegExp(`^${name}:[ \\t]*(.+)$`, 'im')
   return unfolded.match(re)?.[1]?.trim() ?? null

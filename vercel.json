@@ -147,6 +147,10 @@
       "schedule": "*/30 * * * *"
     },
     {
+      "path": "/cron/support-inbox",
+      "schedule": "*/15 * * * *"
+    },
+    {
       "path": "/cron/social-publish",
       "schedule": "0 * * * *"
     },

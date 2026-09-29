@@ -1113,6 +1113,29 @@ export function createCronRoutes() {
   })
 
   /**
+   * GET|POST /cron/support-inbox
+   * Schedule: every 15 minutes. Poll hello@xdipx.com over IMAP for genuine
+   * customer support email (read-only towards the mailbox, same contract as
+   * /cron/outreach-inbox; skips anything that matches an outreach thread) and
+   * draft a reply with customer-service-emma's prompt. Draft-only: nothing is
+   * ever sent or acted on automatically (see support-inbox.server.ts).
+   *
+   * Off by default: pollSupportInbox() itself no-ops before touching IMAP
+   * unless the support_inbox_enabled pipeline setting is 'true', so shipping
+   * the cron costs nothing until the owner arms it.
+   */
+  cronRoute('/support-inbox', async (_req, res) => {
+    try {
+      const { pollSupportInbox } = await import('../app/lib/support-inbox.server.js')
+      const result = await pollSupportInbox()
+      res.status(result.ok ? 200 : 503).json(result)
+    } catch (err) {
+      console.error('[cron:support-inbox]', err)
+      res.status(500).json({ error: String(err) })
+    }
+  })
+
+  /**
    * POST /cron/enrichment-batch-poller
    * Schedule: every 2 minutes. Advances every in-flight batch_job by one pass
    * (retrieve current turn's batch; if ended, distribute + run tools + submit

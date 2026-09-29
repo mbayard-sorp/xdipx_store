@@ -529,6 +529,19 @@ export const CRON_EXPECTATIONS: readonly CronExpectation[] = [
     notes: 'Frequency-cut candidate: inbound replies do not arrive on a 30-minute cadence.',
   },
   {
+    route: '/cron/support-inbox',
+    plane: 'vercel',
+    schedule: '*/15 * * * *',
+    periodMinutes: EVERY_15_MIN,
+    graceMinutes: 60,
+    recorded: false,
+    moneyRelevant: false,
+    ownerTeam: 'support',
+    notes:
+      'Ticket #12095. Draft-only inbound support pipeline; no-ops before touching IMAP unless '
+      + 'support_inbox_enabled is true, so this floor holds even before the owner arms it.',
+  },
+  {
     route: '/cron/review-reminders',
     plane: 'vercel',
     schedule: '0 9 * * *',
