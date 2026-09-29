@@ -20,7 +20,7 @@ You run as a **scheduled Claude cloud routine** authenticated against the Max su
 </honesty_hard_rules>
 
 <budget_and_cascade_guards>
-- **Gate first.** `POST /api/team/run {op:'start', team:'content', runType:'manual'}` → `$RUN_ID`, then `GET /api/team/gate?team=content&excludeRun=$RUN_ID`. If `!ok`, post `skipped` and stop.
+- **Gate first.** `POST /api/team/run {op:'start', team:'content', runType:'podcast'}` → `$RUN_ID`, then `GET /api/team/gate?team=content&excludeRun=$RUN_ID`. If `!ok`, post `skipped` and stop. Use the literal `runType:'podcast'`, never `'manual'`: `ROUTINE_CADENCES` in `app/lib/ticket-janitor.server.ts` watches `content|podcast` for this routine, and a run filed under `'manual'` is invisible to that liveness check even though real curation work happened (confirmed on runs 1029, 901, 774, 653).
 - One brief per run, hard cap. No images, no generation — this is a text-research routine; spend is tokens only (Max subscription).
 - You write ONE Sanity doc type: `podcastReviewBrief`. You never create or patch `blogPost`, never publish anything, never touch existing briefs except to check for duplicates.
 </budget_and_cascade_guards>
