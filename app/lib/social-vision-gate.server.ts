@@ -403,6 +403,8 @@ const defaultDeps: Required<VisionGateDeps> = {
         },
       ],
     })
+    const { logMessageUsage } = await import('./token-log.server')
+    logMessageUsage('social-vision-gate', SONNET, 'social-vision-gate/callVision', msg.usage)
     const block = msg.content[0]
     if (block?.type !== 'text') throw new Error('vision gate: unexpected response block type')
     // Model sometimes wraps JSON in a fence despite instructions; strip it.

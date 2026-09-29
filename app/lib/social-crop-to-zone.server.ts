@@ -294,6 +294,8 @@ const defaultDeps: Required<CropToZoneDeps> = {
         },
       ],
     })
+    const { logMessageUsage } = await import('./token-log.server')
+    logMessageUsage('social-crop-to-zone', SONNET, 'social-crop-to-zone/callVision', msg.usage)
     const block = msg.content[0]
     if (block?.type !== 'text') throw new Error('crop-to-zone: unexpected response block type')
     const cleaned = block.text.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim()

@@ -217,6 +217,36 @@ export async function logApiTokens(entry: TokenLogEntry): Promise<void> {
   }
 }
 
+/**
+ * Logs one synchronous API-key Messages call from its raw SDK `usage` block.
+ * For call sites that hold the response directly (the vision gates), which
+ * wrote no ledger row at all before 2026-09-29 and so were invisible on
+ * /admin/usage and to the team budget gates. Never throws and never delays
+ * the verdict: the caller does not await it.
+ */
+export function logMessageUsage(
+  feature: string,
+  model: string,
+  caller: string,
+  usage: {
+    input_tokens: number
+    output_tokens: number
+    cache_creation_input_tokens?: number | null
+    cache_read_input_tokens?: number | null
+  },
+): void {
+  void logApiTokens({
+    feature,
+    model,
+    source: 'sync',
+    inputTokens: usage.input_tokens,
+    outputTokens: usage.output_tokens,
+    cacheCreationTokens: usage.cache_creation_input_tokens ?? 0,
+    cacheReadTokens: usage.cache_read_input_tokens ?? 0,
+    caller,
+  }).catch(err => console.error(`[token-log] ${feature} usage log failed (ignored):`, err))
+}
+
 // ---------------------------------------------------------------------------
 // Image-generation spend logger
 // ---------------------------------------------------------------------------

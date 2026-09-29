@@ -97,6 +97,8 @@ const defaultCompareFrames: NonNullable<FrameMovementDeps['compareFrames']> = as
       },
     ],
   })
+  const { logMessageUsage } = await import('./token-log.server')
+  logMessageUsage('video-frame-gate', SONNET, 'video-frame-gate/compareFrames', msg.usage)
   const block = msg.content[0]
   if (block?.type !== 'text') throw new Error('frame-movement check: unexpected response block type')
   const cleaned = block.text.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim()
