@@ -7,9 +7,11 @@
 // observed snapshot in nalpac_price_history), syncs the fresh cost/MAP
 // metafields to Shopify, then reprices through recomputeVariant (the v2
 // pricing engine) so the resulting row lands in pricing_audit_log -- the
-// monitored table. This module never imports pricing-apply.server.ts /
-// pricing-engine.server.ts / processNalpacCostChanges (v1). See ADR-007
-// decision 1.
+// monitored table. See ADR-007 decision 1. The real Nalpac cost-change
+// webhook (app/lib/pricing-webhook.server.ts's processNalpacCostChanges)
+// reprices the same way now (ADR-007 decision 4, ticket #12097); the legacy
+// v1 apply path (pricing-apply.server.ts) this module was originally written
+// to avoid no longer exists.
 //
 // Gated end-to-end by the dedicated `pricing_costsync_enabled` kill switch
 // (default 'false', migration 061) -- NOT the pre-existing

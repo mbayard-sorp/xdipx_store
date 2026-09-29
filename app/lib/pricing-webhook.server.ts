@@ -1,14 +1,10 @@
 import crypto from 'node:crypto'
 import { db } from './db.server'
-import { pipelineSettings, pricingChanges } from '../../db/schema'
+import { pipelineSettings, pricingAuditLog } from '../../db/schema'
 import { eq, sql } from 'drizzle-orm'
 import { kvGet, kvSet } from './kv.server'
-import { findVariantsBySkus } from './shopify.server'
-import { computeTargetPrice } from './pricing-engine.server'
-import type { PricingSnapshot } from './pricing-engine.server'
-import { getApprovalMode } from './pricing-agent.server'
-import { decideAndApply, flushMetafieldUpdates } from './pricing-apply.server'
-import type { DecideAndApplyResult } from './pricing-apply.server'
+import { findVariantsBySkus, updateProductMetafield } from './shopify.server'
+import { recomputeVariant } from './pricing-apply-v2.server'
 
 export interface NalpacCostChangeEvent {
   sku: string
@@ -56,10 +52,6 @@ function eventHash(e: NalpacCostChangeEvent): string {
   return crypto.createHash('sha256').update(parts.join('|')).digest('hex')
 }
 
-function utcDateString(d: Date): string {
-  return d.toISOString().slice(0, 10)
-}
-
 export async function processNalpacCostChanges(
   events: NalpacCostChangeEvent[],
   _source: 'webhook' | 'manual-replay',
@@ -85,9 +77,6 @@ export async function processNalpacCostChanges(
 
   const throttleSecsRaw = await getPipelineSetting('pricing_webhook_throttle_secs')
   const throttleSecs = Math.max(5, Math.min(300, parseInt(throttleSecsRaw ?? '30', 10) || 30))
-
-  const approvalMode = await getApprovalMode()
-  const runDate = utcDateString(new Date())
 
   const deduped: NalpacCostChangeEvent[] = []
   for (const ev of events) {
@@ -120,10 +109,6 @@ export async function processNalpacCostChanges(
   }
   result.unknownSkus = [...unknownSet]
 
-  type ChangeRow = typeof pricingChanges.$inferInsert
-  const rows: ChangeRow[] = []
-  const allMetafieldUpdates: DecideAndApplyResult['metafieldUpdates'] = []
-
   for (const ev of deduped) {
     const match = variantBySku.get(ev.sku)
     if (!match) continue
@@ -138,88 +123,41 @@ export async function processNalpacCostChanges(
 
     result.processedCount++
 
-    const mf = match.metafields
-    const wholesale = ev.wholesale ?? mf.wholesaleCost ?? 0
-    const msrp = ev.msrp ?? mf.originalPrice ?? 0
-    const mapPrice = ev.mapPrice !== undefined ? ev.mapPrice : (mf.mapPrice ?? null)
-    const salePrice = ev.salePrice ?? null
-    const vendor = ev.vendor ?? match.vendor
-
-    const inSaleFeed = salePrice != null && msrp > 0 && salePrice < msrp
-    const nalpacDiscountPct = inSaleFeed && salePrice != null && msrp > 0
-      ? (msrp - salePrice) / msrp
-      : null
-
-    const variantTitleVal = match.variant.title !== 'Default Title' ? match.variant.title : undefined
-    const snapshot: PricingSnapshot = {
-      sku: ev.sku,
-      vendor: vendor ?? null,
-      msrp,
-      wholesale,
-      mapPrice: mapPrice != null && mapPrice > 0 ? mapPrice : null,
-      currentPrice: match.variant.price,
-      currentCompareAt: match.variant.compareAtPrice,
-      inSaleFeed,
-      nalpacDiscountPct,
-      productTitle: match.title,
-      ...(variantTitleVal !== undefined ? { variantTitle: variantTitleVal } : {}),
-    }
-
-    const computation = computeTargetPrice(snapshot)
-    if (computation.tier === 'no-change-needed') continue
-
+    // ADR-007 decision 4: reprice through the v2 engine (recomputeVariant),
+    // never v1's decideAndApply. Mirrors app/lib/cost-sync.server.ts's WS3
+    // path exactly -- sync whatever fresh cost/MAP the event carries to the
+    // Shopify metafields recomputeVariant reads, then let it fetch, compute,
+    // audit (pricing_audit_log, the monitored table), and apply in one call.
+    // v1's Nalpac-sale-feed pass-through (ev.salePrice) has no v2 equivalent
+    // and is intentionally dropped here: v2's model is cost/MAP-driven, and
+    // WS3's own drop-sync path already made the same tradeoff (ADR-007
+    // decision 1). ev.msrp is likewise unused for a metafield write, matching
+    // the pre-existing behavior -- the webhook never wrote xdipx.original_price
+    // even under v1.
     try {
-      const applied = await decideAndApply({
-        product: {
-          productId: match.productId,
-          productGid: match.productGid,
-          handle: match.handle,
-          title: match.title,
-          vendor: match.vendor,
-        },
-        variant: {
-          variantId: match.variant.variantId,
-          sku: match.variant.sku,
-          title: match.variant.title,
-          price: match.variant.price,
-          compareAtPrice: match.variant.compareAtPrice,
-        },
-        computation,
-        mapPrice: mapPrice != null && mapPrice > 0 ? mapPrice : null,
-        oldWholesale: mf.wholesaleCost,
-        newWholesale: ev.wholesale ?? null,
-        approvalMode,
-        dryRun: false,
-        runDate,
-        sourceTag: 'webhook',
-      })
+      if (ev.wholesale != null) {
+        await updateProductMetafield(match.productGid, 'wholesale_cost', String(ev.wholesale), 'number_decimal')
+      }
+      if (ev.mapPrice != null) {
+        await updateProductMetafield(match.productGid, 'map_price', String(ev.mapPrice), 'number_decimal')
+      }
 
-      rows.push(applied.row)
-      allMetafieldUpdates.push(...applied.metafieldUpdates)
+      const recomputed = await recomputeVariant({ variantId: match.variant.variantId, trigger: 'webhook' })
 
-      if (applied.row.status === 'auto_applied') result.autoApplied++
-      else if (applied.row.status === 'pending') result.pending++
-      else if (applied.row.status === 'failed') result.failed++
+      if (recomputed.auditId != null) result.changesCreated++
+      if (recomputed.applied) result.autoApplied++
+      else if (recomputed.status === 'pending') result.pending++
+      else if (recomputed.status === 'rejected') result.failed++
+      // 'skipped_no_change' counts toward processedCount above and nothing
+      // else, matching v1's own no-change-needed continue.
 
-      if (applied.error) {
-        result.errors.push({ sku: ev.sku, message: applied.error })
+      if (recomputed.error) {
+        result.errors.push({ sku: ev.sku, message: recomputed.error })
       }
     } catch (err) {
       result.failed++
       result.errors.push({ sku: ev.sku, message: err instanceof Error ? err.message : String(err) })
     }
-  }
-
-  if (allMetafieldUpdates.length > 0) {
-    const mfErrors = await flushMetafieldUpdates(allMetafieldUpdates)
-    for (const e of mfErrors) {
-      result.errors.push({ sku: '', message: e })
-    }
-  }
-
-  if (rows.length > 0) {
-    await db.insert(pricingChanges).values(rows)
-    result.changesCreated = rows.length
   }
 
   return result
@@ -239,15 +177,21 @@ export async function setPipelineSetting(key: string, value: string): Promise<vo
     })
 }
 
+/**
+ * ADR-007 decision 4: the webhook reprices through recomputeVariant now, so
+ * its rows land in pricing_audit_log (trigger='webhook') instead of the
+ * retired pricing_changes write path. Counts today's UTC calendar date to
+ * match this module's other date handling.
+ */
 export async function getWebhookActivityToday(): Promise<number> {
   try {
     const todayStr = new Date().toISOString().slice(0, 10)
     const rows = await db
       .select({ count: sql<number>`count(*)::int` })
-      .from(pricingChanges)
+      .from(pricingAuditLog)
       .where(
-        sql`${pricingChanges.runDate}::text = ${todayStr}
-          AND ${pricingChanges.reason} LIKE '[webhook]%'`,
+        sql`${pricingAuditLog.trigger} = 'webhook'
+          AND ${pricingAuditLog.occurredAt}::date = ${todayStr}::date`,
       )
     return rows[0]?.count ?? 0
   } catch {
