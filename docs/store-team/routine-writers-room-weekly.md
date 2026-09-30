@@ -100,6 +100,16 @@ The same step ends the pitch, with the reason in the event, when there is no sho
 item 6). The retro in Step 5 still runs in both cases, because owner edits from the last batch are
 still worth landing.
 
+**These are the only two legitimate reasons to skip the pitch: the backlog guard at 3+ pending, and
+`no_shortlist`.** No other condition skips Step 3. In particular, an aired-count condition (waiting
+for a prior clip to have aired before pitching again) is **forbidden**: nothing can air until a
+slate is pitched, approved, and rendered, so a room that refuses to pitch until something has aired
+can never pitch again, by construction. Run 1020 (2026-09-22) invented exactly this condition and
+skipped a pitch it should have made; the count that run read (2 pending) was already below the
+threshold. The Step 5 report must print the `pending_approval` **count** this run actually read and
+the threshold (3) it was compared against, so a future false guard is visible in the run summary
+rather than only inferable from it.
+
 ## Step 3: Pitch
 
 Five clips: **3 slots plus 2 alternates**, every product taken from the shortlist and nowhere else.
