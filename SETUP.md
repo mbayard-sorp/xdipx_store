@@ -183,21 +183,17 @@ CRON_SECRET=<another-random-hex>
 
 ## 10. Payment Processor
 
-You need a **high-risk payment processor**. Stripe and PayPal do not allow adult content.
+The store runs on **Shopify Payments**, with Shop Pay, set up through your Shopify admin's payment
+settings — no separate processor account or env vars to configure (owner-confirmed 2026-09-30; a
+high-risk processor such as Segpay or Verotel was the original plan and never went live).
 
-Options:
-- **Segpay** — segpay.com → Merchant application → Adult content
-- **Verotel** — verotel.com → Sign up → Adult merchant
-
-This takes 1–2 weeks to get approved. Apply early.
-
-Once approved, you'll connect via Shopify's payment gateway settings. Set:
-```env
-SEGPAY_MERCHANT_ID=...
-SEGPAY_API_KEY=...
-```
-
-**⚠️ Do not launch to real customers without a payment processor.** The default Shopify Payments does not support this category.
+**⚠️ Account-health risk, not a setup step.** Shopify Payments' own eligibility terms prohibit
+products with sexually explicit content, and widely cited summaries of its US terms list adult toys
+among prohibited businesses. Running this catalog on Shopify Payments is a live, standing risk to
+payment processing, not a one-time approval to clear — see `docs/ads-policy.md` §Shop app and Shop
+Campaigns for the detail and §Platform matrix's Shopify Shop row for the blast radius (losing
+Shopify Payments would also take down the Shop channel). There is no action item here beyond staying
+aware of it; do not apply for Segpay or Verotel, and do not add `SEGPAY_*` env vars.
 
 ---
 
