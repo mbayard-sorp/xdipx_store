@@ -29,7 +29,7 @@ policy page that run and cite it in the `policyCheck`.
 | **Reddit** | Effectively prohibited for adult products in its ads program. | Organic community participation where subreddit rules allow (unpaid, social team's judgment). | Low spend exposure since there's no viable paid path. |
 | **Adult ad networks** (e.g. category-specialist networks) | **Allowed — it's their business.** | Display/native on adult and adjacent inventory. Vet each network's traffic quality and brand-safety before proposing; model conservative conversion rates. | Quality/fraud risk, not policy risk. Attribution via UTMs is mandatory. |
 | **Owned + earned channels** | No gatekeeper. | Email/SMS to consented lists (the email team), SEO/AEO (already invested), affiliates and creator/newsletter sponsorships (disclosure required, creator's platform rules apply), the referral program once built. | Lowest risk, best margins — the default recommendation when paid math is thin. |
-| **Shopify Shop** (Shop app, Shop Campaigns) | **Prohibited on Shop's own terms, for most of the catalog.** Shop's prohibited-products list names "Mature and adult content or services, or products that have nudity", and Shop Campaigns requires Shopify Payments, whose terms bar adult products. Shopify, not xdipx, buys third-party placements (Meta, Google, X, Snap, Pinterest), several of which ban the category outright. See §Shop app and Shop Campaigns. | At most a narrow personal-care set (lubricant, massage oil, toy cleaner), product-as-object imagery, education register, third-party placements off. Owner-run in Shopify admin. | **Critical.** The downside is not a rejected ad. It is losing the Shop channel and, through the Shopify Payments dependency, the store's payment processing with funds held. |
+| **Shopify Shop** (Shop app, Shop Campaigns) | **Approved for this catalog by Shop's own review** (owner report 2026-09-30): every product is approved except one held for missing images. Shop's written prohibited list names "Mature and adult content or services", so the review verdict, not the list, is the operative fact. Shopify, not xdipx, buys third-party placements (Meta, Google, X, Snap, Pinterest), several of which ban the category outright. See §Shop app and Shop Campaigns. | The approved catalog, with product-as-object imagery at media position 0, paid-register titles, and third-party placements off. Owner-run in Shopify admin. | **Medium.** Shop has approved the catalog, so the channel itself is sound today. The residual risk is a later policy change or re-review, and because the store runs on Shopify Payments, a Shopify-side action reaches checkout, not just an ad channel. |
 | **Etsy** | Not an ad platform for this store; the question is whether xdipx's catalog can list there at all. **The Nalpac-fulfilled physical toy catalog cannot, in any form.** See §Etsy for the two independent policy blockers. | A narrow, digital-only, design-original lane (adult party games, printables, digital art), disconnected from the Nalpac catalog and from Shopify inventory. Manual, owner-run; not an automated channel. | **High if physical toys are listed** (policy-prohibited item type, twice over). **Low** for the digital-only lane if kept to original designs with proper mature-content tagging. |
 
 **Channel priority for proposals:** (1) owned/earned, (2) Google restricted-serving Search,
@@ -184,8 +184,9 @@ nothing about the others.
   themselves were not re-read at the primary source on 2026-09-30; confirm before relying on
   either reading). That exposure is why this store was specified on a high-risk processor in the
   first place (CLAUDE.md tech stack, which named Segpay/Verotel until 2026-09-30). The store in
-  fact runs on Shopify Payments, so the catalog is being sold through a processor whose terms very
-  likely bar it.
+  fact runs on Shopify Payments. Shop's approval of the whole catalog (see the store's state
+  below) is Shopify-side evidence that these products are acceptable, though it is a Shop channel
+  verdict, not a Shopify Payments ruling, and the Payments terms were not re-read.
 - **Placements.** Shop Campaigns ads run on the Shop app, the Shop website, the Shopify Product
   Network (other merchants' storefronts), and **optional third-party placements** where Shopify
   buys the media on Meta, Google, X, Snap, and Pinterest. §Platform matrix records that Meta, X,
@@ -205,8 +206,15 @@ nothing about the others.
 
 - The **Shop** publication exists on the store and the catalog is published to it wholesale. A
   sample of the 25 most recently updated active products was 25 of 25 on Shop, including realistic
-  dildos, a realistic torso stroker, anal plugs, penis pumps, and strokers: exactly the set Shop's
-  "products that have nudity" line reaches, since an anatomical product is itself the depiction.
+  dildos, a realistic torso stroker, anal plugs, penis pumps, and strokers.
+- **Shop's review has approved the whole catalog** (owner report 2026-09-30, from the Shop channel in
+  Shopify admin). The only unapproved product was Nalpac SKU 101629 (`power-delay-cream-2-oz`), held
+  for missing images, not for its category. It had zero media; the Nalpac main feed carried one
+  clean packshot, which was attached as media position 0 on 2026-09-30 so Shop can re-review it.
+  This supersedes this section's first reading, written the same morning from Shop's prohibited
+  list alone, that most of the catalog was ineligible and should be unpublished from Shop. Like
+  §Meta Shops, this is a lesson in reading the account's actual verdicts before the published
+  rulebook: the review is Shopify's own judgment of these products.
 - Shop Pay is an enabled wallet. The store is on the Basic plan.
 - **The store processes payments through Shopify Payments** (owner confirmed 2026-09-30, closing
   the gateway question the 2026-07-22 drift audit raised). CLAUDE.md's tech stack now records it.
@@ -220,17 +228,17 @@ nothing about the others.
    `platform:'other'`, `name` prefixed `shop-`), the same way it retros any launched row.
 2. **Third-party placements stay off.** They put our products on platforms whose ad policies ban
    the category, under a buyer who can drop us for it.
-3. **The eligible set is personal care, not pleasure devices.** If the owner keeps Shop Campaigns
-   running, scope it to products a general-audience marketplace sells beside skincare: water- and
-   silicone-based lubricants, massage oils and candles, toy cleaners. Everything anatomical
-   (realistic dildos, strokers, torsos, dolls), everything anal, pumps and extenders, restraints
-   and fetish gear, and anything whose title names an act or a body part stays **unpublished from
-   the Shop channel**, not merely excluded from a campaign. Vibrators and wands are the grey zone:
-   they are adult products under Shop's own list, so they are out unless Shopify confirms in writing
-   that they are eligible. Unpublish in Shopify (Products, Sales channels, Shop), never by deleting
-   anything.
+3. **The eligible set is what Shop has approved, and every product stays approvable.** Do not
+   unpublish Shop-approved products from the Shop channel on category grounds; Shop's review is the
+   verdict. The work is keeping each product reviewable: an active product with zero Shopify media
+   is not approvable on Shop at all (SKU 101629 was held for exactly this), so any product that
+   reaches the Shop channel with no image gets its Nalpac feed image attached as position 0, or is
+   flagged to `shopify-ops` when the feed has none. If Shop rejects or redacts a product for its
+   content rather than for missing data, rule 7 applies; do not re-submit it in disguise.
 4. **Image rule for any product published to Shop.** The product's Shopify media position 0 is
-   what Shop shows and what a Shop Campaigns ad shows, so for that set it must be paid-clean:
+   what Shop shows and what a Shop Campaigns ad shows. With the whole catalog approved, the whole
+   catalog is potential ad creative, so position 0 must be paid-clean everywhere, and must stay
+   that way to keep the approvals it has:
    - Product as object on a clean or single-tint ground (design doctrine §4 Archetype B, or a clean
      packshot). No body, no skin, no hand near a body, no on-skin frame under
      `docs/store-team/instagram-campaigns.md` §3.2c, no implied use. The on-skin licence the voice
