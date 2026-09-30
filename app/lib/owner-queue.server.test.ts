@@ -7,6 +7,7 @@ import {
   blockerEntries,
   fingerprintOf,
   moneyVerdict,
+  ownerBlockedTicketEntries,
   probeFrom,
   sortEntries,
   staleProbeEntries,
@@ -149,6 +150,67 @@ describe('the counter-rule for unregistered owner asks', () => {
     })
     expect(fresh).toEqual([])
     expect(stale).toHaveLength(1)
+  })
+})
+
+describe('owner-blocked ticket entries (#12093)', () => {
+  it('flags a protected-path block that no blocker mentions', () => {
+    const [e] = ownerBlockedTicketEntries({
+      blockedTickets: [{
+        id: 501,
+        kind: 'code',
+        blockClass: 'protected-path',
+        ageDays: 4,
+        suggestion: 'widen the checkout retry window',
+        lastError: null,
+      }],
+      registeredRefs: new Set<string>(),
+    })
+    expect(e!.cls).toBe('blocked-owner-ask')
+    expect(e!.move).toContain('#501')
+    expect(e!.move.toLowerCase()).toContain('merge or close')
+  })
+
+  it('names the env/secret move for an owner-env block', () => {
+    const [e] = ownerBlockedTicketEntries({
+      blockedTickets: [{
+        id: 502,
+        kind: 'code',
+        blockClass: 'owner-env',
+        ageDays: 1,
+        suggestion: 'needs ATLAS_CLOUD_API_KEY',
+        lastError: null,
+      }],
+      registeredRefs: new Set<string>(),
+    })
+    expect(e!.move.toLowerCase()).toContain('secret')
+  })
+
+  it('stays quiet when a blocker already registered the ticket', () => {
+    const out = ownerBlockedTicketEntries({
+      blockedTickets: [{
+        id: 501,
+        kind: 'code',
+        blockClass: 'protected-path',
+        ageDays: 4,
+        suggestion: 'x',
+        lastError: null,
+      }],
+      registeredRefs: new Set(['ticket:501']),
+    })
+    expect(out).toEqual([])
+  })
+
+  it('gives every entry a non-empty move', () => {
+    const entries = ownerBlockedTicketEntries({
+      blockedTickets: [
+        { id: 1, kind: 'code', blockClass: 'protected-path', ageDays: 1, suggestion: 'x', lastError: null },
+        { id: 2, kind: 'code', blockClass: 'owner-env', ageDays: 1, suggestion: 'y', lastError: 'missing secret' },
+      ],
+      registeredRefs: new Set<string>(),
+    })
+    expect(entries).toHaveLength(2)
+    for (const e of entries) expect(e.move.trim().length, e.id).toBeGreaterThan(0)
   })
 })
 

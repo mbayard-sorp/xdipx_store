@@ -70,6 +70,7 @@ export type OwnerQueueClass =
   | 'owner-decision'
   | 'unregistered-owner-ask'
   | 'stale-probe'
+  | 'blocked-owner-ask'
 
 export interface QueueProbe {
   kind: string
@@ -334,6 +335,65 @@ export function unregisteredEntries(input: {
     })
   }
 
+  return out
+}
+
+/**
+ * Entries for blocked `code` tickets whose `blockClass` names the owner as the
+ * only next actor (ticket #12093).
+ *
+ * `blockClass` (migration 089) was built "so the janitor and the owner queue
+ * can route a blocked row to its real next actor without reading the note"
+ * (`routine-dev-daily.md`), but nothing ever read the column after it was
+ * written: `ticket-janitor.server.ts` only flags stale/orphaned/superseded
+ * tickets and never transitions on blockClass, and this queue's
+ * `OwnerQueueClass` union had no entry for a blocked ticket at all. The result
+ * was the `e1-blocked` tracker milestone's own metric (blocked rows sitting at
+ * `attempt_count = 0`) climbing every audit (35 to 38 to 45 to 66) with no
+ * mechanism anywhere that could drain it: an agent cannot retire
+ * `protected-path` or `owner-env` blocks on evidence (there is no PR and no
+ * superseding row, by definition of the class), so those rows could only ever
+ * be cleared by the owner noticing them — and the owner had no surface that
+ * showed them.
+ *
+ * Scoped to exactly the two classes the routine's own vocabulary comment
+ * already calls owner-only ("needs an owner-attended session" / "a secret or
+ * Vercel variable only the owner can set"): `protected-path` and `owner-env`.
+ * The other five classes (`needs-split`, `superseded`, `duplicate`,
+ * `no-code-work`, `dependency`) name an AGENT as the next actor, so putting
+ * them here would violate this file's own rule 1 (an owner-queue entry must
+ * name the owner's single move) and would make the queue noisy with rows
+ * nobody here is meant to act on.
+ */
+export function ownerBlockedTicketEntries(input: {
+  blockedTickets: ReadonlyArray<{
+    id: number
+    kind: string
+    blockClass: string
+    ageDays: number
+    suggestion: string
+    lastError: string | null
+  }>
+  registeredRefs: ReadonlySet<string>
+}): OwnerQueueEntry[] {
+  const out: OwnerQueueEntry[] = []
+  for (const t of input.blockedTickets) {
+    if (input.registeredRefs.has(`ticket:${t.id}`)) continue
+    const move = t.blockClass === 'owner-env'
+      ? `Set the secret or Vercel variable ticket #${t.id} names, then unblock it.`
+      : `Read ticket #${t.id}'s protected-path diff and merge or close its PR, then unblock it.`
+    out.push({
+      id: `blocked:${t.id}`,
+      cls: 'blocked-owner-ask',
+      priority: 3,
+      title: `Blocked \`${t.kind}\` ticket #${t.id} is waiting on you (${t.blockClass})`,
+      move,
+      ageDays: t.ageDays,
+      source: `ticket #${t.id}`,
+      probe: null,
+      detail: (t.lastError ?? t.suggestion).slice(0, 400),
+    })
+  }
   return out
 }
 
@@ -636,6 +696,41 @@ async function gatherOwnerOnlyTickets(gaps: string[], now: number): Promise<Owne
   }
 }
 
+interface OwnerBlockedTicket {
+  id: number
+  kind: string
+  blockClass: string
+  ageDays: number
+  suggestion: string
+  lastError: string | null
+}
+
+async function gatherOwnerBlockedTickets(gaps: string[], now: number): Promise<OwnerBlockedTicket[]> {
+  try {
+    // Only the two blockClass values the routine's own vocabulary already
+    // calls owner-only (`protected-path`, `owner-env`); the other five name an
+    // agent-reachable next actor and do not belong on this surface.
+    const r = await db.execute(sql`
+      SELECT id, kind, block_class, created_at::text AS created_at, suggestion, last_error
+        FROM homepage_team_suggestions
+       WHERE status = 'blocked' AND block_class IN ('protected-path','owner-env')
+       ORDER BY created_at ASC
+       LIMIT 50`)
+    return ((r.rows ?? []) as Array<Record<string, unknown>>).map((row) => ({
+      id: Number(row['id'] ?? 0),
+      kind: String(row['kind'] ?? '?'),
+      blockClass: String(row['block_class'] ?? ''),
+      ageDays: daysBetween(String(row['created_at'] ?? ''), now),
+      suggestion: String(row['suggestion'] ?? ''),
+      lastError: row['last_error'] == null ? null : String(row['last_error']),
+    }))
+  } catch (err) {
+    gaps.push('owner-blocked-tickets')
+    console.warn(`${LOG} owner-blocked ticket read failed`, err)
+    return []
+  }
+}
+
 /**
  * Compute the queue.
  *
@@ -658,10 +753,11 @@ export async function computeOwnerQueue(opts: {
     console.warn(`${LOG} blocker read failed`, err)
   }
 
-  const [money, health, ownerOnlyTickets] = await Promise.all([
+  const [money, health, ownerOnlyTickets, ownerBlockedTickets] = await Promise.all([
     gatherMoney(gaps),
     gatherHealth(gaps),
     gatherOwnerOnlyTickets(gaps, now),
+    gatherOwnerBlockedTickets(gaps, now),
   ])
 
   health.openBlockers = blockers.length
@@ -689,6 +785,10 @@ export async function computeOwnerQueue(opts: {
     ...unregisteredEntries({
       ownerOnlyTickets,
       needsOwnerPrs: opts.needsOwnerPrs ?? [],
+      registeredRefs,
+    }),
+    ...ownerBlockedTicketEntries({
+      blockedTickets: ownerBlockedTickets,
       registeredRefs,
     }),
     ...staleProbeEntries(base),
