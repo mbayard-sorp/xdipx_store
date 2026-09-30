@@ -28,6 +28,8 @@
 
 > Amended 2026-09-23 on Mike's rulings in the video-program session, codified by his merge of this change: the core gains **The thesis**, the one idea every channel carries ("The door doesn't have to stay closed", his own sentence of 2026-08-22), with three pillars, and the channel table sits under Channel addenda outside every runtime fence; the video addendum gains a second owner-gated carve-out, **product-talk clips**, whose spoken track runs at register 9, plain, on every platform with the fence narrowed to graphic detail, conditioned on every final cut being owner-approved and posted by hand; and "Talking heads never show the product in frame" is replaced by "a talking presenter may hold, show, or set down the product", with the frame-level stops named. The Group Chat is shelved for the season; its 2026-09-04 override stands unchanged for when it returns. Emma's no-lived-experience rule, the §3.2a stop list, and the nudity definition do not move. This moves the charter to v5.6.
 
+> Amended 2026-09-30 on Mike's direction, all-hands on Shop and agentic channels: **"go, use the SEO register"**. The AI shopping catalog (the Shopify Catalog feed that ChatGPT, Copilot, and other agentic channels read, carried in the product metafield `xdipx.catalog_description`) is a new surface and runs at the SEO register, 4 to 5: factual, plain, what the product is and how it is used, with no desire-forward copy and no health, efficacy, or proof claim beyond what the label states. The site's own descriptions and every other register are unchanged, so this stays v5.6.
+
 <!-- core:start -->
 
 ## What xdipx is
@@ -174,6 +176,7 @@ The registers restate the addenda below, which govern wherever they are more spe
 | Blog | Authority at max, desire capped 7 to 8 | Knowledge |
 | LinkedIn | 2 to 3 | Discretion and the business |
 | Paid ads | 3 to 4 | Discretion |
+| AI shopping catalog (`xdipx.catalog_description`) | 4 to 5, factual | Knowledge |
 | Support | 2 to 3 | Discretion |
 
 The week's owner-approved clips are the content calendar for every channel: the blog expands one, email quotes one, and social carries them at each platform's register.
@@ -198,6 +201,7 @@ Include the addendum matching the surface, on top of the core.
 
 - Nouns are searchable. Use exact product-type names (wand, air pulsation, prostate massager) in titles and meta. "Sex toy" is allowed in meta descriptions.
 - Titles and meta descriptions stay at 4-5 (search intent is informational); the full desire-forward register runs in taglines, Emma's take, and full stories.
+- The catalog description (`xdipx.catalog_description`, read by AI shopping channels through the Shopify Catalog) stays at 4-5 and strictly factual: product type, base or material, size, compatibility (condoms, toy materials), and how to use it. No desire-forward phrasing, no narrated acts or arousal, and no health, efficacy, or proof claim ("hypoallergenic", "dermatologist approved", "relieves") unless the label states it, in which case say "labeled". Plainly naming a use (oral, anal, solo) in a factual sentence is fine. It describes the product honestly; it never re-describes a product to get past a platform's mature-content filter.
 - Every fact must trace to feed data, specs, or reviews. No invented awards, statistics, or origin stories. Sensation claims must be grounded in what the product verifiably does (mechanism, settings, review patterns), sold as experience rather than spec.
 
 <!-- addendum:enrichment:end -->
