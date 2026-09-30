@@ -117,3 +117,42 @@ mechanical rename. Filed as a follow-up `code` ticket rather than attempted here
 the same reason — it is still called by `pm-chat-tools.server.ts`, `pricing-agent.server.ts`,
 `import-monitor.server.ts`, and two probe scripts, none of which are the hazardous auto-apply path this
 ADR was written to contain.
+
+## Design decision, 2026-09-29 (ticket #12455): `pricing_changes` is not retired
+
+The follow-up above assumed `pricing_changes` should eventually be retired or migrated once its
+hazardous use (the webhook's old write target, fixed by #12097) was gone. Investigating the table's
+remaining reader/writer set changes that conclusion:
+
+- **`pricing_changes` and `pricing_audit_log` are not the same kind of table.** `pricing_audit_log`
+  records an ENGINE verdict on an observed repricing event (`trigger`, old/new cost/MAP/MSRP/sell,
+  `status: auto_applied | pending | skipped_no_change | rejected` — the engine's own confidence, not a
+  human's). `pricing_changes` records a PM-chat-PROPOSED price awaiting a human's explicit approve or
+  reject click (`app/routes/api.pricing.approve.tsx` → `pricing-agent.server.ts`'s
+  `applyApprovedChange`/`rejectChange`, `status: pending | approved | rejected`, with `approvedBy` and
+  `appliedAt`). Folding the second concept into the first's schema means bolting a human-approval
+  workflow onto an audit log, which is a worse fit than leaving two small tables that each honestly
+  describe what they are.
+- **The feature this table now exclusively serves is small, live, and already correct.** One proposer
+  (`pm-chat-tools.server.ts`'s `propose_pricing_changes`, MAP-checked at proposal time), one approval
+  surface (`api.pricing.approve.tsx`), one apply path (`applyApprovedChange`, which clamps to
+  `enforceMapFloor` — the v2 MAP invariant — before writing to Shopify). Nothing about it is v1's
+  hazard: it was never routed through `decideAndApply`, and it already enforces MAP universally rather
+  than v1's 2-vendor allowlist.
+
+**Decision: keep `pricing_changes`, formally reclassified as the dedicated PM-chat pricing-proposal /
+human-approval table, distinct from and never merged into `pricing_audit_log`.** Documented directly on
+the table definition (`db/schema.ts`). This closes decision 4's remaining item: the two-pricing-engine
+hazard decision 4 exists to close (one engine auto-applying with weak MAP coverage, writing to an
+unmonitored table) is fully closed by #12097 — `decideAndApply` is deleted and its webhook caller
+reprices through v2. `pricing_changes`'s continued existence past that point is a different, healthy
+table for a different, healthy feature, not residual v1 debt.
+
+`computeTargetPrice`/`pricing-engine.server.ts` is likewise not scheduled for removal: none of its
+remaining callers (`pm-chat-tools.server.ts`, `pricing-agent.server.ts`, `import-monitor.server.ts`, two
+probe scripts) are the auto-apply path this ADR was written to contain, and `pricing-agent.server.ts`'s
+own `runDailyPriceReview` (the last full v1-style pass, still importing v1's
+`ApprovalMode`) has no cron or route wired to it — reachable only via `scripts/run-pricing-review.ts` by
+hand, exactly the dormant-by-decision-2 state this ADR already accepts as residual risk. Nothing here
+changes that; a future ticket touching `runDailyPriceReview` itself should re-confirm it is still
+unscheduled before assuming so.
