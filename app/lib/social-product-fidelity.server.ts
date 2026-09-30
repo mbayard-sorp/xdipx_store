@@ -194,6 +194,8 @@ const defaultDeps: Required<ProductFidelityDeps> = {
         },
       ],
     })
+    const { logMessageUsage } = await import('./token-log.server')
+    logMessageUsage('social-product-fidelity', SONNET, 'social-product-fidelity/callVision', msg.usage)
     const block = msg.content[0]
     if (block?.type !== 'text') throw new Error('product-fidelity check: unexpected response block type')
     const cleaned = block.text.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim()

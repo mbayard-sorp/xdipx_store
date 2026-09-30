@@ -37,6 +37,7 @@ vi.mock('~/lib/db.server', () => ({
 
 vi.mock('~/lib/model-pricing.server', () => ({
   estimateImageCostUsd: () => 0.04,
+  estimateCostUsd: () => 0.012,
 }))
 
 vi.mock('~/lib/team-keys', () => ({
@@ -61,7 +62,7 @@ vi.mock('~/lib/kv.server', () => ({
   },
 }))
 
-import { logImageCost } from '~/lib/token-log.server'
+import { logImageCost, logMessageUsage } from '~/lib/token-log.server'
 
 const LONG_HANDLE = 'sliquid-naturals-satin-personal-moisturizer' // 43 chars, > 32
 
@@ -102,5 +103,38 @@ describe('logImageCost — long product handle (#5051)', () => {
     await logImageCost({ feature: 'content-images', model: 'imagen', count: 0, sku: LONG_HANDLE })
     expect(state.inserted).toHaveLength(0)
     expect(state.incr).toHaveLength(0)
+  })
+})
+
+describe('logMessageUsage (vision-gate spend, 2026-09-29)', () => {
+  it('writes a sync ledger row from a raw SDK usage block and bumps the team spend counter', async () => {
+    logMessageUsage('social-vision-gate', 'claude-sonnet-4-6', 'social-vision-gate/callVision', {
+      input_tokens: 1800,
+      output_tokens: 120,
+      cache_creation_input_tokens: null,
+      cache_read_input_tokens: 400,
+    })
+    await vi.waitFor(() => expect(state.inserted).toHaveLength(1))
+    const row = state.inserted[0]!
+    expect(row['feature']).toBe('social-vision-gate')
+    expect(row['source']).toBe('sync')
+    expect(row['caller']).toBe('social-vision-gate/callVision')
+    expect(row['inputTokens']).toBe(1800)
+    expect(row['outputTokens']).toBe(120)
+    expect(row['cacheCreationTokens']).toBe(0)
+    expect(row['cacheReadTokens']).toBe(400)
+    expect(state.incr.find(i => i.key.startsWith('SPEND:'))?.by).toBe(1)
+  })
+
+  it('never throws into the caller when the ledger write fails', async () => {
+    state.insertThrows = true
+    expect(() =>
+      logMessageUsage('video-frame-gate', 'claude-sonnet-4-6', 'video-frame-gate/compareFrames', {
+        input_tokens: 10,
+        output_tokens: 5,
+      }),
+    ).not.toThrow()
+    await vi.waitFor(() => expect(state.incr.length).toBeGreaterThan(0))
+    expect(state.inserted).toHaveLength(0)
   })
 })
