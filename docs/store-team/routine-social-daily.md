@@ -1190,11 +1190,16 @@ gate ran as an `Agent` subagent on 2026-09-28).
    "notes":"<its per-string reason, verbatim>"}`: `SHIP-READY` with the string at PASS is `PASS`, a
    REVISE on the string is `REVISE`, any BLOCK is `BLOCK`. A fresh caption after a REVISE gets a
    fresh subagent, never a follow-up message to the one that judged the previous version.
-2. **Endpoint (fallback only).** Use it when this run has no `Agent`/`Task` tool, or when the spawn
-   itself errors (not when you dislike the verdict: a subagent REVISE or BLOCK is final for that
-   caption, and re-asking the endpoint to get a different answer is gate shopping). Post one
-   `decision` event the first time a run falls back, naming the reason, so the API spend it causes
-   is visible. (Subagent tokens are Max spend: include them in the run's final `social-drafts`
+2. **Endpoint (fallback only).** Use it only after you have actually tried the subagent path and
+   it failed, never on an assumption that the tool is missing. Run 1151 (2026-09-29) declared "no
+   Agent/Task tool this run" without once looking for it, and billed both gates to the API key.
+   **Probe first, once per run, before the first gate:** if `Agent` (or `Task`) is not already in
+   your tool list, it may be deferred, so call `ToolSearch` with query `select:Agent,Task`. Fall
+   back only when that probe returns no match, or when an actual spawn call errors. A dislike of
+   the verdict is never a reason: a subagent REVISE or BLOCK is final for that caption, and
+   re-asking the endpoint to get a different answer is gate shopping. Post one `decision` event
+   the first time a run falls back, **quoting the probe result or the spawn error verbatim**, so
+   the API spend it causes is visible and a false fallback is diagnosable. (Subagent tokens are Max spend: include them in the run's final `social-drafts`
    spend log, never as API-key rows.)
 
 ```bash
@@ -2170,7 +2175,7 @@ and the server-assembled inputs, never your reasoning about why it complies.
 4. Relay the returned `gate` object via `op:"gate"` below. A subagent that returns no parseable
    verdict gets one fresh respawn; a second failure is a fallback case.
 
-**Endpoint fallback (no `Agent`/`Task` tool this run, or the spawn errors):** call the default
+**Endpoint fallback (the Step 4a probe found no `Agent`/`Task` tool, or a spawn errors; never assumed):** call the default
 mode, which runs the same preparation plus a server-side model call, and post one `decision` event
 naming the reason the first time a run falls back:
 
