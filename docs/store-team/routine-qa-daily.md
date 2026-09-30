@@ -189,6 +189,21 @@ npm run typecheck && npm test && npm run build
 Run them yourself rather than trusting the PR body. If one fails, that is your `last_error`, and it
 should include the actual error text.
 
+**`npm test`'s total-test-count line is not comparable across separately-cloned checkouts.**
+(ticket #12465) Investigated: on the *same* commit, `vitest run` is fully deterministic — two
+back-to-back local runs on `cf80b80` both reported exactly 359 files / 5192 tests, byte-identical.
+The variance that prompted this row (five separate full-suite runs across different worktrees and a
+fresh `origin/main` checkout, all green, reporting file counts differing by up to one and test
+counts differing by several dozen) was not a flaky test generating a variable number of cases at
+runtime; it was `origin/main` itself advancing between checkouts. This repo's release engine merges
+continuously from up to nine autonomous team lanes plus ordinary R-DEV/R-SHEP traffic, so two
+`git clone`/`git fetch` calls made even a few minutes apart can land on different commits with
+different test files — confirmed directly in this session: `origin/main`'s tip advanced through
+three different PRs (#1353 → #1410 → #1429) across three fetches inside about ninety seconds, with
+no action taken locally in between. Treat a test-count delta as evidence only when both checkouts
+are pinned to the identical head SHA; a delta between two independently-fetched checkouts is
+evidence about how much of the fleet merged in the interval, not about test-suite health.
+
 **The stale-artifact bounce.** CI's `check` job also asserts the tree is clean after a build, and
 the one file that legitimately goes dirty is `server/vercel-entry.mjs`, a committed build artifact.
 When that is the *only* thing wrong with an otherwise-correct PR, the change is not defective and
