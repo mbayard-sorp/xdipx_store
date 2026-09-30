@@ -952,8 +952,11 @@ curl -s -X POST "$BASE_URL/api/team/suggestion" \
   -d '{"op":"list","targetTeam":"content","status":"approved","orderBy":"age"}'
 ```
 
-Act on up to **3 per run**, oldest first, and only what this run can actually execute within the
-gates it already obeys. Close each one you did execute so tomorrow's run does not re-read it:
+Act on up to **8 per run** (raised from 3, ticket #12094/#12364: the approved process/campaign/promo
+backlog reversed from draining to growing against the old 3-per-run ceiling once it reached 78 rows
+deep, against a fixed one-content-run-per-day cadence that could never keep pace with inflow), oldest
+first, and only what this run can actually execute within the gates it already obeys. Close each one
+you did execute so tomorrow's run does not re-read it:
 
 ```bash
 -d '{"op":"transition","id":<id>,"to":"applied","actor":"agent:content-writer","note":"<what changed>"}'
@@ -1019,7 +1022,7 @@ curl -s -X POST "$BASE_URL/api/team/suggestion" \
        "suggestion":"Published post /notebook/<slug> has dead embeds: <handle> (<reason>) ... Swap each for an in-stock, buyable product (charter-voice pairing copy) or remove it. <slug> has NO buyable path and is remediated first.","cxRisk":"low"}'
 ```
 
-Then remediate through Step 6b's execute-what-you-can rule (up to 3 rows per run). Order the
+Then remediate through Step 6b's execute-what-you-can rule (up to 8 rows per run). Order the
 work from `groupedByHandle`, worst impact first: posts with no buyable path come first, then the
 highest-impact shared handle (`slugs.length > 1`), then everything else. When a dead handle breaks
 more than one post, remediate all of them in the same run with the same replacement product,
