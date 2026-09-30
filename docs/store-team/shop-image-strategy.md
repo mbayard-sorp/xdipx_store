@@ -103,3 +103,46 @@ the product rendered from its real reference image.
 | Layer 3 frames | `media-manager`, vision-gated | after the pilot |
 | Cover image | `media-manager` produces, owner sets | owner click |
 | Watching Shop Campaigns results | `ads-manager` retro, per ads-policy §Shop rule 1 | weekly |
+
+## 7. Shopify Catalog and agentic channels (ChatGPT and others)
+
+Added 2026-09-30 after the owner saw 164 products "available" in the Shopify Catalog and an order
+(#1008, `dame-eva-couples-vibrator-ice`) whose product shows as unpublished to ChatGPT.
+
+**The ceiling is policy, and most of it cannot move.**
+
+- Shopify Catalog requires a product to be published to the Online Store, Hydrogen, or Headless
+  channel, have a title, at least one image and a price above zero, not be Unlisted, and "can't
+  contain sensitive content, such as mature content" (help.shopify.com, Shopify Catalog
+  requirements, read 2026-09-30).
+- OpenAI's commerce policy prohibits "Adult sexual products, including sex toys and
+  fetish-focused products" from ChatGPT commerce (openai.com/policies/commerce-policies, read via
+  search 2026-09-30; direct fetch was refused). The Dame Eva is a sex toy, so it will not appear in
+  ChatGPT whatever we change. Do not try to re-describe toys to get them in; that is the
+  disguised-listing pattern ads-policy bans.
+- What can be in the Catalog is the non-mature slice: lubricants, massage oils and candles, toy
+  cleaners, intimate washes, and similar personal care.
+
+**The lever that does move: publication.** xdipx.com is headless and reads products through the
+"Storefront Admin" app. The Catalog does not count that. Measured 2026-09-30: of 5,243 active
+products, 1,419 are published to the Online Store channel and 3,824 are not. For lubricants alone,
+94 of 350 are published there. Installing Shopify's Headless channel and publishing the active
+catalog to it would make every non-mature product eligible without exposing a Shopify theme. The
+headless route format `/products/{handle}` already matches what the Catalog expects.
+
+**Catalog field mapping** (Sales channels, Agentic, Review how your product data is sent):
+
+- Product category is mapped to Product type (free text, for example "Clitoral Vibrator"). The
+  Catalog is built around Shopify's standard product taxonomy; products carry no standard
+  category today (`category` is null on the order #1008 product). Assigning standard categories
+  is the better source and unlocks standard attributes (color, size, flavor) as grouping options.
+- Product description is mapped to "Original Description" and 239 of 5,243 are missing it.
+
+**Grouping (custom combined listings).** Use the Product metafield method, not Product title:
+supplier titles are inconsistent, and title grouping with no delimiter would merge exact
+duplicates (two products are both titled "Juicy AF Water-Based Personal Lubricant 2oz"). Plan: a
+typed metafield `xdipx.catalog_group` holding a family key, set only on eligible (non-mature)
+products, with size, scent, flavor, or color as the option. A first pass found about 28 families
+(69 products) among consumables, for example Swiss Navy water-based in 1, 2, and 4 oz, JO H2O
+original, warming, and cooling, Sliquid Swirl flavors, and JO Aromatix massage oil scents. Keep
+custom combined listings off until the metafield is populated.
