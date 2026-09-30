@@ -123,16 +123,17 @@ Open .notebook-art/ and review each candidate against the image brief
     third, series upper third)
 
 Then upload each keeper (swap the -1/-2 filename for the one you chose, and
-write real Emma-voice alt text — descriptive, non-explicit):
+write real Emma-voice alt text — descriptive, non-explicit). --upload requires
+--prompt: repeat the exact prompt that produced the file you are uploading:
 
-  npx tsx scripts/gen-notebook-art.ts --surface masthead --upload .notebook-art/masthead-1.png --alt "..."
-  npx tsx scripts/gen-notebook-art.ts --surface category --slug guides          --upload .notebook-art/category-guides-1.png          --alt "..."
-  npx tsx scripts/gen-notebook-art.ts --surface category --slug comparisons     --upload .notebook-art/category-comparisons-1.png     --alt "..."
-  npx tsx scripts/gen-notebook-art.ts --surface category --slug care            --upload .notebook-art/category-care-1.png            --alt "..."
-  npx tsx scripts/gen-notebook-art.ts --surface category --slug wellness-basics --upload .notebook-art/category-wellness-basics-1.png --alt "..."
-  npx tsx scripts/gen-notebook-art.ts --surface series --slug first-times       --upload .notebook-art/series-first-times-1.png       --alt "..."
-  npx tsx scripts/gen-notebook-art.ts --surface series --slug how-it-works      --upload .notebook-art/series-how-it-works-1.png      --alt "..."
-  npx tsx scripts/gen-notebook-art.ts --surface series --slug field-notes       --upload .notebook-art/series-field-notes-1.png       --alt "..."
+  npx tsx scripts/gen-notebook-art.ts --surface masthead --upload .notebook-art/masthead-1.png --alt "..." --prompt "..."
+  npx tsx scripts/gen-notebook-art.ts --surface category --slug guides          --upload .notebook-art/category-guides-1.png          --alt "..." --prompt "..."
+  npx tsx scripts/gen-notebook-art.ts --surface category --slug comparisons     --upload .notebook-art/category-comparisons-1.png     --alt "..." --prompt "..."
+  npx tsx scripts/gen-notebook-art.ts --surface category --slug care            --upload .notebook-art/category-care-1.png            --alt "..." --prompt "..."
+  npx tsx scripts/gen-notebook-art.ts --surface category --slug wellness-basics --upload .notebook-art/category-wellness-basics-1.png --alt "..." --prompt "..."
+  npx tsx scripts/gen-notebook-art.ts --surface series --slug first-times       --upload .notebook-art/series-first-times-1.png       --alt "..." --prompt "..."
+  npx tsx scripts/gen-notebook-art.ts --surface series --slug how-it-works      --upload .notebook-art/series-how-it-works-1.png      --alt "..." --prompt "..."
+  npx tsx scripts/gen-notebook-art.ts --surface series --slug field-notes       --upload .notebook-art/series-field-notes-1.png       --alt "..." --prompt "..."
 
 A dud pair? Re-run just that surface for two fresh candidates:
   npx tsx scripts/gen-notebook-art.ts --surface category --slug care --count 2 --save-dir .notebook-art
