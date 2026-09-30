@@ -183,8 +183,9 @@ nothing about the others.
   widely cited summaries of its US terms list adult toys among prohibited businesses (the US terms
   themselves were not re-read at the primary source on 2026-09-30; confirm before relying on
   either reading). That exposure is why this store was specified on a high-risk processor in the
-  first place (CLAUDE.md tech stack). If Shop Campaigns is running, Shopify Payments is running,
-  and the catalog is being sold through a processor whose terms very likely bar it.
+  first place (CLAUDE.md tech stack, which named Segpay/Verotel until 2026-09-30). The store in
+  fact runs on Shopify Payments, so the catalog is being sold through a processor whose terms very
+  likely bar it.
 - **Placements.** Shop Campaigns ads run on the Shop app, the Shop website, the Shopify Product
   Network (other merchants' storefronts), and **optional third-party placements** where Shopify
   buys the media on Meta, Google, X, Snap, and Pinterest. §Platform matrix records that Meta, X,
@@ -207,8 +208,9 @@ nothing about the others.
   dildos, a realistic torso stroker, anal plugs, penis pumps, and strokers: exactly the set Shop's
   "products that have nudity" line reaches, since an anatomical product is itself the depiction.
 - Shop Pay is an enabled wallet. The store is on the Basic plan.
-- Which payment gateway processes orders is not recorded anywhere in this repo (flagged by the
-  2026-07-22 drift audit). The owner is the source of truth; record the answer here when known.
+- **The store processes payments through Shopify Payments** (owner confirmed 2026-09-30, closing
+  the gateway question the 2026-07-22 drift audit raised). CLAUDE.md's tech stack now records it.
+  Every rule below therefore protects the store's only payment processor, not just an ad channel.
 
 ### The rules (binding)
 
