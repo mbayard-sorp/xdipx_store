@@ -105,6 +105,7 @@ interface Candidate {
   handle: string
   title: string
   productId: string
+  primaryMediaId: string
   primaryUrl: string
   proposedMediaId: string
   proposedUrl: string
@@ -236,6 +237,7 @@ async function main(): Promise<number> {
           handle: product.handle,
           title: product.title,
           productId: product.id,
+          primaryMediaId: primary.id,
           primaryUrl: primary.image.url,
           proposedMediaId: pick.m.id,
           proposedUrl: pick.m.image.url,
@@ -303,7 +305,9 @@ async function main(): Promise<number> {
     try {
       await setMediaAsPrimary(c.productId, c.proposedMediaId)
       applied++
-      process.stderr.write(`APPLIED ${c.handle}: promoted ${c.proposedUrl.split('?')[0]!.split('/').pop()}\n`)
+      // primaryMediaId is logged so a run's own output is its rollback list:
+      // setMediaAsPrimary(productId, primaryMediaId) restores the prior order.
+      process.stderr.write(`APPLIED ${c.handle}: promoted ${c.proposedUrl.split('?')[0]!.split('/').pop()} (was ${c.primaryMediaId} on ${c.productId})\n`)
     } catch (err) {
       process.stderr.write(`ERROR ${c.handle}: reorder failed: ${(err as Error).message}\n`)
     }
