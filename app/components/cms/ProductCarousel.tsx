@@ -228,14 +228,22 @@ export function ProductCarousel({
               // #8418). Legacy chrome and dark backgrounds are unchanged.
               <Link
                 to={ctaLink}
-                className={`text-sm font-semibold transition-colors ml-1 shrink-0 whitespace-nowrap ${
+                className={`transition-colors ml-1 shrink-0 whitespace-nowrap ${
+                  storefront ? 'text-[15px] font-medium' : 'text-sm font-semibold'
+                } ${
                   dark
                     ? 'text-white/80 hover:text-white'
                     : storefront
                       ? 'text-ink link-coral'
                       : 'text-plum hover:text-plum-2'
                 }`}
-                style={{ fontFamily: 'var(--font-display)' }}
+                /* Storefront chrome now matches the Nº 03 grid's See-all in TYPE
+                   as well as color: DM Sans 15px/medium (StorefrontHome's
+                   `seeAllHref` Link), not Newsreader 14px/semibold. Doctrine §2
+                   assigns CTA text to font-body, and this was the only CTA on
+                   the storefront set in the display serif (design-critic run
+                   1162). Legacy chrome keeps the display serif it shipped with. */
+                style={storefront ? { fontFamily: 'var(--font-body)' } : { fontFamily: 'var(--font-display)' }}
               >
                 {displayCtaLabel}
               </Link>

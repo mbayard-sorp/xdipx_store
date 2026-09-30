@@ -23,10 +23,14 @@ export function emphasisParts(text: string, emphasis: string): { before: string;
 
 /** Render a heading with a given word/phrase italicized in the plum emphasis
     style, matching the editorial headline treatment across the page. When
-    `emphasis` is omitted, falls back to italicizing the last word. When
-    `emphasis` is provided but not actually present in `text`, renders the
-    heading plain -- no <em> is appended, so a mismatched Sanity emphasis
-    field can never garble the published heading.
+    `emphasis` is omitted, or is provided but not actually present in `text`,
+    falls back to italicizing the last word. A mismatched Sanity emphasis field
+    can never garble the published heading -- no <em> is ever appended to the
+    end of the sentence (ticket #461) -- but it no longer strips the emphasis
+    either (ticket #12340): a stale `emmaHero.emphasisWord` left the live hero
+    H1, the biggest type on the site, with no `.em` word at all, against the
+    doctrine §2 rule of exactly one per headline. Degrading to the last word is
+    the same treatment an unset field already gets.
 
     `onDark` switches the emphasis word to `.em-on-dark` (the lighter plum that
     clears the doctrine contrast floor on ink/scrimmed grounds); pass it whenever
@@ -35,11 +39,8 @@ export function emphasisParts(text: string, emphasis: string): { before: string;
 export function EmphasizedHeading({ text, emphasis, onDark = false }: { text: string; emphasis?: string | undefined; onDark?: boolean }) {
   const emClass = onDark ? 'em em-on-dark' : 'em'
   const trimmed = text.trim()
-  if (emphasis) {
-    const parts = emphasisParts(trimmed, emphasis)
-    if (!parts) return <>{trimmed}</>
-    return <>{parts.before}<em className={emClass}>{parts.match}</em>{parts.after}</>
-  }
+  const parts = emphasis ? emphasisParts(trimmed, emphasis) : null
+  if (parts) return <>{parts.before}<em className={emClass}>{parts.match}</em>{parts.after}</>
   const trailing = trimmed.match(/[.?!]$/)?.[0] ?? ''
   const core = trailing ? trimmed.slice(0, -1) : trimmed
   const words = core.split(' ')

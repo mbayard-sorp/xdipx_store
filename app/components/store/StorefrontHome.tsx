@@ -115,13 +115,20 @@ const TILE_TINTS = ['bg-coral-soft', 'bg-plum-soft', 'bg-paper-3'] as const
    — and threaded through ContentBlockRenderer. A deliberate `charcoal`/
    `purple` rail is never re-tinted (see `railGroundClass`).
 
-   The first team rail sits between the Nº 03 anchor grid (paper) and Meet Emma
-   (paper-2), so it takes the third light ground rather than repeating either.
-   The Nº 06 edit rails follow the wayfinder band (paper), so they alternate
-   starting at paper-2: no two adjacent bands in the run share a ground, at any
-   rail count. */
-const TEAM_RAIL_GROUND: StorefrontGround = 'paper-3'
-const EDIT_RAIL_GROUNDS: readonly StorefrontGround[] = ['paper-2', 'paper'] as const
+   Alternating paper/paper-2/paper-3 is not enough on its own: every one of
+   those is pale, and doctrine §1 is explicit that six pale sections must never
+   ship in a row. design-critic measured exactly that on 2026-09-30 (run 1162) —
+   six consecutive pale bands spanning 6,867px, 56% of the page height at
+   1440px, with one unbroken 3,073px paper run carrying five section blocks. The
+   rails are the only bands in that run whose ground this team may set, so each
+   slot takes a real tint from the ground lock: the first team rail (between the
+   Nº 03 anchor grid and Meet Emma) on plum-soft, and the Nº 06 run leading on
+   coral-soft. That is also backlog item 13 ("one committed tinted band carrying
+   white cards"), delivered where the doctrine violation actually is. Three
+   distinct values in the Nº 06 rotation means no two adjacent rails share a
+   ground at any rail count, including across the wrap. */
+export const TEAM_RAIL_GROUND: StorefrontGround = 'plum-soft'
+const EDIT_RAIL_GROUNDS: readonly StorefrontGround[] = ['coral-soft', 'paper-2', 'paper-3'] as const
 
 /** The ground for the i-th Nº 06 edit rail. The modulo makes the index total,
     which the readonly-array element type cannot express on its own. */
@@ -470,7 +477,19 @@ function Hero({
         </div>
       </div>
 
-      {/* Nº 02 · Trust strip — raised into the hero band, inside the first viewport.
+      {/* Nº 02 · Trust strip — welded to the bottom of the hero band, which is
+          the LOCKED position redesign-v2-spec.md §Nº02 pins it to. It is inside
+          the first viewport at `lg:` and up, where the hero grid is two columns.
+          Below `lg` the grid is ONE column, so the strip follows the product
+          still and is nowhere near the fold; this comment used to claim the
+          first viewport unqualified, which is what invited design-critic to
+          file it as a defect twice (ticket #12340 defect 4). Doctrine §6 does
+          say "inside the first viewport" and names no breakpoint, so the gap is
+          real, but closing it on mobile either reorders a locked section or
+          spends the fold budget an earlier critic finding bought for the LCP
+          product still. Deferred by homepage-ia, run 1162, pending a named spec
+          (a `line` variant of TrustStrip, md:hidden, inside the hero text
+          column) and traffic that can measure it.
           Content-controlled: a published `trustBar` block wins, the shared
           fallback in TrustStrip.tsx covers the shell. Extracted to
           ~/components/store/TrustStrip so collection pages render the same

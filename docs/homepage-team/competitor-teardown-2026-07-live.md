@@ -1475,3 +1475,429 @@ With GA4 below the 300-sessions/week weighting threshold, this cycle banks the
 above as design capital. The only spend proposed is one content pass (item 4,
 already-built field, already-built renderer) and one two-token code fix
 (item 6). No generated imagery, no new machinery, no new section types.
+
+---
+
+## Delta — 2026-09-30 (Routine B design cycle, run 1162)
+
+**Captures (real, this run):** `inthegroove.com`, `spectrumboutique.com`,
+`www.tootimid.com`, `unboundbabes.com`, `dame.com`, `www.glossier.com`,
+`www.awaytravel.com`, and our own `xdipx.com`. Those eight are the only sites
+reported below. Two of them are firsts for this document: **In The Groove has
+never been captured here** (the 2026-09-23 delta recorded it as a 429 and noted
+that `shopinthegroove.com` is a different company, a laser-engraving business),
+and **Glossier has never been captured here** (429 bot-challenge on 09-23, the
+only prior attempt). Both are on the mission brief §4 / doctrine §7 standing
+sets, so both gaps are now closed with real bytes.
+
+Capture provenance, stated per host:
+
+- **Raw `curl -L` 200, every quoted string re-verified by `grep` against the
+  raw bytes:** `inthegroove.com` (391,041 B), `spectrumboutique.com`
+  (483,457 B), `www.tootimid.com` (720,615 B), `unboundbabes.com` (410,879 B),
+  `dame.com` (1,122,768 B), `www.glossier.com` (533,156 B),
+  `www.awaytravel.com` (1,060,455 B), `xdipx.com` (322,690 B). Highest-
+  confidence tier; every site-by-site quote below comes from this tier.
+- **WebFetch 200 as a second, independent read** on `inthegroove.com`. Its
+  extraction agreed with the raw bytes on every nav label and banner string
+  this delta uses. Its one extraction-only claim (Halloween banner imagery) is
+  marked as such where it appears, and is downgraded further below.
+- **`www.awaytravel.com` is raw-verified this run, which is a provenance
+  upgrade.** The 09-23 delta could only reach Away's card metadata by WebFetch
+  extraction and flagged it as such. Every Away card string below is now
+  confirmed in raw bytes.
+- **Retry matters and is now twice-proven.** `spectrumboutique.com` returned
+  **503** on first attempt and **200** on immediate retry;
+  `inthegroove.com` returned 429 last cycle and **200** this cycle on the first
+  attempt with a desktop UA. The 09-23 note that a 429/5xx means "challenged on
+  the attempts made", not "permanently closed", is confirmed. 403s still do not
+  respond to retry.
+
+**Refusals and blocks, recorded as results:**
+
+| Host | Result this run | History |
+|---|---|---|
+| `www.lovehoney.com` | HTTP **403** on `curl` (retried once, 403 again) **and** HTTP **403** on WebFetch | 403 on 2026-09-02, 09-09, 09-16, 09-23. **Fifth consecutive**, and the first cycle where both fetch paths were tried and both refused. |
+| `www.aesop.com` | HTTP **403** (`curl`) | 403 on 2026-09-09, 09-16, 09-23. Fourth consecutive. |
+| `www.arket.com` | HTTP **403** (`curl`, 367 B body) | 403 on 2026-09-09, 09-16, 09-23. Fourth consecutive. |
+| `www.cos.com` | HTTP **403** (`curl`, 363 B body) | 403 on 2026-09-23. Second consecutive. |
+| `maude.com` | HTTP **301 → `https://brandportal.godaddysites.com/`**, then connection reset by peer (0 bytes). `www.maude.com` behaves identically | Same parked-domain mode as 2026-08-26, 09-16, 09-23. **Four cycles parked.** |
+| `normal.co` | HTTP **403 → `www.namepros.com/parked/normal.co`**, a domain-marketplace parking page behind a Cloudflare "Just a moment..." challenge | **First attempt recorded in this document.** The host does not currently serve a retailer. |
+
+Nothing is reported for Lovehoney, Aesop, Arket, COS, Maude or Normal beyond
+the refusal itself. No competitor copy is quoted from memory anywhere in this
+delta.
+
+**Bench-maintenance note.** The 09-16 and 09-23 deltas both asked for doctrine
+§7's Aesop, Arket and Lovehoney rows to be annotated **prior-knowledge-only**.
+All three refused again. Two rows move the other way this cycle and the
+annotation pass should reflect both: **Glossier is now reachable and captured**,
+which restores the "Glossier / Away" bench row to fully-verified for the first
+time, and **In The Groove is reachable and captured**, which retires the 09-23
+note that no In The Groove capture exists. **Maude's row should additionally
+carry a standing note that the domain has been parked for four consecutive
+cycles** — it is not a bot wall, the brand is not serving from that host, and
+every future cycle that lists Maude as a target is spending an attempt on a
+parked domain. The annotation is an `agent-editor` pass on
+`docs/design-doctrine.md`; this document does not own the doctrine and does not
+action it here.
+
+**The lens this run:** **how the field merchandises apparel and wearables, and
+what a product card has to say when the thing has to FIT.** The lens was chosen
+because this week's live strategy signal is that our search and GA4 demand is in
+apparel and wearables (harnesses, g-strings, mesh dresses, masks, pasties)
+rather than in vibrators, with the store ranking 1.0-3.0 on many apparel
+queries. A homepage finding about apparel is worth more to us right now than a
+polish finding about anything else.
+
+### The finding: in this field apparel gets a deep menu and a toy's card. The sites that actually sell fitted goods put the fit on the card.
+
+Every adult site captured sells apparel. Not one of them answers "will it fit
+me" anywhere a visitor can see it without clicking. The non-adult bench answers
+it on every card, unprompted.
+
+- **In The Groove (new to this document) — the deepest apparel taxonomy in the
+  capture set, and it stops at the menu.** "Lingerie" is a top-level nav peer of
+  "Sex Toys", "Vibrators", "Male Toys", "Dildos", "Lube", "Wellness" and
+  "Bondage", and it carries seventeen shelves, raw-verified: Bedroom Costumes,
+  Body Stockings & Hosiery, Panties (itself splitting to Boyshort, Thong, Panty,
+  Crotchless), Babydolls & Chemises, Teddies & Rompers, Bras & Lingerie Sets,
+  Corsets & Bustiers, Garters & Garter Belts, Robes & Gowns, Plus Size Lingerie,
+  Shoes, Dance & Festival, Accessories - Lingerie (Body Decor, Pasties, Fashion
+  Fixes, Care & Accessories, Jewelry, Wigs and Eyelashes), Mens Garments.
+  **Every one of those shelves carries its own thumbnail in the nav** — raw
+  `alt` attributes confirm "Babydolls &amp; Chemises", "Corsets &amp; Bustiers",
+  "Garters &amp; Garter Belts", "Body Stockings &amp; Hosiery", "Bedroom
+  Costumes", "Harnesses &amp; Strap-Ons", "Mens Garments", "Dance &amp;
+  Festival" as image alts, not just link text. Its four-tile homepage door gives
+  apparel one of the four: "For Her / shop for her", "For Him / shop for him",
+  **"Lingerie / shop lingerie"**, "Stores / locations". And then: the Best
+  Sellers rail is five items — a Maia mini wand, a Hitachi Magic Wand Mini, a
+  Sliquid lube, a Screaming O ring, a Doc Johnson stroker — **zero apparel**.
+  The "Collections" rail interleaves apparel and toys in one flat list
+  ("C-Rings Vibrating", "Babydolls & Chemises", "Small & Discreet", "Panties",
+  "Traditional Vibrators", "Pleasure Air", "Anal Plugs", "Dance & Festival",
+  "Vibrating Wands", "Fetish Play") with identical chrome and no size anywhere.
+  Seventeen lingerie shelves upstairs, no lingerie downstairs.
+- **In The Groove also runs the warmest proof band in the capture set, and it
+  is about fit.** Under "SEE WHAT EVERYONE IS SAYING", three raw-verified
+  customer quotes name store staff by first name: "Sierra and Sky are amazing at
+  helping you find the best fit for you. They are so kind and helpful and there
+  is such a variety of options!" (Renee H.); "This store had the best sales
+  associates ever..." (Kathy J.); "...Olivia was just fabulous, she was amazing
+  and went above and beyond..." (Albert A.). Note what the proof is *about*:
+  someone helped me find my fit. That is the emotional job, stated by customers,
+  in the category we are ranking for.
+- **Spectrum Boutique — "harness" is a polysemous word and Spectrum solves it
+  by filing it three times.** Raw-verified, "Harnesses" appears as a shelf under
+  **Sex Toys**, again under **Wellness → Gender** (alongside Packers, Dilators,
+  Strokers, Penis Extenders), and a third time as **"Body Harnesses"** under
+  **Apparel & Accessories** (with Apparel, Lingerie, Stockings, Pasties, Jocks,
+  Underwear). One word, three shopping intents, three entry points. Its footer
+  category prose has a section headed "Sexy Apparel & Lingerie Store" whose one
+  differentiator is sizing: "We prioritize inclusivity, providing a range of
+  sizes for both plus size and straight size customers."
+- **Spectrum also interleaves apparel into the main homepage product grid — and
+  the apparel cards grow an affordance the toy cards do not have.** Raw-verified
+  between the dildos and the lube: "Dreamgirl Desire Pink Blue Ombre Mini Dress
+  / Sale price / $30.00", "Prowler RED Leather Pouch Jock / Sale price / $39.00
+  / Black / Gray / Red", "Bijoux Indiscrets Maze Tassel Choker / $39.00". The
+  Jock card carries a three-swatch colour row; most toy cards carry none. The
+  card grammar is already diverging under them. **Size is still absent from
+  every one of those cards.**
+- **TooTimid — size is the first cut of the lingerie menu, and then it
+  disappears.** Its Lingerie branch is ordered, raw-verified: **"Queen Size"**,
+  Crotchless, Lingerie Sets, Panties, Schoolgirl Outfits, Body Stockings,
+  Shapewear, Shop All Lingerie. Size leads. It is also worth recording that
+  TooTimid's "Shop by Experience" branch is the most intent-labelled nav in the
+  set — "Fast Orgasm Toys", "Feels Like Oral Sex", "Tip Teasing Toys", "Best
+  Edging Sex Toys", "Sex Toys for a Long-Distance Relationship", **"Wearable
+  Toys for Date Night"** — which is the wearable category described by *occasion*
+  rather than by anatomy.
+- **TooTimid gives this document its first longitudinal proof that derived
+  freshness works.** Its homepage review stream read "from 29954 reviews" on
+  2026-09-23 and reads **"from 30050 reviews"** today, raw-verified, with eight
+  entries dated **09/30/2026**, ten dated 09/29/2026 and twelve dated
+  09/28/2026. **+96 reviews in seven days, checkable by anyone, with no designer
+  having touched the page.** One of those entries is for an apparel item ("Pink
+  Striped - Black Thigh High Socks"), which is the only apparel proof anywhere
+  in the adult set this run — and it is there by accident of the feed, not by
+  merchandising.
+- **Away (§7 bench, raw-verified this run) — size is the FIRST axis, above
+  style.** Its Luggage nav opens "Shop by size" (All luggage, Carry-On luggage,
+  Checked luggage, Compare Carry-Ons, Compare Checked) and only then "Shop by
+  style" (Series 3, Classic & Flex, Topside, Softside, Aluminum, Compare
+  styles). Eight raw occurrences of "Shop by size". Its card, now confirmed in
+  raw bytes rather than extraction, is: badge ("New" or **"New color"**), name,
+  review count in parentheses ("(40)", "(1.1K)", "(2)"), price, then **"in 8
+  colors" plus "Color: Coast Blue"** — the variant count *and* the named
+  selected variant, on the card, before any click. Other named colorways
+  raw-verified: "Chocolate Brown", "Dune Taupe", "Cherry Red", "Olive Green",
+  "Cloud Gray", "Blush Pink".
+- **Dame — the Away label grammar now has a second adopter, and it is in our
+  category.** The 09-23 delta adopted "New" vs "New color" as a bench pattern
+  off Away alone. Dame's served HTML today carries **"New Color" four times**
+  and "New" as a separate badge on a different product, alongside "Bestseller"
+  (3), "Team Favorite" (2) and "#1 Best Seller". Its cards also carry a variant
+  line in the Away shape: **"2 colors" (9 occurrences), "1 option" (3), "2
+  sizes"**. Convergence across two independent sites, one of them category-
+  adjacent, is stronger evidence than the single bench observation we adopted on.
+- **Dame — the Black Friday string is still there.** Raw-verified on
+  2026-09-30: thirteen occurrences of `black-friday-sale`, with "It's Black
+  Friday." and "Add products to your cart to reveal **up to 60% off.**" This is
+  now the **third consecutive weekly capture** of the same out-of-season string
+  (WebFetch 09-16, raw 09-23, raw 09-30). A hard-coded seasonal claim does not
+  get noticed and removed. It gets noticed and left.
+- **Unbound — the most fit-literate card in the adult set, and it still does not
+  say a size.** Raw-verified cards carry an inline named-colourway pair ("Violet
+  / Opal", "Cerulean / Aqua", "Mint / Sea", "Quartz / Coral", "Aqua / Teal"), a
+  **one-line benefit descriptor** under the name ("A compact, rumbly,
+  powerhouse", "Rechargeable Bullet", "Bestselling suction toy"), a rating and a
+  review count ("4.6 / 3,174 Reviews"), and a **"Quick add"** control that opens
+  a variant picker without leaving the page. Delta against 09-23: the inventory
+  fact that was a card badge last week has been **promoted to the announcement
+  bar** — "Our best seller DEX is back in stock! 🪩" — alongside "Meet Buff! Our
+  brand new silicone lube 💦". Still a fact, still derived, now the first line of
+  the page. The "BACK IN STOCK!" badge is still on the Dex card as well.
+- **Glossier (§7 bench, first capture in this document) — the card is a
+  two-word category descriptor plus a variant, and that is the whole idea.**
+  Raw-verified card grammar: badge ("Best Seller", "Top-rated", "NEW", "Coming
+  soon"), product name, then a **two-to-three-word category descriptor** —
+  "Grooming pomade", "Nourishing lip balm", "Seamless cheek color",
+  "Skincare-makeup hybrid", "Eau de parfum" — then the *selected* variant shown
+  as text ("Dark Brown", "Float", "100 ml") and, on multi-size items, **a price
+  per size stacked against the size list** ("$116 / $82 / $32" against "100 ml /
+  50 ml / 8 ml"). Two further notes: "Glossier Goods", its merch line, sits
+  top-level in the nav between "Fragrance" and "Sets" with no qualifier; and the
+  page ships the literal CTA string **"Take a peek"**, which is on our own
+  whitelist — a small piece of field validation for a charter decision we made
+  on our own.
+
+**The cross-site rule this produces:** *toys are shopped on sensation, apparel
+is shopped on fit, and the card grammar has to diverge — the adult field has not
+noticed, and the bench has.* In The Groove ships seventeen lingerie shelves and
+puts no lingerie on its homepage. TooTimid leads its lingerie menu with "Queen
+Size" and surfaces a size nowhere else. Spectrum's jock card grew a colour row
+and still has no size. Meanwhile Away, Dame and Glossier — none of whom sell
+lingerie — put the variant axis, the variant count and the named variant on
+every single card, because they sell things that have to fit and they know the
+first question. The gap between those two groups is precisely where our demand
+signal says our traffic is arriving.
+
+### Applied to our page (measured this run against the live `xdipx.com` HTML, 200, 322,690 B)
+
+**We already ship an apparel rail. It is not an apparel rail.**
+
+1. **"The apparel edit" is a harness shelf wearing a category's name.** The
+   served homepage renders the kicker "The apparel edit" over the heading "Wear
+   it. Lead every thrust from here." Its five items are, in order: "Leatherette
+   Desirous Adjustable Strap-On Harness $62.99", "Frosted Jelly Dildo Strap-On
+   Harness Kit 6 Inch $40.99", "Lux Fetish Neoprene Strap-On Harness with Bullet
+   Vibe Pocket Black $23.99", "NudeFit Fully Adjustable Strap-On Harness with 3
+   O-Rings, Light $29.99", "Bumpher Dildo Base Cushion Stimulator Black $31.99".
+   Four harnesses and a cushion. Its "Take a peek" resolves to
+   **`/collections/strap-on-harnesses`**. The kicker promises a category and the
+   shelf delivers one subcategory of it. Our own demand signal spans g-strings,
+   mesh dresses, masks and pasties; **none of those appear anywhere on the
+   homepage.** This is not a ticket #4270 breach — the destination does contain
+   the set — it is the mirror-image defect: the label over-promises relative to
+   the link. And the wider destination already exists: `href="/collections/wear"`
+   is live in our own nav in this same capture.
+2. **Our apparel cards say nothing about fit.** Raw-verified, every card on our
+   page renders exactly: brand eyebrow (`text-ink-3 text-xs`), product name,
+   price, optional strike price, optional "SALE" pill. No size, no colour, no
+   variant count, no descriptor line. On a harness card — where the single
+   biggest purchase anxiety is "will this fit my body" — that card is silent on
+   the only thing that matters. Every one of Away, Dame, Unbound, Glossier and
+   even Spectrum's jock card is ahead of us here.
+3. **"Wear" is a door with nothing behind it that looks like clothing.** The
+   live "Pick your door" band still renders bare nouns — "Pleasure / Body / Wear
+   / Last Chance / Couples" — with no second line. That is the 09-23 delta's
+   adopted item 4 (fill `emmaAside`) **one week on and unshipped**. Worth
+   restating with this week's lens: "Wear" is doing more work than the other four
+   doors, because it is the only one naming the category our search demand is in,
+   and it is the one most in need of a qualifier and an image that reads as
+   apparel rather than as a toy.
+
+**Carry-forward defects from 2026-09-23, all re-measured and all still open:**
+
+| Item | 09-23 finding | 09-30 measurement |
+|---|---|---|
+| `/discover` two-link cap | 3 links, none a `?preset=` | **Still exactly 3** `href="/discover"`, still none a `?preset=`. Unfixed. |
+| "Surprise me" → best-sellers | intent pill lands on `/collections/best-sellers` | **Unfixed.** Two `/collections/best-sellers` in the HTML: the "Surprise me" pill and a legitimate footer nav link. |
+| `emmaAside` door tiles | built, empty | **Unfixed**, doors still bare nouns. |
+| `bg-cream` in `app/root.tsx` | lines 276 and 398 | **Unfixed**, both still present on the branch. |
+
+Four adopted items from one week ago, zero shipped. That is not a criticism of
+the finding; it is a note that this document's adoption rate is currently
+bounded by Routine A's content queue and the shell-PR queue, not by taste.
+
+### Adopted
+
+1. **Fit is the apparel card's price.** New standing rule: any card for a **worn**
+   product carries a fit fact — a size range, the literal "one size", or a
+   variant count — in the same slot a toy card uses for its benefit line.
+   Converging live evidence from five sites: Away ("in 8 colors" + "Color: Coast
+   Blue"), Dame ("2 colors" / "1 option" / "2 sizes"), Unbound (named colourway
+   pairs), Glossier (selected variant plus a price per size), Spectrum (a colour
+   row on the jock card and not on the toys). **Zero adult sites in this capture
+   set do it.** Rule, not a build; it binds whenever the card payload gains
+   variant data, and it tells `rr7-engineer` what to ask for when it does.
+2. **The kicker and the destination name the same set. Widen the apparel rail.**
+   *This is the cheap-and-certain item of the cycle.* "The apparel edit" either
+   narrows its kicker to the harnesses it actually shows, or it widens its set to
+   span the apparel taxonomy our demand is in and points "Take a peek" at
+   **`/collections/wear`** instead of `/collections/strap-on-harnesses`. Given
+   the live search/GA4 signal, **widen**. Content-only: an existing rail, an
+   existing collection already linked from our own nav, a curation change plus
+   one href. No new section type, no schema, no route, no asset generation, no
+   `rr7-engineer`. Curation to Routine A, heading and Emma aside to
+   `emma-copywriter` under `emma-empathy-reviewer`.
+3. **Size is a first-class axis, not a filter.** Away puts "Shop by size" above
+   "Shop by style"; TooTimid leads its lingerie menu with "Queen Size"; In The
+   Groove ships "Plus Size Lingerie" as a named shelf; Spectrum writes sizing
+   inclusivity into its category prose. Adopted at spec level for whenever
+   apparel earns a dedicated door or a filtered surface. **Proposal only** — it
+   implies collection structure and possibly a route, so it goes to
+   `homepage-ia` for taxonomy and `tech-architect` for anything URL-shaped. Not
+   a build this cycle.
+4. **Apparel is shopped by silhouette, so apparel navigation is pictures.** In
+   The Groove gives all seventeen lingerie shelves their own thumbnail
+   (raw-verified in the `alt` attributes). "Chemise" does not describe a chemise
+   to anyone who does not already know the word, and neither does "teddy",
+   "romper" or "bustier". Adopted as an **imagery-brief principle** for
+   `media-manager` — doctrine §4 Archetype B (colour-block still life) for the
+   garment-alone shots and Archetype D (cropped human presence, never faces,
+   never explicit) for the on-body silhouette shots, on the coral-soft /
+   plum-soft / paper ground lock. It is also the reason the "Wear" door tile
+   deserves an image treatment distinct from the toy doors. **Deferred on the
+   traffic gate: no image generation proposed this cycle.** Banked as design
+   capital with a clear trigger — the first apparel wave goes when traffic
+   returns or when an apparel shell change makes it cheap-and-certain.
+5. **Glossier settles an open question inside backlog item 12.** Item 12 says
+   "one Emma-voice sentence from the `tagline` metafield between name and price".
+   The field says the shorter form reads better in a card: Glossier runs a
+   two-to-three-word *category* descriptor ("Grooming pomade", "Nourishing lip
+   balm", "Seamless cheek color"), Unbound runs a sentence fragment ("A compact,
+   rumbly, powerhouse"). Nobody in the capture set runs a full sentence on a
+   card. Recorded as a design note against item 12 for `emma-copywriter` to
+   weigh when it ships; for apparel specifically, adopted item 1 says the slot
+   is spent on fit rather than on voice.
+6. **09-23 adopted item 2 (the "New" / "New color" label grammar) is
+   re-confirmed with a second, category-adjacent adopter.** Dame now ships both
+   badges on its own cards. No change to the rule; the evidence is stronger than
+   when we took it.
+7. **09-23 adopted item 5 (seasonal language never lives in component code) now
+   has longitudinal proof.** Dame's Black Friday string is present in raw bytes
+   on three consecutive weekly captures, nine-plus months out of season. The
+   failure mode is not "it expires", it is "nobody ever removes it". Re-confirmed;
+   review note for `rr7-engineer` and `design-critic` stands.
+8. **09-23 adopted item 1 (freshness is derived or it is deleted) now has its
+   first measured datapoint.** TooTimid: 29,954 reviews on 09-23, 30,050 today,
+   eight entries carrying today's date. The number moved because the data moved.
+   That is the mechanism we said we wanted, observed working over a week.
+
+### Rejected, with reasons, so they are not re-proposed
+
+- **Apparel interleaved into the general product grid (Spectrum: a $30 mini
+  dress and a $39 jock sitting between dildos and lube).** Cheap, and it does
+  put apparel in front of people. Rejected because our rails are editorially
+  sequenced and each carries an Emma aside that argues for its set; a dress
+  dropped into "Under $30" breaks the rail's own argument. Apparel gets its own
+  rail, curated properly — which is adopted item 2.
+- **Mega-nav dropdowns carrying priced product cards (Spectrum: five priced
+  cards per nav branch, full product names and prices in the menu).** Effective
+  desktop merchandising and a large payload for a mobile-first store designed at
+  375px first. Rejected on the mobile-first hard constraint, not on taste.
+- **In-store-staff testimonials (In The Groove's "SEE WHAT EVERYONE IS SAYING",
+  three quotes naming Sierra, Sky and Olivia).** The warmest proof in the capture
+  set and structurally unavailable to us: we have no store and no staff.
+  Doctrine §6, never fabricate proof. **What IS adoptable is the observation
+  underneath it** — their best proof is about somebody helping a customer find
+  their fit, which is exactly the job the Compass claims to do. That observation
+  feeds adopted items 1 and 3; the testimonials themselves are a hard reject.
+- **A third-party "Quick add" variant modal (Unbound).** The affordance is
+  genuinely right for apparel — you cannot add a harness to a cart without
+  choosing a size — and it is new machinery on a page below the 300-sessions/week
+  threshold, and any modal must clear our SSR-visible, zero-CLS and
+  `loader → useLoaderData` discipline. Deferred with a named trigger: revisit
+  when the card payload gains variant data for another reason, or when traffic
+  returns.
+- **Scarcity dressed as a demand fact (Away: "Red hot. Hard to keep in stock.",
+  "4,000-person waitlist: Aluminum Edge is back in new colors").** The waitlist
+  number is exactly the checkable claim adopted item 1 of 09-23 asks for, and we
+  still reject the treatment. "Hard to keep in stock" is urgency wearing a
+  fact's clothes, charter-banned, and we have no waitlist to cite. If we ever
+  have a real number it goes in plain prose, never in a banner.
+- **Seasonal category banners recycled year over year (In The Groove serves an
+  asset named `Halloween_Banner_2025_2.svg` on 2026-09-30).** Seasonal
+  merchandising is legitimate and the *timing* here is in season; the narrow
+  reject is that the creative is a previous year's file, which is the slow
+  version of Dame's failure. **Weak evidence, flagged as weak:** a filename is
+  not proof of intent, and this should not be re-derived later as a strong
+  finding. Logged only to sharpen 09-23's adopted item 5 — seasonal creative
+  lives in Sanity with a named owner *and a retire date*.
+- **"Glossier Goods" as an unqualified top-level merch door.** Confident, and it
+  works because Glossier is a brand people want to wear the logo of. We are not,
+  and a "Goods" door on our nav would be an empty room. Rejected on our own
+  footing, not on the pattern.
+- **Discount chrome and coupon-code merchandising (TooTimid "50% OFF All Orders
+  w/ code: Love50", "Huge Sale!", "Final Sale - 70% OFF!"; Spectrum "ON A
+  BUDGET? EXPLORE ALL SALES AND PROMOTIONS!" and "JOIN OUR LOYALTY PROGRAM TO
+  EARN REWARDS"; In The Groove "Earn Groove Rewards").** Standing reject,
+  charter-banned urgency and discount theatre. Unchanged.
+- **Tenure claims (TooTimid "For more than 20 years").** Standing reject,
+  doctrine §6. We are new.
+- **Press and "as seen in" rows (TooTimid's "As Seen In"; Dame's eight "Dame in
+  The Press" pull-quotes).** Standing reject; backlog item 20's press slot stays
+  built-empty until a placement is genuinely earned. One craft note worth
+  keeping: Dame's four press quotes each appear **twice** in the served HTML, a
+  carousel duplication that reads as padding rather than as proof. If we ever
+  fill that slot, four real quotes shown once beats four shown twice.
+- **A rented quiz (Unbound's "Take Product Quiz" / "Not sure where to start?
+  We've got you covered.", surfaced four separate times on its homepage; Dame's
+  "Find Your Vibe (2-minute quiz)").** Standing reject on third-party JS. Noted
+  for a different reason this week: Unbound places the quiz invitation in the
+  nav, the mobile menu, the account panel and the body, which is a **placement**
+  lesson for the Compass rather than a technology one — and it runs straight
+  into our two-link `/discover` cap, which we are already breaching at three.
+  The lesson is filed; the placement is not adopted.
+
+### The one thing we will do this week that none of them do
+
+**Make the apparel shelf answer the only question a worn thing raises.** Every
+adult site captured this run sells apparel through the menu and then hands it a
+toy's card. In The Groove has seventeen lingerie shelves and not one lingerie
+item on its homepage. TooTimid leads its lingerie menu with "Queen Size" and
+then surfaces a size nowhere a shopper can see it. Spectrum's jock card grew a
+colour row and still cannot tell you whether it fits. The category our own
+search and analytics say people are arriving for is, everywhere in this field, a
+menu item. We will make it a shelf — and the first move costs nothing: the words
+over our apparel rail and the link under it stop disagreeing, so that "The
+apparel edit" leads somewhere that is actually the apparel edit.
+
+### IA fence check
+
+Adopted items 1, 3, 5, 6, 7 and 8 are **standing rules or design notes that
+change no markup**. Adopted item 2 is a **content-only edit to an existing rail**
+inside the locked Nº 01-Nº 11 shell: a curation change plus one `ctaLink` value,
+pointed at `/collections/wear`, which is already live and already linked from
+our own nav in this run's HTML — **no new section type, no Sanity schema change
+of any kind, no new URL or route, and `rr7-engineer` is not needed**. Adopted
+item 4 is an imagery-brief principle for `media-manager`, **deferred on the
+traffic gate with no generation proposed this cycle**. The two ideas that would
+imply new structure — a dedicated apparel door with size axes (adopted item 3)
+and per-subcategory apparel nav imagery (adopted item 4) — are logged as
+**proposals routed to `homepage-ia` for taxonomy and `tech-architect` for
+anything URL-shaped**, exactly as the fence requires, and neither is proposed as
+a build. The two-link `/discover` cap is **re-measured and still breached at
+three**, unchanged from 09-23 and re-handed to `homepage-ia` and Routine A; this
+delta adds no `/discover` link and its rejection of Unbound's four-placement
+quiz pattern is partly on those grounds. The retired-route denylist is
+untouched. All copy lands with `emma-copywriter` under `emma-empathy-reviewer`.
+
+With GA4 far below the 300-sessions/week weighting threshold, this cycle banks
+the above as design capital. The only spend proposed is **one content pass**
+(adopted item 2: rail curation plus one href, on an existing block with an
+existing renderer). No generated imagery, no new machinery, no new section
+types, no shell PR from this step.

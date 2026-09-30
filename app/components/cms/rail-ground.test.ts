@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { railGroundClass } from './ProductCarousel'
-import { editRailGround } from '~/components/store/StorefrontHome'
+import { editRailGround, TEAM_RAIL_GROUND } from '~/components/store/StorefrontHome'
 
 /**
  * Rail band grounds (ticket #12340). On 2026-09-29 the live homepage rendered
@@ -47,8 +47,14 @@ describe('railGroundClass — assigned ground vs published bgStyle', () => {
 })
 
 describe('editRailGround — the Nº 06 rail run alternates at every count', () => {
-  it('starts on paper-2, so it differs from the paper wayfinder band above it', () => {
-    expect(editRailGround(0)).toBe('paper-2')
+  it('leads on a real tint, not another pale band', () => {
+    // Doctrine §1: never ship six pale sections in a row. design-critic
+    // measured six consecutive pale bands spanning 56% of the page height on
+    // 2026-09-30, and the rails are the only bands in that run whose ground
+    // this team may set. Rotating paper/paper-2/paper-3 would alternate and
+    // still be six pale bands, so the run has to lead on a tint.
+    expect(editRailGround(0)).toBe('coral-soft')
+    expect(TEAM_RAIL_GROUND).toBe('plum-soft')
   })
 
   it('never repeats a ground on adjacent rails', () => {
@@ -63,6 +69,16 @@ describe('editRailGround — the Nº 06 rail run alternates at every count', () 
   it('only ever emits grounds from the doctrine ground lock', () => {
     const lock = new Set(['paper', 'paper-2', 'paper-3', 'coral-soft', 'plum-soft'])
     for (let i = 0; i < 12; i++) expect(lock.has(editRailGround(i))).toBe(true)
+    expect(lock.has(TEAM_RAIL_GROUND)).toBe(true)
+  })
+
+  it('spends at most one coral ground on the run', () => {
+    // Coral is the accent, not a wash (doctrine §3 / the coral budget). One
+    // coral-soft band per rotation is the committed tinted band; two would be
+    // a coral wall.
+    const run = Array.from({ length: 12 }, (_, i) => editRailGround(i))
+    const perRotation = run.slice(0, 3).filter(g => g === 'coral-soft')
+    expect(perRotation).toHaveLength(1)
   })
 })
 
@@ -78,6 +94,12 @@ const src = readFileSync(
 )
 
 describe('storefront rail header takes the v3 type motifs', () => {
+  it('sets the See-all CTA in font-body, matching the Nº 03 grid See-all', () => {
+    // Doctrine §2 assigns CTA text to font-body. This was the only CTA on the
+    // storefront rendered in the Newsreader display serif.
+    expect(src).toContain("storefront ? { fontFamily: 'var(--font-body)' }")
+  })
+
   it('renders the eyebrow through the mono .kicker class', () => {
     // It rendered in DM Sans semibold, making the published rails the only
     // bands on the storefront whose section label was not mono.
