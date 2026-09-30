@@ -16,6 +16,13 @@ that sentence: nudity means visible nipples, labia, penis, or anus, and
 everything else is allowed. At the same all-hands the owner extended the
 treatment past social: "On-skin extends to all areas of the site".
 
+**Standing order since 2026-09-27: every IG and X post is a bodyscape post.**
+The owner, verbatim: "Every post should be a bodyscape post until I say stop."
+This is a floor on top of the on-skin treatment, not a separate ceiling: the
+full specification, including how it interacts with the mix-report caps, lives
+in `docs/store-team/instagram-campaigns.md` §3.2c. This router points at it
+and does not restate it.
+
 ## 2. Where the specification lives
 
 `docs/store-team/instagram-campaigns.md` **§3.2c**, inside the §3.2a ceiling.
@@ -75,10 +82,13 @@ What remains is code, not judgment, and all of it is on the bus:
   `scripts/gen-social-image.ts` never reaches `resolveCastReference`, so
   `skinToneNote` reaches no prompt and the bare-product picker never runs.
   Ticket #10475.
-- **Nothing populates the variety axes.** 281 rows, none carrying
-  `body_zone`, `contact_mode`, `crop_scale` or `scene_location`, so every cap
-  in the mix report reads UNKNOWN and the report is clean by construction.
-  Tickets #10479 and #10478.
+- **The variety axes are partially populated, not empty.** Measured against
+  live Neon 2026-09-28: `social_posts` holds 345 rows, of which 41 carry
+  `body_zone`, 41 `contact_mode`, 57 `crop_scale`, and 62 `scene_location`; 7
+  of that week's 14 posted Instagram rows carry a `body_zone`. Tickets #10479
+  and #10478 are therefore partially landed, not open from zero; the mix
+  report can read real values on some rows and UNKNOWN on others, it is not
+  clean by construction.
 - **The video path cannot read a body reference**, and there is no way to
   declare a crop scale on a scene. A close on-skin video frame would animate an
   invented body. Ticket #10484, and it is a hard blocker on on-skin video.
@@ -90,6 +100,11 @@ What remains is code, not judgment, and all of it is on the bus:
 
 ## 6. Changelog
 
+- **2026-09-27.** Records the bodyscape standing order (owner, "Every post
+  should be a bodyscape post until I say stop"), pointed at
+  `docs/store-team/instagram-campaigns.md` §3.2c. Section 5's variety-axes gap
+  restated as partial (41/41/57/62 of 345 rows) against live 2026-09-28 counts,
+  not empty as originally recorded.
 - **2026-09-20, morning.** Created. Records the on-skin treatment (owner
   2026-09-19), the nudity definition (owner 2026-09-20), and the site-wide
   extension (owner 2026-09-20, all-hands). Video (#192), Emma likeness (#193)
