@@ -62,7 +62,17 @@ curl -s -X POST "$BASE_URL/api/team/run" \
 2. The LinkedIn addendum in `docs/emma-voice.md` — it defines what a usable angle looks like
    (industry-first, brand byline, professional register) — and `docs/ads-policy.md` (binding
    creative rules, most conservative setting).
-3. Existing briefs (Sanity GROQ): `*[_type=="researchBrief"]{topic, status, createdAt}`.
+3. **Before counting pending briefs, mark consumed ones `used`.** Read the latest strategy brief's
+   `Research briefs consumed` line (`docs/store-team/routine-weekly-strategy.md` §"Marking a brief
+   consumed") and, for every `_id` it lists that is still `status:'pending'` in Sanity, patch that
+   doc to `status:'used'`. store-strategist has no Sanity write tool and can only *list* a brief as
+   consumed; this routine has write access and is the only actor that can turn that list into the
+   status flip. A brief listed as consumed in a published strategy brief is consumed — do not wait
+   for further confirmation. Skipping this step is exactly how the queue deadlocks: six already-read
+   briefs sat `pending` for three straight weeks (2026-09-24) because nothing ever flipped their
+   status, so the cap below could never fall and this routine could never file another brief.
+4. Existing briefs (Sanity GROQ): `*[_type=="researchBrief"]{topic, status, createdAt}`, read AFTER
+   the consumed-marking above so the count reflects genuinely unread briefs only.
    **More than 5 already `pending` → stop honestly; the queue is ahead of the posting cadence.**
    Never re-cover a topic that is `pending` or was `used` in the last 60 days.
 
