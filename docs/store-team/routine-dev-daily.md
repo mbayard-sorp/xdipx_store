@@ -98,12 +98,23 @@ git diff --stat origin/main...ticket/<already-done-id> -- <files>   # compare ta
 
 If they overlap, take one of three routes: **defer** the later ticket to the next pass — release its
 claim (`{"op":"claim"}`'s lease lapses on its own, or transition it back to `approved`) so it is not
-implemented on top of an in-flight sibling; or **serialize** (branch the later ticket off the earlier
-ticket's tip rather than off `main`, and hand-reconcile both behaviors); or **flag the overlap
-loudly** in both tickets' notes so QA checks the merged result before verifying either independently.
-Prefer **defer** when the overlap is heavy or the earlier ticket's PR is still open, so a pass never
-builds a second edit on a region that has not landed. Do not let two overlapping tickets proceed to
-`pr_open` as if they were independent.
+implemented on top of an in-flight sibling; or **serialize**; or **flag the overlap loudly** in both
+tickets' notes so QA checks the merged result before verifying either independently. Prefer **defer**
+when the overlap is heavy or the earlier ticket's PR is still open, so a pass never builds a second
+edit on a region that has not landed. Do not let two overlapping tickets proceed to `pr_open` as if
+they were independent.
+
+**Serializing means basing on `main`, not stacking the branch, until #12463 ships.** Until the
+release engine validates a PR's base ref (#12463, filed 2026-09-29), it will silently squash-merge a
+follow-up PR into whatever branch it was opened against rather than `main`, marking the ticket
+`applied` while the change never reaches production. Ticket #12455/PR #1413 hit exactly this: it
+was correctly identified as a direct follow-up to #12097/PR #1412 and deliberately based on
+`ticket/12097` for early review, and QA had to bounce it. The safe pattern for a same-file/same-table
+follow-up ticket today is: set `blockedById` on the follow-up against the lead ticket (already
+required by `operating-system.md` filing rule 2) **and** branch the follow-up from `main` directly,
+waiting to open its PR until the lead ticket's PR has actually merged, rather than stacking it for
+early review. Once #12463 ships, branching off the earlier ticket's tip for early review is safe
+again and this paragraph goes stale.
 
 **On the 20:00 pass, work bounced tickets first.** A bounced ticket is one sitting in
 `in_progress` with a `last_error` and an `attempt_count` above zero, assigned to you. It is already
