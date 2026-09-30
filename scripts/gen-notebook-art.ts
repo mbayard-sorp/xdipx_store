@@ -62,7 +62,11 @@
  *
  * Env: FAL_KEY (or Imagen creds) for generation; SANITY_PROJECT_ID +
  * SANITY_API_TOKEN (write) for --upload. Cost logs via the standard
- * generateImage() logImageCost path (feature 'notebook-images').
+ * generateImage() logImageCost path, under --feature (ticket #11100),
+ * default 'notebook-images'. A caller generating a post hero on behalf of
+ * another team's routine (the daily content run) should pass its own
+ * feature (e.g. --feature content-blog) so spend attributes to the lane
+ * that actually incurred it; every other caller keeps the default.
  */
 
 // Load env FIRST — generate-image/sanity.server read env at module eval.
@@ -296,6 +300,7 @@ async function generateHeroComposite(slug: string, castSlug: string, opts: {
   prompt: string
   count: number
   saveDir: string
+  feature: string
   runId?: number
 }): Promise<HeroRungResult | null> {
   const { composeSceneFrame, downloadFalAsset } = await import('~/lib/fal-video.server')
@@ -329,9 +334,9 @@ async function generateHeroComposite(slug: string, castSlug: string, opts: {
     // evaluated, let alone kept, so nothing gets billed for this rung.
     const billable = billableCandidateCount(verdicts)
     if (billable > 0) {
-      void logImageCost({ feature: 'notebook-images', model: res.costKey, count: billable, caller: `notebook-hero-composite/${rung}`, sku: productHandle ?? undefined })
+      void logImageCost({ feature: opts.feature, model: res.costKey, count: billable, caller: `notebook-hero-composite/${rung}`, sku: productHandle ?? undefined })
       if (res.plate) {
-        void logImageCost({ feature: 'notebook-images', model: res.plate.costKey, count: res.plate.count, caller: 'notebook-hero-composite/plate', sku: productHandle ?? undefined })
+        void logImageCost({ feature: opts.feature, model: res.plate.costKey, count: res.plate.count, caller: 'notebook-hero-composite/plate', sku: productHandle ?? undefined })
       }
     }
     const { passing, failing } = splitByVerdict(buffers, verdicts)
@@ -352,7 +357,7 @@ async function generateHeroComposite(slug: string, castSlug: string, opts: {
     const res = await generateImage({
       prompt: `${SHARED_PREFIX}editorial hero portrait, a single relatable person in soft directional daylight, calm negative space for a headline, unembarrassed and inviting.`,
       count: opts.count,
-      feature: 'notebook-images',
+      feature: opts.feature,
       caller: 'notebook-hero-composite/single-figure',
       imageSize: SURFACES.hero.size,
       logCost: false,
@@ -363,7 +368,7 @@ async function generateHeroComposite(slug: string, castSlug: string, opts: {
     const billable = billableCandidateCount(verdicts)
     if (billable > 0) {
       const { logImageCost } = await import('~/lib/token-log.server')
-      void logImageCost({ feature: 'notebook-images', model: res.model, count: billable, caller: 'notebook-hero-composite/single-figure' })
+      void logImageCost({ feature: opts.feature, model: res.model, count: billable, caller: 'notebook-hero-composite/single-figure' })
     }
     const { passing, failing } = splitByVerdict(buffers, verdicts)
     if (!passing.length) {
@@ -396,6 +401,7 @@ async function generate(surface: Surface, slug: string | undefined, opts: {
   prompt: string
   count: number
   saveDir: string
+  feature: string
   only?: 'atlas' | 'fal' | 'imagen'
   refImage?: string
   runId?: number
@@ -407,7 +413,7 @@ async function generate(surface: Surface, slug: string | undefined, opts: {
     return generateImage({
       prompt: opts.prompt,
       count: opts.count,
-      feature: 'notebook-images',
+      feature: opts.feature,
       caller: `media-manager/notebook-${surface}`,
       // Text-to-image takes the exact pixel size; the Kontext ref-image path only
       // honors a string aspect enum, so send the nearest enum there instead of a
@@ -622,6 +628,12 @@ async function main() {
   const only = arg('only') as 'atlas' | 'fal' | 'imagen' | undefined
   const refImage = arg('ref-image')
   const cast = arg('cast')
+  // Ticket #11100: defaults to 'notebook-images' so every existing caller
+  // (masthead/category/series/spot, and the notebook-launch.sh examples)
+  // keeps working unchanged. A caller generating on behalf of another
+  // team's routine (the daily content run's post hero) passes its own
+  // feature so the spend attributes to the lane that incurred it.
+  const feature = arg('feature') ?? 'notebook-images'
   const dryRun = hasFlag('dry-run')
   // Threaded into every gateHeroBuffer() call on the hero surface so the
   // vision-gate route's gate('content', runId) can exclude THIS run from its
@@ -642,7 +654,7 @@ async function main() {
   }
 
   if (!surface || !(surface in SURFACES)) {
-    console.error('Usage: gen-notebook-art.ts --surface masthead|category|series|hero|spot [--slug <slug>] [--prompt <p>] [--alt <a>] [--count N] [--save-dir <dir>] [--upload <file>] [--only fal|imagen] [--ref-image <url>] [--cast <castSlug>] [--run-id <n>] [--dry-run]\n   or: gen-notebook-art.ts --preflight [--run-id <n>]')
+    console.error('Usage: gen-notebook-art.ts --surface masthead|category|series|hero|spot [--slug <slug>] [--prompt <p>] [--alt <a>] [--count N] [--save-dir <dir>] [--upload <file>] [--only fal|imagen] [--ref-image <url>] [--cast <castSlug>] [--run-id <n>] [--feature <f>] [--dry-run]\n   or: gen-notebook-art.ts --preflight [--run-id <n>]')
     process.exit(1)
   }
   if (cast && surface !== 'hero') {
@@ -717,7 +729,7 @@ async function main() {
   // passed by the caller; without --cast the hero stays the plain text-to-image
   // path below, unchanged.
   if (surface === 'hero' && cast) {
-    const result = await generateHeroComposite(slug!, cast, { prompt, count, saveDir, runId })
+    const result = await generateHeroComposite(slug!, cast, { prompt, count, saveDir, feature, runId })
     if (!result) {
       console.log(JSON.stringify({
         generated: 0,
@@ -750,6 +762,7 @@ async function main() {
     prompt,
     count,
     saveDir,
+    feature,
     ...(only ? { only } : {}),
     ...(refImage ? { refImage } : {}),
     ...(runId !== undefined ? { runId } : {}),
