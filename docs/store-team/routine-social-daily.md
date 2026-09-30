@@ -1530,6 +1530,18 @@ garble — the identifying surface simply did not render). Prefer the composite-
 (ticket #5493 route a) or a pre-cleared library asset over further occlusion-angle generation rounds
 for this SKU, matching the treatment already given to Wicked Simply Hybrid and Botanical ON above.
 
+**Spectrum Essentials Rechargeable Silicone G-Spot Vibrator Purple**
+(`spectrum-essentials-rechargeable-silicone-g-spot-vibrator-purple`) — a shape-risk SKU matching the
+B-Swish Bthrilled pattern above: the real product is single-ended, curved, elongated, mint/teal, with
+an angled neck and a bulbous offset head, no secondary arm. Reused asset 683 (run 1121, 2026-09-28)
+BLOCKed at publish-gate rendering a purple rabbit-style dual-stimulator with a clitoral arm, and two
+separate fresh regenerations of the same handle (assets 774, 775, same run) each also rendered the
+wrong shape on a second attempt: row 348 a purple rabbit-style dual-stimulator, row 352 a short
+symmetrical dual-bulge/compact-wand silhouette. Four independent failures across reuse and fresh
+generation, two different wrong shapes, confirm this is a shape-risk product handle, not one bad
+cached asset. Treat as **reuse-degraded/fresh-degraded** until a working frame is found and logged in
+`social_media_assets`, matching the B-Swish and JO H2O treatment above.
+
 For any SKU on this list, the `social-art-director` brief MUST
 either occlude or angle the marked region out of frame (hand-over-handle grip, band turned away,
 composite the real plate over the marked segment) OR the run prefers a clean-bodied product for that
@@ -2418,9 +2430,11 @@ curl -s -X POST "$BASE_URL/api/team/suggestion" \
   -d '{"op":"list","targetTeam":"social","status":"approved","orderBy":"age"}'
 ```
 
-Act on up to **3 per run** for `process`/`strategy` rows, oldest first, and only what this run can
-actually execute within the gates it already obeys. Close each one you did execute so tomorrow's
-run does not re-read it:
+Act on up to **8 per run** for `process`/`strategy` rows (raised from 3, ticket #12094/#12364: the
+approved process/campaign/promo backlog reversed from draining to growing against the old 3-per-run
+ceiling once it reached 78 rows deep against ~3-5 live social runs/day plus one content run/day),
+oldest first, and only what this run can actually execute within the gates it already obeys. Close
+each one you did execute so tomorrow's run does not re-read it:
 
 ```bash
 -d '{"op":"transition","id":<id>,"to":"applied","actor":"agent:social-media-manager","note":"<what changed>"}'
@@ -2436,8 +2450,9 @@ are READ at Step 2 item 10, before drafting; this step is where their bookkeepin
   with the draft id in the note.
 - **Age out honestly.** A product-launch signal older than 14 days is no longer "new"; close it
   `applied` with a note saying it aged past the what's-new window without a slot (that is the
-  system deciding, which is the point; it is not a failure). Do this for up to 5 aged rows per run
-  so the queue converges instead of growing at the detectors' filing rate.
+  system deciding, which is the point; it is not a failure). Do this for up to **12** aged rows per
+  run (raised from 5, ticket #12094/#12364, same backlog-inflow reasoning as the cap above) so the
+  queue converges instead of growing at the detectors' filing rate.
 - **`campaign` and `promo` rows can be closed to `applied` by a run.** PR #789 (the
   `RUN_CLOSE_KINDS` change) merged 2026-08-20 and added `campaign`/`promo` to the set a run may
   transition (`app/lib/team.server.ts:1515`: `RUN_CLOSE_KINDS = ['process', 'strategy', 'campaign',
