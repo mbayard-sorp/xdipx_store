@@ -67,3 +67,35 @@ describe('EmphasizedHeading', () => {
       .toContain('<em class="em em-on-dark">deciding</em>')
   })
 })
+
+/**
+ * Trailing-symbol and whitespace handling in the last-word fallback. This path
+ * used to run only on a handful of hardcoded headings; since ticket #12340 it
+ * runs on every published rail heading, which is exactly where an Emma-voice
+ * line is most likely to end on a ♥ (tech-architect, run 1162).
+ */
+describe('EmphasizedHeading last-word fallback picks a word, not a glyph', () => {
+  const html = (el: React.ReactElement) => renderToStaticMarkup(el)
+
+  it.each([
+    ['Chosen for how they feel.', 'feel', '.'],
+    ['Where do you want to start?', 'start', '?'],
+    ['Hand over the remote ♥', 'remote', ' ♥'],
+    ['Find your fit →', 'fit', ' →'],
+    ['Under thirty, and every one of them packs a real buzz…', 'buzz', '…'],
+  ])('%s → italicizes %s', (text, word) => {
+    const out = html(<EmphasizedHeading text={text} />)
+    expect(out).toContain(`<em class="em">${word}</em>`)
+    expect(out.match(/<em /g)).toHaveLength(1)
+  })
+
+  it('keeps the trailing symbol outside the em, and the text intact', () => {
+    expect(html(<EmphasizedHeading text="Hand over the remote ♥" />))
+      .toBe('Hand over the <em class="em">remote</em> ♥')
+  })
+
+  it('never italicizes an empty string on a double space', () => {
+    expect(html(<EmphasizedHeading text="Two  spaces here." />))
+      .toBe('Two spaces <em class="em">here</em>.')
+  })
+})

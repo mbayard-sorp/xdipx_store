@@ -94,24 +94,13 @@ const src = readFileSync(
 )
 
 describe('storefront rail header takes the v3 type motifs', () => {
-  it('sets the See-all CTA in font-body, matching the Nº 03 grid See-all', () => {
-    // Doctrine §2 assigns CTA text to font-body. This was the only CTA on the
-    // storefront rendered in the Newsreader display serif.
-    expect(src).toContain("storefront ? { fontFamily: 'var(--font-body)' }")
-  })
-
-  it('renders the eyebrow through the mono .kicker class', () => {
-    // It rendered in DM Sans semibold, making the published rails the only
-    // bands on the storefront whose section label was not mono.
-    expect(src).toMatch(/storefront\s*\n?\s*\?\s*`kicker/)
-  })
-
-  it('renders the heading through EmphasizedHeading, not a bare string', () => {
-    // Doctrine §2: exactly one plum-italic emphasis word per headline. Every
-    // other storefront h2 already goes through this component.
-    expect(src).toContain('<EmphasizedHeading text={heading} onDark={dark} />')
-  })
-
+  // The rendered assertions for the kicker, the emphasis word and the CTA type
+  // live in EmmaCuratedRail.ssr.test.tsx, against real component output. They
+  // used to be duplicated here as source greps and were dropped: one of them
+  // broke on a formatting change while the behaviour was untouched, which is
+  // the failure mode tech-architect and qa-reviewer both named (run 1162). The
+  // one thing left here is the negative case, which has no rendered surface to
+  // assert against because nothing on the storefront renders legacy chrome.
   it('leaves the legacy chrome branch on the old treatment', () => {
     expect(src).toContain("text-xs font-semibold uppercase tracking-[0.18em] mb-1")
   })

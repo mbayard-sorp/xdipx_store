@@ -41,9 +41,21 @@ export function EmphasizedHeading({ text, emphasis, onDark = false }: { text: st
   const trimmed = text.trim()
   const parts = emphasis ? emphasisParts(trimmed, emphasis) : null
   if (parts) return <>{parts.before}<em className={emClass}>{parts.match}</em>{parts.after}</>
-  const trailing = trimmed.match(/[.?!]$/)?.[0] ?? ''
-  const core = trailing ? trimmed.slice(0, -1) : trimmed
-  const words = core.split(' ')
+  // Strip trailing punctuation AND the brand motifs an Emma heading can end on,
+  // so the italic word is a word. This used to be `[.?!]` only, which was
+  // survivable while the fallback ran on a handful of hardcoded headings; every
+  // published rail heading now takes this path, and a heading ending in `♥` or
+  // `→` would have set the glyph in plum italic (tech-architect, run 1162).
+  // Split on /\s+/ for the same reason: `split(' ')` italicizes an empty string
+  // on a double space.
+  // `\s*` in front, so the space that separated the glyph from the last word is
+  // carried out with it rather than swallowed ("...remote♥"). Runs of internal
+  // whitespace collapse to one space, which is the only way the rendered text
+  // differs from the input, and is better than the old `split(' ')` behaviour of
+  // italicizing an empty string.
+  const trailing = trimmed.match(/\s*[.?!…♥→"”'’)\]]+$/)?.[0] ?? ''
+  const core = trailing ? trimmed.slice(0, -trailing.length) : trimmed
+  const words = core.split(/\s+/).filter(Boolean)
   if (words.length < 2) return <>{trimmed}</>
   const last = words.pop() as string
   return <>{words.join(' ')} <em className={emClass}>{last}</em>{trailing}</>

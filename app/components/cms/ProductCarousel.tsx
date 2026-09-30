@@ -147,19 +147,31 @@ export function ProductCarousel({
           <div className="min-w-0 flex-1">
             {eyebrow && (
               /* Storefront chrome takes the mono `.kicker` motif every other
-                 section label on the page uses (app.css §11, doctrine §2).
-                 It rendered in DM Sans semibold here, so the three published
-                 rails were the only bands on the storefront whose kicker was
-                 not mono (design-critic run 1136, ticket #12340). `.kicker`
-                 carries its own color, so only the dark ground overrides it.
-                 Legacy chrome is untouched. */
+                 section label on the page uses (app.css §11, doctrine §2). It
+                 rendered in DM Sans semibold here, so the published rails were
+                 the only bands on the storefront whose section label was not
+                 mono (design-critic run 1136, ticket #12340).
+
+                 On a DARK rail it takes the explicit mono treatment instead,
+                 which is what every other dark band on the storefront already
+                 does (StorefrontHome's ink closer: `text-[11px] uppercase
+                 tracking-[0.18em]` + the MONO style). `.kicker` cannot be used
+                 there: it is defined unlayered in app.css, so its own
+                 `color: var(--color-ink-3)` BEATS a Tailwind `text-white/60`
+                 from `@layer utilities`, and the eyebrow would render ink-3 on
+                 ink at roughly 2.7:1 (qa-reviewer, run 1162, measured in the
+                 built CSS). Reproducing the motif with utilities avoids a
+                 specificity fight and leaves `.kicker` unchanged for the rest
+                 of the site. Legacy chrome is untouched. */
               <Reveal
                 as="p"
                 variant="up"
                 index={0}
                 className={
                   storefront
-                    ? `kicker mb-1 block ${dark ? 'text-white/60' : ''}`
+                    ? dark
+                      ? 'mb-1 block font-mono text-[10px] uppercase tracking-[0.18em] text-white/60'
+                      : 'kicker mb-1 block'
                     : `text-xs font-semibold uppercase tracking-[0.18em] mb-1 ${dark ? 'text-white/60' : 'text-ink-3'}`
                 }
               >

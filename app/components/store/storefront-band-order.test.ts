@@ -246,8 +246,10 @@ describe('Nº 03 anchor grid default heading — no fabricated proof (ticket #46
   })
 
   it('the emphasis phrase is actually present in the heading (renders cleanly)', () => {
-    // EmphasizedHeading drops the <em> entirely when the emphasis word is
-    // absent, so a mismatch would silently strip the plum styling.
+    // A mismatch no longer strips the plum styling outright -- since ticket
+    // #12340, EmphasizedHeading degrades to italicizing the last word -- but
+    // the DEFAULT heading should still emphasize the word it was written to
+    // emphasize, not whatever happens to end the sentence.
     expect(ANCHOR_GRID_DEFAULT_HEADING).toContain(ANCHOR_GRID_DEFAULT_EMPHASIS)
     expect(emphasisParts(ANCHOR_GRID_DEFAULT_HEADING, ANCHOR_GRID_DEFAULT_EMPHASIS)).not.toBeNull()
   })
