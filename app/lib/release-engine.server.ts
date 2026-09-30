@@ -130,6 +130,17 @@ export const AGENT_BRANCH_PREFIXES: readonly string[] = [
 /** Revert branches the engine opens for itself. */
 export const REVERT_BRANCH_PREFIX = 'revert/pr-'
 
+/**
+ * The only branch this engine will ever squash-merge INTO (ticket
+ * #release-engine-no-baseref-validation). `squashMergePullRequest` merges into
+ * whatever the PR's current base ref is, not necessarily this branch, so
+ * `evaluatePullRequest` compares `facts.baseRef` against it before anything
+ * merges. A stacked PR whose base is a feature branch (a deliberate pattern for
+ * a direct follow-up PR) must never merge unretargeted, even once its own gates
+ * are all green.
+ */
+export const DEFAULT_BASE_BRANCH = 'main'
+
 /** The required CI check, from .github/workflows/ci.yml (job id `check`). */
 export const REQUIRED_CHECK = 'check'
 
@@ -386,6 +397,13 @@ export interface TicketFacts {
 export interface PullRequestFacts {
   number: number
   headRef: string
+  /**
+   * The PR's current base ref, from GitHub. Compared against
+   * `DEFAULT_BASE_BRANCH`: `squashMergePullRequest` merges into whatever this
+   * is, so a PR left pointed at a stale feature branch (its parent merged
+   * without the base ever being retargeted) must never reach `action: 'merge'`.
+   */
+  baseRef: string
   /** Current head commit sha, compared against `ticket.verifiedHeadSha` (#10502). */
   headSha: string
   /** PR title, consulted ONLY for the WIP marker in the conditional undraft
@@ -462,6 +480,7 @@ export type ReleaseAction =
 
 export type ReleaseReasonCode =
   | 'protected'
+  | 'wrong-base'
   | 'needs-owner-label'
   | 'draft'
   | 'draft-auto-ready'
@@ -768,6 +787,23 @@ export function evaluatePullRequest(facts: PullRequestFacts): ReleaseDecision {
         + facts.classification.files.slice(0, 6).join(', '),
       protectedFiles: facts.classification.files,
       protectedGlobs: facts.classification.globs,
+    }
+  }
+
+  // 1b. Base ref. A PR pointed at anything but the default branch would merge
+  // into that branch, not main, if every other gate below passed — silently,
+  // since GitHub reports the merge as a normal success either way. This is
+  // deliberately a skip, not an escalation: a stacked PR (base = another
+  // ticket's branch) is a legitimate, common pattern that resolves itself once
+  // the parent PR merges and something retargets this one to
+  // `DEFAULT_BASE_BRANCH`; nothing here does that automatically.
+  if (facts.baseRef !== DEFAULT_BASE_BRANCH) {
+    return {
+      ...base,
+      action: 'skip',
+      code: 'wrong-base',
+      reason: `base ref is '${facts.baseRef}', not '${DEFAULT_BASE_BRANCH}'; merging would not reach `
+        + `${DEFAULT_BASE_BRANCH}`,
     }
   }
 
@@ -1974,6 +2010,7 @@ async function gatherFacts(
   return {
     number: pr.number,
     headRef: pr.headRef,
+    baseRef: pr.baseRef,
     headSha: pr.headSha,
     title: pr.title,
     ageMs: ageMsFromTimestamp(pr.updatedAt),
