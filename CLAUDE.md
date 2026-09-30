@@ -81,7 +81,7 @@ Build and test at 375px first. Most traffic will be mobile. Use responsive class
 | Email | Klaviyo |
 | AI Copy | Anthropic Claude API (`claude-sonnet-4-6`) |
 | AI Image | Google Imagen via Vertex AI |
-| Payments | Segpay or Verotel (high-risk — NOT Stripe/PayPal) |
+| Payments | Shopify Payments, with Shop Pay (owner confirmed 2026-09-30; Segpay/Verotel was the original plan and never went live). Shopify Payments' terms restrict adult products, so treat processor standing as a live account-health risk: see docs/ads-policy.md §Shop app and Shop Campaigns |
 | Styling | Tailwind CSS v4 (CSS-first config) |
 | Cart State | Shopify Storefront API cart mutations |
 | Animations | Motion (formerly Framer Motion) |
