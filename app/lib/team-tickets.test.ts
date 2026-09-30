@@ -743,7 +743,7 @@ describe('markSuggestion (legacy agent-editor path)', () => {
     expect(await status(markSuggestion(7, 'applied', 'ref'))).toBe(409)
   })
 
-  // #12480: applyRef alone was invisible to the verdict pin, so every
+  // #12639: applyRef alone was invisible to the verdict pin, so every
   // agent-editor PR was verified unpinned and bounced by the engine.
   it('records the PR as a pr-kind link when marking pr_open', async () => {
     h.state.updates.push([{ id: 7 }])
@@ -2002,7 +2002,7 @@ describe('transitionSuggestion: pinning the QA verdict to a commit', () => {
     expect(h.state.patches[0]!['status']).toBe('verified')
   })
 
-  // #12480: QA sends the pr link on the verify call itself, and that link is
+  // #12639: QA sends the pr link on the verify call itself, and that link is
   // written after the pin runs. Reading only the stored link missed it.
   it('pins from a pr link arriving on the verify call, without a stored link', async () => {
     seedTicket({ status: 'in_review' })
@@ -2014,7 +2014,7 @@ describe('transitionSuggestion: pinning the QA verdict to a commit', () => {
     expect(linkWrites()).toContainEqual({ suggestionId: 42, kind: 'commit', ref: HEAD, state: 'verified' })
   })
 
-  // #12480: agent-editor's mark op historically set only applyRef.
+  // #12639: agent-editor's mark op historically set only applyRef.
   it('falls back to applyRef when no pr link exists anywhere', async () => {
     seedTicket({ status: 'in_review', applyRef: PR_LINK })
     seedPrLink(null)

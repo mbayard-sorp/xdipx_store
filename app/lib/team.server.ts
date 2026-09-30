@@ -1648,7 +1648,7 @@ export async function markSuggestion(
       { status: 409 },
     )
   }
-  // Record the PR as a `pr` link too, not only in applyRef (ticket #12480).
+  // Record the PR as a `pr` link too, not only in applyRef (ticket #12639).
   // The verdict pin, the engine's PR-to-ticket lookup, and the out-of-band
   // sweep all read suggestion_links, so a row that only carried applyRef was
   // invisible to all three. Best-effort: the status write above has committed.
@@ -2413,7 +2413,7 @@ function verdictPinNote(detail: string): string {
  *
  * The PR to pin is resolved in this order: a `pr` link arriving on THIS
  * verify call, then the row's stored `pr` link, then `applyRef` (ticket
- * #12480). The stored link alone was not enough: the verify call's own links
+ * #12639). The stored link alone was not enough: the verify call's own links
  * are written after this runs, and agent-editor's `mark pr_open` sets only
  * `applyRef`. So every agent-editor row was verified with no pin, the engine
  * failed it closed and bounced it back to `approved`, and QA never lists
