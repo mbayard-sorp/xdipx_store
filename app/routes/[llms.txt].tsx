@@ -139,9 +139,16 @@ export async function loader() {
   if (products.length > 0) {
     lines.push('## Products')
     lines.push('')
+    // `[Name](url): details` per the llms.txt spec. The tagline is the PDP's
+    // one-line positioning; the SEO description is the fallback. Bare links
+    // gave an answer engine nothing to match a query against without a fetch.
     for (const p of products) {
       const name = (p.title ?? humanizeHandle(p.handle)).replace(/[[\]]/g, '')
-      lines.push(`- [${name}](${BASE_URL}/products/${p.handle}.md)`)
+      const blurb = (p.tagline ?? p.seoDescription ?? '').replace(/\s+/g, ' ').trim()
+      const desc = blurb ? truncate(blurb, 120) : undefined
+      lines.push(desc
+        ? `- [${name}](${BASE_URL}/products/${p.handle}.md): ${desc}`
+        : `- [${name}](${BASE_URL}/products/${p.handle}.md)`)
     }
     lines.push('')
   }

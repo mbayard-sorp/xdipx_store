@@ -234,9 +234,59 @@ function portableTextToMarkdown(body: unknown): string {
 export interface ProductMarkdownOpts {
   /** ISO date string for last-updated footer */
   updatedAt?: string
+  /**
+   * Product FAQs (Sanity). Rendered as `## Question` / answer pairs BEFORE the
+   * footer, mirroring the FAQPage JSON-LD on the HTML PDP. They used to be
+   * appended by the route after the footer, which put the canonical line and
+   * "Last updated" in the middle of the document.
+   */
+  faqs?: { question: string; answer: string }[]
 }
 
-export function productToMarkdown(deal: Deal, _opts: ProductMarkdownOpts = {}): string {
+/**
+ * The citable-facts block answer engines lift from a product page: identifiers,
+ * price per variant, availability, and the store policies that decide whether
+ * a shopper is told "ships discreetly, returnable". Every line here restates a
+ * fact the HTML PDP already publishes in its Product JSON-LD (gtin/mpn/sku,
+ * per-variant Offer, MerchantReturnPolicy, OfferShippingDetails) or in the FAQ,
+ * so the markdown twin and the HTML page can never disagree.
+ */
+function productKeyFacts(deal: Deal): string[] {
+  const lines: string[] = ['## Key facts', '']
+  if (deal.brand) lines.push(`- Brand: ${deal.brand}`)
+  if (deal.sku) lines.push(`- SKU: ${deal.sku}`)
+  const gtin = deal.variants?.find(v => v.barcode)?.barcode
+  if (gtin) lines.push(`- GTIN: ${gtin}`)
+  if (deal.nalpacSku) lines.push(`- MPN: ${deal.nalpacSku}`)
+  if (Array.isArray(deal.category) && deal.category.length > 0) {
+    lines.push(`- Category: ${deal.category.join(', ')}`)
+  }
+
+  const variants = deal.variants ?? []
+  if (variants.length > 1) {
+    lines.push('- Variants:')
+    for (const v of variants) {
+      const inStock = v.availableForSale && v.quantityAvailable > 0
+      const label = v.title && v.title !== 'Default Title' ? v.title : 'Standard'
+      const price = parseFloat(v.price)
+      const priceStr = Number.isFinite(price) ? `$${price.toFixed(2)}` : 'price on page'
+      lines.push(`  - ${label}: ${priceStr}, ${inStock ? 'in stock' : 'out of stock'}`)
+    }
+  }
+
+  if (deal.rating && deal.rating.count > 0) {
+    lines.push(`- Customer rating: ${deal.rating.value.toFixed(1)} out of 5 (${deal.rating.count} reviews)`)
+  }
+
+  lines.push('- Condition: new')
+  lines.push('- Ships to: United States, in plain unmarked packaging')
+  lines.push('- Returns: unopened items in original packaging within 30 days (hygiene restrictions apply to used products)')
+  lines.push('- Card statement reads: XDIPX')
+  lines.push('')
+  return lines
+}
+
+export function productToMarkdown(deal: Deal, opts: ProductMarkdownOpts = {}): string {
   const path = `/products/${deal.handle}`
   const lines: string[] = []
 
@@ -263,6 +313,9 @@ export function productToMarkdown(deal: Deal, _opts: ProductMarkdownOpts = {}): 
     `The ${deal.seoTitle} is a ${deal.brand ? `${deal.brand} ` : ''}wellness product.${forLine} Current price: ${priceStr}. ${availability}`,
   )
   lines.push('')
+
+  // Citable facts (identifiers, variants, policies) before the editorial voice
+  lines.push(...productKeyFacts(deal))
 
   // Emma editorial
   if (deal.tagline) {
@@ -313,6 +366,19 @@ export function productToMarkdown(deal: Deal, _opts: ProductMarkdownOpts = {}): 
     lines.push('')
     for (const step of deal.careInstructions) lines.push(`- ${step}`)
     lines.push('')
+  }
+
+  // FAQs: answer-shaped `## Question` / answer pairs, before the footer
+  if (opts.faqs && opts.faqs.length > 0) {
+    lines.push('## Frequently asked questions')
+    lines.push('')
+    for (const faq of opts.faqs) {
+      if (!faq.question?.trim() || !faq.answer?.trim()) continue
+      lines.push(`## ${faq.question.trim()}`)
+      lines.push('')
+      lines.push(faq.answer.trim())
+      lines.push('')
+    }
   }
 
   // Footer
