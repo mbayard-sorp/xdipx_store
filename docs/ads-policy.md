@@ -11,8 +11,9 @@ API rejects proposals without one). The creative rules in §Creative apply to **
 
 Policies drift. Last verified **2026-07** against the platform sources listed at the bottom, except
 the Google sections (platform matrix row, §Google network eligibility, §Merchant Center), which were
-re-verified **2026-08-08**, and §Meta Shops, which was added **2026-08-15** from the store's own
-live channel state. If a proposal hinges on a policy detail, re-verify against the live
+re-verified **2026-08-08**, §Meta Shops, which was added **2026-08-15** from the store's own
+live channel state, and §Shop app and Shop Campaigns, added **2026-09-30** from Shopify's help
+center and the store's live Shop publication. If a proposal hinges on a policy detail, re-verify against the live
 policy page that run and cite it in the `policyCheck`.
 
 ---
@@ -28,12 +29,14 @@ policy page that run and cite it in the `policyCheck`.
 | **Reddit** | Effectively prohibited for adult products in its ads program. | Organic community participation where subreddit rules allow (unpaid, social team's judgment). | Low spend exposure since there's no viable paid path. |
 | **Adult ad networks** (e.g. category-specialist networks) | **Allowed — it's their business.** | Display/native on adult and adjacent inventory. Vet each network's traffic quality and brand-safety before proposing; model conservative conversion rates. | Quality/fraud risk, not policy risk. Attribution via UTMs is mandatory. |
 | **Owned + earned channels** | No gatekeeper. | Email/SMS to consented lists (the email team), SEO/AEO (already invested), affiliates and creator/newsletter sponsorships (disclosure required, creator's platform rules apply), the referral program once built. | Lowest risk, best margins — the default recommendation when paid math is thin. |
+| **Shopify Shop** (Shop app, Shop Campaigns) | **Prohibited on Shop's own terms, for most of the catalog.** Shop's prohibited-products list names "Mature and adult content or services, or products that have nudity", and Shop Campaigns requires Shopify Payments, whose terms bar adult products. Shopify, not xdipx, buys third-party placements (Meta, Google, X, Snap, Pinterest), several of which ban the category outright. See §Shop app and Shop Campaigns. | At most a narrow personal-care set (lubricant, massage oil, toy cleaner), product-as-object imagery, education register, third-party placements off. Owner-run in Shopify admin. | **Critical.** The downside is not a rejected ad. It is losing the Shop channel and, through the Shopify Payments dependency, the store's payment processing with funds held. |
 | **Etsy** | Not an ad platform for this store; the question is whether xdipx's catalog can list there at all. **The Nalpac-fulfilled physical toy catalog cannot, in any form.** See §Etsy for the two independent policy blockers. | A narrow, digital-only, design-original lane (adult party games, printables, digital art), disconnected from the Nalpac catalog and from Shopify inventory. Manual, owner-run; not an automated channel. | **High if physical toys are listed** (policy-prohibited item type, twice over). **Low** for the digital-only lane if kept to original designs with proper mature-content tagging. |
 
 **Channel priority for proposals:** (1) owned/earned, (2) Google restricted-serving Search,
 (3) vetted adult networks and newsletter/creator sponsorships, (4) Google Shopping via Merchant
 Center once §Merchant Center is satisfied, (5) Meta only for genuinely health-framed SKUs that pass
-the carve-out honestly. Never TikTok; never X paid.
+the carve-out honestly. Never TikTok; never X paid. Shop Campaigns sits outside this ladder: it is
+an owner-run surface under §Shop app and Shop Campaigns, and `ads-manager` never proposes widening it.
 
 ## Google network eligibility (the rule that kills campaign types)
 
@@ -156,6 +159,99 @@ What follows from this:
   Facebook & Instagram channel in Shopify instead.
 
 Re-verify the counts before citing them. They move as Meta works through the review queue.
+
+## Shop app and Shop Campaigns (Shopify)
+
+Added 2026-09-30 on owner direction, verbatim: "I've started to run ads on Shopify's Shop
+platform. We need a strategy for images and ads to leverage the platform within their guidelines."
+This is a fourth rulebook, separate from the ad policies in §Platform matrix, the community
+standards in §Organic social, and Meta's Commerce Policies in §Meta Shops. A verdict under one says
+nothing about the others.
+
+### What Shopify's own rules say (read 2026-09-30)
+
+- **Shop's prohibited-products list** names "Mature and adult content or services, or products that
+  have nudity". Shop's content policy (shop.app/content-policies, read via search on 2026-09-30
+  because the page rate-limited a direct fetch) separately bars content that is sexually
+  suggestive or intended to arouse. There is no restricted-with-conditions tier for adult products on Shop the
+  way Google has one; the category is on the prohibited list.
+- **Shop Campaigns eligibility** requires Shopify Payments to be set up on the store, "Sell directly
+  on Shop with direct checkout" on, Shopify Network Intelligence on, and compliance with the Shop
+  merchant eligibility rules, the Shop Campaigns Merchant Terms, the Shopify Acceptable Use Policy,
+  and the **Shopify Payments Terms of Service**.
+- **Shopify Payments.** Its eligibility page prohibits products with sexually explicit content, and
+  widely cited summaries of its US terms list adult toys among prohibited businesses (the US terms
+  themselves were not re-read at the primary source on 2026-09-30; confirm before relying on
+  either reading). That exposure is why this store was specified on a high-risk processor in the
+  first place (CLAUDE.md tech stack). If Shop Campaigns is running, Shopify Payments is running,
+  and the catalog is being sold through a processor whose terms very likely bar it.
+- **Placements.** Shop Campaigns ads run on the Shop app, the Shop website, the Shopify Product
+  Network (other merchants' storefronts), and **optional third-party placements** where Shopify
+  buys the media on Meta, Google, X, Snap, and Pinterest. §Platform matrix records that Meta, X,
+  and TikTok-class platforms prohibit this category in ads. Shopify being the advertiser of record
+  does not make our products eligible there.
+- **Creative is assembled from catalog data.** The Merchant Terms license Shopify to use, reproduce,
+  and display the merchant's materials (product images, titles, descriptions) in ads for up to a
+  year after the campaign ends. In practice the ad image is the product's Shopify media and the ad
+  copy is the product title. There is no separate ad-creative review we control, which means **the
+  catalog is the creative.**
+- **Enforcement.** Shopify may end the Merchant Terms "at any time for any reason", and Shop may
+  redact content or delist a store. The costliest failure is not the channel. It is a Shopify
+  Payments review that terminates processing and holds funds, which takes checkout down for every
+  channel at once.
+
+### The store's state (measured 2026-09-30)
+
+- The **Shop** publication exists on the store and the catalog is published to it wholesale. A
+  sample of the 25 most recently updated active products was 25 of 25 on Shop, including realistic
+  dildos, a realistic torso stroker, anal plugs, penis pumps, and strokers: exactly the set Shop's
+  "products that have nudity" line reaches, since an anatomical product is itself the depiction.
+- Shop Pay is an enabled wallet. The store is on the Basic plan.
+- Which payment gateway processes orders is not recorded anywhere in this repo (flagged by the
+  2026-07-22 drift audit). The owner is the source of truth; record the answer here when known.
+
+### The rules (binding)
+
+1. **Shop Campaigns is owner-run, owner-scoped, and never widened by an agent.** `ads-manager` does
+   not propose Shop Campaigns, does not propose adding products to the Shop publication, and does
+   not size Shop budgets. It does retro any live Shop Campaigns spend the owner reports (log as
+   `platform:'other'`, `name` prefixed `shop-`), the same way it retros any launched row.
+2. **Third-party placements stay off.** They put our products on platforms whose ad policies ban
+   the category, under a buyer who can drop us for it.
+3. **The eligible set is personal care, not pleasure devices.** If the owner keeps Shop Campaigns
+   running, scope it to products a general-audience marketplace sells beside skincare: water- and
+   silicone-based lubricants, massage oils and candles, toy cleaners. Everything anatomical
+   (realistic dildos, strokers, torsos, dolls), everything anal, pumps and extenders, restraints
+   and fetish gear, and anything whose title names an act or a body part stays **unpublished from
+   the Shop channel**, not merely excluded from a campaign. Vibrators and wands are the grey zone:
+   they are adult products under Shop's own list, so they are out unless Shopify confirms in writing
+   that they are eligible. Unpublish in Shopify (Products, Sales channels, Shop), never by deleting
+   anything.
+4. **Image rule for any product published to Shop.** The product's Shopify media position 0 is
+   what Shop shows and what a Shop Campaigns ad shows, so for that set it must be paid-clean:
+   - Product as object on a clean or single-tint ground (design doctrine §4 Archetype B, or a clean
+     packshot). No body, no skin, no hand near a body, no on-skin frame under
+     `docs/store-team/instagram-campaigns.md` §3.2c, no implied use. The on-skin licence the voice
+     charter extended to owned surfaces on 2026-09-20 stops at Shopify product media for anything
+     published to Shop; those frames live in `mood_image_url`, Sanity, and site-only surfaces.
+   - Never the Nalpac packaging shot as primary. Retail boxes frequently carry model photography and
+     baked-in text; `scripts/sweep-packshot-primaries.ts` finds and fixes them.
+   - No text in pixels, no price or discount in the image, no stars or badges baked in.
+   - Every Shopify product image carries alt text that reads as a product description.
+   - No product video attached as Shopify media (`attachVideoToProduct` from the video studio or the
+     LTX/Veo upload routes) on a Shop-published product unless it meets the same paid ceiling:
+     product as object, no body.
+5. **Words on Shop are paid-ad words.** The title and description Shop pulls are the storefront's
+   own, so for the Shop-published set they must already read at the paid-ads register in
+   `docs/emma-voice.md` (3-4, education and mechanism, no pleasure claim, no act named). A lubricant
+   titled by its base, size, and brand passes; a title that sells an orgasm does not. Never create a
+   Shop-only title that says something different from the PDP to slip review; that is the
+   disguised-listing pattern §Etsy and §Organic social already ban.
+6. **Offers.** Shop Campaigns pays per acquired customer. Any discount it carries follows §Creative's
+   MAP rule and the voice charter's no-urgency rule.
+7. **A Shop notice is an account-health event.** Any Shop delisting, product redaction, Shop
+   Campaigns rejection, or Shopify Payments inquiry is surfaced to the owner the same day and
+   stops any further Shop work, per §Escalation.
 
 ## Etsy
 
@@ -289,6 +385,7 @@ killed. "It'll probably slip through review" is never a compliance case.
 - TikTok: [Adult content ad policy](https://ads.tiktok.com/help/article/tiktok-ads-policy-adult-content)
 - X: [Adult or sexual products and services ads policy](https://business.twitter.com/en/help/ads-policies/ads-content-policies/adult-or-sexual-products-and-services), [Shopping policies](https://help.x.com/en/rules-and-policies/shopping-policies)
 - Google (re-verified 2026-08-08): [Sexual content ad policy](https://support.google.com/adspolicy/answer/6023699), [Merchant Center adult-oriented content](https://support.google.com/merchants/answer/6150138), [Advertiser verification](https://support.google.com/adspolicy/answer/9703665)
+- Shopify (read 2026-09-30): [Prohibited products on Shop](https://help.shopify.com/en/manual/online-sales-channels/shop/eligibility/prohibited-products), [Shop Campaigns eligibility](https://help.shopify.com/en/manual/online-sales-channels/shop/shop-campaigns/eligibility), [Shop Campaigns overview](https://help.shopify.com/en/manual/online-sales-channels/shop/shop-campaigns), [Shop Campaigns Merchant Terms](https://www.shopify.com/legal/shop-campaigns-merchant-terms), [Shopify Payments eligibility](https://help.shopify.com/en/manual/payments/shopify-payments/onboarding/eligibility), [Content on Shop](https://shop.app/content-policies)
 
 Organic (community standards, not ad standards):
 
