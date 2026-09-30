@@ -263,10 +263,14 @@ Create the `blogPost` idempotently: doc `_id` is `blogPost-${slug}`, `createIfNo
 - `seoTitle` (max 70 chars) and `seoDescription` (max 160 chars), both filled.
 - `relatedPosts` (max 3, when relevant); `featured` and `noIndex` default off.
 - `heroImage` + `heroImageAlt`: ask `media-manager` (reuse-first). The request MUST (a) state the
-  post's publishing category and (b) point at the §0 **hero router** in
+  post's publishing category, (b) point at the §0 **hero router** in
   `docs/notebook-team/image-brief.md`, which is binding: guides/comparisons/care/wellness-basics
   posts get the §0-P product hero (subject = one of the post's `blogProductEmbed` handles via its
-  real Shopify photo as ref image); real-talk/podcast-notes posts get the §0-H **human hero**.
+  real Shopify photo as ref image); real-talk/podcast-notes posts get the §0-H **human hero**; and
+  (c) tell media-manager to pass `--feature content-blog` on every `gen-notebook-art.ts` call for
+  this hero (ticket #11100). Without it the call defaults to `--feature notebook-images`, which is
+  correct for a masthead/category/series asset but silently splits a daily post's hero spend away
+  from `content-blog`, the feature `api_token_log` totals this routine's own cost under.
   On §0-H posts the hero request is a **structured payload**, not "category plus a pointer to
   the router" (owner direction 2026-08-11, ticket #2748). It carries all six fields:
   - `headline`: the post's title, verbatim (the hero stages this question);
