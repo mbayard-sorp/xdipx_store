@@ -41,21 +41,9 @@ export async function loader({ params }: LoaderFunctionArgs) {
 
       if (!deal) return null
 
-      let md = productToMarkdown(deal)
-
-      // Append FAQs if present
-      if (faqs && faqs.length > 0) {
-        const faqLines: string[] = ['', '## Frequently asked questions', '']
-        for (const faq of faqs) {
-          faqLines.push(`## ${faq.question}`)
-          faqLines.push('')
-          faqLines.push(faq.answer)
-          faqLines.push('')
-        }
-        md = md + faqLines.join('\n')
-      }
-
-      return md
+      // FAQs render inside the serializer so they land before the footer
+      // (canonical + last-updated), not after it.
+      return productToMarkdown(deal, { faqs: faqs ?? [] })
     })
   } catch (err) {
     if (err instanceof StorefrontUnavailableError) {
