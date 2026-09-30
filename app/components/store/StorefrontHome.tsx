@@ -37,6 +37,8 @@ import { FAQStructuredData } from '~/components/seo/FAQStructuredData'
 import { ItemListStructuredData } from '~/components/seo/ItemListStructuredData'
 import { Reveal } from '~/components/motion/Reveal'
 import { PanelDeck } from '~/components/home/panels/PanelDeck'
+import { EmphasizedHeading } from './EmphasizedHeading'
+import type { StorefrontGround } from '~/components/cms/ProductCarousel'
 import {
   BAND_NAMES,
   DEFAULT_BAND_ORDER,
@@ -100,6 +102,32 @@ const MONO = { fontFamily: 'var(--font-mono)' } as const
 /* No-image wayfinder tiles cycle these tints so an unfilled row still has
    rhythm instead of three grey plates. */
 const TILE_TINTS = ['bg-coral-soft', 'bg-plum-soft', 'bg-paper-3'] as const
+
+/* ── Rail band grounds (ticket #12340) ────────────────────────────────────
+   The published `emmaCuratedRail` blocks carry a Sanity `bgStyle` whose enum
+   predates the v3 palette: `white` and `cream` BOTH resolve to #FFFFFF now
+   that `cream` is a legacy alias of paper, and `mist`/`cream-2` is the only
+   other light value. The content team therefore had no lever that could break
+   up a run of rails, and on 2026-09-29 four consecutive bands (wayfinder,
+   under-$30 rail, wearables rail, glass rail) all rendered #FFFFFF, against
+   design-doctrine.md §1 ground alternation. The schema is additive-only, so
+   the ground is assigned here — the only place that knows a band's neighbours
+   — and threaded through ContentBlockRenderer. A deliberate `charcoal`/
+   `purple` rail is never re-tinted (see `railGroundClass`).
+
+   The first team rail sits between the Nº 03 anchor grid (paper) and Meet Emma
+   (paper-2), so it takes the third light ground rather than repeating either.
+   The Nº 06 edit rails follow the wayfinder band (paper), so they alternate
+   starting at paper-2: no two adjacent bands in the run share a ground, at any
+   rail count. */
+const TEAM_RAIL_GROUND: StorefrontGround = 'paper-3'
+const EDIT_RAIL_GROUNDS: readonly StorefrontGround[] = ['paper-2', 'paper'] as const
+
+/** The ground for the i-th Nº 06 edit rail. The modulo makes the index total,
+    which the readonly-array element type cannot express on its own. */
+export function editRailGround(i: number): StorefrontGround {
+  return EDIT_RAIL_GROUNDS[i % EDIT_RAIL_GROUNDS.length] as StorefrontGround
+}
 
 /* Ink scrim for text over a promo photo, shared by every band that overlays
    copy on CMS-supplied photography (ticket #8417). The old scrim was a single
@@ -462,45 +490,12 @@ function Hero({
    is the team's curated anchor collection (default best-sellers), falling back
    to the discovery best-of when that collection is empty or unreachable. */
 
-/** Split a heading around the first occurrence of an emphasis word/phrase.
-    Returns null when the emphasis is absent from the heading, so callers can
-    render the heading plain instead of appending a stray, unspaced <em> to
-    the end. Uses indexOf/slice (not split) so a heading containing the
-    emphasis word more than once is never truncated -- only the first
-    occurrence is wrapped, and everything after it (including any repeat)
-    survives in `after`. */
-export function emphasisParts(text: string, emphasis: string): { before: string; match: string; after: string } | null {
-  const idx = text.indexOf(emphasis)
-  if (idx === -1) return null
-  return { before: text.slice(0, idx), match: emphasis, after: text.slice(idx + emphasis.length) }
-}
-
-/** Render a heading with a given word/phrase italicized in the plum emphasis
-    style, matching the editorial headline treatment across the page. When
-    `emphasis` is omitted, falls back to italicizing the last word. When
-    `emphasis` is provided but not actually present in `text`, renders the
-    heading plain -- no <em> is appended, so a mismatched Sanity emphasis
-    field can never garble the published heading.
-
-    `onDark` switches the emphasis word to `.em-on-dark` (the lighter plum that
-    clears the doctrine contrast floor on ink/scrimmed grounds); pass it whenever
-    the heading sits on a dark or photo-scrimmed surface. Base `.em` plum only
-    clears ~2.48:1 there, under the large-display 3:1 floor. */
-function EmphasizedHeading({ text, emphasis, onDark = false }: { text: string; emphasis?: string | undefined; onDark?: boolean }) {
-  const emClass = onDark ? 'em em-on-dark' : 'em'
-  const trimmed = text.trim()
-  if (emphasis) {
-    const parts = emphasisParts(trimmed, emphasis)
-    if (!parts) return <>{trimmed}</>
-    return <>{parts.before}<em className={emClass}>{parts.match}</em>{parts.after}</>
-  }
-  const trailing = trimmed.match(/[.?!]$/)?.[0] ?? ''
-  const core = trailing ? trimmed.slice(0, -1) : trimmed
-  const words = core.split(' ')
-  if (words.length < 2) return <>{trimmed}</>
-  const last = words.pop() as string
-  return <>{words.join(' ')} <em className={emClass}>{last}</em>{trailing}</>
-}
+/* `emphasisParts` / `EmphasizedHeading` moved to ./EmphasizedHeading (ticket
+   #12340) so the CMS rail components can share the identical doctrine §2
+   treatment without closing an import cycle through this file. Re-exported
+   here so every existing importer (and storefront-band-order.test.ts) is
+   unchanged. */
+export { emphasisParts, EmphasizedHeading } from './EmphasizedHeading'
 
 /** Adapt a full Shopify product (team-rail fetch) to the lean grid-card shape.
     Only the fields StorefrontProductCard reads matter; the rest are inert. */
@@ -1445,7 +1440,11 @@ export function StorefrontHome({ featured, rails, anchorProducts, contentBlocks,
           seeAllLabel={firstTeamRail.ctaLabel || 'See all →'}
         />
       ) : (
-        <ContentBlockRenderer block={firstTeamRail} carouselProductMap={carouselProductMap} />
+        <ContentBlockRenderer
+          block={firstTeamRail}
+          carouselProductMap={carouselProductMap}
+          ground={TEAM_RAIL_GROUND}
+        />
       )
     ) : null,
 
@@ -1463,11 +1462,12 @@ export function StorefrontHome({ featured, rails, anchorProducts, contentBlocks,
        the products already shown in the Nº 03 grid. */
     emmasEdit: (
       <>
-        {restTeamRails.map(block => (
+        {restTeamRails.map((block, i) => (
           <ContentBlockRenderer
             key={block._key}
             block={block}
             carouselProductMap={carouselProductMap}
+            ground={editRailGround(i)}
           />
         ))}
         {teamRails.length === 0 && <EmmasEdit rails={editRails} />}

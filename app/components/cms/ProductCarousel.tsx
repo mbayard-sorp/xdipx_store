@@ -3,6 +3,7 @@ import { Link } from 'react-router'
 import type { LeanCardProduct } from '~/types'
 import type { ProductCarouselBlock } from '~/types/cms'
 import ProductTileMedia from '~/components/store/ProductTileMedia'
+import { EmphasizedHeading } from '~/components/store/EmphasizedHeading'
 import { Reveal } from '~/components/motion/Reveal'
 import { mapAllowsDiscountDisplay } from '~/lib/discount-badge'
 
@@ -25,7 +26,44 @@ interface ProductCarouselProps {
    * shadow + near-invisible border-cream-2). See `EmmaCuratedRail`.
    */
   chrome?: 'legacy' | 'storefront'
+  /**
+   * v3 ground tint for the band, storefront chrome only (ticket #12340). The
+   * Sanity `bgStyle` enum predates the v3 palette and cannot express the
+   * doctrine ground lock: `white` and `cream` BOTH resolve to #FFFFFF now that
+   * `cream` is a legacy alias, so four published rails in a row rendered four
+   * identical white bands and the content team had no lever to break them up.
+   * Passing `ground` lets the composing page assign the band tint per slot; it
+   * wins over `bgStyle` only for the light values (`white`/`cream`/`mist`),
+   * so a deliberate `charcoal`/`purple` rail is never silently re-tinted.
+   * Ignored entirely under legacy chrome.
+   */
+  ground?: StorefrontGround
   products: LeanCardProduct[]
+}
+
+/** The doctrine ground lock (docs/design-doctrine.md §1/§4). */
+export type StorefrontGround = 'paper' | 'paper-2' | 'paper-3' | 'coral-soft' | 'plum-soft'
+
+const GROUND_CLASSES: Record<StorefrontGround, string> = {
+  'paper':      'bg-paper',
+  'paper-2':    'bg-paper-2',
+  'paper-3':    'bg-paper-3',
+  'coral-soft': 'bg-coral-soft',
+  'plum-soft':  'bg-plum-soft',
+}
+
+/** bgStyle values a passed `ground` is allowed to override (all light). */
+const OVERRIDABLE_BG: ReadonlySet<string> = new Set(['white', 'cream', 'mist'])
+
+/** Resolve the band ground class for either chrome. Exported for the unit test
+    that pins the override precedence. */
+export function railGroundClass(
+  chrome: 'legacy' | 'storefront',
+  bgStyle: string,
+  ground?: StorefrontGround,
+): string {
+  if (chrome === 'storefront' && ground && OVERRIDABLE_BG.has(bgStyle)) return GROUND_CLASSES[ground]
+  return BG_CLASSES[bgStyle] ?? 'bg-white'
 }
 
 const BG_CLASSES: Record<string, string> = {
@@ -49,6 +87,7 @@ export function ProductCarousel({
   bgStyle: bgStyleProp,
   layout: layoutProp,
   chrome = 'legacy',
+  ground,
   products,
 }: ProductCarouselProps) {
   const heading  = block?.heading  ?? headingProp  ?? 'Products'
@@ -69,7 +108,7 @@ export function ProductCarousel({
   // whatever arrow the label carries.
   const displayCtaLabel = layout === 'carousel' ? ctaLabel.replace(/\s*→\s*$/, '') : ctaLabel
 
-  const bgClass = BG_CLASSES[bgStyle] ?? 'bg-white'
+  const bgClass = railGroundClass(chrome, bgStyle, ground)
   const dark = isDark(bgStyle)
   const storefront = chrome === 'storefront'
   // Light-mode scroll-arrow border: the legacy `border-cream-2` (#FAFAF9) is a
@@ -107,7 +146,23 @@ export function ProductCarousel({
         <div className="flex flex-wrap items-end justify-between gap-4 mb-6">
           <div className="min-w-0 flex-1">
             {eyebrow && (
-              <Reveal as="p" variant="up" index={0} className={`text-xs font-semibold uppercase tracking-[0.18em] mb-1 ${dark ? 'text-white/60' : 'text-ink-3'}`}>
+              /* Storefront chrome takes the mono `.kicker` motif every other
+                 section label on the page uses (app.css §11, doctrine §2).
+                 It rendered in DM Sans semibold here, so the three published
+                 rails were the only bands on the storefront whose kicker was
+                 not mono (design-critic run 1136, ticket #12340). `.kicker`
+                 carries its own color, so only the dark ground overrides it.
+                 Legacy chrome is untouched. */
+              <Reveal
+                as="p"
+                variant="up"
+                index={0}
+                className={
+                  storefront
+                    ? `kicker mb-1 block ${dark ? 'text-white/60' : ''}`
+                    : `text-xs font-semibold uppercase tracking-[0.18em] mb-1 ${dark ? 'text-white/60' : 'text-ink-3'}`
+                }
+              >
                 {eyebrow}
               </Reveal>
             )}
@@ -126,7 +181,16 @@ export function ProductCarousel({
               }
               style={{ fontFamily: 'var(--font-display)', fontWeight: storefront ? 400 : undefined }}
             >
-              {heading}
+              {/* Doctrine §2 wants exactly one plum-italic emphasis word per
+                  headline. Every other storefront h2 renders through
+                  EmphasizedHeading; the published rails rendered a bare string,
+                  so none of them carried the emphasis word (design-critic run
+                  1136, ticket #12340). No Sanity field holds an emphasis word
+                  for this block and the schema is additive-only, so the
+                  component's own last-word fallback supplies it -- the same
+                  fallback the Sanity-driven hero headline already uses.
+                  Legacy chrome keeps the plain string. */}
+              {storefront ? <EmphasizedHeading text={heading} onDark={dark} /> : heading}
             </Reveal>
           </div>
           <div className="flex items-center gap-2 shrink-0">
