@@ -8,6 +8,7 @@ import { EditorialTiles }     from './EditorialTiles'
 import { CategoryGrid }       from './CategoryGrid'
 import { ProductCarousel }    from './ProductCarousel'
 import { EmmaCuratedRail }    from './EmmaCuratedRail'
+import type { StorefrontGround } from './ProductCarousel'
 import { PlayTogetherBanner } from './PlayTogetherBanner'
 import { BrandLogoWall }      from './BrandLogoWall'
 import { Testimonials }       from './Testimonials'
@@ -21,6 +22,13 @@ interface ContentBlockRendererProps {
   block: ContentBlock
   carouselProductMap: Record<string, LeanCardProduct[]>
   bonusDealProduct?: Product | null
+  /**
+   * Per-slot v3 band tint for rail blocks (ticket #12340). Only the composing
+   * page knows what a band's neighbours are, so ground alternation is assigned
+   * there and threaded through; every other block type ignores it. Optional,
+   * so every existing call site is unchanged.
+   */
+  ground?: StorefrontGround
 }
 
 /** Pinned chrome that must paint immediately — never wrapped in a reveal. */
@@ -38,6 +46,7 @@ function renderBlock(
   block: ContentBlock,
   carouselProductMap: Record<string, LeanCardProduct[]>,
   bonusDealProduct?: Product | null,
+  ground?: StorefrontGround,
 ) {
   switch (block._type) {
     case 'announcementBar':
@@ -60,6 +69,7 @@ function renderBlock(
         <EmmaCuratedRail
           block={block}
           products={carouselProductMap[block._key] ?? []}
+          {...(ground !== undefined ? { ground } : {})}
         />
       )
     case 'playTogetherBanner':
@@ -90,8 +100,8 @@ function renderBlock(
   }
 }
 
-export function ContentBlockRenderer({ block, carouselProductMap, bonusDealProduct }: ContentBlockRendererProps) {
-  const inner = renderBlock(block, carouselProductMap, bonusDealProduct)
+export function ContentBlockRenderer({ block, carouselProductMap, bonusDealProduct, ground }: ContentBlockRendererProps) {
+  const inner = renderBlock(block, carouselProductMap, bonusDealProduct, ground)
   if (inner === null || NO_REVEAL.has(block._type)) return inner
 
   const variant: RevealVariant = FADE_BLOCKS.has(block._type) ? 'fade' : 'up'

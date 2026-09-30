@@ -3,6 +3,7 @@ import { Link } from 'react-router'
 import type { LeanCardProduct } from '~/types'
 import type { ProductCarouselBlock } from '~/types/cms'
 import ProductTileMedia from '~/components/store/ProductTileMedia'
+import { EmphasizedHeading } from '~/components/store/EmphasizedHeading'
 import { Reveal } from '~/components/motion/Reveal'
 import { mapAllowsDiscountDisplay } from '~/lib/discount-badge'
 
@@ -25,7 +26,44 @@ interface ProductCarouselProps {
    * shadow + near-invisible border-cream-2). See `EmmaCuratedRail`.
    */
   chrome?: 'legacy' | 'storefront'
+  /**
+   * v3 ground tint for the band, storefront chrome only (ticket #12340). The
+   * Sanity `bgStyle` enum predates the v3 palette and cannot express the
+   * doctrine ground lock: `white` and `cream` BOTH resolve to #FFFFFF now that
+   * `cream` is a legacy alias, so four published rails in a row rendered four
+   * identical white bands and the content team had no lever to break them up.
+   * Passing `ground` lets the composing page assign the band tint per slot; it
+   * wins over `bgStyle` only for the light values (`white`/`cream`/`mist`),
+   * so a deliberate `charcoal`/`purple` rail is never silently re-tinted.
+   * Ignored entirely under legacy chrome.
+   */
+  ground?: StorefrontGround
   products: LeanCardProduct[]
+}
+
+/** The doctrine ground lock (docs/design-doctrine.md §1/§4). */
+export type StorefrontGround = 'paper' | 'paper-2' | 'paper-3' | 'coral-soft' | 'plum-soft'
+
+const GROUND_CLASSES: Record<StorefrontGround, string> = {
+  'paper':      'bg-paper',
+  'paper-2':    'bg-paper-2',
+  'paper-3':    'bg-paper-3',
+  'coral-soft': 'bg-coral-soft',
+  'plum-soft':  'bg-plum-soft',
+}
+
+/** bgStyle values a passed `ground` is allowed to override (all light). */
+const OVERRIDABLE_BG: ReadonlySet<string> = new Set(['white', 'cream', 'mist'])
+
+/** Resolve the band ground class for either chrome. Exported for the unit test
+    that pins the override precedence. */
+export function railGroundClass(
+  chrome: 'legacy' | 'storefront',
+  bgStyle: string,
+  ground?: StorefrontGround,
+): string {
+  if (chrome === 'storefront' && ground && OVERRIDABLE_BG.has(bgStyle)) return GROUND_CLASSES[ground]
+  return BG_CLASSES[bgStyle] ?? 'bg-white'
 }
 
 const BG_CLASSES: Record<string, string> = {
@@ -49,6 +87,7 @@ export function ProductCarousel({
   bgStyle: bgStyleProp,
   layout: layoutProp,
   chrome = 'legacy',
+  ground,
   products,
 }: ProductCarouselProps) {
   const heading  = block?.heading  ?? headingProp  ?? 'Products'
@@ -69,7 +108,7 @@ export function ProductCarousel({
   // whatever arrow the label carries.
   const displayCtaLabel = layout === 'carousel' ? ctaLabel.replace(/\s*→\s*$/, '') : ctaLabel
 
-  const bgClass = BG_CLASSES[bgStyle] ?? 'bg-white'
+  const bgClass = railGroundClass(chrome, bgStyle, ground)
   const dark = isDark(bgStyle)
   const storefront = chrome === 'storefront'
   // Light-mode scroll-arrow border: the legacy `border-cream-2` (#FAFAF9) is a
@@ -107,7 +146,35 @@ export function ProductCarousel({
         <div className="flex flex-wrap items-end justify-between gap-4 mb-6">
           <div className="min-w-0 flex-1">
             {eyebrow && (
-              <Reveal as="p" variant="up" index={0} className={`text-xs font-semibold uppercase tracking-[0.18em] mb-1 ${dark ? 'text-white/60' : 'text-ink-3'}`}>
+              /* Storefront chrome takes the mono `.kicker` motif every other
+                 section label on the page uses (app.css §11, doctrine §2). It
+                 rendered in DM Sans semibold here, so the published rails were
+                 the only bands on the storefront whose section label was not
+                 mono (design-critic run 1136, ticket #12340).
+
+                 On a DARK rail it takes the explicit mono treatment instead,
+                 which is what every other dark band on the storefront already
+                 does (StorefrontHome's ink closer: `text-[11px] uppercase
+                 tracking-[0.18em]` + the MONO style). `.kicker` cannot be used
+                 there: it is defined unlayered in app.css, so its own
+                 `color: var(--color-ink-3)` BEATS a Tailwind `text-white/60`
+                 from `@layer utilities`, and the eyebrow would render ink-3 on
+                 ink at roughly 2.7:1 (qa-reviewer, run 1162, measured in the
+                 built CSS). Reproducing the motif with utilities avoids a
+                 specificity fight and leaves `.kicker` unchanged for the rest
+                 of the site. Legacy chrome is untouched. */
+              <Reveal
+                as="p"
+                variant="up"
+                index={0}
+                className={
+                  storefront
+                    ? dark
+                      ? 'mb-1 block font-mono text-[10px] uppercase tracking-[0.18em] text-white/60'
+                      : 'kicker mb-1 block'
+                    : `text-xs font-semibold uppercase tracking-[0.18em] mb-1 ${dark ? 'text-white/60' : 'text-ink-3'}`
+                }
+              >
                 {eyebrow}
               </Reveal>
             )}
@@ -126,7 +193,16 @@ export function ProductCarousel({
               }
               style={{ fontFamily: 'var(--font-display)', fontWeight: storefront ? 400 : undefined }}
             >
-              {heading}
+              {/* Doctrine §2 wants exactly one plum-italic emphasis word per
+                  headline. Every other storefront h2 renders through
+                  EmphasizedHeading; the published rails rendered a bare string,
+                  so none of them carried the emphasis word (design-critic run
+                  1136, ticket #12340). No Sanity field holds an emphasis word
+                  for this block and the schema is additive-only, so the
+                  component's own last-word fallback supplies it -- the same
+                  fallback the Sanity-driven hero headline already uses.
+                  Legacy chrome keeps the plain string. */}
+              {storefront ? <EmphasizedHeading text={heading} onDark={dark} /> : heading}
             </Reveal>
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -164,14 +240,22 @@ export function ProductCarousel({
               // #8418). Legacy chrome and dark backgrounds are unchanged.
               <Link
                 to={ctaLink}
-                className={`text-sm font-semibold transition-colors ml-1 shrink-0 whitespace-nowrap ${
+                className={`transition-colors ml-1 shrink-0 whitespace-nowrap ${
+                  storefront ? 'text-[15px] font-medium' : 'text-sm font-semibold'
+                } ${
                   dark
                     ? 'text-white/80 hover:text-white'
                     : storefront
                       ? 'text-ink link-coral'
                       : 'text-plum hover:text-plum-2'
                 }`}
-                style={{ fontFamily: 'var(--font-display)' }}
+                /* Storefront chrome now matches the Nº 03 grid's See-all in TYPE
+                   as well as color: DM Sans 15px/medium (StorefrontHome's
+                   `seeAllHref` Link), not Newsreader 14px/semibold. Doctrine §2
+                   assigns CTA text to font-body, and this was the only CTA on
+                   the storefront set in the display serif (design-critic run
+                   1162). Legacy chrome keeps the display serif it shipped with. */
+                style={storefront ? { fontFamily: 'var(--font-body)' } : { fontFamily: 'var(--font-display)' }}
               >
                 {displayCtaLabel}
               </Link>
