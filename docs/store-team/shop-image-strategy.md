@@ -28,9 +28,10 @@ disagree, ads-policy wins.
 | Background already removed | 1 seen (`jo-h2o-original-water-based-lubricant-4-oz-nobg.png`) |
 
 In a feed, a retail box reads as a clearance flyer: baked-in text, another brand's logo, a dildo
-still in its blister pack. The teardown already names text in pixels as a cheap tell
-(`docs/homepage-team/competitor-teardown-2026-07-live.md` finding 6). Roughly a third of the
-catalog is leading its Shop ad with the box.
+still in its blister pack. The teardown already bans text in pixels as a hard constraint on
+generated imagery (`docs/homepage-team/competitor-teardown-2026-07-live.md`, "AI imagery + video
+program" section, "no text in pixels"). Roughly a third of the catalog is leading its Shop ad with
+the box.
 
 ## 3. The strategy, in three layers
 
