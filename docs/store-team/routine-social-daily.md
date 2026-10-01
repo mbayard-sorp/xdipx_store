@@ -764,14 +764,18 @@ and it outranks any slate file, kickoff image pool, or "proven shape" habit.
 
 **1. Build the pool before choosing anything.** In this order:
 
-1. The brief's `metricsJson.socialShortlist` when present (`routine-weekly-strategy.md`), else the
+1. `POST /api/team/social-candidates {op:'candidates', platform, limit:20}` (ticket #12876): a
+   scored, cooldown-excluded, category-filtered candidate pool over ACTIVE in-stock Shopify
+   products, read-only and free. Prefer this first — it already applies this step's cooldown
+   (item 2), category filter (item 3), and new-arrival ranking (item 4) in one call.
+2. The brief's `metricsJson.socialShortlist` when present (`routine-weekly-strategy.md`), else the
    Social Plan's named products, else `metricsJson.videoShortlist`.
-2. The product-news rows from Step 2 item 10, including the product team's daily
+3. The product-news rows from Step 2 item 10, including the product team's daily
    `social-new-picks:` row when one exists. Read that mailbox with `"limit":200` and compare the
    returned `total`, because the list returns oldest first and the newest arrivals are the first
    rows a short read cuts off.
-3. The storefront's new arrivals (products tagged `new-arrival`, newest first, the set behind
-   `/new`), for the days the two sources above run dry.
+4. The storefront's new arrivals (products tagged `new-arrival`, newest first, the set behind
+   `/new`), for the days the three sources above run dry.
 
 A slate file's products and a campaign kickoff image pool are suggestions for subject and look. They
 are never the roster. The kickoff pool fixes ground, light, prop and cast, never the product.
