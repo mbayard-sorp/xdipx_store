@@ -28,6 +28,7 @@ import { assertTeamAuth, gate, getValve, TEAM_IDS } from '~/lib/team.server'
 import { computeOwnerQueue } from '~/lib/owner-queue.server'
 import { VALVE_KEYS } from '~/lib/team-keys'
 import { db } from '~/lib/db.server'
+import { gatherAcquisitionSummary } from '~/lib/owner-digest.server'
 
 interface LastRunRow {
   team: string
@@ -42,7 +43,7 @@ interface LastRunRow {
 export async function loader({ request }: LoaderFunctionArgs) {
   assertTeamAuth(request)
 
-  const [gates, lastRunsRes, valveEntries, ownerQueue] = await Promise.all([
+  const [gates, lastRunsRes, valveEntries, ownerQueue, acquisition] = await Promise.all([
     Promise.all(TEAM_IDS.map(t => gate(t))),
     db.execute(sql`
       SELECT DISTINCT ON (team)
@@ -58,6 +59,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // blocker query hiccuped would stop runs that had nothing to do with it.
     computeOwnerQueue().catch((err) => {
       console.warn('[api.team.status] owner queue unavailable', err)
+      return null
+    }),
+    // Same reasoning: the weekly brief reads this endpoint for acquisition
+    // signal, and a null here (migration 111 not applied yet) must not take
+    // the rest of the snapshot down with it.
+    gatherAcquisitionSummary().catch((err) => {
+      console.warn('[api.team.status] acquisition summary unavailable', err)
       return null
     }),
   ])
@@ -83,6 +91,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           }
         : null,
       health: ownerQueue?.health ?? null,
+      acquisition,
     },
     { headers: { 'Cache-Control': 'no-store' } },
   )

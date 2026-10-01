@@ -987,6 +987,46 @@ async function gatherShipped(): Promise<ShippedItem[]> {
   return items
 }
 
+export interface AcquisitionSummary {
+  windowDays: number
+  aiAssistantOrders: number
+  aiAssistantRevenue: number
+}
+
+/**
+ * Trailing-30-day AI-assistant acquisition count and revenue from
+ * order_attribution (ticket #12669). Returns null when the table or the
+ * query is unavailable (migration 111 not applied yet), distinct from a real
+ * zero — the render must say "not reported", not "AI assistant orders: 0".
+ */
+export async function gatherAcquisitionSummary(): Promise<AcquisitionSummary | null> {
+  try {
+    const windowDays = 30
+    const res = await db.execute(sql`
+      SELECT count(*)::int AS orders, COALESCE(sum(total_price), 0)::numeric AS revenue
+      FROM order_attribution
+      WHERE channel_group = 'ai-assistant'
+        AND created_at >= now() - interval '30 days'`)
+    const row = (res.rows ?? [])[0] as Record<string, unknown> | undefined
+    if (!row) return { windowDays, aiAssistantOrders: 0, aiAssistantRevenue: 0 }
+    return {
+      windowDays,
+      aiAssistantOrders: Number(row['orders'] ?? 0),
+      aiAssistantRevenue: Number(row['revenue'] ?? 0),
+    }
+  } catch (err) {
+    console.warn('[owner-digest] order_attribution unavailable (migration 111 not applied?):', String(err).slice(0, 200))
+    return null
+  }
+}
+
+function renderAcquisitionSection(acquisition: AcquisitionSummary | null): string {
+  if (!acquisition) {
+    return `<p style="margin:0;color:${MUTED};">Could not compute this run.</p>`
+  }
+  return `<p style="margin:0;">AI assistant orders: ${acquisition.aiAssistantOrders} ($${acquisition.aiAssistantRevenue.toFixed(2)})</p>`
+}
+
 async function gatherHomepageNow(): Promise<HomepageNowFacts> {
   let live: HomepageNowFacts['live'] = null
   try {
@@ -1636,7 +1676,7 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
     return null
   })
 
-  const [shipped, homepageNow, ticketMetrics, escalations, ownerQueue, opsWatch, reconciliation, loopHealth, staleOwnerRows, adCampaignQueue, parkedVideoFrames, parkedVideoRenders, parkedVideoFlagged] =
+  const [shipped, homepageNow, ticketMetrics, escalations, ownerQueue, opsWatch, reconciliation, loopHealth, staleOwnerRows, adCampaignQueue, parkedVideoFrames, parkedVideoRenders, parkedVideoFlagged, acquisition] =
     await Promise.all([
       gatherShipped(),
       gatherHomepageNow(),
@@ -1675,6 +1715,7 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
       gatherParkedVideoFrames(),
       gatherParkedVideoRenders(),
       gatherParkedVideoFlagged(),
+      gatherAcquisitionSummary(),
     ])
   const needsOwner = escalations.protectedPrs.length + escalations.exhausted.length
   // One note-aware source for blocked rows, shared by the Needs Mike list and
@@ -1834,6 +1875,7 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
       ${section(`Needs a decision from you${ownerQueue.totalCount > 0 ? ` (${ownerQueue.totalCount})` : ''}`, renderOwnerQueueSection(ownerQueue))}
       ${section(`Ad campaigns awaiting launch${adCampaignQueue.length > 0 ? ` (${adCampaignQueue.length})` : ''}`, renderAdCampaignQueueSection(adCampaignQueue))}
       ${section('Orders and profit (last 8 days)', `<table style="border-collapse:collapse;">${profitRows || '<tr><td>no rows</td></tr>'}</table>${reconLine}`)}
+      ${section('Acquisition (trailing 30 days)', renderAcquisitionSection(acquisition))}
       ${section('Ops watch', renderOpsWatchSection(opsWatch))}
       ${section(`Team runs, last 24h (${failures.length} failed)`, `<table style="border-collapse:collapse;">${runRows || '<tr><td>no runs</td></tr>'}</table>`)}
       ${section('Team gates', `<table style="border-collapse:collapse;">${gateRows}</table>`)}
