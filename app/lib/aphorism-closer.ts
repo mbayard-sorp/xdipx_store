@@ -158,10 +158,21 @@ interface PtBlock {
   _type?: string
   style?: string
   children?: { text?: string }[]
+  /** blogPullQuote fields — read directly, this node type has no `children`. */
+  quote?: string
+  attribution?: string
 }
 
 function blockText(block: PtBlock): string {
   return (block.children ?? []).map(c => c.text ?? '').join('')
+}
+
+/** blogPullQuote's own text: the quote, plus its attribution if present. */
+function pullQuoteText(block: PtBlock): string {
+  const quote = block.quote?.trim() ?? ''
+  const attribution = block.attribution?.trim()
+  if (!quote) return ''
+  return attribution ? `${quote} ${attribution}` : quote
 }
 
 /** A paragraph-sized unit of prose with its enclosing section. */
@@ -213,7 +224,15 @@ export function draftToParagraphs(draft: DraftInput): DraftParagraph[] {
   const body = Array.isArray(draft.body) ? (draft.body as PtBlock[]) : []
   let section = 'Intro'
   for (const block of body) {
-    if (!block || block._type !== 'block') continue // skip embeds, quotes-as-objects, images
+    if (!block) continue
+    if (block._type === 'blogPullQuote') {
+      // The single most-quoted string on the page — attributed to whatever
+      // section it sits in, the same treatment as an h2-attributed paragraph.
+      const text = pullQuoteText(block)
+      if (text) paragraphs.push({ section, text })
+      continue
+    }
+    if (block._type !== 'block') continue // skip other embeds and images
     const text = blockText(block).trim()
     if (block.style === 'h2') {
       section = text || section

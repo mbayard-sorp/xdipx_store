@@ -173,4 +173,23 @@ describe('analyzeDraft — portable text structure', () => {
     expect(report.totalPost).toBe(0)
     expect(report.overCap).toBe(false)
   })
+
+  it('scans a blogPullQuote, attributed to its enclosing section (#12630)', () => {
+    const report = analyzeDraft({
+      body: [
+        block('h2', 'How do I start'),
+        block('normal', 'A wand hums at a low pitch.'),
+        { _type: 'blogPullQuote', quote: 'That is what keeps the moment alive.' },
+      ],
+    })
+    expect(report.totalPost).toBe(1)
+    expect(report.perSection['How do I start']).toBe(1)
+  })
+
+  it('ignores an empty blogPullQuote (no quote text)', () => {
+    const report = analyzeDraft({
+      body: [{ _type: 'blogPullQuote', attribution: 'Emma' }],
+    })
+    expect(report.totalPost).toBe(0)
+  })
 })

@@ -374,6 +374,11 @@ unchanged: 3 per post, 1 per section, never 2 in a paragraph. Trim by de-constru
 shape, not by swapping synonyms inside it. **`seoTitle` and `seoDescription` are in scope** (#10266):
 pass them alongside `title`/`excerpt`/`body` in the draft JSON, since both are customer-facing
 strings that ship to every SERP and LLM snippet and the whole-document tally counts them.
+**`blogPullQuote` blocks are in scope too** (#12630): the shared extractor
+(`app/lib/aphorism-closer.ts`'s `draftToParagraphs`, which all three checkers below build on) reads a
+pull quote's `quote` and `attribution` fields and counts them against the enclosing section, the same
+as any other paragraph — before #12630 a pull quote, the single most-quoted string on the page, was
+silently skipped by every one of these checkers.
 
 **"X, not Y" antithesis pre-flight (mandatory, before Step 5, content-plan §7):** run the
 deterministic checker on the draft JSON and trim until it exits 0, before submitting to the voice
