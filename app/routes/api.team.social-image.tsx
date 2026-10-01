@@ -10,8 +10,10 @@
  *       -> GenerateCastCompositeResult { urls, filenames, costs, requestIds, plateRequestId? }
  *          plus bodyReferenceMissing?/handReferenceMissing?/warning?
  *          (#10336, #10341, #11476). A handle whose bare-product reference
- *          (xdipx.bare_product_reference) is unresolved or resolves to no
- *          bare frame 400s instead of falling back to media[0] (#11474).
+ *          (xdipx.bare_product_reference) is unresolved is resolved live, once
+ *          (#12875); a handle whose reference resolves (live or already
+ *          stored) to no bare frame 400s instead of falling back to
+ *          media[0] (#11474).
  *          plus derivedLengthInches?/derivedScaleCue? when `handle` resolves to a
  *          product carrying `xdipx.specifications` (#10981)
  *          plus ok:false/reason when every candidate across both attempts was
@@ -216,7 +218,7 @@ export async function action({ request }: ActionFunctionArgs) {
       let derivedScaleCue: string | undefined
       let derivedLengthInches: number | undefined
       if (handle) {
-        const { getProductByHandle } = await import('~/lib/shopify.server')
+        const { getProductByHandle, resolveAndPersistBareProductReference } = await import('~/lib/shopify.server')
         const product = await getProductByHandle(handle)
         if (!productImageUrl && product) {
           // Ticket #11474: refuse rather than fall back to media[0] (or a
@@ -227,11 +229,20 @@ export async function action({ request }: ActionFunctionArgs) {
           // route refusal here costs one retry with an explicit
           // productImageUrl; a silent carton/synthetic brief is a
           // product-misrepresentation defect.
-          const bareRef = product.bareProductReference
+          //
+          // Ticket #12875: a product that has never been resolved at all
+          // (new arrival, imported after the last catalog backfill pass) is
+          // resolved live here, once, instead of refusing outright — same
+          // heuristic the catalog backfill uses, persisted so every later
+          // call reads it off the metafield like any other product. A
+          // product already resolved to `url: null` is a settled verdict,
+          // not re-resolved on every miss.
+          let bareRef = product.bareProductReference
+          if (!bareRef) {
+            bareRef = await resolveAndPersistBareProductReference(product.id)
+          }
           if (!bareRef || bareRef.url == null) {
-            const why = bareRef
-              ? `xdipx.bare_product_reference resolved to no bare frame (${bareRef.reason})`
-              : 'xdipx.bare_product_reference has not been resolved yet (run scripts/resolve-bare-product-references.ts --apply)'
+            const why = `xdipx.bare_product_reference resolved to no bare frame (${bareRef?.reason ?? 'unknown'})`
             return new Response(
               `Bad Request: no confirmed bare-product reference for "${handle}": ${why}. Pass productImageUrl explicitly to override.`,
               { status: 400 },

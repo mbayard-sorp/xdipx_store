@@ -696,6 +696,43 @@ export interface BareProductReferenceMetafield extends BareProductReferenceResol
   method: 'heuristic'
 }
 
+/**
+ * Live, single-product counterpart to the catalog-wide
+ * `scripts/resolve-bare-product-references.ts` backfill (ticket #12875).
+ * That script resolves the whole catalog once; a product imported or
+ * re-photographed after the last pass has no `xdipx.bare_product_reference`
+ * at all, so `app/routes/api.team.social-image.tsx` used to refuse it
+ * outright instead of resolving on the spot. This runs the exact same
+ * heuristic against the product's current Admin-API media list, persists
+ * the verdict (including a genuine `url: null`) so every later read finds
+ * the metafield already resolved, and hands the verdict back so the caller
+ * can proceed or refuse in the same request.
+ */
+export async function resolveAndPersistBareProductReference(
+  productId: string,
+): Promise<BareProductReferenceMetafield> {
+  const numericId = productId.replace('gid://shopify/Product/', '')
+  const data = await adminGraphQL<{
+    product: { images: { edges: { node: { url: string; altText: string | null } }[] } } | null
+  }>(`
+    query ResolveBareProductReferenceOne($id: ID!) {
+      product(id: $id) {
+        images(first: 20) { edges { node { url altText } } }
+      }
+    }
+  `, { id: `gid://shopify/Product/${numericId}` })
+
+  const images = (data.product?.images.edges ?? []).map(e => ({ url: e.node.url, altText: e.node.altText }))
+  const resolution = resolveBareProductReference(images)
+  const metafieldValue: BareProductReferenceMetafield = {
+    ...resolution,
+    resolvedAt: new Date().toISOString(),
+    method: 'heuristic',
+  }
+  await updateProductMetafield(productId, 'bare_product_reference', JSON.stringify(metafieldValue), 'json')
+  return metafieldValue
+}
+
 // ─── Sensation dial v1 → v2 projection ────────────────────────────────────
 // Legacy fixed-key labels per dimension. Used only when sensation_dial_v2 is
 // absent — lets old products keep rendering while migration proceeds.

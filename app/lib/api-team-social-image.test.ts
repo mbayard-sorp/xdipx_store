@@ -16,6 +16,7 @@ const castMock = vi.hoisted(() => vi.fn())
 const logImageCostMock = vi.hoisted(() => vi.fn())
 const rosterMock = vi.hoisted(() => vi.fn())
 const productByHandleMock = vi.hoisted(() => vi.fn())
+const resolveAndPersistBareRefMock = vi.hoisted(() => vi.fn())
 const recordEventMock = vi.hoisted(() => vi.fn())
 const captureMessageMock = vi.hoisted(() => vi.fn())
 
@@ -62,7 +63,16 @@ vi.mock('~/lib/sanity.server', () => ({
 }))
 vi.mock('~/lib/shopify.server', async () => {
   const actual = await vi.importActual<typeof import('~/lib/shopify.server')>('~/lib/shopify.server')
-  return { ...actual, getProductByHandle: productByHandleMock }
+  return {
+    ...actual,
+    getProductByHandle: productByHandleMock,
+    // Ticket #12875: resolve-on-miss. Mocked rather than left real because
+    // the real implementation hits Admin GraphQL and writes a metafield;
+    // what's under test here is the route's branching (call it only when
+    // unresolved, refuse or proceed on its verdict), not the heuristic
+    // itself (covered by shopify-bare-product-reference.test.ts).
+    resolveAndPersistBareProductReference: resolveAndPersistBareRefMock,
+  }
 })
 
 import { action } from '~/routes/api.team.social-image'
@@ -475,8 +485,9 @@ describe('cast: hand reference for held contact modes (#11476)', () => {
  * Ticket #10341, tightened by #11474: featuredMedia is sometimes the retail
  * carton, so the route now reads the stored, once-resolved
  * `xdipx.bare_product_reference` metafield rather than walking the media
- * list live, and refuses (400) instead of falling back when it is null or
- * unresolved.
+ * list live, and refuses (400) instead of falling back when it is null.
+ * Ticket #12875: a handle with no stored verdict at all (never resolved) is
+ * resolved live, once, instead of refusing outright.
  */
 describe('cast: bare-product reference (#10341, #11474)', () => {
   it('uses the resolved bare-product reference when productImageUrl is omitted', async () => {
@@ -492,12 +503,13 @@ describe('cast: bare-product reference (#10341, #11474)', () => {
     })
     const res = await post({ ...validCast, productImageUrl: undefined })
     expect(res.status).toBe(200)
+    expect(resolveAndPersistBareRefMock).not.toHaveBeenCalled()
     expect(castMock).toHaveBeenCalledWith(expect.objectContaining({
       productImageUrl: 'https://cdn/96203-product.jpg',
     }))
   })
 
-  it('refuses with a clear reason when the reference resolved to no bare frame', async () => {
+  it('refuses with a clear reason when the stored reference resolved to no bare frame, without re-resolving (#12875)', async () => {
     productByHandleMock.mockResolvedValue({
       images: [{ url: 'https://cdn/96203-box-front.jpg', altText: 'Retail box' }],
       bareProductReference: {
@@ -507,16 +519,36 @@ describe('cast: bare-product reference (#10341, #11474)', () => {
     })
     const res = await post({ ...validCast, productImageUrl: undefined })
     expect(res.status).toBe(400)
+    expect(resolveAndPersistBareRefMock).not.toHaveBeenCalled()
     expect(castMock).not.toHaveBeenCalled()
     expect(await res.text()).toContain('every non-AI-generated frame looks like packaging')
   })
 
-  it('refuses with a clear reason when the reference has never been resolved', async () => {
-    productByHandleMock.mockResolvedValue({ images: [] })
+  it('resolves live and proceeds when the reference has never been resolved and the live resolution finds a bare frame (#12875)', async () => {
+    productByHandleMock.mockResolvedValue({ id: 'gid://shopify/Product/96203', images: [] })
+    resolveAndPersistBareRefMock.mockResolvedValue({
+      url: 'https://cdn/96203-live-resolved.jpg', index: 0, reason: 'confirmed bare frame',
+      resolvedAt: '2026-10-01T00:00:00.000Z', method: 'heuristic',
+    })
+    const res = await post({ ...validCast, productImageUrl: undefined })
+    expect(res.status).toBe(200)
+    expect(resolveAndPersistBareRefMock).toHaveBeenCalledWith('gid://shopify/Product/96203')
+    expect(castMock).toHaveBeenCalledWith(expect.objectContaining({
+      productImageUrl: 'https://cdn/96203-live-resolved.jpg',
+    }))
+  })
+
+  it('refuses with a clear reason when the reference has never been resolved and the live resolution finds no bare frame (#12875)', async () => {
+    productByHandleMock.mockResolvedValue({ id: 'gid://shopify/Product/96203', images: [] })
+    resolveAndPersistBareRefMock.mockResolvedValue({
+      url: null, index: null, reason: 'every non-AI-generated frame looks like packaging',
+      resolvedAt: '2026-10-01T00:00:00.000Z', method: 'heuristic',
+    })
     const res = await post({ ...validCast, productImageUrl: undefined })
     expect(res.status).toBe(400)
+    expect(resolveAndPersistBareRefMock).toHaveBeenCalledWith('gid://shopify/Product/96203')
     expect(castMock).not.toHaveBeenCalled()
-    expect(await res.text()).toContain('has not been resolved yet')
+    expect(await res.text()).toContain('every non-AI-generated frame looks like packaging')
   })
 
   it('never falls back to media[0]: a caller must pass productImageUrl explicitly to override', async () => {
