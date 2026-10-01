@@ -19,6 +19,42 @@ export interface Ga4PurchaseEvent {
   currency:      string
   items:         { item_id: string; item_name?: string; price?: number; quantity?: number }[]
   clientId?:     string | null
+  // GA4 session id from the `_ga_<suffix>` cookie (ticket #12670). Without
+  // it, Measurement Protocol events are not joined to a session and land in
+  // the "Unassigned" channel, which hid every purchase from GA4 acquisition
+  // reports. null/absent is a valid, if degraded, send.
+  sessionId?:    string | null
+}
+
+/**
+ * Builds the GA4 Measurement Protocol request body for a purchase event.
+ * Pure and exported so the session_id/engagement_time_msec wiring (ticket
+ * #12670) is unit-tested without a network call or a GA4 config lookup.
+ */
+export function buildGa4PurchaseBody(e: Ga4PurchaseEvent, clientId: string): {
+  client_id: string
+  events: { name: 'purchase'; params: Record<string, unknown> }[]
+} {
+  return {
+    client_id: clientId,
+    // Non-personalized server event; no user-id, no ad-consent implied.
+    events: [{
+      name: 'purchase',
+      params: {
+        transaction_id: e.transactionId,
+        value:          e.value,
+        currency:       e.currency,
+        items:          e.items,
+        // session_id joins this event to the browsing session that produced
+        // it, which is what lets GA4 attribute the purchase to a real
+        // channel instead of "Unassigned". engagement_time_msec is required
+        // alongside it for GA4 to treat the session as engaged; 1 is the
+        // documented minimum for a server-sent event with no real duration
+        // to report.
+        ...(e.sessionId ? { session_id: e.sessionId, engagement_time_msec: 1 } : {}),
+      },
+    }],
+  }
 }
 
 export async function sendGa4Purchase(e: Ga4PurchaseEvent): Promise<{ ok: boolean; error?: string; skipped?: string }> {
@@ -31,20 +67,7 @@ export async function sendGa4Purchase(e: Ga4PurchaseEvent): Promise<{ ok: boolea
   // fall back to a stable per-order id so the purchase is still counted (the
   // session attribution is lost, the revenue is not).
   const clientId = e.clientId && e.clientId.length > 0 ? e.clientId : `srv.${e.transactionId}`
-
-  const body = {
-    client_id: clientId,
-    // Non-personalized server event; no user-id, no ad-consent implied.
-    events: [{
-      name: 'purchase',
-      params: {
-        transaction_id: e.transactionId,
-        value:          e.value,
-        currency:       e.currency,
-        items:          e.items,
-      },
-    }],
-  }
+  const body = buildGa4PurchaseBody(e, clientId)
 
   try {
     const res = await fetch(

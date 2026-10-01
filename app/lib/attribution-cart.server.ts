@@ -16,6 +16,7 @@
 import {
   getFbCookies,
   getGaClientId,
+  getGaSessionId,
   getStoredGoogleClickId,
   getStoredRefCode,
   getStoredUTM,
@@ -27,12 +28,14 @@ export interface CartAttr { key: string; value: string }
 
 /**
  * Attribution cart attributes from the request's cookies: `_fbp`, `_fbc`,
- * `_ga_cid`, the `_utm_` set, and `_ref_code`. Only cookies that are actually
- * present produce an attribute, so this can return an empty array.
+ * `_ga_cid`, `_ga_sid`, the `_utm_` set, and `_ref_code`. Only cookies that
+ * are actually present produce an attribute, so this can return an empty
+ * array.
  */
 export function attributionCartAttrs(request: Request): CartAttr[] {
   const { fbp, fbc } = getFbCookies(request)
   const gaCid = getGaClientId(request)
+  const gaSid = getGaSessionId(request)
   const gclid = getStoredGoogleClickId(request)
   const utm = getStoredUTM(request)
   const refCode = getStoredRefCode(request)
@@ -40,6 +43,7 @@ export function attributionCartAttrs(request: Request): CartAttr[] {
   if (fbp) attrs.push({ key: '_fbp', value: fbp })
   if (fbc) attrs.push({ key: '_fbc', value: fbc })
   if (gaCid) attrs.push({ key: '_ga_cid', value: gaCid })
+  if (gaSid) attrs.push({ key: '_ga_sid', value: gaSid })
   // Google offline conversion import needs the id AND its type: gbraid/wbraid
   // upload in their own column, not as a gclid. Both ride to the order webhook.
   if (gclid) {

@@ -231,6 +231,37 @@ export function getGaClientId(request: Request): string | null {
   return `${parts[2]}.${parts[3]}`
 }
 
+/**
+ * Read the GA4 session id from the `_ga_<measurement-id-suffix>` cookie so a
+ * server-side purchase event can be joined to the browsing session that
+ * produced it (ticket #12670). Without a session_id, GA4 Measurement
+ * Protocol events are not joined to any session and attribute to the
+ * "Unassigned" channel — which is exactly what happened to every purchase
+ * sent from the order webhook until now, hiding acquisition channels
+ * (including AI Assistant) from every GA4 report the strategy brief reads.
+ *
+ * The cookie name carries the GA4 property's measurement id suffix, which
+ * this function does not need to know: at most one `_ga_<suffix>` cookie is
+ * ever set for a single GA4 property on this domain, so matching the prefix
+ * is sufficient and avoids an async measurement-id lookup from a sync cookie
+ * reader. Two cookie value formats exist:
+ *   - GS2 (current): `GS2.1.s<sessionId>$o<n>$g<n>$t<n>$...`
+ *   - GS1 (older):    `GS1.1.<sessionId>.<n>.<n>.<n>.<n>`
+ * Returns null when no matching cookie is present or its value is in neither
+ * format.
+ */
+export function getGaSessionId(request: Request): string | null {
+  const cookies = parseCookie(request.headers.get('Cookie') ?? '')
+  const key = Object.keys(cookies).find(k => /^_ga_[A-Za-z0-9]+$/.test(k))
+  const raw = key ? cookies[key] : undefined
+  if (!raw) return null
+  const gs2 = raw.match(/^GS2\.\d+\.s(\d+)/)
+  if (gs2) return gs2[1]!
+  const gs1 = raw.match(/^GS1\.\d+\.(\d+)\./)
+  if (gs1) return gs1[1]!
+  return null
+}
+
 export function getClientIP(request: Request): string {
   return getClientIPOrNull(request) ?? '0.0.0.0'
 }
