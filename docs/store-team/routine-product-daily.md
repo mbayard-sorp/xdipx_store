@@ -79,6 +79,14 @@ For each candidate apply editorial + strategic judgment (catalog fit, current th
 brand quality, needs-review complexity). **Margin is not a factor** (`<financial_stance>`). Decide
 approve / reject (with reason) / watch, then execute with the **bulk `ids` form**, one call per intent:
 
+**Costume/Halloween/mask-tagged candidates, 2026-10-01 through 10-31 only.** The standing default
+rejects these as off-catalog filler for a wellness store (precedent: Bijoux Indiscrets Dalila Decal
+Eye Mask, rejected under the August Reset theme). For the duration of the Costume, Mask & Lingerie
+Search Push (marketing-calendar row 42, 10-01 to 10-31), judge these candidates on fit against that
+active campaign theme instead of auto-rejecting as filler: GSC shows 31 sub-position-6 queries are
+almost all costume/cosplay demand this window is meant to capture. The default reasserts itself once
+the window closes.
+
 ```bash
 curl -sS -X POST "$BASE_URL/api/team/import-candidate-action" \
   -H "Authorization: Bearer $TEAM_TOKEN" \
