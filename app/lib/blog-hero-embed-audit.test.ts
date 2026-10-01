@@ -249,6 +249,62 @@ describe('single short distinctive token (#5397)', () => {
   })
 })
 
+// Ticket #12865: a Shopify title that reduces to ZERO distinctive tokens
+// made the hero/embed match structurally unpassable for that SKU no matter
+// what the hero copy said. Live case: blogPost-why-you-can-orgasm-alone-but-
+// not-with-a-partner's only embed is
+// femmefunn-ultra-bullet-massager-rechargeable-silicone-vibrator-pink, whose
+// Sanity title "Rechargeable Silicone Bullet Massager Pink" strips to [] —
+// every word is in GENERIC_TOKENS. The handle still carries the brand/model
+// tokens ("femmefunn", "ultra") a title-only read discarded.
+describe('zero-distinctive-token title falls back to handle tokens (#12865)', () => {
+  const FEMMEFUNN_ZERO_TOKEN_TITLE: CatalogProduct[] = [
+    {
+      handle: 'femmefunn-ultra-bullet-massager-rechargeable-silicone-vibrator-pink',
+      title: 'Rechargeable Silicone Bullet Massager Pink',
+    },
+  ]
+
+  it("the title alone strips to zero distinctive tokens", () => {
+    expect(distinctiveTokens('Rechargeable Silicone Bullet Massager Pink')).toEqual([])
+  })
+
+  it('heroNamesAnyProduct is true for hero copy naming the handle-derived brand/model tokens', () => {
+    const post: AuditBlogPost = {
+      slug: 'why-you-can-orgasm-alone-but-not-with-a-partner',
+      heroImageAlt: 'a pink FemmeFunn Ultra Bullet resting in soft coral daylight',
+      imagePrompt: null,
+      embedHandles: ['femmefunn-ultra-bullet-massager-rechargeable-silicone-vibrator-pink'],
+    }
+    expect(heroNamesAnyProduct(post, FEMMEFUNN_ZERO_TOKEN_TITLE)).toBe(true)
+  })
+
+  it('does not false-flag the hero as a mismatch against its own embed', () => {
+    const posts: AuditBlogPost[] = [
+      {
+        slug: 'why-you-can-orgasm-alone-but-not-with-a-partner',
+        heroImageAlt: 'a pink FemmeFunn Ultra Bullet resting in soft coral daylight',
+        imagePrompt: null,
+        embedHandles: ['femmefunn-ultra-bullet-massager-rechargeable-silicone-vibrator-pink'],
+      },
+    ]
+    expect(findHeroEmbedMismatches(posts, FEMMEFUNN_ZERO_TOKEN_TITLE)).toHaveLength(0)
+  })
+
+  it('still resolves to zero (not a false match) for a product whose title AND handle are both fully generic (colour-token guard, #11731, unchanged)', () => {
+    // 'rechargeable-bullet-vibrator-pink' from CATALOG: handle words are the
+    // exact same generic set as the title, so the fallback does not invent a
+    // distinctive token where none exists.
+    const post: AuditBlogPost = {
+      slug: 'p',
+      heroImageAlt: 'a pale pink rechargeable bullet vibrator resting in warm daylight',
+      imagePrompt: null,
+      embedHandles: [],
+    }
+    expect(heroNamesAnyProduct(post, CATALOG)).toBe(false)
+  })
+})
+
 // Ticket #11543, THIRD-PLUS OCCURRENCE: heroImageAlt is a customer-facing,
 // LLM-ingested string no gate reviews, and it routinely carries spec claims
 // whose only source is our own Emma-rewritten Shopify title — which the

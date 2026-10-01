@@ -75,10 +75,23 @@ function normalize(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim()
 }
 
-/** The name a product is recognizable by: its title, or its handle words. */
+/**
+ * The name a product is recognizable by: its title, or its handle words.
+ *
+ * Falls back to the handle when the title is empty, and ALSO when a
+ * non-empty title's distinctive-token yield is zero (ticket #12865): a
+ * Shopify title like "Rechargeable Silicone Bullet Massager Pink" strips to
+ * nothing once every word is removed as generic, which makes the hero/embed
+ * match structurally unpassable for that SKU no matter what the hero copy
+ * says — yet its handle,
+ * "femmefunn-ultra-bullet-massager-rechargeable-silicone-vibrator-pink",
+ * still carries the brand/model tokens ("femmefunn", "ultra") a title-only
+ * read discards.
+ */
 function productName(p: CatalogProduct): string {
-  const t = p.title && p.title.trim() ? p.title : p.handle.replace(/-/g, ' ')
-  return normalize(t)
+  const titleName = p.title && p.title.trim() ? normalize(p.title) : null
+  if (titleName && distinctiveTokens(titleName).length > 0) return titleName
+  return normalize(p.handle.replace(/-/g, ' '))
 }
 
 /**
