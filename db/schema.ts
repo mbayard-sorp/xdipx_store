@@ -522,6 +522,24 @@ export const orderLineItems = pgTable('order_line_items', {
   productIdx: index('oli_product_idx').on(t.shopifyProductId),
 }))
 
+export const orderAttribution = pgTable('order_attribution', {
+  shopifyOrderId: text('shopify_order_id').primaryKey(),
+  utmSource:      text('utm_source'),
+  utmMedium:      text('utm_medium'),
+  utmCampaign:    text('utm_campaign'),
+  utmContent:     text('utm_content'),
+  refCode:        text('ref_code'),
+  referringSite:  text('referring_site'),
+  landingSite:    text('landing_site'),
+  sourceName:     text('source_name'),
+  channelGroup:   varchar('channel_group', { length: 24 }).notNull(),
+  totalPrice:     decimal('total_price', { precision: 10, scale: 2 }),
+  createdAt:      timestamp('created_at').defaultNow().notNull(),
+}, t => ({
+  channelGroupIdx: index('idx_order_attribution_channel_group').on(t.channelGroup),
+  createdAtIdx:    index('idx_order_attribution_created_at').on(t.createdAt),
+}))
+
 export const wishlists = pgTable('wishlists', {
   id:          serial('id').primaryKey(),
   customerGid: varchar('customer_gid', { length: 60 }).notNull(),

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { isRestockCrossing, parseWebhookBody, runWebhookWork, handleOrderFulfilled, referralCodeFromNoteAttributes, customerEmailFromNoteAttributes } from './webhooks'
+import { isRestockCrossing, parseWebhookBody, runWebhookWork, handleOrderFulfilled, referralCodeFromNoteAttributes, customerEmailFromNoteAttributes, classifyChannelGroup } from './webhooks'
 
 vi.mock('../app/lib/reviews.server.js', () => ({
   getReviewSettings: vi.fn(async () => ({ inviteDelayDays: 3 })),
@@ -62,6 +62,41 @@ describe('referralCodeFromNoteAttributes', () => {
   it('returns undefined when there is no referral code (or no attributes)', () => {
     expect(referralCodeFromNoteAttributes([])).toBeUndefined()
     expect(referralCodeFromNoteAttributes(undefined)).toBeUndefined()
+  })
+})
+
+// ticket #12669: orders #1005 and #1008 carried _utm_source=chatgpt.com with
+// no referring_site, so the classifier must catch an AI assistant from either
+// signal alone.
+describe('classifyChannelGroup', () => {
+  it('classifies ai-assistant from utm_source alone (the #1005/#1008 case)', () => {
+    expect(classifyChannelGroup({ utmSource: 'chatgpt.com', referringSite: null })).toBe('ai-assistant')
+  })
+
+  it('classifies ai-assistant from the referring_site host alone', () => {
+    expect(classifyChannelGroup({ utmSource: null, referringSite: 'https://www.perplexity.ai/search?q=x' })).toBe('ai-assistant')
+  })
+
+  it('recognizes every documented AI-assistant host', () => {
+    for (const host of ['chatgpt.com', 'openai.com', 'perplexity.ai', 'claude.ai', 'gemini.google.com', 'copilot.microsoft.com']) {
+      expect(classifyChannelGroup({ utmSource: host })).toBe('ai-assistant')
+    }
+  })
+
+  it('classifies organic-search from a search-engine referrer', () => {
+    expect(classifyChannelGroup({ referringSite: 'https://www.google.com/search?q=xdipx' })).toBe('organic-search')
+  })
+
+  it('classifies social from a known social referrer', () => {
+    expect(classifyChannelGroup({ referringSite: 'https://www.instagram.com/' })).toBe('social')
+  })
+
+  it('classifies direct when there is no referring site or utm source', () => {
+    expect(classifyChannelGroup({})).toBe('direct')
+  })
+
+  it('classifies other for an unrecognized referrer', () => {
+    expect(classifyChannelGroup({ referringSite: 'https://some-blog.example.com/post' })).toBe('other')
   })
 })
 

@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from 'express'
 import crypto from 'node:crypto'
-import { ga4PurchaseOutbox, orderLineItems, productCopurchase, referrals } from '../db/schema.js'
+import { ga4PurchaseOutbox, orderAttribution, orderLineItems, productCopurchase, referrals } from '../db/schema.js'
 import { eq, sql } from 'drizzle-orm'
 import { canonicalDedupeKey } from '../app/lib/dedupe-key.js'
 
@@ -98,6 +98,61 @@ interface ShopifyOrder {
   // browser, and the Purchase event's action_source is already 'website'.
   browser_ip?: string
   client_details?: { user_agent?: string; browser_ip?: string } | null
+  referring_site?: string | null
+  landing_site?: string | null
+  source_name?: string | null
+}
+
+/**
+ * Buckets an order into the channel the owner digest and weekly brief report
+ * on, from whichever acquisition signal survived to the order (ticket
+ * #12669). `ai-assistant` is checked first and matches either the UTM source
+ * or the referring-site host against the known AI-assistant domains, because
+ * an order can carry one signal without the other (orders #1005 and #1008
+ * both carried `_utm_source=chatgpt.com` with no referring_site). Exported as
+ * a pure function so the classification is unit-tested and does not drift as
+ * new assistants show up.
+ */
+const AI_ASSISTANT_HOSTS = [
+  'chatgpt.com', 'openai.com', 'perplexity.ai', 'claude.ai', 'gemini.google.com', 'copilot.microsoft.com',
+]
+
+export function classifyChannelGroup(signals: {
+  utmSource?: string | null
+  referringSite?: string | null
+  sourceName?: string | null
+}): 'ai-assistant' | 'organic-search' | 'social' | 'direct' | 'other' {
+  const host = (value: string | null | undefined): string => {
+    if (!value) return ''
+    try {
+      return new URL(value.includes('://') ? value : `https://${value}`).hostname.toLowerCase()
+    } catch {
+      return value.toLowerCase()
+    }
+  }
+  const utmSourceHost = (signals.utmSource ?? '').toLowerCase()
+  const referringHost = host(signals.referringSite)
+
+  if (
+    AI_ASSISTANT_HOSTS.some(h => utmSourceHost.includes(h)) ||
+    AI_ASSISTANT_HOSTS.some(h => referringHost.includes(h))
+  ) {
+    return 'ai-assistant'
+  }
+
+  const SEARCH_HOSTS = ['google.', 'bing.', 'duckduckgo.', 'yahoo.']
+  if (SEARCH_HOSTS.some(h => referringHost.includes(h)) || utmSourceHost === 'google') {
+    return 'organic-search'
+  }
+
+  const SOCIAL_HOSTS = ['instagram.com', 'facebook.com', 'tiktok.com', 'x.com', 'twitter.com', 'pinterest.com', 'reddit.com']
+  if (SOCIAL_HOSTS.some(h => referringHost.includes(h)) || ['instagram', 'facebook', 'tiktok', 'x', 'twitter', 'pinterest', 'reddit'].includes(utmSourceHost)) {
+    return 'social'
+  }
+
+  if (!referringHost && !utmSourceHost) return 'direct'
+
+  return 'other'
 }
 
 // ─── Handlers ─────────────────────────────────────────────────────────────
@@ -281,6 +336,35 @@ async function handleOrderCreated(order: ShopifyOrder): Promise<void> {
         }
       }
     }
+  }
+
+  // Persist acquisition attribution (ticket #12669). Best-effort: a write
+  // failure here costs the owner digest's acquisition line, never the order.
+  try {
+    const attrOf = (name: string): string | undefined =>
+      order.note_attributes?.find(a => a.name === name)?.value
+    const utmSource   = attrOf('_utm_source') ?? null
+    const referringSite = order.referring_site ?? null
+    const channelGroup = classifyChannelGroup({
+      utmSource,
+      referringSite,
+      sourceName: order.source_name ?? null,
+    })
+    await db.insert(orderAttribution).values({
+      shopifyOrderId: String(order.id),
+      utmSource,
+      utmMedium:      attrOf('_utm_medium') ?? null,
+      utmCampaign:    attrOf('_utm_campaign') ?? null,
+      utmContent:     attrOf('_utm_content') ?? null,
+      refCode:        referralCodeFromNoteAttributes(order.note_attributes) ?? null,
+      referringSite,
+      landingSite:    order.landing_site ?? null,
+      sourceName:     order.source_name ?? null,
+      channelGroup,
+      totalPrice:     order.total_price,
+    }).onConflictDoNothing({ target: orderAttribution.shopifyOrderId })
+  } catch (err) {
+    console.error('[webhook:order-created] order_attribution insert failed:', err)
   }
 
   // Capture referral code from note_attributes (stamped as `_ref_code` by the
