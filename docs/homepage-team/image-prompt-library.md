@@ -2380,5 +2380,27 @@ with stock this run.
 
 ---
 
+## Notebook §0-H keeper — content run 1182, "Why Can You Orgasm Alone But Not With a Partner?"
+
+`cast: jade` + Rechargeable Silicone Bullet Massager Pink, FemmeFunn Ultra Bullet
+(`femmefunn-ultra-bullet-massager-rechargeable-silicone-vibrator-pink`),
+`blogPost-why-you-can-orgasm-alone-but-not-with-a-partner` (`podcast-notes`, † health-adjacent: no
+levity, no scale exaggeration, sincere staging). Gesture per the "Is this normal? / Is it just me?"
+row: pink bullet held up at eye level, head tilted, brow raised, free hand palm-up. Casting: `jade`
+(`reflective`, `reassured`); `vivian` excluded (09-24 hero, inside no-repeat-within-5). Route:
+`composeSceneFrame()` via `gen-notebook-art.ts --cast jade --feature content-blog`, Atlas
+`seedream-4.5-edit`, landscape 4:3. Gate PASS (digit counts [5,5]); the first composite rung was
+rejected by the code gate (exposure-confirmation parse failure plus a [4,5] digit read), the
+`composite-retry` rung returned the keeper. Placed asset:
+`image-b0a5eca6299eef4aec1a93e040afadb2db592660-1200x900-png`.
+
+**Checker note (catalog defect, not a content issue):** the productPage title for this handle is
+"Rechargeable Silicone Bullet Massager Pink", whose every token is in `GENERIC_TOKENS`, so
+`distinctiveTokens()` is empty and `heroNamesAnyProduct` can never pass for it whatever the alt or
+prompt says. Fix is the catalog title (add the brand/model, e.g. FemmeFunn Ultra) or the matcher,
+not the hero.
+
+---
+
 *Seeded 2026-07-17 from the doctrine §4 directives and the mission-brief §2 image rules.
 Owner: `media-manager` (append keepers/rejects each run); pruned monthly.*
