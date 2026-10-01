@@ -694,6 +694,18 @@ Two reviewers, both binding, sequenced so a cheap voice failure never spends the
      enumeration unchanged). A post-scoped enumeration is exactly the shape the post-scoped-cap
      carve-out above already exists for, so that carve-out's permission to edit anywhere in the
      document covers this case too.
+   - **Section-level contradiction scan (part of the same pre-resubmit self-check, ticket #12631):**
+     the two scans above both operate per rewritten STRING or per enumeration, and both miss a repair
+     that is internally fine, introduces no universal quantifier, and touches no shared enumeration,
+     yet still breaks a RULE SYSTEM spread across several blocks — run 327 and run 1164 both lost a
+     publish to exactly this shape despite passing the string- and enumeration-level scans. After a
+     repair, list every rule system the post teaches (a multi-step procedure, a count of checks, a
+     per-material enumeration, a measurement method), then re-read every block that participates in
+     that system — the pull quote and the FAQ block included — and confirm the system still reads
+     consistently as a system and that any count the post promises matches what it delivers. Run the
+     contradiction scan section against section, not sentence against sentence. A claim scoped in one
+     block must also be re-checked in every OTHER block that repeats it, because scoping one instance
+     is what makes the unscoped siblings invisible.
    - **Whole-document aphorism recount:** before resubmitting, re-run your own whole-document
      aphorism-as-closer count on the REWRITTEN draft (not just the changed strings), and separately
      count any newly added first-person sentences.
