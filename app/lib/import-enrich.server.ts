@@ -52,6 +52,7 @@ import {
   pushProductToShopify,
   appendProductTag,
   getHandleByProductId,
+  resolveAndPersistBareProductReference,
   type ProductPageDoc,
 } from '~/lib/shopify.server'
 import { createSuggestion } from '~/lib/team.server'
@@ -1012,6 +1013,18 @@ export async function publishEnrichedProducts(): Promise<{ published: number; fa
         await appendProductTag(r.productId, 'new-arrival')
       } catch (tagErr) {
         console.warn(`[import-enrich] appendProductTag('new-arrival') failed for product ${r.productId} (candidate ${r.id}):`, tagErr instanceof Error ? tagErr.message : tagErr)
+      }
+
+      // Ticket #12875: resolve xdipx.bare_product_reference at publish time
+      // so a new arrival is born image-able for the social-image route
+      // instead of waiting on the next catalog-wide backfill pass. Same
+      // isolated try/catch as the tag above: a resolution hiccup must never
+      // block the publishedAt stamp, and the route's own resolve-on-miss
+      // path still covers it if this fails.
+      try {
+        await resolveAndPersistBareProductReference(r.productId)
+      } catch (bareRefErr) {
+        console.warn(`[import-enrich] resolveAndPersistBareProductReference failed for product ${r.productId} (candidate ${r.id}):`, bareRefErr instanceof Error ? bareRefErr.message : bareRefErr)
       }
 
       await db.update(importCandidates)
