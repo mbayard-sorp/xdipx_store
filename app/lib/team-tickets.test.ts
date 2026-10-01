@@ -742,6 +742,21 @@ describe('markSuggestion (legacy agent-editor path)', () => {
     h.state.updates.push([])
     expect(await status(markSuggestion(7, 'applied', 'ref'))).toBe(409)
   })
+
+  // #12639: applyRef alone was invisible to the verdict pin, so every
+  // agent-editor PR was verified unpinned and bounced by the engine.
+  it('records the PR as a pr-kind link when marking pr_open', async () => {
+    h.state.updates.push([{ id: 7 }])
+    await markSuggestion(7, 'pr_open', 'https://github.com/o/r/pull/7')
+    const links = h.state.inserts.flatMap(v => (Array.isArray(v) ? v : [v])) as Array<Record<string, unknown>>
+    expect(links).toContainEqual({ suggestionId: 7, kind: 'pr', ref: 'https://github.com/o/r/pull/7', state: 'open' })
+  })
+
+  it('writes no link when the ref is not a PR url', async () => {
+    h.state.updates.push([{ id: 7 }])
+    await markSuggestion(7, 'pr_open', 'not-a-pr')
+    expect(h.state.inserts).toEqual([])
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -1985,6 +2000,28 @@ describe('transitionSuggestion: pinning the QA verdict to a commit', () => {
     gh.state.results.push({ ok: false, status: 502, error: 'bad gateway' })
     expect(await status(transitionSuggestion(42, 'verified', 'agent:qa-reviewer'))).toBe(200)
     expect(h.state.patches[0]!['status']).toBe('verified')
+  })
+
+  // #12639: QA sends the pr link on the verify call itself, and that link is
+  // written after the pin runs. Reading only the stored link missed it.
+  it('pins from a pr link arriving on the verify call, without a stored link', async () => {
+    seedTicket({ status: 'in_review' })
+    gh.state.results.push({ ok: true, status: 200, data: { headSha: HEAD } })
+    await transitionSuggestion(42, 'verified', 'agent:qa-reviewer', {
+      links: [{ kind: 'pr', ref: PR_LINK, state: 'ci_green' }],
+    })
+    expect(gh.state.calls).toHaveLength(1)
+    expect(linkWrites()).toContainEqual({ suggestionId: 42, kind: 'commit', ref: HEAD, state: 'verified' })
+  })
+
+  // #12639: agent-editor's mark op historically set only applyRef.
+  it('falls back to applyRef when no pr link exists anywhere', async () => {
+    seedTicket({ status: 'in_review', applyRef: PR_LINK })
+    seedPrLink(null)
+    gh.state.results.push({ ok: true, status: 200, data: { headSha: HEAD } })
+    await transitionSuggestion(42, 'verified', 'agent:qa-reviewer')
+    expect(gh.state.calls).toHaveLength(1)
+    expect(linkWrites()).toContainEqual({ suggestionId: 42, kind: 'commit', ref: HEAD, state: 'verified' })
   })
 
   it('pins nothing on a transition that is not to verified', async () => {

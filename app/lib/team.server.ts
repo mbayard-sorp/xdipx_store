@@ -1648,6 +1648,17 @@ export async function markSuggestion(
       { status: 409 },
     )
   }
+  // Record the PR as a `pr` link too, not only in applyRef (ticket #12639).
+  // The verdict pin, the engine's PR-to-ticket lookup, and the out-of-band
+  // sweep all read suggestion_links, so a row that only carried applyRef was
+  // invisible to all three. Best-effort: the status write above has committed.
+  if (status === 'pr_open' && /\/pull\/\d+/.test(applyRef)) {
+    try {
+      await addTicketLinks(id, [{ kind: 'pr', ref: applyRef, state: 'open' }])
+    } catch (err) {
+      console.warn(`[team] could not record pr link for suggestion ${id} (non-fatal)`, err)
+    }
+  }
 }
 
 // ── Ticket lifecycle (070) ───────────────────────────────────────────────────
@@ -2399,15 +2410,31 @@ function verdictPinNote(detail: string): string {
  * #10502 deployed carried a pin, the failures interleaved with successes 19
  * seconds apart, so the live suspect is a transient `getPullRequest` failure
  * rather than a deploy boundary or a parsing bug. Hence the single retry.
+ *
+ * The PR to pin is resolved in this order: a `pr` link arriving on THIS
+ * verify call, then the row's stored `pr` link, then `applyRef` (ticket
+ * #12639). The stored link alone was not enough: the verify call's own links
+ * are written after this runs, and agent-editor's `mark pr_open` sets only
+ * `applyRef`. So every agent-editor row was verified with no pin, the engine
+ * failed it closed and bounced it back to `approved`, and QA never lists
+ * `approved`. On 2026-09-30 that stranded 7 of the 9 open agent PRs.
  */
-async function pinVerifiedCommit(id: number): Promise<{ sha?: string; failure?: string }> {
+async function pinVerifiedCommit(
+  id: number,
+  incoming: readonly TicketLinkInput[] = [],
+  applyRef: string | null = null,
+): Promise<{ sha?: string; failure?: string }> {
   try {
-    const [prLink] = await db
-      .select({ ref: suggestionLinks.ref })
-      .from(suggestionLinks)
-      .where(and(eq(suggestionLinks.suggestionId, id), eq(suggestionLinks.kind, 'pr')))
-      .orderBy(desc(suggestionLinks.createdAt))
-      .limit(1)
+    let prLink: { ref: string } | undefined = incoming.find(l => l.kind === 'pr' && l.ref?.trim())
+    if (!prLink) {
+      ;[prLink] = await db
+        .select({ ref: suggestionLinks.ref })
+        .from(suggestionLinks)
+        .where(and(eq(suggestionLinks.suggestionId, id), eq(suggestionLinks.kind, 'pr')))
+        .orderBy(desc(suggestionLinks.createdAt))
+        .limit(1)
+    }
+    if (!prLink && applyRef?.trim()) prLink = { ref: applyRef }
     // No PR link: nothing to pin, and never was. Not a failure.
     if (!prLink) return {}
     const prNumberMatch = /(?:\/pull\/|#)(\d{1,9})\b/.exec(prLink.ref)
@@ -2629,7 +2656,7 @@ export async function transitionSuggestion(
   // indistinguishable from a row that was never eligible; and the engine
   // fails CLOSED on an unpinned verification after VERDICT_PIN_CUTOFF.
   if (to === 'verified') {
-    const pin = await pinVerifiedCommit(id)
+    const pin = await pinVerifiedCommit(id, opts.links ?? [], row.applyRef ?? null)
     if (pin.sha) links.push({ kind: 'commit', ref: pin.sha, state: 'verified' })
     else if (pin.failure) links.push({ kind: 'note', ref: pin.failure, state: to })
   }
