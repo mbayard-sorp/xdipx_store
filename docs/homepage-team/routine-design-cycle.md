@@ -221,6 +221,14 @@ from colliding with uncommitted work, they do not remove it.
   375/768/1440 against `docs/design-doctrine.md` and scores its rubric (hierarchy, spacing rhythm,
   type, color, imagery, motion, overall). The PR does not open on a REVISE or BLOCK; fix and
   re-review. Record the verdict + scores as an `/event` row (`agentRole:'design-critic'`).
+  **When this cycle is working a filed defect ticket (ticket #12615):** before any fix is written,
+  dispatch `design-critic` for a per-defect CONFIRMED / REFUTED verdict against a fresh capture and
+  a stated measurement, not a re-score of the whole surface. Run 1162 wrote exactly that fix-first
+  sequence by accident and caught two of four filed defects materially wrong on the fresh look (one
+  refuted outright — the claimed clip did not reproduce at measurement — one understated, one broader
+  than filed), any of which a build-then-re-score order would have shipped a wrong or incomplete fix
+  for. Record each verdict as its own `/event` row before `rr7-engineer` starts; a REFUTED defect is
+  closed on its ticket with the measurement as evidence, never silently dropped.
   **Capture the screenshots with the repo CLI (ticket #8421, run 905).** One command, and it carries
   the cloud-routine accommodations itself:
 
