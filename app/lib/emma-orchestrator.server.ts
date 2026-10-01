@@ -109,6 +109,10 @@ export interface ProductWrites {
   ivrFeatures?:       string[]
   // PDP FAQs — Sanity-only (productPage.productFaqs[]). Renders visibly + emits FAQPage JSON-LD.
   productFaqs?:       ProductFaq[]
+  /** Shopify Standard Product Taxonomy category (bare id, e.g. `ma-1-4`) plus attribute
+   *  values by attribute name. Optional: the enrich step falls back to a default by product
+   *  type. Applied by applyShopifyCategory; see docs/store-team/shopify-category-playbook.md. */
+  shopifyCategory?:   { id: string; attributes?: Record<string, string[]> }
 }
 
 export interface ToolCallTrace {

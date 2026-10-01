@@ -343,6 +343,34 @@ async function loadEnricherAgentPrompt(): Promise<string> {
   return body
 }
 
+let _cachedCategoryPlaybook: string | null = null
+
+/**
+ * Load docs/store-team/shopify-category-playbook.md for the batch prompt. The
+ * subagent transport Reads this file itself; the batch path has no tools, so the
+ * playbook rides inside the shared context block (not its own block: Anthropic
+ * allows at most 4 cache_control breakpoints per request). A missing file is not
+ * fatal: the payload then carries no shopifyCategory and the enrich step applies
+ * the deterministic default by product type.
+ */
+async function loadCategoryPlaybook(): Promise<string> {
+  if (_cachedCategoryPlaybook !== null) return _cachedCategoryPlaybook
+  const here = dirname(fileURLToPath(import.meta.url))
+  const rel = ['docs', 'store-team', 'shopify-category-playbook.md'] as const
+  const candidates = [
+    resolve(process.cwd(), ...rel),
+    resolve(here, '..', '..', ...rel),
+    resolve(here, '..', ...rel),
+  ]
+  const path = candidates.find(p => existsSync(p))
+  if (!path) {
+    console.warn(`[batch-enrichment] category playbook not found; tried ${candidates.join(', ')}`)
+    return ''
+  }
+  _cachedCategoryPlaybook = (await readFile(path, 'utf8')).trim()
+  return _cachedCategoryPlaybook
+}
+
 function buildSharedContextBlock(ctx: SharedEnrichmentContext): string {
   const dialReg = Object.entries(ctx.dialRegistryByType)
     .map(([t, labels]) => `  ${t}: ${labels.join(', ')}`)
@@ -421,7 +449,9 @@ async function buildFullEnrichmentRequests(
 ): Promise<BatchRequest[]> {
   const emmaBlocks   = await buildEmmaSystemBlocks(opts.brandVoice)
   const agentPrompt  = await loadEnricherAgentPrompt()
+  const playbook     = await loadCategoryPlaybook()
   const contextBlock = buildSharedContextBlock(context)
+    + (playbook ? `\n\nShopify category playbook (your agent prompt tells you to read this file; it is inlined here because you have no file access in this transport):\n\n${playbook}` : '')
 
   const systemParam: Anthropic.TextBlockParam[] = [
     ...emmaBlocks.map(b => ({

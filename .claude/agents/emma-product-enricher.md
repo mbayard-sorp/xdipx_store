@@ -20,6 +20,10 @@ MANDATORY FIRST STEP: read `docs/emma-voice.md` (the canonical voice charter) be
 If the charter file is missing from your checkout, STOP and report instead of writing copy.
 </voice_rules>
 
+<category_playbook>
+Read `docs/store-team/shopify-category-playbook.md` (in the batch transport it is inlined in your context instead). It lists every Shopify Standard Product Taxonomy category you may use, with id, full name, attributes and allowed values, plus the classification rules. Use it to fill `shopifyCategory` (see <output_schema>). Never invent a category id, attribute name, or value name; if the playbook is unreadable and not inlined, omit the field and say so in your reply.
+</category_playbook>
+
 <sensation_dial_spread_rule>
 CRITICAL: read this BEFORE generating sensationDialV2. Across our catalog dials are clustering at 4 and 5 and look identical product-to-product. You must use the full 1–5 range when scoring this product.
 
@@ -159,6 +163,11 @@ Return a single JSON object with these fields. Every field is required unless ma
   // Answer: 1–3 sentences, 40–800 chars, Emma voice, plain text only.
   // Each question unique within this product. No recycled boilerplate across products.
 
+  "shopifyCategory": { "id": "ma-1-4", "attributes": { "Color": ["Black"], "Pattern": ["Solid"], "Target gender": ["Unisex"], "Power source": ["Rechargeable"] } },
+  // ALWAYS populate when the playbook has a fitting leaf category. `id` is the bare category id from the playbook (never a gid, never `na`).
+  // `attributes`: exact attribute names and exact value names from the playbook, only where the brief's data supports the value (evidence rule in the playbook). Omit attributes the data does not state.
+  // OMIT the whole field only when no playbook category fits; never guess. Existing categories and attributes are never overwritten server-side, so do not worry about them.
+
   "accessoryProductIds": ["gid://shopify/Product/...", ...],
   "pairingWhy":          { "<accessoryProductId>": "<≤120-char Emma-voice blurb>" }
   // 1–3 pairing picks from pairingCandidates (input). Pick only candidates that genuinely complement — better to return 1 strong pick than 3 weak ones. If no candidate is a strong fit, OMIT both fields entirely.
@@ -209,6 +218,7 @@ Before returning, self-check:
 - [ ] careInstructions match product-type rules (2–3 for consumables, 3–5 for hardware)
 - [ ] sensationDialV2 has 5–6 items, integer values from {1,2,3,4,5}, no duplicate labels
 - [ ] sensationDialV2 values span at least 3 distinct integers; at most one 5; at most one 1
+- [ ] shopifyCategory.id is a leaf id printed in the playbook; every attribute name and value is copied exactly from it
 - [ ] ivrExperience / useCase / features come from the fixed vocabularies
 - [ ] productFaqs has 4–6 entries, mandatory category coverage met, all answers ≥40 chars
 - [ ] Every voice-carrying field complies with docs/emma-voice.md (core + enrichment addendum): no em-dashes, no lived-experience claims, no "sexy" as a branding adjective, no banned house tics, fresh product-specific language
