@@ -145,6 +145,12 @@ async function sendGa4Purchase_(order: ShopifyOrder): Promise<void> {
   try {
     const { sendGa4Purchase } = await import('../app/lib/ga4-mp.server.js')
     const gaCid = order.note_attributes?.find(a => a.name === '_ga_cid')?.value || null
+    // Ticket #12670: without a session_id, Measurement Protocol purchases are
+    // not joined to a session and land in GA4's "Unassigned" channel, which
+    // was hiding every channel's purchases (AI Assistant included) from the
+    // strategy brief. Stamped onto the cart by attributionCartAttrs as
+    // `_ga_sid` (attribution-cart.server.ts / getGaSessionId).
+    const gaSid = order.note_attributes?.find(a => a.name === '_ga_sid')?.value || null
     const lineItems = order.line_items ?? []
     const gaEvent = {
       transactionId: String(order.id),
@@ -157,6 +163,7 @@ async function sendGa4Purchase_(order: ShopifyOrder): Promise<void> {
         quantity:  li.quantity || 0,
       })),
       clientId: gaCid,
+      sessionId: gaSid,
     }
     const gaResult = await sendGa4Purchase(gaEvent)
     if (!gaResult.ok && !gaResult.skipped) {
