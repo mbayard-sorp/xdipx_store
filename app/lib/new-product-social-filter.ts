@@ -67,6 +67,24 @@ function matchesAny(haystack: string, patterns: readonly RegExp[]): boolean {
   return patterns.some(re => re.test(haystack))
 }
 
+// Instagram category hard exclude (ticket #12877; instagram-campaigns.md
+// §4b, "Picking the product", filter 2: "Never a dildo, never an
+// anatomically realistic product.") NOTE: the ticket that filed this asked
+// to "reuse isInstagramEligible" -- no function by that name exists anywhere
+// in this codebase (grepped before writing this). This is new code
+// codifying that literal doctrine text, matching the independently-filed
+// ticket #12876's `isInstagramEligibleCategory` in
+// `app/lib/social-candidates.server.ts` (same pattern, same doctrine
+// citation; the two tickets landed the same day on separate branches,
+// neither depending on the other, hence the duplication rather than a
+// shared import).
+const INSTAGRAM_INELIGIBLE_PRODUCT_TYPE = /dildo|realistic|sex\s*doll/i
+
+export function isInstagramEligibleProduct(productType?: string | null | undefined): boolean {
+  if (!productType) return true
+  return !INSTAGRAM_INELIGIBLE_PRODUCT_TYPE.test(productType)
+}
+
 export interface NewProductGateInput {
   /** Shopify product title. */
   title?: string | null | undefined
@@ -97,6 +115,14 @@ export function newProductPostExcludeReason(input: NewProductGateInput): string 
   }
   if (matchesAny(text, OFF_THEME_NOVELTY_PATTERNS)) {
     return 'off-theme novelty (undercuts editorially-curated sexual wellness)'
+  }
+  // Checked before the weekly-cap test below (ticket #12877): on 2026-10-01
+  // all three of the week's slots (rows 12809-12811) were dildos Instagram
+  // cannot run, which starved every genuinely postable launch that week. An
+  // Instagram-ineligible product must never consume a cap slot in the first
+  // place, not merely be skipped once it already has one.
+  if (!isInstagramEligibleProduct(input.productType)) {
+    return 'not Instagram-eligible by category (instagram-campaigns.md §4b: never a dildo, never an anatomically realistic product)'
   }
 
   for (const rationale of input.pricingRationales ?? []) {

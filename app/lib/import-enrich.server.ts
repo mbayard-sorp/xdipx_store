@@ -33,7 +33,7 @@
 
 import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
-import { importCandidates, dealHistory } from '../../db/schema'
+import { importCandidates, dealHistory, homepageTeamSuggestions } from '../../db/schema'
 import {
   fetchProductSnapshot,
   gatherProductBrief,
@@ -54,7 +54,7 @@ import {
   getHandleByProductId,
   type ProductPageDoc,
 } from '~/lib/shopify.server'
-import { createSuggestion } from '~/lib/team.server'
+import { createSuggestionDetailed } from '~/lib/team.server'
 import { upsertProductPage } from '~/lib/sanity.server'
 import { ensureProductTypeForPublish } from '~/lib/product-type.server'
 import { getPipelineSetting, deriveSection } from '~/lib/feed-processor.server'
@@ -960,6 +960,99 @@ export async function collectEnrichmentBatch(): Promise<{ enriched: number; fail
   return { enriched: enrichedTotal, failed: failedTotal, stillPending, recovered: recoveredTotal }
 }
 
+export interface WentLiveProduct {
+  handle: string
+  title: string
+  category: string
+  vendor: string
+  /** Shopify's native product_type, resolved/derived at publish time. */
+  productType: string | null
+  totalInventory: number | null
+  /** The resolved xdipx.bare_product_reference url, when one already exists. */
+  bareRefUrl: string | null
+  /** From newProductPostExcludeReason: why this product should NOT get its
+   *  own social post (includes the #12877 Instagram-category check), or
+   *  null when it's clean. Informational only here — does not gate whether
+   *  the product appears in this summary row at all. */
+  excludeReason: string | null
+}
+
+function formatWentLiveLine(p: WentLiveProduct): string {
+  const bits = [
+    `category: ${p.category}`,
+    `vendor: ${p.vendor}`,
+    `type: ${p.productType ?? 'unknown'}`,
+    `inventory: ${p.totalInventory ?? 'unknown'}`,
+    `Instagram-eligible: ${p.excludeReason ? `no (${p.excludeReason})` : 'yes'}`,
+    ...(p.bareRefUrl ? [`bare ref: ${p.bareRefUrl}`] : []),
+  ]
+  return `- ${p.title} (handle: ${p.handle}, ${bits.join(', ')})`
+}
+
+/**
+ * File (or extend) today's "products went live" row for the social team
+ * (ticket #3736, curated per #12877). Same append-on-dedupe-hit shape as
+ * `restock-digest.server.ts`'s `fileRestockDigestEntry`, whose header
+ * comment calls out this file's dedupeKey by name as the pattern it mirrors:
+ * `createSuggestionDetailed`'s dedupe-collision path returns the EXISTING
+ * row without touching its content, so a repeat create is not an append.
+ * The publish tick runs every 30 minutes against a per-UTC-day key, and a
+ * second-and-later batch the same day used to be silently discarded this
+ * way — verified 2026-09-25 (15 products published across two batches, row
+ * listed 10) and 2026-09-16 (28 published, row listed 25). Fixed the same
+ * way restock-digest.server.ts already was: append via a direct, atomic SQL
+ * concatenation on a dedupe hit, never a read-modify-write, so two publish
+ * ticks landing close together cannot clobber one another.
+ */
+export async function fileWentLiveSuggestion(
+  products: readonly WentLiveProduct[],
+  opts: { now?: Date } = {},
+): Promise<{ id: number; created: boolean }> {
+  if (products.length === 0) return { id: 0, created: false }
+  const now = opts.now ?? new Date()
+  const day = now.toISOString().slice(0, 10)
+  const lines = products.map(formatWentLiveLine).join('\n')
+  const dedupeKey = `new-products:enrich:${day}`
+
+  const result = await createSuggestionDetailed({
+    team:       'social',
+    targetTeam: 'social',
+    kind:       'process',
+    category:   'social-automation',
+    dedupeKey,
+    // One campaign per day of new arrivals is the point here, so the date is
+    // identity, not noise. Without this the key canonicalizes to
+    // `new-products-enrich` and every day after the first is swallowed.
+    dedupeScope: 'daily' as const,
+    suggestion:
+      `${products.length} product(s) went live on the storefront via the enrich-to-publish ` +
+      `chain (owner direction 2026-08-16: posts about new products we now have on the site):\n` +
+      `${lines}\n` +
+      `Consider a new-arrivals post per routine-social-daily.md. Every pick still ` +
+      `passes the usual gates: Instagram category eligibility, stock, and the voice gate.`,
+  })
+
+  if (!result.deduped) return { id: result.id, created: true }
+  if (result.id === 0) {
+    // Dedupe collision fired but the live row it pointed at could not be
+    // resolved (e.g. closed between the insert attempt and the lookup inside
+    // createSuggestionDetailed). Rare and not worth retrying here: the next
+    // publish tick mints a fresh row for today.
+    console.warn(`[import-enrich] dedupe collision on '${dedupeKey}' but no live row found; this batch's products were not recorded in today's row`)
+    return { id: 0, created: false }
+  }
+
+  await db
+    .update(homepageTeamSuggestions)
+    .set({
+      suggestion: sql`${homepageTeamSuggestions.suggestion} || ${'\n' + lines}`,
+      updatedAt:  now,
+    })
+    .where(eq(homepageTeamSuggestions.id, result.id))
+
+  return { id: result.id, created: false }
+}
+
 /**
  * Flip enriched-but-unpublished imported drafts to active on the curated
  * channels (POS excluded — handled inside activateShopifyProduct). Products are
@@ -985,17 +1078,23 @@ export async function publishEnrichedProducts(): Promise<{ published: number; fa
 
   let published = 0
   let failed = 0
-  // Collected for the social team's new-product suggestion below (#3736):
-  // handle, title, category, vendor per product that actually went live.
-  const wentLive: Array<{ handle: string; title: string; category: string; vendor: string }> = []
+  // Collected for the social team's new-product suggestion below (#3736,
+  // curated per ticket #12877): handle, title, category, vendor, plus the
+  // resolved Shopify product_type, current stock, the bare-product-reference
+  // url when one is already resolved, and an Instagram-eligibility read, per
+  // product that actually went live.
+  const wentLive: WentLiveProduct[] = []
   for (const r of rows) {
     if (!r.productId) continue
     try {
       // Last-line guard: never flip a draft live without a product_type the
       // pricing engine can resolve. Backfills by derivation when missing and
       // error-logs (without blocking publish) when unresolvable — a typeless
-      // live product prices on the global fallback rule.
-      await ensureProductTypeForPublish({
+      // live product prices on the global fallback rule. Also the row's own
+      // product_type for the curated new-product suggestion below, so that
+      // row never needs a second lookup for a value this call already
+      // resolved.
+      const resolvedProductType = await ensureProductTypeForPublish({
         numericProductId: r.productId,
         sku:              r.sku,
         title:            r.title ?? '',
@@ -1021,16 +1120,42 @@ export async function publishEnrichedProducts(): Promise<{ published: number; fa
 
       // Best-effort handle lookup for the social suggestion below. A miss
       // falls back to the SKU so the row still names the product somehow.
+      const category = (r.categories ?? []).filter(c => !!c && c !== '(uncategorized)').join(', ') || 'uncategorized'
+      const vendor = r.brand ?? 'unknown'
       try {
         const handle = await getHandleByProductId(r.productId)
+        // Best-effort stock + bare-reference read. Non-fatal: this is
+        // informational curation on an already-published product, never a
+        // reason to fail the publish that already succeeded above.
+        let totalInventory: number | null = null
+        let bareRefUrl: string | null = null
+        if (handle) {
+          try {
+            const { getProductByHandle } = await import('~/lib/shopify.server')
+            const product = await getProductByHandle(handle)
+            totalInventory = product?.totalInventory ?? null
+            bareRefUrl = product?.bareProductReference?.url ?? null
+          } catch (lookupErr) {
+            console.warn(`[import-enrich] curation lookup failed for ${handle} (candidate ${r.id}):`, lookupErr instanceof Error ? lookupErr.message : lookupErr)
+          }
+        }
+        const { newProductPostExcludeReason } = await import('~/lib/new-product-social-filter')
+        const excludeReason = newProductPostExcludeReason({ title: r.title, productType: resolvedProductType })
         wentLive.push({
-          handle:   handle ?? r.sku,
-          title:    r.title ?? r.sku,
-          category: (r.categories ?? []).filter(c => !!c && c !== '(uncategorized)').join(', ') || 'uncategorized',
-          vendor:   r.brand ?? 'unknown',
+          handle: handle ?? r.sku,
+          title: r.title ?? r.sku,
+          category,
+          vendor,
+          productType: resolvedProductType,
+          totalInventory,
+          bareRefUrl,
+          excludeReason,
         })
       } catch {
-        wentLive.push({ handle: r.sku, title: r.title ?? r.sku, category: 'uncategorized', vendor: r.brand ?? 'unknown' })
+        wentLive.push({
+          handle: r.sku, title: r.title ?? r.sku, category, vendor,
+          productType: resolvedProductType, totalInventory: null, bareRefUrl: null, excludeReason: null,
+        })
       }
     } catch (err) {
       console.error(`[import-enrich] publish failed for product ${r.productId} (candidate ${r.id}):`, err)
@@ -1058,34 +1183,12 @@ export async function publishEnrichedProducts(): Promise<{ published: number; fa
   // the bus; the social routine reads its inbound mail via the
   // targetTeam:'social' mailbox query, so targetTeam must be set or the row is
   // invisible to it. kind:'process' matches the webhook half (#4360) so a run
-  // can close the row. The daily dedupe key means a re-run on the same day
-  // extends the open conversation instead of opening a second one. Products
-  // activated OUTSIDE this chain (manual Shopify status flip) are caught by
-  // handleProductUpdated in server/webhooks.ts, which skips products this
-  // chain just published.
+  // can close the row. Products activated OUTSIDE this chain (manual Shopify
+  // status flip) are caught by handleProductUpdated in server/webhooks.ts,
+  // which skips products this chain just published.
   if (wentLive.length > 0) {
     try {
-      const day = new Date().toISOString().slice(0, 10)
-      const lines = wentLive
-        .map(p => `- ${p.title} (handle: ${p.handle}, category: ${p.category}, vendor: ${p.vendor})`)
-        .join('\n')
-      await createSuggestion({
-        team:       'social',
-        targetTeam: 'social',
-        kind:       'process',
-        category:   'social-automation',
-        dedupeKey:  `new-products:enrich:${day}`,
-        // One campaign per day of new arrivals is the point here, so the date
-        // is identity, not noise. Without this the key canonicalizes to
-        // `new-products-enrich` and every day after the first is swallowed.
-        dedupeScope: 'daily' as const,
-        suggestion:
-          `${wentLive.length} product(s) went live on the storefront via the enrich-to-publish ` +
-          `chain (owner direction 2026-08-16: posts about new products we now have on the site):\n` +
-          `${lines}\n` +
-          `Consider a new-arrivals post per routine-social-daily.md. Every pick still ` +
-          `passes the usual gates: Instagram category eligibility, stock, and the voice gate.`,
-      })
+      await fileWentLiveSuggestion(wentLive)
     } catch (err) {
       console.warn('[import-enrich] new-product social suggestion filing failed (non-blocking):', err)
     }
