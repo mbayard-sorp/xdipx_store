@@ -2267,6 +2267,22 @@ export interface TransitionOpts {
    * not forward it, so the fence cannot be crossed by a bare transition call.
    */
   viaRetireEvidence?: boolean | undefined
+  /**
+   * Reports the outcome of the verdict-pin write on a `-> verified` transition
+   * (#12636), without widening `transitionSuggestion`'s return type for every
+   * other caller. `pinned:true` means a `commit` link was recorded; `false`
+   * means either a `verdict-pin-failed` note was recorded (`failure` set) or
+   * there was never a PR link to pin (`failure` absent). Ignored on any other
+   * target status.
+   */
+  onVerdictPin?: ((result: VerdictPinResult) => void) | undefined
+}
+
+/** The verdict-pin outcome of a `-> verified` transition. See `onVerdictPin`. */
+export interface VerdictPinResult {
+  pinned: boolean
+  sha?: string | undefined
+  failure?: string | undefined
 }
 
 export type TicketRow = typeof homepageTeamSuggestions.$inferSelect
@@ -2659,6 +2675,12 @@ export async function transitionSuggestion(
     const pin = await pinVerifiedCommit(id, opts.links ?? [], row.applyRef ?? null)
     if (pin.sha) links.push({ kind: 'commit', ref: pin.sha, state: 'verified' })
     else if (pin.failure) links.push({ kind: 'note', ref: pin.failure, state: to })
+    // Surface the outcome to the caller (#12636): before this, a failed pin
+    // was recorded only in a `note` link the caller had no reason to go
+    // looking for, and the first anyone learned of it was the release engine
+    // bouncing the PR hours later with "the pin write failed" — turning a
+    // one-call retry into a full bounce-and-reverify.
+    opts.onVerdictPin?.({ pinned: Boolean(pin.sha), sha: pin.sha, failure: pin.failure })
   }
   if (opts.note) links.push({ kind: 'note', ref: opts.note, state: to })
   // Honest attribution on the delegated dismissal (#3573): decided_by above
@@ -2700,6 +2722,42 @@ export async function transitionSuggestion(
   }
 
   return updated[0]!
+}
+
+/**
+ * Re-attempts the verdict-pin write for a ticket that is ALREADY `verified`,
+ * without touching its status or re-running QA (#12636). `pinVerifiedCommit`
+ * retries once against a transient GitHub read, but two verifies 40 seconds
+ * apart in the same QA pass both lost their pin, so the outage window the
+ * single 250ms retry is meant to survive can outlast it. Before this, the
+ * only recovery path was the release engine bouncing the PR back to
+ * `in_progress` hours later and QA re-verifying the whole ticket from
+ * scratch, for a failure that has nothing to do with the diff.
+ */
+export async function repinVerifiedTicket(id: number): Promise<VerdictPinResult> {
+  const [row] = await db
+    .select({ status: homepageTeamSuggestions.status })
+    .from(homepageTeamSuggestions)
+    .where(eq(homepageTeamSuggestions.id, id))
+    .limit(1)
+  if (!row) throw new Response(`Not Found: suggestion ${id}`, { status: 404 })
+  if (row.status !== 'verified') {
+    throw new Response(
+      `Conflict: suggestion ${id} is '${row.status}', not 'verified' — nothing to repin`,
+      { status: 409 },
+    )
+  }
+  const pin = await pinVerifiedCommit(id)
+  if (pin.sha) {
+    await addTicketLinks(id, [{ kind: 'commit', ref: pin.sha, state: 'verified' }])
+    return { pinned: true, sha: pin.sha }
+  }
+  if (pin.failure) {
+    await addTicketLinks(id, [{ kind: 'note', ref: pin.failure, state: 'verified' }])
+    return { pinned: false, failure: pin.failure }
+  }
+  // No PR link at all — nothing was ever pinnable, and this is not a failure.
+  return { pinned: false }
 }
 
 /**

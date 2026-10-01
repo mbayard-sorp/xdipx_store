@@ -121,6 +121,7 @@ import {
   markSuggestion,
   normalizeTicketKind,
   parseSupersessionRef,
+  repinVerifiedTicket,
   resolveListOrder,
   runWithOutOfBandReconcile,
   transitionSuggestion,
@@ -2028,5 +2029,92 @@ describe('transitionSuggestion: pinning the QA verdict to a commit', () => {
     seedTicket({ status: 'in_progress' })
     await transitionSuggestion(42, 'pr_open', 'agent:rr7-engineer')
     expect(gh.state.calls).toHaveLength(0)
+  })
+})
+
+describe('transitionSuggestion: onVerdictPin reports the pin outcome (#12636)', () => {
+  const PR_LINK = 'https://github.com/mbayard-sorp/xdipx_store/pull/1261'
+  const HEAD = 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2'
+
+  function seedPrLink(ref: string | null = PR_LINK) {
+    h.state.selects.push(ref === null ? [] : [{ ref }])
+  }
+
+  it('reports pinned:true with the sha on a clean pin', async () => {
+    seedTicket({ status: 'in_review' })
+    seedPrLink()
+    gh.state.results.push({ ok: true, status: 200, data: { headSha: HEAD } })
+    let result: unknown
+    await transitionSuggestion(42, 'verified', 'agent:qa-reviewer', {
+      onVerdictPin: (r) => { result = r },
+    })
+    expect(result).toEqual({ pinned: true, sha: HEAD, failure: undefined })
+  })
+
+  it('reports pinned:false with the failure reason when both GitHub reads fail', async () => {
+    seedTicket({ status: 'in_review' })
+    seedPrLink()
+    gh.state.results.push({ ok: false, status: 502, error: 'bad gateway' })
+    gh.state.results.push({ ok: false, status: 502, error: 'bad gateway' })
+    let result: { pinned: boolean; sha?: string | undefined; failure?: string | undefined } | undefined
+    await transitionSuggestion(42, 'verified', 'agent:qa-reviewer', {
+      onVerdictPin: (r) => { result = r },
+    })
+    expect(result?.pinned).toBe(false)
+    expect(result?.failure).toContain('1261')
+  })
+
+  it('is never called on a transition that is not to verified', async () => {
+    seedTicket({ status: 'in_progress' })
+    let called = false
+    await transitionSuggestion(42, 'pr_open', 'agent:rr7-engineer', { onVerdictPin: () => { called = true } })
+    expect(called).toBe(false)
+  })
+})
+
+describe('repinVerifiedTicket: retrying a lost verdict pin without re-verifying (#12636)', () => {
+  const PR_LINK = 'https://github.com/mbayard-sorp/xdipx_store/pull/1261'
+  const HEAD = 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2'
+
+  function seedPrLink(ref: string | null = PR_LINK) {
+    h.state.selects.push(ref === null ? [] : [{ ref }])
+  }
+
+  function linkWrites(): Array<{ kind: string; ref: string; state: string }> {
+    return h.state.inserts.flatMap(v => (Array.isArray(v) ? v : [v])) as Array<{
+      kind: string; ref: string; state: string
+    }>
+  }
+
+  it('409s when the ticket is not currently verified', async () => {
+    h.state.selects.push([{ status: 'in_progress' }])
+    expect(await status(repinVerifiedTicket(42))).toBe(409)
+  })
+
+  it('404s when the ticket does not exist', async () => {
+    h.state.selects.push([])
+    expect(await status(repinVerifiedTicket(999))).toBe(404)
+  })
+
+  it('writes a fresh commit link and returns pinned:true on success, without touching status', async () => {
+    h.state.selects.push([{ status: 'verified' }])
+    seedPrLink()
+    gh.state.results.push({ ok: true, status: 200, data: { headSha: HEAD } })
+    const result = await repinVerifiedTicket(42)
+    expect(result).toEqual({ pinned: true, sha: HEAD })
+    expect(linkWrites()).toContainEqual({ suggestionId: 42, kind: 'commit', ref: HEAD, state: 'verified' })
+    expect(h.state.patches).toHaveLength(0)
+  })
+
+  it('writes a fresh note link and returns pinned:false on a repeat failure', async () => {
+    h.state.selects.push([{ status: 'verified' }])
+    seedPrLink()
+    gh.state.results.push({ ok: false, status: 502, error: 'bad gateway' })
+    gh.state.results.push({ ok: false, status: 502, error: 'bad gateway' })
+    const result = await repinVerifiedTicket(42)
+    expect(result.pinned).toBe(false)
+    expect(result.failure).toContain('1261')
+    const note = linkWrites().find(l => l.kind === 'note' && l.ref.startsWith(VERDICT_PIN_NOTE_PREFIX))
+    expect(note).toBeDefined()
   })
 })

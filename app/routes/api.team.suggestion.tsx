@@ -23,7 +23,13 @@
  *   { op: 'claim', assignee, leaseSeconds?, id?, filter? }
  *       -> { claimed: true, ...ticket } | { empty: true }
  *   { op: 'transition', id, to, actor, note?, links?, lastError?, remedyScope? }
- *       -> { ok: true, suggestion }
+ *       -> { ok: true, suggestion, verdictPin? }
+ *     verdictPin (#12636) appears only on a `-> verified` transition:
+ *     { pinned: true, sha } on a successful verdict pin, or { pinned: false,
+ *     failure? } when the pin write failed or there was no PR link to pin.
+ *     A failed pin does not fail the transition (best-effort, ticket #10671);
+ *     this just makes the outcome visible in the same response instead of
+ *     only in a `note` link the caller has no reason to go looking for.
  *     Delegated dismissal (#3573, owner-approved): an agent actor MAY
  *     transition a proposed/approved row to dismissed when the note contains
  *     a supersession reference — a GitHub PR URL, or `#<id>` of a live
@@ -51,6 +57,10 @@
  *     repo file/symbol path the investigator read. See RetireEvidence in
  *     team.server.ts for the validation and why the file check is format-only.
  *   { op: 'note', id, ref } -> { ok: true }
+ *   { op: 'repin', id } -> { ok: true, pinned, sha?, failure? }
+ *     Re-attempts the verdict-pin write for a ticket that is already
+ *     `verified` (#12636), without touching its status or re-running QA.
+ *     409s if the ticket is not currently `verified`.
  *
  * Lifecycle (app/lib/team.server.ts ALLOWED is the single source of truth):
  *   proposed -> approved (owner, or the acting team's auto-approve valve)
@@ -76,6 +86,7 @@ import {
   createSuggestionDetailed,
   getTicket,
   rekindSuggestion,
+  repinVerifiedTicket,
   isTeamId,
   isTicketActor,
   isTicketStatus,
@@ -85,6 +96,7 @@ import {
   SUGGESTION_LIST_MAX,
   type TicketLinkInput,
   type TicketStatus,
+  type VerdictPinResult,
 } from '~/lib/team.server'
 
 const KINDS = ['process', 'strategy', 'instructions', 'agent-def', 'config', 'code', 'campaign', 'promo', 'program']
@@ -286,6 +298,10 @@ export async function action({ request }: ActionFunctionArgs) {
     if (!isTicketActor(b['actor'])) {
       return new Response("Bad Request: actor must be 'owner' | 'auto' | 'system' | 'agent:<slug>'", { status: 400 })
     }
+    // Captured only on a `-> verified` transition (#12636), so a QA pass can
+    // see a failed verdict-pin write in THIS response instead of learning
+    // about it hours later from a release-engine bounce.
+    let verdictPin: VerdictPinResult | undefined
     const suggestion = await transitionSuggestion(b['id'], b['to'] as TicketStatus, b['actor'], {
       // #10506: a caller-supplied note becomes a `note` link on the ticket,
       // and an unclamped one can overflow the btree index-tuple ceiling on
@@ -307,8 +323,23 @@ export async function action({ request }: ActionFunctionArgs) {
       // `category:'design'` row; an unrecognised value is dropped
       // server-side, same shape as blockClass.
       remedyScope: typeof b['remedyScope'] === 'string' ? b['remedyScope'] : undefined,
+      onVerdictPin: (result) => { verdictPin = result },
     })
-    return Response.json({ ok: true, suggestion })
+    return Response.json({ ok: true, suggestion, ...(verdictPin ? { verdictPin } : {}) })
+  }
+
+  // Retry the verdict-pin write for a ticket that is already `verified`,
+  // without re-running QA (#12636): `pinVerifiedCommit` is a best-effort
+  // external read that can intermittently fail (two verifies 40 seconds
+  // apart in the same pass both lost their pin), and until now the only
+  // recovery was the release engine bouncing the PR hours later and QA
+  // re-verifying the whole ticket from scratch.
+  if (b['op'] === 'repin') {
+    if (typeof b['id'] !== 'number') {
+      return new Response('Bad Request: id required', { status: 400 })
+    }
+    const result = await repinVerifiedTicket(b['id'])
+    return Response.json({ ok: true, ...result })
   }
 
   // Re-file a misfiled row under a kind that actually has an executor. One-way
