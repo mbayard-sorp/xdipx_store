@@ -31,9 +31,10 @@ and every touchpoint must be comfortable to receive, open, and share.
 - **PAID ACQUISITION IS HELD (owner direction, 2026-08-15): "fix the AOV and CVR first, hold the
   ads."** No team proposes, plans, or launches paid spend on any platform while this stands. This is
   not a policy hold and not a lack of a plan; `docs/store-team/google-ads-launch-plan.md` is complete
-  and carries the full reasoning and the unhold criteria. It is an **economics** hold: **AOV is n=0**
-  (no real customer order has ever been placed; the one non-test order is the owner's own purchase at
-  75% off), and at the ~$33 basket the catalog currently produces, break-even on paid needs a ~12%
+  and carries the full reasoning and the unhold criteria. It is an **economics** hold: as of
+  2026-09-30 there are 6 real customer orders (#1003-#1008, 2026-08-20 to 2026-09-30), AOV $50.69, so
+  the AOV half of the unhold criterion is met and the 10-order half is not (6 of 10). The hold stands.
+  At the ~$33 basket the catalog previously produced, break-even on paid needs a ~12%
   conversion rate, which nobody achieves at any budget.
   **The hold lifts when AOV >= $45 over 10+ real orders AND the measurement chain is trustworthy**
   (tickets #3441 and #3422 shipped, plus a checkout step pixel). Until then, acquisition effort goes
@@ -57,6 +58,15 @@ and every touchpoint must be comfortable to receive, open, and share.
 - **Consent is sacred.** Email/SMS plans target consented lists only. Referral mechanics never
   expose a customer's purchase to a third party beyond the customer's own share action.
 - **Canonical URLs.** All product links everywhere are `/products/{slug}`, with channel UTMs.
+- **AI assistants are a first-class acquisition channel** (owner all-hands 2026-09-30, ticket
+  #12673). ChatGPT answers cite xdipx product pages and Notebook comparisons organically (2 of the
+  store's first 6 real customer orders, $198.97 of $304.13, came in with `_utm_source=chatgpt.com`).
+  The organic surface is the only path that works for this catalog: the OpenAI merchant feed
+  (Commerce Policies) prohibits sex toys, and Shopify Catalog excludes mature content. Every team
+  protects that surface: `robots.txt` keeps every named AI crawler allowed, every new page class
+  ships a `.md` twin and appears in `llms.txt`, Product JSON-LD stays complete (price, availability,
+  GTIN, returns, shipping), Notebook posts stay answer-shaped (FAQ H2s, comparison pages), and no
+  gate, age wall, or rate limit may ever block a cookie-less crawler from a PDP or `.md` twin.
 
 ## 2b. Owner bandwidth doctrine (owner direction 2026-08-19, binding on every run)
 
