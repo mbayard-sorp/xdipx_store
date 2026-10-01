@@ -393,9 +393,19 @@ the day's drafting to real context (the social routine reads this section at run
 `docs/store-team/routine-social-daily.md` already treats it as the volume driver):
 
 - new aisles/drops going live and any featured brand of the week (tag the verified brand handle);
-- **this week's featured products, named** (owner direction 2026-09-01): pick 3-5 specific
-  in-stock products from the week's new arrivals, restocks, and the promo window's theme that
-  deserve social coverage, each with handle and the one-line reason it earns a post. This is what
+- **this week's featured products, named** (owner direction 2026-09-01, widened 2026-10-01 after
+  the owner found social repeating a handful of products): pick **10 to 14** specific in-stock
+  products from the week's new arrivals, restocks, and the promo window's theme that deserve social
+  coverage, each with handle and the one-line reason it earns a post. Publish the same list as
+  `metricsJson.socialShortlist` in the `videoShortlist` object shape plus `isNew` and
+  `lastSocialPostAt`, built by the same `product-manager` + `inventory-sentinel` sub-step. Hard
+  gates: Shopify inventory above 3 and in stock in the Nalpac feed; ACTIVE; Instagram-eligible by
+  category; a text-free bare-product image present. At least half went live in the last 14 days, at
+  least 5 product types and 6 vendors are represented, and no product on it was posted on social in
+  the last 21 days. Rank: never posted on social first, then existing search demand for the
+  product's type (approved keyword volume, GSC impressions), then stock depth, then margin. This
+  list is the first source for the social routine's product pool (`routine-social-daily.md`
+  Step 2.9); three to five names produced the narrow rotation, so do not shrink it. This is what
   makes social posts pegged to real products instead of category abstractions, and it is the same
   set the homepage and content sections should reference where they fit, so the store carries one
   message across surfaces instead of five;

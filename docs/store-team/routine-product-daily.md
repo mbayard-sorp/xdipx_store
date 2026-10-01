@@ -117,6 +117,17 @@ volume explains, name the likely cause (`import_enrich_enabled` off, enrich batc
 newly-published products worth a merchandising push → suggestion `targetTeam:'homepage'`, `kind:'strategy'`
 (you propose the feature; the homepage team's gate decides).
 
+**Also nominate the day's new arrivals to social, every run (owner direction 2026-10-01).** The
+owner wants new products showcased on social as they arrive, and the enrich chain's own daily row
+lists every published product unranked, which social could not act on. Rank the products published
+since the last run: never posted on social first, then a product type absent from social's last 7
+product posts, then stock depth, then margin. Exclude what Instagram cannot run (dildos,
+anatomically realistic products) and anything with inventory of 3 or less. File one row:
+`kind:'process'`, `team:'product'`, `targetTeam:'social'`, `dedupeKey:'social-new-picks:<YYYY-MM-DD>'`,
+the top 3 to 5 with handle, vendor, product type, a text-free bare-product image URL, and one line
+on why each earns a post. On a day nothing was published, file nothing. The social routine reads it
+at its Step 2.9.
+
 ## Step 4b: Inbound suggestions (read your own mail)
 
 Other agents file findings *at* this team, and before 2026-07-29 no routine read them: the playbooks
