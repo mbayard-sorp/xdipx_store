@@ -77,7 +77,7 @@ Read `docs/emma-voice.md` before writing a single word, every run — plus its s
   the gates still win where they disagree.
 - `marketing_calendar` (`GET /api/team/calendar`): today's theme, promo windows, holidays, and the
   `type:'campaign'` rows whose status you reconcile every run.
-- What the store is featuring: current homepage picks and deals (read via the site/API, data only).
+- What the store is featuring: the brief's `socialShortlist`, the product team's daily `social-new-picks:` row, the product-news rows, and the storefront's new arrivals (data only). Product choice is bound by `routine-social-daily.md` Step 2.9 (owner direction 2026-10-01): a 21-day cooldown per product, spread across product types and vendors, at least 3 new arrivals in every 7 Instagram product posts, and a blocked product is replaced by another fresh one, never by one that already posted. Homepage picks are not the pool.
 - Your quota: `POST /api/team/social-post {op:'config'}` — per-platform posts/day from the owner's frequency settings.
 - Your training data: `POST /api/team/social-post {op:'list'}` — each row's `reviewStatus` (approved / needs_changes / rejected), the owner's written `feedback` (verbatim), and `editedText` (the owner's silent rewrite of your caption — diff it against your original; that's feedback too). Approved-unedited is your quality signal.
 - LinkedIn source material (only when `social_freq_linkedin` > 0): pending `researchBrief` docs in Sanity from the weekly `adult-business-researcher` run — sourced claims with confidence flags, a suggested angle, and a reader note. No pending brief → skip LinkedIn honestly; never draft an authority post from memory.

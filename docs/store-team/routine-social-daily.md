@@ -102,15 +102,18 @@ and the publish gate; nothing here softens a verdict.
    ceiling in rung 5 does. Run 720 (2026-09-06) left rows 185 and 186 at `needs_changes` on a
    one-line "add anticipation" REVISE and finished at zero. Those were twenty minutes from live.
 2. **Pivot after two failed iterations on one concept** (Step 2b). Under the on-skin standing order
-   a concept is the same product in the same body zone. Pivot to a different in-stock SKU with a
-   simpler silhouette (single colour, no accent stripe, no nozzle detail) on the same on-skin
-   bodyscape treatment; change the product, body zone, or crop scale, never the treatment.
+   a concept is the same product in the same body zone. Pivot to a different in-stock SKU from the Step 2.9 pool, outside its
+   21-day cooldown and in a different product type, on the same on-skin bodyscape treatment. A
+   simpler silhouette (single colour, no accent stripe, no nozzle detail) breaks a tie between two
+   fresh candidates; it does not license going back to a product that has already posted; change the product, body zone, or crop scale, never the treatment.
 3. **Fall back to a proven shape.** List `status:'posted'` rows for the platform from the last 14
    days. Those rows PASSed this exact gate and stayed live; their shape is the calibration. Draft the
    next attempt in a shape that has at least two live precedents: the same slot, the same format,
-   the same charge level, a fresh in-stock product or subject, and where one fits, a gate-cleared
-   image asset reused from `social_media_assets` (Step 5 reuse-first) so the image cannot be the
-   reason. As of 2026-09-06 the shapes with live precedents are the cast-plus-product Today's Pick
+   the same charge level, and a fresh in-stock product from the Step 2.9 pool. "Proven shape" means
+   the slot, format and charge that have live precedents, never the product that has them. A
+   gate-cleared image asset from `social_media_assets` (Step 5 reuse-first) may be reused only when
+   it shows that fresh product; reusing last week's cleared frame of last week's product is the
+   repeat the owner flagged on 2026-10-01. As of 2026-09-06 the shapes with live precedents are the cast-plus-product Today's Pick
    and the category-comparison education post with the product in frame (rows 142, 149, 167, 168,
    152). A subject class that failed the gate on two consecutive days (toy care and cleaning,
    2026-09-05 and 2026-09-06, twelve attempts) is off the table until the calibration ticket for it
@@ -236,7 +239,8 @@ is on the record with a ticket the team can act on tomorrow.
 2. `docs/ads-policy.md` §Organic social + §Creative (mandatory). These bind organic drafts, not
    just paid, and the platform's live rules outrank both when they are stricter.
 3. `docs/store-team/mission-brief.md`; the strategy brief (`GET /api/team/brief`), including its
-   **Social Plan** section when present, which sizes the day's volume.
+   **Social Plan** section when present, which sizes the day's volume and names the week's
+   products. Those products seed the pool in Step 2.9; they are not the whole pool.
 4. `docs/store-team/instagram-campaigns.md` (mandatory before any Instagram drafting): the standing
    campaign schedule, the pillar and format library, the rotation rule, and the continuity rule.
    Missing → STOP and report.
@@ -351,9 +355,9 @@ is on the record with a ticket the team can act on tomorrow.
    went live in 30 days with zero social coverage. The same timing rule as item 9 applies: read
    at context load so today's slate can use them, because a row first seen at Step 7b is a post
    drafted tomorrow at the earliest. These rows are the source for slot D (what's new) and for
-   product-pegged picks in slots C and E. Curation still applies (§4c of
-   `instagram-campaigns.md`): new does not mean postable, and the freshest in-stock product with
-   a distinct story wins. Close consumed rows `applied` per Step 7b's bookkeeping; age out
+   product-pegged picks in slots C and E. Curation decides which new product, never whether: Step 2.9 sets a
+   floor of 3 new-arrival posts in every 7 Instagram product posts and the ranking that picks
+   them (owner direction 2026-10-01). Close consumed rows `applied` per Step 7b's bookkeeping; age out
    product-launch rows older than 14 days there as before.
 
 11. **Trend briefs, read here (owner audit 2026-09-01).** From the same list, approved
@@ -744,6 +748,77 @@ On a clip day:
 
 On a non-clip day nothing changes: stills remain the base layer, and the rest of this playbook runs
 as written. Report clip days in the run summary as `clipDay: true` with the reel's post id.
+
+## Step 2.9: Product pool and rotation (owner direction 2026-10-01)
+
+The owner reviewed two weeks of generated images and said: *"we are too narrow on product
+selection. I would expect to see a variety of products and it seems like we are consistently
+repeating only a few. Ideally we showcase new products on the site as they arrive because there's a
+higher chance someone is going to search for something new."* The measurement agreed with him. In the
+21 days to 2026-10-01 the lane posted 14 distinct products out of roughly 4,800 in stock, the top
+five took 64% of product posts, 6 of the 452 products that went live in 30 days appeared anywhere
+in social, and the biggest catalog categories (cock rings, strokers, plugs, clitoral vibrators,
+restraints) were never featured. Location, cast, zone and crop each had a rotation window. The
+product had none. This step is that window. It binds every product choice in Step 3, in every slot,
+and it outranks any slate file, kickoff image pool, or "proven shape" habit.
+
+**1. Build the pool before choosing anything.** In this order:
+
+1. The brief's `metricsJson.socialShortlist` when present (`routine-weekly-strategy.md`), else the
+   Social Plan's named products, else `metricsJson.videoShortlist`.
+2. The product-news rows from Step 2 item 10, including the product team's daily
+   `social-new-picks:` row when one exists. Read that mailbox with `"limit":200` and compare the
+   returned `total`, because the list returns oldest first and the newest arrivals are the first
+   rows a short read cuts off.
+3. The storefront's new arrivals (products tagged `new-arrival`, newest first, the set behind
+   `/new`), for the days the two sources above run dry.
+
+A slate file's products and a campaign kickoff image pool are suggestions for subject and look. They
+are never the roster. The kickoff pool fixes ground, light, prop and cast, never the product.
+
+**2. Cooldown, checked from real rows.** Before choosing a product, list this lane's Instagram and X
+rows from the last 21 days (`op:'list'`, every status except rejected) and write down each row's
+product. A product on that list is ineligible for a new Instagram product post. Three exceptions
+only: a rework of that product's own row, one restock-digest pick, and the X companion of an
+Instagram product post (Step 3's companion rule is unchanged, so X inherits Instagram's variety).
+
+**3. Spread.** No two consecutive product posts on a platform share a product type. No vendor
+appears in more than 2 of any 7 product posts. Categories Instagram cannot run stay excluded at
+selection (`instagram-campaigns.md` §4b filter 2); that is the only category filter. Everything
+else the store sells is in play, and a category this lane has never featured outranks one it has.
+
+**4. New arrivals are a floor, not a leftover.** At least 3 of every 7 Instagram product posts
+feature a product that went live in the last 21 days, and every run's first product attempt is a
+new arrival until that floor is met. This does not wait for slot D and does not need a quota of 4.
+Roughly 100 products go live a week, so the rule is to rank, never to feature all of them. Rank the
+eligible new arrivals: never posted on social first, then a product type absent from the last 7
+product posts, then stock depth, then margin. Render ease (single body, single colour, no printed
+label) breaks ties only. It is never the reason a product is chosen, because choosing on render
+ease is exactly how the lane converged on four wands and a lube.
+
+**5. A block is not a reason to go back to the usual products.** When a fresh product fails the
+gate, the pivot is another fresh product from the pool, in a different product type. The Step 1b
+ladder's "simpler silhouette" and "proven shape" rungs select from the pool under this step's
+cooldown; they no longer select from what has posted before. Only after two different fresh
+products have each failed twice in one run on a zero-post day does the cooldown relax, to 7 days,
+for that run only. Name every product that failed on identity or legible text in the run summary
+with the gate check that failed, and when the same product has failed in two separate runs, file
+one `kind:'code'` ticket for it (`dedupeKey` `social-product-drift:<handle>`) instead of quietly
+never choosing it again. Silent avoidance is how a catalog of 4,800 became a rotation of 14.
+
+**6. Record the product on the row.** Every draft that features a product passes
+`shopifyProductId` on `op:'draft'`. A product post without it is invisible to the cooldown, the
+mix report, and the next run, and two thirds of Instagram rows were written without it.
+
+**7. Close the mail you read.** Every product-news row read in this run is closed in this run:
+`applied` with the draft id when a product from it was drafted, `dismissed` with a one-line reason
+when none was (not Instagram-eligible, out of stock, no usable reference image). No product-news row
+stays `approved` past the run that read it. Thirty-eight of them sat unread from 09-17 to 10-01.
+
+**8. Report it as numbers.** The Step 7 retro reports, for the trailing 7 and 21 days per
+platform: distinct products over product posts, the top product's share, new-arrival posts over
+product posts, and the product types featured. Distinct over product posts below 0.8 on Instagram,
+or a new-arrival share below 3 in 7, is a finding the next run corrects before anything else.
 
 ## Step 3 — Draft (reworks included)
 
@@ -2365,6 +2440,9 @@ had, so the replacement is not optional. Read instead:
    campaign rules, logging any that would not pass the gate as written now. On a run where the owner
    said nothing and nothing was removed, this is the only way the loop still learns anything. Never
    report a silent week as a good week.
+4b. **Product variety, computed not asserted (owner direction 2026-10-01).** Report the four
+   Step 2.9 item 8 numbers from real rows. A week that posted often on few products is a failed
+   week on this line whatever the other lines say.
 5. **Slate-mix self-check, computed not asserted (ticket #4066).** Of the last 7 published Instagram
    posts, count and report three numbers: how many were product-forward, how many were carousels, and
    how many were slot A (the product-free resource post). Compute them from real rows, do not assert

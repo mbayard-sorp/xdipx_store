@@ -493,7 +493,8 @@ Every post should be a bodyscape post until I say stop."* So the exemption is cl
   from `shopify_product_id`, so it will read over band; that is expected and the run summary says so
   rather than drafting a still life to correct it.
 - **When a bodyscape row blocks, the recovery is another bodyscape** (routine Step 6.5 rung 2 and 3):
-  a different in-stock SKU with a simpler silhouette, a different zone, a different crop. A still
+  a different in-stock SKU from the routine Step 2.9 pool (fresh, outside the cooldown, a simpler
+  silhouette only as a tie-break), a different zone, a different crop. A still
   life is never the recovery, and neither is a clothed portrait. If no bodyscape clears the gate the
   day posts fewer times and the summary names every blocked row and check, which is what surfaces
   the product-fidelity work (tickets #11487, #11476) instead of hiding it behind a plate of fruit.
@@ -1295,7 +1296,7 @@ A through D.
 | **A** | **Resource.** The advice post, and the reason a non-buyer follows us. | Field Notes, Ask Emma, Inspo Carousel, WTF Is… | **Yes when the advice is about a category we sell** (§3.9); no only when the subject has no product in it |
 | **B** | **Campaign.** The active campaign's next beat, on its pillar and format rotation. | any campaign format | Usually |
 | **C** | **Today's Pick.** One in-stock product presented by a cast member (§4b). | Today's Pick | Yes |
-| **D** | **What's new.** A Notebook promo when one is queued, else Brand Crush, This Week at xdipx, or Trend React. | those four | No |
+| **D** | **What's new.** A Notebook promo when one is queued, else a new arrival ranked per routine Step 2.9, else Brand Crush, This Week at xdipx, or Trend React. | those five | Yes for a new arrival; no otherwise |
 | **E** | **Carousel.** Scheduled Mon and Wed per §5a, and on any day the rolling-14 carousel count reads 0 (owner direction 2026-09-25, ticket #11492: reach comes from saves, and a single still earns almost none). | Inspo Carousel, Field Notes, WTF Is… | Either |
 | **R** | **Reel**, at least one a week per §5a. Produced by the video lane, never by the social run: an owner-approved render fans out as a `video_reel` row and is the day's Instagram post (routine Step 2.8). The social run reports the week's Reel by post id, or names the block. | product-talk clip | Yes |
 
@@ -1375,7 +1376,9 @@ that enforcement is built to catch. A percentage is the clearest sell signal ava
    filter runs at *selection*, before any image is generated, and it matters most here: a deeply
    discounted, slow-moving SKU is disproportionately likely to be exactly the excluded category.
    Post #49 is what skipping it looks like.
-3. **In stock and ACTIVE**, per the Step 2.6 stock gate, and **not posted in the last 30 days**.
+3. **In stock and ACTIVE**, per the Step 2.6 stock gate, and **not posted in the last 30 days**. The cooldown,
+   spread and new-arrival floor in routine Step 2.9 (owner direction 2026-10-01) apply to this slot
+   and to every other product post; this filter is the stricter of the two windows for Today's Pick.
 
 **Say "our price against list", never "today's markdown".** This is an honesty rule and it is
 specific to how this store prices. The pricing engine writes `compare_at = msrp` on every product
@@ -1412,8 +1415,17 @@ time. Volume is not signal.
 **An event does not buy a new slot.** The daily slate (§4a) is already fully assigned. An event wins
 **first right of refusal on the slot that was going to be a generic instance of that format anyway**,
 and it still obeys the campaign's visual scheme, the §3.7 cast mandate, and the §3.8 variety rules.
-Budget roughly **one event-sourced post per day, at most**. An event never justifies skipping a gate,
-and "it is news" is not a reason to cut the cast composite.
+An event never justifies skipping a gate, and "it is news" is not a reason to cut the cast composite.
+
+**New arrivals are the exception to "volume is not signal" (owner direction 2026-10-01).** The owner:
+*"Ideally we showcase new products on the site as they arrive because there's a higher chance
+someone is going to search for something new."* The finding above still explains why the lane does
+not post every arrival. It no longer licenses posting almost none, which is what happened: 6 of 452
+arrivals in 30 days. A new arrival is a first-class reason to post. Curation decides which one,
+never whether. Routine Step 2.9 sets the floor (at least 3 of every 7 Instagram product posts) and
+the ranking, and a new arrival fills slot B, C or D ahead of a product that has posted before.
+Restocks, price moves and the other events keep the budget of roughly one event-sourced post per
+day, at most.
 
 ### Tier 1: live today, with data behind them
 
@@ -1626,7 +1638,10 @@ does it.
 
 Drafted captions, alt text, hashtags, and image briefs for the first week live in
 `docs/store-team/social-slate-2026-08-24.md`; the routine drafts from them rather than from scratch
-**while that slate's window is open.** A slate file is a convenience, not a dependency: when the
+**while that slate's window is open.** A slate file's named products are suggestions, never a
+roster: the product for each post is chosen under routine Step 2.9 (cooldown, spread, new-arrival
+floor), and a slate product inside its cooldown is swapped for a fresh one while the slate's
+subject, format and caption angle are kept. A slate file is a convenience, not a dependency: when the
 current slate's window has ended and no successor file exists, the routine drafts from this
 document's campaign table, weekday lanes, and pillars directly, and says so in the run summary
 instead of stalling or treating the expired slate as current.
