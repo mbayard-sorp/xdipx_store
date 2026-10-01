@@ -5,7 +5,8 @@ enriched product carries a `shopifyCategory` object so no product is published u
 Shopify. The server (`app/lib/shopify-category.server.ts`) validates and writes it; this doc is how
 you decide it.
 
-Goal: the correct Shopify Standard Product Taxonomy category (always a leaf) plus as many of that
+Goal: the correct Shopify Standard Product Taxonomy category (a leaf, except the one sanctioned
+non-leaf below) plus as many of that
 category's attribute values as the product data supports. You cannot query the taxonomy, so every
 category you may use, with its id, full name, attributes and allowed values, is embedded below.
 
@@ -31,8 +32,8 @@ category you may use, with its id, full name, attributes and allowed values, is 
 
 ## Category guidance
 
-Use these unless the product data clearly says otherwise. Always pick a leaf. Never `na`
-(Uncategorized).
+Use these unless the product data clearly says otherwise. Always pick a leaf, with one exception:
+`hb-3` (see the table). Never `na` (Uncategorized).
 
 | What the product is | Category |
 |---|---|
@@ -48,7 +49,11 @@ Use these unless the product data clearly says otherwise. Always pick a leaf. Ne
 | Men's underwear, jocks | the leaf under `aa-1-8-3` (Jockstraps `aa-1-8-3-5`, Thongs `aa-1-8-3-7`, and so on) |
 | Fetish wear, erotic costumes, bodystockings sold as erotic wear, wet-look and vinyl outfits that fit no ordinary lingerie leaf | `ma-1-1` Erotic Clothing |
 | Edible novelty items (candy underwear, edible body paint) | `ma-1-2` Erotic Food & Edibles |
-| Everything else (desensitizers, arousal gels, oral enhancers, pheromones, toy cleaners, douches and enemas, wipes, massage candles, bath and body) | The closest leaf listed below (enema bulbs `hb-3-7-3`, enema accessories `hb-3-7-2`, perfume oils `hb-3-2-8-8`, body cleansing wipes `hb-3-2-1-7-1`, and so on). If none fits, omit `shopifyCategory` |
+| Toy cleaners, toy sanitizers and sprays, and sexual wellness supplements, pills, gummies and drops | `hb-3` Health & Beauty > Personal Care. Owner decision 2026-09-30: the taxonomy has no leaf for these, and this is the one sanctioned non-leaf. Use `hb-3` itself, do not search for a leaf and do not omit the field |
+| Everything else (desensitizers, arousal gels, oral enhancers, pheromones, douches and enemas, wipes, massage candles, bath and body) | The closest leaf listed below (enema bulbs `hb-3-7-3`, enema accessories `hb-3-7-2`, perfume oils `hb-3-2-8-8`, body cleansing wipes `hb-3-2-1-7-1`, and so on). If none fits, omit `shopifyCategory` |
+
+Owner decision 2026-09-30: items from "Prowler RED Toppers" stay uncategorized. Omit `shopifyCategory`
+for them and do not substitute a default.
 
 `productType` is the store's own label and is usually right, but it is not the category. The value
 `Discontinued` says nothing about what the product is: classify from the title, tags, dials and
@@ -78,10 +83,36 @@ Conventions:
   `AC-powered`. Hand-operated pumps: `Manual`. Non-powered products: omit.
 - **Material / Fabric**: from "Material(s)" in specifications or the description. List each named
   material that has an allowed value. TPE, TPR and "body-safe" blends with no matching value: omit.
+  This is the Shopify attribute on categories that have one. The separate top-level `material`
+  field (next section) is in addition to it and applies to every category.
 - **Size** (apparel): from the Size option values or title.
 - **Lubricant attributes**: composition (water, silicone, oil, hybrid), application, flavor,
   sensation effect, condom compatibility, form and dispenser only as the data states them.
 - **Age group**: `Adults` where the attribute exists.
+
+## Material
+
+Every product payload carries a top-level `material` array, beside `shopifyCategory`, when and only
+when the product data names what the product is made of. Look at the specifications "Materials" line
+first, then the manufacturer description or title. The server writes it to the store-owned
+`xdipx.material` metafield (fill gaps only), because the toy category `ma-1-4` has no Material
+attribute in Shopify.
+
+```json
+"material": ["Silicone", "ABS Plastic"]
+```
+
+- Use only these values, spelled exactly: Silicone, TPE, TPR, ABS Plastic, PVC, Vinyl, Stainless
+  Steel, Aluminum, Glass, Faux Leather, Leather, Latex, Rubber, Neoprene, Nylon, Polyester, Spandex,
+  Cotton, Satin, Silk, Velvet, Faux Fur, Feather, Wood, Crystal, Ceramic, Stone, Polyurethane,
+  Acrylic, Polycarbonate, Steel, Metal, Plastic, Elastomer, Paper. Anything else is dropped.
+- List every named material. A silicone body with an ABS handle is `["Silicone","ABS Plastic"]`.
+- Proprietary skin-feel names map only when the maker states the base: ULTRASKYN, Fanta Flesh and
+  CyberSkin are TPE.
+- "Phthalate-free", "latex-free" and "body-safe" are not materials.
+- A material named only as something the product is compatible with ("safe with silicone toys", "use
+  with latex condoms") is not the product's material.
+- When the data does not say, OMIT the field. Never guess from the product type.
 
 Attributes marked "see Appendix" share one allowed-value list, printed once in the appendix at the
 end of this file.

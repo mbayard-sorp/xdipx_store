@@ -8,6 +8,10 @@ import {
   resolveCategoryToSet,
   defaultCategoryId,
   allowedByName,
+  normalizeMaterials,
+  parseMetafieldUserErrors,
+  MATERIAL_VOCAB,
+  OWNER_APPROVED_NON_LEAF_IDS,
   type AllowedAttribute,
 } from './shopify-category.server'
 
@@ -149,6 +153,10 @@ describe('defaultCategoryId', () => {
     expect(defaultCategoryId('Erotic Books', 'book-media')).toBe('ma-1-6')
     expect(defaultCategoryId('Adult Game', 'novelty')).toBe('ma-1-4')
   })
+  it('maps toy cleaners and supplements to the approved non-leaf hb-3', () => {
+    expect(defaultCategoryId('Toy Cleaner', 'wellness')).toBe('hb-3')
+    expect(defaultCategoryId('Supplement / Pill', null)).toBe('hb-3')
+  })
   it('falls back to the product type dial for toys and gear', () => {
     for (const dial of ['vibrator', 'dildo', 'anal', 'bondage', 'cock-ring', 'stroker', 'couples', 'harness', 'extender', 'pump', 'sex-machine']) {
       expect(defaultCategoryId('Discontinued', dial)).toBe('ma-1-4')
@@ -162,5 +170,57 @@ describe('defaultCategoryId', () => {
     }
     expect(defaultCategoryId('Novelty Gift', 'novelty', 'candy-edible')).toBeNull()
     expect(defaultCategoryId(null, undefined)).toBeNull()
+  })
+})
+
+describe('OWNER_APPROVED_NON_LEAF_IDS', () => {
+  it('allows hb-3 and nothing broader', () => {
+    expect(OWNER_APPROVED_NON_LEAF_IDS).toEqual(['hb-3'])
+    expect(normalizeCategoryId('hb-3')).toBe('hb-3')
+  })
+})
+
+describe('normalizeMaterials', () => {
+  it('maps case-insensitively onto the vocabulary, dedupes, keeps order', () => {
+    expect(normalizeMaterials(['silicone', 'ABS plastic', 'SILICONE', 'tpe'])).toEqual(['Silicone', 'ABS Plastic', 'TPE'])
+  })
+  it('applies aliases', () => {
+    expect(normalizeMaterials(['ABS', 'Thermoplastic Elastomer', 'thermoplastic rubber', 'stainless', 'vegan leather', 'PU leather', 'leatherette', 'borosilicate glass', 'aluminium']))
+      .toEqual(['ABS Plastic', 'TPE', 'TPR', 'Stainless Steel', 'Faux Leather', 'Glass', 'Aluminum'])
+  })
+  it('drops anything outside the vocabulary and non-string input', () => {
+    expect(normalizeMaterials(['Titanium', 'body-safe', 7, null, ' Glass '])).toEqual(['Glass'])
+    expect(normalizeMaterials(undefined)).toEqual([])
+    expect(normalizeMaterials({})).toEqual([])
+    expect(normalizeMaterials('Silk')).toEqual(['Silk'])
+  })
+  it('every vocabulary entry maps to itself', () => {
+    expect(normalizeMaterials([...MATERIAL_VOCAB])).toEqual([...MATERIAL_VOCAB])
+    expect(MATERIAL_VOCAB).toHaveLength(35)
+  })
+})
+
+describe('parseMetafieldUserErrors', () => {
+  const msg = 'Owner subtype does not match the metafield definition\'s constraints.'
+  it('extracts indexed rejections, sorted and de-duplicated', () => {
+    const r = parseMetafieldUserErrors([
+      { field: ['metafields', '2'], message: msg },
+      { field: ['metafields', '0'], message: msg },
+      { field: ['metafields', '2', 'value'], message: 'dup' },
+    ], 3)
+    expect(r.rejected).toEqual([{ index: 0, message: msg }, { index: 2, message: msg }])
+    expect(r.unindexed).toEqual([])
+  })
+  it('treats missing, non-index and out-of-range fields as unindexed', () => {
+    const r = parseMetafieldUserErrors([
+      { message: 'boom' },
+      { field: null, message: 'null field' },
+      { field: ['metafields'], message: 'no index' },
+      { field: ['metafields', 'x'], message: 'bad index' },
+      { field: ['other', '0'], message: 'wrong root' },
+      { field: ['metafields', '5'], message: 'out of range' },
+    ], 2)
+    expect(r.rejected).toEqual([])
+    expect(r.unindexed).toHaveLength(6)
   })
 })

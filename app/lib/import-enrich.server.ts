@@ -62,7 +62,7 @@ import { IVR_EXPERIENCE_LEVELS } from '~/lib/claude.server'
 import { EMMA_VOICE_ENRICHMENT } from '~/lib/emma-voice.server'
 import { PRODUCT_TYPE_DIALS } from '~/types'
 import type { ProductWrites } from '~/lib/emma-orchestrator.server'
-import { applyCategoryForEnrichment } from '~/lib/shopify-category.server'
+import { applyCategoryForEnrichment, applyMaterial } from '~/lib/shopify-category.server'
 import { deriveCastTarget } from '~/lib/cast-target.server'
 
 const VALID_IVR_EXPERIENCE = new Set<string>(IVR_EXPERIENCE_LEVELS as readonly string[])
@@ -280,6 +280,19 @@ export async function applyFullEnrichmentWrites(numericProductId: string, writes
     }
   } catch (err) {
     console.error(`[import-enrich] shopify category failed for product ${numericProductId}:`, err)
+  }
+
+  // Material goes in the store-owned xdipx.material list (the toy category has no
+  // Shopify Material attribute). Same rules as above: fill-gaps, non-fatal.
+  if (writes.material?.length) {
+    try {
+      const matResult = await applyMaterial(`gid://shopify/Product/${numericProductId}`, writes.material)
+      if (matResult.errors.length) {
+        console.warn(`[import-enrich] material for product ${numericProductId}:`, JSON.stringify(matResult))
+      }
+    } catch (err) {
+      console.error(`[import-enrich] material failed for product ${numericProductId}:`, err)
+    }
   }
 
   // Mirror to the Sanity productPage so search index, voice/IVR surfaces, and

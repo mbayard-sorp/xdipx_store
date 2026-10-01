@@ -88,6 +88,11 @@ naming the missing field; a product type with no playbook fit may ship without i
 falls back to a default category by product type where one is unambiguous. The category step rides
 the existing `import_enrich_enabled` gate; there is no separate valve.
 
+The payload also carries `material` (array from the closed `xdipx.material` vocabulary) when, and only
+when, the product data names the material; omit it otherwise. The rules are in the playbook's Material
+section. The server writes it to `xdipx.material`, fill-gaps only, and a failure never blocks publish.
+Toy cleaners and supplements use `hb-3` and "Prowler RED Toppers" stay uncategorized, per the playbook.
+
 Before submitting, self-check the payload against the acceptance rules the server will apply
 (non-empty `descriptionHtml`, `tagline`, `seoMetaDescription` ≥ 100 chars, valid `productTypeDial`,
 non-empty mood/audience/matters tags, and the sensation-dial spread rule: ≥5 values, ≥3 distinct,

@@ -21,7 +21,7 @@ If the charter file is missing from your checkout, STOP and report instead of wr
 </voice_rules>
 
 <category_playbook>
-Read `docs/store-team/shopify-category-playbook.md` (in the batch transport it is inlined in your context instead). It lists every Shopify Standard Product Taxonomy category you may use, with id, full name, attributes and allowed values, plus the classification rules. Use it to fill `shopifyCategory` (see <output_schema>). Never invent a category id, attribute name, or value name; if the playbook is unreadable and not inlined, omit the field and say so in your reply.
+Read `docs/store-team/shopify-category-playbook.md` (in the batch transport it is inlined in your context instead). It lists every Shopify Standard Product Taxonomy category you may use, with id, full name, attributes and allowed values, plus the classification rules. Use it to fill `shopifyCategory` and `material` (see <output_schema>; the Material section has the vocabulary and rules). Never invent a category id, attribute name, or value name; if the playbook is unreadable and not inlined, omit the field and say so in your reply.
 </category_playbook>
 
 <sensation_dial_spread_rule>
@@ -167,6 +167,10 @@ Return a single JSON object with these fields. Every field is required unless ma
   // ALWAYS populate when the playbook has a fitting leaf category. `id` is the bare category id from the playbook (never a gid, never `na`).
   // `attributes`: exact attribute names and exact value names from the playbook, only where the brief's data supports the value (evidence rule in the playbook). Omit attributes the data does not state.
   // OMIT the whole field only when no playbook category fits; never guess. Existing categories and attributes are never overwritten server-side, so do not worry about them.
+  // Toy cleaners and supplements use `hb-3` (the one sanctioned non-leaf). "Prowler RED Toppers" items stay uncategorized: omit the field.
+
+  "material": ["Silicone", "ABS Plastic"],
+  // Top-level, beside shopifyCategory. Include ONLY when the brief's data (specifications "Materials" line first, then description or title) names what the product is made of; otherwise OMIT. Closed vocabulary and rules: the playbook's Material section. List every named material; ignore "phthalate-free" style claims and materials named only as compatible.
 
   "accessoryProductIds": ["gid://shopify/Product/...", ...],
   "pairingWhy":          { "<accessoryProductId>": "<≤120-char Emma-voice blurb>" }
@@ -218,7 +222,8 @@ Before returning, self-check:
 - [ ] careInstructions match product-type rules (2–3 for consumables, 3–5 for hardware)
 - [ ] sensationDialV2 has 5–6 items, integer values from {1,2,3,4,5}, no duplicate labels
 - [ ] sensationDialV2 values span at least 3 distinct integers; at most one 5; at most one 1
-- [ ] shopifyCategory.id is a leaf id printed in the playbook; every attribute name and value is copied exactly from it
+- [ ] shopifyCategory.id is a leaf id printed in the playbook (or `hb-3` for toy cleaners and supplements); every attribute name and value is copied exactly from it
+- [ ] material is present only when the data names the material, and every entry is from the playbook's Material vocabulary
 - [ ] ivrExperience / useCase / features come from the fixed vocabularies
 - [ ] productFaqs has 4–6 entries, mandatory category coverage met, all answers ≥40 chars
 - [ ] Every voice-carrying field complies with docs/emma-voice.md (core + enrichment addendum): no em-dashes, no lived-experience claims, no "sexy" as a branding adjective, no banned house tics, fresh product-specific language

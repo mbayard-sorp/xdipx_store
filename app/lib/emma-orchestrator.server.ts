@@ -113,6 +113,10 @@ export interface ProductWrites {
    *  values by attribute name. Optional: the enrich step falls back to a default by product
    *  type. Applied by applyShopifyCategory; see docs/store-team/shopify-category-playbook.md. */
   shopifyCategory?:   { id: string; attributes?: Record<string, string[]> }
+  /** Materials the product is made of, from the closed `xdipx.material` vocabulary
+   *  (MATERIAL_VOCAB in shopify-category.server.ts). Present only when the product data
+   *  names them. Applied by applyMaterial; see the playbook's Material section. */
+  material?:          string[]
 }
 
 export interface ToolCallTrace {

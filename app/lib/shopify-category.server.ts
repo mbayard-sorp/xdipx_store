@@ -19,6 +19,13 @@
  *    values are validated against the category's allowed values; unknown
  *    attribute or value names are dropped, not written.
  *
+ * Shopify-owned `shopify.*` definitions carry a category constraint list we cannot
+ * edit, and one out-of-list entry fails the whole metafieldsSet call atomically.
+ * Rejections that name an entry index are dropped and the rest is retried.
+ *
+ * Material is not a Shopify attribute on the toy category, so it lives in the
+ * store-owned `xdipx.material` list metafield (see applyMaterial).
+ *
  * Works on the pinned Admin API version (2024-10); verified read-only that the
  * taxonomy attribute queries and ProductUpdateInput.category exist there.
  *
@@ -75,7 +82,87 @@ export interface ApplyCategoryResult {
   errors:        string[]
 }
 
+export interface ApplyMaterialResult {
+  ok:      boolean
+  written: string[]
+  /** Why nothing was written, when that was not an error. */
+  skipped: string | null
+  errors:  string[]
+}
+
+export interface MutationUserError { field?: string[] | null; message: string }
+
 // ─── Pure helpers (unit tested) ──────────────────────────────────────────────
+
+/**
+ * Category ids the owner approved even though they are not taxonomy leaves
+ * (2026-09-30): the taxonomy has no leaf for toy cleaners or supplements, so both
+ * go under Health & Beauty > Personal Care (`hb-3`).
+ */
+export const OWNER_APPROVED_NON_LEAF_IDS: readonly string[] = ['hb-3']
+
+/** Vocabulary of the `xdipx.material` metafield's `choices` validation, exact spelling. */
+export const MATERIAL_VOCAB: readonly string[] = [
+  'Silicone', 'TPE', 'TPR', 'ABS Plastic', 'PVC', 'Vinyl', 'Stainless Steel', 'Aluminum',
+  'Glass', 'Faux Leather', 'Leather', 'Latex', 'Rubber', 'Neoprene', 'Nylon', 'Polyester',
+  'Spandex', 'Cotton', 'Satin', 'Silk', 'Velvet', 'Faux Fur', 'Feather', 'Wood', 'Crystal',
+  'Ceramic', 'Stone', 'Polyurethane', 'Acrylic', 'Polycarbonate', 'Steel', 'Metal', 'Plastic',
+  'Elastomer', 'Paper',
+]
+
+const MATERIAL_ALIASES: Readonly<Record<string, string>> = {
+  'abs':                      'ABS Plastic',
+  'abs plastic':              'ABS Plastic',
+  'thermoplastic elastomer':  'TPE',
+  'thermoplastic rubber':     'TPR',
+  'stainless':                'Stainless Steel',
+  'vegan leather':            'Faux Leather',
+  'pu leather':               'Faux Leather',
+  'leatherette':              'Faux Leather',
+  'borosilicate glass':       'Glass',
+  'aluminium':                'Aluminum',
+}
+
+/**
+ * Map free-form material names onto MATERIAL_VOCAB (case-insensitive, with a few
+ * aliases). De-duplicates, keeps first-seen order, drops anything outside the
+ * vocabulary. Non-array input yields an empty list, a lone string counts as one.
+ */
+export function normalizeMaterials(input: unknown): string[] {
+  const list = Array.isArray(input) ? input : typeof input === 'string' ? [input] : []
+  const byLower = new Map(MATERIAL_VOCAB.map(m => [m.toLowerCase(), m]))
+  const out: string[] = []
+  for (const raw of list) {
+    if (typeof raw !== 'string') continue
+    const k = raw.trim().replace(/\s+/g, ' ').toLowerCase()
+    const hit = MATERIAL_ALIASES[k] ?? byLower.get(k)
+    if (hit && !out.includes(hit)) out.push(hit)
+  }
+  return out
+}
+
+/**
+ * Split metafieldsSet userErrors into those that point at a specific entry
+ * (`field` = ['metafields', '<index>', ...], index inside `count`) and those
+ * that do not. Indexed rejections are de-duplicated by index, first message wins.
+ */
+export function parseMetafieldUserErrors(
+  errors: readonly MutationUserError[],
+  count: number,
+): { rejected: Array<{ index: number; message: string }>; unindexed: MutationUserError[] } {
+  const byIndex = new Map<number, string>()
+  const unindexed: MutationUserError[] = []
+  for (const e of errors) {
+    const f = e.field
+    const idx = Array.isArray(f) && f[0] === 'metafields' && f.length > 1 && /^\d+$/.test(String(f[1]))
+      ? Number(f[1])
+      : -1
+    if (idx >= 0 && idx < count) { if (!byIndex.has(idx)) byIndex.set(idx, e.message) }
+    else unindexed.push(e)
+  }
+  const rejected = [...byIndex].map(([index, message]) => ({ index, message })).sort((a, b) => a.index - b.index)
+  return { rejected, unindexed }
+}
 
 /** Representative hex for the plain Shopify color values, written on solid color entries. */
 export const COLOR_HEX: Readonly<Record<string, string>> = {
@@ -237,6 +324,9 @@ const DEFAULT_BY_PRODUCT_TYPE: Readonly<Record<string, string>> = {
   'massage oil':  'hb-3-11-4',
   'erotic books': 'ma-1-6',
   'adult game':   'ma-1-4',
+  // Owner decision 2026-09-30: no taxonomy leaf exists, so these use the Personal Care parent.
+  'toy cleaner':      'hb-3',
+  'supplement / pill': 'hb-3',
 }
 
 const DEFAULT_BY_DIAL: Readonly<Record<string, string>> = {
@@ -424,7 +514,7 @@ export async function applyShopifyCategory(
 
     const cat = await fetchCategory(requested)
     if (!cat) { result.errors.push(`unknown category ${requested}`); return result }
-    if (!cat.isLeaf) { result.errors.push(`category ${requested} is not a leaf`); return result }
+    if (!cat.isLeaf && !OWNER_APPROVED_NON_LEAF_IDS.includes(requested)) { result.errors.push(`category ${requested} is not a leaf`); return result }
 
     const prod = await adminGraphQL<{ product: {
       category: { id: string } | null
@@ -461,31 +551,84 @@ export async function applyShopifyCategory(
     if (plan.colorPattern) await addMetafield('color-pattern', 'shopify--color-pattern', plan.colorPattern)
     for (const s of plan.simple) await addMetafield(s.key, `shopify--${s.key}`, s.entries)
 
-    if (pick.set || metafields.length) {
+    // productUpdate is sent once. metafieldsSet may be retried: Shopify fails the
+    // whole call when one entry is outside a definition's category constraints, so
+    // entries it names by index are dropped and the remainder is sent again.
+    let pending = metafields
+    let sendCategory = pick.set != null
+    while (sendCategory || pending.length) {
       const vars: Record<string, unknown> = {}
       const decl: string[] = []
       const body: string[] = []
-      if (pick.set) {
+      if (sendCategory && pick.set) {
         decl.push('$p: ProductUpdateInput!')
         body.push('productUpdate(product: $p) { product { id } userErrors { field message } }')
         vars['p'] = { id: productGid, category: CATEGORY_GID_PREFIX + pick.set }
       }
-      if (metafields.length) {
+      if (pending.length) {
         decl.push('$m: [MetafieldsSetInput!]!')
         body.push('metafieldsSet(metafields: $m) { metafields { key } userErrors { field message code } }')
-        vars['m'] = metafields
+        vars['m'] = pending
       }
       const d = await adminGraphQL<{
         productUpdate?:  { userErrors: Array<{ message: string }> } | null
-        metafieldsSet?:  { userErrors: Array<{ message: string }> } | null
+        metafieldsSet?:  { userErrors: MutationUserError[] } | null
       }>(`mutation(${decl.join(', ')}) { ${body.join(' ')} }`, vars)
-      const pu = d.productUpdate?.userErrors ?? []
+      if (sendCategory && pick.set) {
+        const pu = d.productUpdate?.userErrors ?? []
+        if (pu.length) result.errors.push(`productUpdate: ${pu.map(e => e.message).join('; ')}`)
+        else result.categorySet = pick.set
+      }
+      sendCategory = false
+      if (!pending.length) break
       const ms = d.metafieldsSet?.userErrors ?? []
-      if (pu.length) result.errors.push(`productUpdate: ${pu.map(e => e.message).join('; ')}`)
-      else if (pick.set) result.categorySet = pick.set
-      if (ms.length) result.errors.push(`metafieldsSet: ${ms.map(e => e.message).join('; ')}`)
-      else result.metafieldsSet = metafields.map(m => m.key)
+      if (!ms.length) { result.metafieldsSet = pending.map(m => m.key); break }
+      const { rejected, unindexed } = parseMetafieldUserErrors(ms, pending.length)
+      if (unindexed.length) {
+        result.errors.push(`metafieldsSet: ${ms.map(e => e.message).join('; ')}`)
+        break
+      }
+      const drop = new Set(rejected.map(r => r.index))
+      for (const r of rejected) {
+        result.dropped.push(`Shopify rejected shopify.${pending[r.index]!.key} on category ${pick.effective}: ${r.message}`)
+      }
+      pending = pending.filter((_, i) => !drop.has(i))
     }
+    result.ok = result.errors.length === 0
+    return result
+  } catch (err) {
+    result.errors.push(err instanceof Error ? err.message : String(err))
+    result.ok = false
+    return result
+  }
+}
+
+/**
+ * Write `xdipx.material` for one product. Fill gaps only: an existing non-empty
+ * value is never overwritten. Values are normalized onto MATERIAL_VOCAB first.
+ * Never throws: failures land in `errors`.
+ */
+export async function applyMaterial(productGid: string, materials: unknown): Promise<ApplyMaterialResult> {
+  const result: ApplyMaterialResult = { ok: false, written: [], skipped: null, errors: [] }
+  try {
+    const list = normalizeMaterials(materials)
+    if (!list.length) { result.ok = true; result.skipped = 'no recognised materials'; return result }
+
+    const cur = await adminGraphQL<{ product: { metafield: { value: string } | null } | null }>(
+      `query($id: ID!) { product(id: $id) { metafield(namespace: "xdipx", key: "material") { value } } }`,
+      { id: productGid },
+    )
+    if (!cur.product) { result.errors.push(`product ${productGid} not found`); return result }
+    const existing = cur.product.metafield?.value?.trim() ?? ''
+    if (existing && existing !== '[]') { result.ok = true; result.skipped = 'material already set'; return result }
+
+    const d = await adminGraphQL<{ metafieldsSet: { userErrors: MutationUserError[] } | null }>(
+      `mutation($m: [MetafieldsSetInput!]!) { metafieldsSet(metafields: $m) { metafields { key } userErrors { field message code } } }`,
+      { m: [{ ownerId: productGid, namespace: 'xdipx', key: 'material', type: 'list.single_line_text_field', value: JSON.stringify(list) }] },
+    )
+    const errs = d.metafieldsSet?.userErrors ?? []
+    if (errs.length) result.errors.push(`metafieldsSet: ${errs.map(e => e.message).join('; ')}`)
+    else result.written = list
     result.ok = result.errors.length === 0
     return result
   } catch (err) {

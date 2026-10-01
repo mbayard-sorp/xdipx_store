@@ -224,6 +224,17 @@ const DEFS: MetafieldDef[] = [
     description: 'JSON { url, index, reason, resolvedAt, method }. url is the confirmed bare, text-free product frame for social briefing (never carton, never AI-generated); null = no bare frame exists. Resolved ONCE by scripts/resolve-bare-product-references.ts.',
     type:        'json',
   },
+  // Material (owner decision 2026-09-30): the toy category has no Shopify Material attribute
+  {
+    key:         'material',
+    name:        'Material',
+    description: 'What the product is made of, from a closed list. Filled by import enrichment when the product data names the material.',
+    type:        'list.single_line_text_field',
+    validations: [{
+      name:  'choices',
+      value: JSON.stringify(['Silicone', 'TPE', 'TPR', 'ABS Plastic', 'PVC', 'Vinyl', 'Stainless Steel', 'Aluminum', 'Glass', 'Faux Leather', 'Leather', 'Latex', 'Rubber', 'Neoprene', 'Nylon', 'Polyester', 'Spandex', 'Cotton', 'Satin', 'Silk', 'Velvet', 'Faux Fur', 'Feather', 'Wood', 'Crystal', 'Ceramic', 'Stone', 'Polyurethane', 'Acrylic', 'Polycarbonate', 'Steel', 'Metal', 'Plastic', 'Elastomer', 'Paper']),
+    }],
+  },
 ]
 
 const STORE = process.env['SHOPIFY_STORE_DOMAIN']
