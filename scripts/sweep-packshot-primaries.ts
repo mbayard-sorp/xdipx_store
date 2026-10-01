@@ -34,14 +34,30 @@
  *
  * Dry-run is the default; --apply writes via productReorderMedia
  * (setMediaAsPrimary in app/lib/shopify.server.ts).
+ *
+ * Shop image clean-up (docs/store-team/shop-image-strategy.md Layer 1,
+ * owner direction 2026-09-30):
+ *
+ *   - Apparel is skipped by default. Its clean "B" sibling is usually the
+ *     garment on a model, which ads-policy §Shop rule 4 keeps off position 0.
+ *     Pass --include-apparel to override.
+ *   - --alt-text also writes alt text to every image on a scanned product
+ *     that has none (title plus brand, "view N" for later images), via
+ *     fileUpdate in batches of 50. Honors --apply like the reorder does.
+ *
+ *   npx tsx scripts/sweep-packshot-primaries.ts --alt-text           # dry-run both
+ *   npx tsx scripts/sweep-packshot-primaries.ts --alt-text --apply   # write both
  */
 
 import 'dotenv/config'
 import { adminGraphQL, setMediaAsPrimary } from '../app/lib/shopify.server'
+import { altTextFor, chunk, isApparelTitle } from './lib/shop-image-hygiene'
 
 const argv = process.argv.slice(2)
 const APPLY = argv.includes('--apply')
 const PIXELS = argv.includes('--pixels')
+const ALT_TEXT = argv.includes('--alt-text')
+const INCLUDE_APPAREL = argv.includes('--include-apparel')
 function flag(name: string): string | undefined {
   const i = argv.indexOf(`--${name}`)
   if (i === -1) return undefined
@@ -61,6 +77,7 @@ interface ProductNode {
   id: string
   handle: string
   title: string
+  vendor?: string | null
   media: { nodes: MediaNode[] }
 }
 
@@ -88,6 +105,7 @@ interface Candidate {
   handle: string
   title: string
   productId: string
+  primaryMediaId: string
   primaryUrl: string
   proposedMediaId: string
   proposedUrl: string
@@ -115,6 +133,7 @@ async function* iterateProducts(): AsyncGenerator<ProductNode> {
             id
             handle
             title
+            vendor
             media(first: 30) {
               nodes {
                 id
@@ -177,6 +196,12 @@ async function analyzePixels(url: string): Promise<string | null> {
 async function main(): Promise<number> {
   const candidates: Candidate[] = []
   const pixelFlags: PixelFlag[] = []
+  const altWrites: { id: string; alt: string }[] = []
+  // Alt text is labelled by FINAL position, so it is computed after the
+  // reorder decision: the promoted image gets the bare description.
+  const altQueue: { product: ProductNode; images: (MediaNode & { image: { url: string } })[] }[] = []
+  const promotedFor = new Map<string, string>()
+  let skippedApparel = 0
   let scanned = 0
 
   for await (const product of iterateProducts()) {
@@ -187,7 +212,12 @@ async function main(): Promise<number> {
       (m): m is MediaNode & { image: { url: string } } =>
         m.mediaContentType === 'IMAGE' && typeof m.image?.url === 'string',
     )
+    if (ALT_TEXT) altQueue.push({ product, images })
     if (images.length < 2) continue
+    if (!INCLUDE_APPAREL && isApparelTitle(product.title)) {
+      skippedApparel++
+      continue
+    }
 
     const primary = images[0]!
     const primaryStem = letteredStem(filenameStem(primary.image.url))
@@ -207,11 +237,13 @@ async function main(): Promise<number> {
           handle: product.handle,
           title: product.title,
           productId: product.id,
+          primaryMediaId: primary.id,
           primaryUrl: primary.image.url,
           proposedMediaId: pick.m.id,
           proposedUrl: pick.m.image.url,
           reason: `primary stem ${primaryStem.base}${primaryStem.letter} has cleaner sibling ${pick.s.base}${pick.s.letter}`,
         })
+        promotedFor.set(product.id, pick.m.id)
         continue // filename hit; no need to burn a download on pixels
       }
     }
@@ -229,12 +261,26 @@ async function main(): Promise<number> {
     }
   }
 
+  for (const { product, images } of altQueue) {
+    const promoted = promotedFor.get(product.id)
+    const ordered = promoted
+      ? [...images.filter((m) => m.id === promoted), ...images.filter((m) => m.id !== promoted)]
+      : images
+    ordered.forEach((m, i) => {
+      if (!(m.image.altText ?? '').trim()) {
+        altWrites.push({ id: m.id, alt: altTextFor(product.title, product.vendor, i) })
+      }
+    })
+  }
+
   process.stderr.write(`scanned ${scanned} product(s)\n`)
   process.stdout.write(
     `${JSON.stringify(
       {
         mode: APPLY ? 'apply' : 'dry-run',
         scanned,
+        skippedApparel,
+        ...(ALT_TEXT ? { altTextWrites: altWrites.length } : {}),
         confident: candidates,
         ...(PIXELS ? { pixelFlagged: pixelFlags } : {}),
       },
@@ -247,7 +293,9 @@ async function main(): Promise<number> {
     process.stderr.write(
       `dry-run: ${candidates.length} confident candidate(s)` +
         (PIXELS ? `, ${pixelFlags.length} pixel-flagged for eyeballing` : '') +
-        '. Re-run with --apply to promote the proposed images.\n',
+        (ALT_TEXT ? `, ${altWrites.length} image(s) missing alt text` : '') +
+        `, ${skippedApparel} apparel product(s) skipped` +
+        '. Re-run with --apply to write.\n',
     )
     return 0
   }
@@ -257,13 +305,34 @@ async function main(): Promise<number> {
     try {
       await setMediaAsPrimary(c.productId, c.proposedMediaId)
       applied++
-      process.stderr.write(`APPLIED ${c.handle}: promoted ${c.proposedUrl.split('?')[0]!.split('/').pop()}\n`)
+      // primaryMediaId is logged so a run's own output is its rollback list:
+      // setMediaAsPrimary(productId, primaryMediaId) restores the prior order.
+      process.stderr.write(`APPLIED ${c.handle}: promoted ${c.proposedUrl.split('?')[0]!.split('/').pop()} (was ${c.primaryMediaId} on ${c.productId})\n`)
     } catch (err) {
       process.stderr.write(`ERROR ${c.handle}: reorder failed: ${(err as Error).message}\n`)
     }
   }
   process.stderr.write(`applied ${applied}/${candidates.length} reorder(s)\n`)
-  return applied === candidates.length ? 0 : 1
+
+  let altWritten = 0
+  for (const batch of chunk(altWrites, 50)) {
+    try {
+      const res = await adminGraphQL<{ fileUpdate: { userErrors: { field: string[]; message: string }[] } }>(
+        `mutation AltText($files: [FileUpdateInput!]!) {
+          fileUpdate(files: $files) { userErrors { field message } }
+        }`,
+        { files: batch },
+      )
+      const errs = res.fileUpdate.userErrors
+      if (errs.length) process.stderr.write(`WARN alt-text batch: ${errs.map((e) => e.message).join('; ')}\n`)
+      altWritten += batch.length - errs.length
+    } catch (err) {
+      process.stderr.write(`ERROR alt-text batch: ${(err as Error).message}\n`)
+    }
+  }
+  if (ALT_TEXT) process.stderr.write(`alt text written ${altWritten}/${altWrites.length}\n`)
+
+  return applied === candidates.length && altWritten === altWrites.length ? 0 : 1
 }
 
 main().then(
