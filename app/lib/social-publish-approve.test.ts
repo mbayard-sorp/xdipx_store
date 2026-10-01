@@ -333,6 +333,29 @@ describe('applyPublishGateVerdict', () => {
     expect(calls).toEqual([{ urls: [`${CDN}/bswish-bthrilled-1.jpg`], note: 'foam vs silicone' }])
   })
 
+  it('flags a BLOCK whose check slug is a product-identity variant, not just the exact string (#12674)', async () => {
+    // The gate model composes its own short slug per call (team-gates.server.ts's
+    // own isImageLevelFinding documents this); a real finding on row 362
+    // (2026-09-30) was blocked with the slug `product-identity-pattern` for a
+    // packshot-print mismatch, which the old exact-equality check silently
+    // missed, leaving the library row unflagged despite a real BLOCK.
+    const calls: { urls: string[]; note: string }[] = []
+    const { repo } = fakeRepo(row({ mediaUrls: [`${CDN}/prints-charming-1.jpg`], posterUrl: null }))
+    const v = verdict({
+      verdict: 'BLOCK',
+      notes: 'packshot carries the wrong print',
+      findings: [{ check: 'product-identity-pattern', verdict: 'block', note: 'floral print vs cannabis-leaf/skull/rose packshot' }],
+    })
+    await applyPublishGateVerdict(7, v, {
+      repo, ...inStock,
+      markProductIdentityBlocked: async (urls, note) => { calls.push({ urls, note }) },
+    })
+    expect(calls).toEqual([{
+      urls: [`${CDN}/prints-charming-1.jpg`],
+      note: 'floral print vs cannabis-leaf/skull/rose packshot',
+    }])
+  })
+
   it('includes posterUrl alongside mediaUrls when flagging a product-identity BLOCK', async () => {
     const calls: { urls: string[] }[] = []
     const { repo } = fakeRepo(row({

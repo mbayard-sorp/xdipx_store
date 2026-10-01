@@ -680,7 +680,18 @@ export async function applyPublishGateVerdict(
     // Flag the library row(s) so social-asset-query stops surfacing it; a
     // best-effort side write that never overturns the verdict already
     // recorded above.
-    const identityBlock = findings.find(f => f.check === 'product-identity' && f.verdict === 'block')
+    //
+    // #12674: match by keyword, not exact equality. `check` is free text the
+    // gate model composes per-call (team-gates.server.ts's own
+    // `isImageLevelFinding` documents this: "the model composes its own short
+    // slug... not a controlled vocabulary"), and a real BLOCK on row 362
+    // (2026-09-30) carried the slug `product-identity-pattern` for a
+    // packshot-print mismatch -- a natural, correct variant that the old
+    // `=== 'product-identity'` check silently failed to match, so the
+    // library row was never flagged despite a real, confirmed BLOCK.
+    const identityBlock = findings.find(
+      f => f.verdict === 'block' && f.check.toLowerCase().includes('identity'),
+    )
     if (identityBlock) {
       const markBlocked = deps.markProductIdentityBlocked ?? markAssetsProductIdentityBlocked
       const urls = [...(post.mediaUrls ?? []), ...(post.posterUrl ? [post.posterUrl] : [])]
