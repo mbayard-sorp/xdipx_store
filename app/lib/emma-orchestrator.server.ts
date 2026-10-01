@@ -109,6 +109,14 @@ export interface ProductWrites {
   ivrFeatures?:       string[]
   // PDP FAQs — Sanity-only (productPage.productFaqs[]). Renders visibly + emits FAQPage JSON-LD.
   productFaqs?:       ProductFaq[]
+  /** Shopify Standard Product Taxonomy category (bare id, e.g. `ma-1-4`) plus attribute
+   *  values by attribute name. Optional: the enrich step falls back to a default by product
+   *  type. Applied by applyShopifyCategory; see docs/store-team/shopify-category-playbook.md. */
+  shopifyCategory?:   { id: string; attributes?: Record<string, string[]> }
+  /** Materials the product is made of, from the closed `xdipx.material` vocabulary
+   *  (MATERIAL_VOCAB in shopify-category.server.ts). Present only when the product data
+   *  names them. Applied by applyMaterial; see the playbook's Material section. */
+  material?:          string[]
 }
 
 export interface ToolCallTrace {

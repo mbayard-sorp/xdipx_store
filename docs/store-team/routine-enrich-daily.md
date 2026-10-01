@@ -80,6 +80,19 @@ mapped into the `vocabularies` object its input contract expects (`moodVocab`, `
 pairings are deal-cycle artifacts; the agent should omit `pairingWhy`. Ask for ONLY the JSON object,
 no fences.
 
+Every payload must carry `shopifyCategory` (`{id, attributes}`), chosen from
+`docs/store-team/shopify-category-playbook.md`; the agent def reads the playbook itself. The server
+applies it after the Shopify write, fill-gaps only (never overwrites an existing category or
+`shopify.*` attribute metafield) and never blocks publish. If the agent omitted it, re-dispatch once
+naming the missing field; a product type with no playbook fit may ship without it, because the server
+falls back to a default category by product type where one is unambiguous. The category step rides
+the existing `import_enrich_enabled` gate; there is no separate valve.
+
+The payload also carries `material` (array from the closed `xdipx.material` vocabulary) when, and only
+when, the product data names the material; omit it otherwise. The rules are in the playbook's Material
+section. The server writes it to `xdipx.material`, fill-gaps only, and a failure never blocks publish.
+Toy cleaners and supplements use `hb-3` and "Prowler RED Toppers" stay uncategorized, per the playbook.
+
 Before submitting, self-check the payload against the acceptance rules the server will apply
 (non-empty `descriptionHtml`, `tagline`, `seoMetaDescription` ≥ 100 chars, valid `productTypeDial`,
 non-empty mood/audience/matters tags, and the sensation-dial spread rule: ≥5 values, ≥3 distinct,
@@ -118,6 +131,24 @@ products this run** (session-length bound; the rest keep until tomorrow — the 
 alarms past 25 rows aged 6h+, so a one-day backlog under ~25 is quiet and expected). A `403 disabled`
 mid-run means the owner pulled the kill switch: stop generating immediately, report what completed,
 finish honestly.
+
+## Step 5b: Weekly category gap check (Mondays)
+
+Once a week, after the loop, find live products that still have no Shopify category (imports before
+this step existed, payloads that omitted the field, a failed category write) and classify them in the
+same run. Read-only Admin query, then one subagent dispatch per leftover with the playbook:
+
+```graphql
+{ products(first: 50, query: "-category_id:* -status:archived") { nodes { id title productType category { id } } } }
+```
+
+`-category_id:*` (verified read-only against the Admin API) matches products with no category.
+Classify each leftover from its title, product type, tags and description using the playbook, then
+apply through the enrich queue by re-enriching, or by filing a `kind:'process'` suggestion at the
+product team listing the product ids and the category you chose when the product is already enriched
+and the queue will not take it again (the category write needs the server module, not a direct Shopify
+call from this session). Report the leftover count in the Step 6 summary; a non-zero count two weeks
+running is a bug in the category step, not backlog.
 
 ## Step 6: Report + finish
 

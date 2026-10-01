@@ -62,6 +62,7 @@ import { IVR_EXPERIENCE_LEVELS } from '~/lib/claude.server'
 import { EMMA_VOICE_ENRICHMENT } from '~/lib/emma-voice.server'
 import { PRODUCT_TYPE_DIALS } from '~/types'
 import type { ProductWrites } from '~/lib/emma-orchestrator.server'
+import { applyCategoryForEnrichment, applyMaterial } from '~/lib/shopify-category.server'
 import { deriveCastTarget } from '~/lib/cast-target.server'
 
 const VALID_IVR_EXPERIENCE = new Set<string>(IVR_EXPERIENCE_LEVELS as readonly string[])
@@ -264,6 +265,35 @@ export async function applyFullEnrichmentWrites(numericProductId: string, writes
   if (writes.moodImageUrl)           doc.moodImageUrl        = writes.moodImageUrl
 
   await pushProductToShopify(doc)
+
+  // Standard Product Taxonomy category + attribute metafields, so a published
+  // product is never uncategorized. Fill-gaps only, never throws, and a failure
+  // here is logged without unwinding the enrichment write.
+  try {
+    const catResult = await applyCategoryForEnrichment(
+      `gid://shopify/Product/${numericProductId}`,
+      writes,
+      snap.product_type,
+    )
+    if (catResult && (catResult.errors.length || catResult.dropped.length)) {
+      console.warn(`[import-enrich] shopify category for product ${numericProductId}:`, JSON.stringify(catResult))
+    }
+  } catch (err) {
+    console.error(`[import-enrich] shopify category failed for product ${numericProductId}:`, err)
+  }
+
+  // Material goes in the store-owned xdipx.material list (the toy category has no
+  // Shopify Material attribute). Same rules as above: fill-gaps, non-fatal.
+  if (writes.material?.length) {
+    try {
+      const matResult = await applyMaterial(`gid://shopify/Product/${numericProductId}`, writes.material)
+      if (matResult.errors.length) {
+        console.warn(`[import-enrich] material for product ${numericProductId}:`, JSON.stringify(matResult))
+      }
+    } catch (err) {
+      console.error(`[import-enrich] material failed for product ${numericProductId}:`, err)
+    }
+  }
 
   // Mirror to the Sanity productPage so search index, voice/IVR surfaces, and
   // the keyword-bank projection don't lag. Best-effort with one retry.
