@@ -59,6 +59,7 @@ import {
   MAX_CI_RETRIGGERS_PER_PR,
   CONDITIONAL_UNDRAFT_MIN_AGE_MS,
   CONDITIONAL_UNDRAFT_PREFIXES,
+  DEFAULT_BASE_BRANCH,
   DEFAULT_MAX_MERGES_PER_DAY,
   ESCALATION_KIND_TO_CLASS,
   MAX_TICKET_ATTEMPTS,
@@ -111,6 +112,7 @@ function facts(over: Partial<PullRequestFacts> = {}): PullRequestFacts {
   return {
     number: 100,
     headRef: 'ticket/41',
+    baseRef: DEFAULT_BASE_BRANCH,
     headSha: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
     title: 'fix the rail anchor',
     // Fresh activity by default, so the conditional undraft (which requires 30
@@ -415,6 +417,27 @@ describe('evaluatePullRequest: gates', () => {
     const d = evaluatePullRequest(facts({ labels: [NEEDS_OWNER_LABEL] }))
     expect(d.action).toBe('skip')
     expect(d.code).toBe('needs-owner-label')
+  })
+
+  // A stacked PR (a legitimate follow-up branched off another ticket's PR
+  // instead of off main) must never reach `action: 'merge'` while its base is
+  // still that other branch: squashMergePullRequest merges into whatever the
+  // base ref currently is, not necessarily main, and nothing here retargets
+  // it automatically.
+  it('never merges a PR whose base is not the default branch, however green', () => {
+    const d = evaluatePullRequest(facts({ baseRef: 'ticket/12097' }))
+    expect(d.action).toBe('skip')
+    expect(d.code).toBe('wrong-base')
+    expect(d.action).not.toBe('merge')
+  })
+
+  it('the wrong-base check runs before labels, draft, and CI, so nothing downstream can paper over it', () => {
+    const wrongBase = { baseRef: 'ticket/12097' }
+    expect(evaluatePullRequest(facts({ ...wrongBase, labels: [NEEDS_OWNER_LABEL] })).code).toBe('wrong-base')
+    expect(evaluatePullRequest(facts({ ...wrongBase, draft: true })).code).toBe('wrong-base')
+    expect(evaluatePullRequest(facts({ ...wrongBase, checks: { [REQUIRED_CHECK]: 'failure' } })).code).toBe(
+      'wrong-base',
+    )
   })
 
   // Draft handling. A PR opened from a cloud session is drafted by the harness,
