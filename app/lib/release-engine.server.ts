@@ -1187,6 +1187,47 @@ export async function runReleaseSmoke(): Promise<SmokeResult> {
   return summarizeSmoke(checks)
 }
 
+/**
+ * Pause before the one smoke retry. Short on purpose: it has to fit the 300s
+ * function cap alongside POLL_BUDGET_MS and two smoke passes.
+ */
+export const SMOKE_RETRY_DELAY_MS = 20_000
+
+/**
+ * Post-deploy smoke with one retry before a rollback.
+ *
+ * All five rollbacks from 2026-09-09 to 2026-10-01 (cron_runs 3006, 5265,
+ * 5702, 6160, 13045) carried identical evidence: the smoke PDP answered HTTP
+ * 503, which is what a PDP serves when a single Storefront lookup times out.
+ * Two of the reverted PRs were docs-only (#1183, and #1456, the owner's
+ * charter v5.7), so the deploy could not have caused it. A single-shot smoke
+ * turns every Storefront blip into a revert of good work, and two in one UTC
+ * day trips the circuit breaker, which stops all merging until the owner
+ * turns it back on.
+ *
+ * A regression the deploy actually caused fails both passes and still rolls
+ * back; the cost is SMOKE_RETRY_DELAY_MS more of the bad build being live. If
+ * the invocation is killed during the retry, the pending merge stays in KV and
+ * the next cycle re-runs the smoke. `run` and `wait` are injectable so the
+ * decision is testable without a network.
+ */
+export async function runReleaseSmokeWithRetry(
+  run: () => Promise<SmokeResult> = runReleaseSmoke,
+  wait: (ms: number) => Promise<void> = sleep,
+): Promise<SmokeResult> {
+  const first = await run()
+  if (first.ok) return first
+  console.warn(`${LOG} smoke failed once, retrying in ${SMOKE_RETRY_DELAY_MS / 1000}s: ${first.evidence}`)
+  await wait(SMOKE_RETRY_DELAY_MS)
+  const second = await run()
+  return {
+    ...second,
+    evidence: second.ok
+      ? `${second.evidence} (on retry; first attempt ${first.evidence})`
+      : `${second.evidence} (failed twice, ${SMOKE_RETRY_DELAY_MS / 1000}s apart)`,
+  }
+}
+
 function siteOrigin(): string {
   const base = process.env['BASE_URL'] || (process.env['VERCEL_URL'] ? `https://${process.env['VERCEL_URL']}` : '')
   return base.replace(/\/+$/, '') || 'https://xdipx.com'
@@ -2558,7 +2599,7 @@ async function settleDeployment(
         state: 'ready',
       })
     }
-    const smoke = await runReleaseSmoke()
+    const smoke = await runReleaseSmokeWithRetry()
     console.log(`${LOG} smoke for PR #${pending.prNumber}: ${smoke.evidence}`)
     if (smoke.ok) return applySuccess(pending, smoke, dryRun)
     return failAndRollback(pending, smoke.evidence, dryRun)
