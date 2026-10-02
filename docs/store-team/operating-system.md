@@ -293,6 +293,21 @@ the row text and its links are the only carriers, so the conventions are the con
    superseded before any code was duplicated, but two of five claims in that pass were burned
    confirming work that already existed. Running the same check once at split time, before any
    split row is filed, is cheaper than N downstream claims independently rediscovering it.
+10. **Grep the named file or function before citing it in a DONE WHEN, don't write it from memory.**
+    (#8058, #12953, second occurrence) A filer's DONE WHEN is a lead for the claiming agent, not a
+    binding spec (`routine-dev-daily.md` already tells R-DEV to verify rather than trust it on the
+    receiving end), but every wrong citation still costs a verification step the filer could have
+    skipped. #8026 named `app/lib/cron-expectations.ts` for a rate-floor fix that actually lives in
+    `app/lib/lane-floors.server.ts`; #8028 named a `POST /api/team/blocker` op of `'create'` when
+    the route's real op is `'file'`; #12876 and #12877, filed the same day in the same batch, each
+    said to reuse an `isInstagramEligible` function that does not exist anywhere in the repo, so the
+    filter logic got written twice independently in `app/lib/social-candidates.server.ts` and
+    `app/lib/new-product-social-filter.ts` instead of once as a shared helper. None of these blocked
+    implementation outright, but each one is a wasted grep an R-DEV pass had to run that the filer
+    could have run first. Before writing a DONE WHEN that names a specific file, function, route, or
+    op as something to reuse, modify, or call, `git grep` that exact name once. If it doesn't exist,
+    either find the real name or say plainly that no such symbol exists yet and the ticket is asking
+    for a new one.
 
 ### Playbook-authoring conventions
 
