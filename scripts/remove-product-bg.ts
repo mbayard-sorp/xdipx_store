@@ -13,8 +13,15 @@
  *   npm run bg:remove -- --live --limit=5
  *   npm run bg:remove -- --live --resume          # skip products already in checkpoint
  *   npm run bg:remove -- --live --yes             # skip cost-confirmation prompt
+ *   npm run bg:remove -- --live --ground=FFE6DD   # composite onto a flat ground (Layer 2)
  *
  * Cost: ~$0.01/image on fal.ai BiRefNet v2. Shopify Admin has no charge.
+ *
+ * --ground=<hex> (docs/store-team/shop-image-strategy.md Layer 2): instead of
+ * uploading the raw transparent cutout, composite it onto a flat square
+ * canvas of that color, product centered at ~78% of the frame with a soft
+ * contact shadow, 1200x1200 JPEG. Omit --ground to keep the existing
+ * transparent-PNG behavior unchanged.
  *
  * Checkpoint: scripts/.bg-removal-checkpoint.json (gitignored).
  */
@@ -30,6 +37,7 @@ import {
   deleteProductMedia,
 } from '../app/lib/shopify.server.ts'
 import { removeBackground } from '../app/lib/fal.server.ts'
+import { hexToRgb, computeGroundPlacement, contactShadowSvg } from './lib/shop-image-hygiene.ts'
 
 // ─── CLI args ─────────────────────────────────────────────────────────────
 
@@ -49,6 +57,9 @@ const ONLY_HANDLE       = opt('only')
 const LIMIT             = opt('limit') ? parseInt(opt('limit')!, 10) : null
 const CONCURRENCY       = parseInt(opt('concurrency') ?? '4', 10)
 const COST_PER_IMAGE    = 0.01 // USD — fal.ai BiRefNet v2 posted price
+const GROUND            = opt('ground') // hex color, e.g. FFE6DD; omit to keep the raw PNG
+const GROUND_CANVAS_SIZE = 1200
+const GROUND_PRODUCT_SCALE = 0.78
 
 // ─── Checkpoint ───────────────────────────────────────────────────────────
 
@@ -209,6 +220,38 @@ async function analyzeBackground(imageBuffer: Buffer): Promise<BgAnalysis> {
   return { hasAlpha, isWhiteBg: hits >= 7, whiteCornerHits: hits }
 }
 
+// ─── Layer 2: signature-ground compositing ───────────────────────────────
+
+/**
+ * Composite a transparent product cutout onto a flat square ground, centered
+ * at GROUND_PRODUCT_SCALE of the frame with a soft contact shadow. Returns a
+ * JPEG buffer at GROUND_CANVAS_SIZE x GROUND_CANVAS_SIZE.
+ */
+async function compositeOnGround(pngBuffer: Buffer, groundHex: string): Promise<Buffer> {
+  const meta = await sharp(pngBuffer).metadata()
+  const width = meta.width ?? GROUND_CANVAS_SIZE
+  const height = meta.height ?? GROUND_CANVAS_SIZE
+  const placement = computeGroundPlacement(width, height, GROUND_CANVAS_SIZE, GROUND_PRODUCT_SCALE)
+
+  const resizedProduct = await sharp(pngBuffer)
+    .resize(placement.width, placement.height, { fit: 'fill' })
+    .toBuffer()
+
+  const shadowSvg = contactShadowSvg(GROUND_CANVAS_SIZE, placement)
+  const shadow = await sharp(Buffer.from(shadowSvg)).blur(14).toBuffer()
+
+  const { r, g, b } = hexToRgb(groundHex)
+  return sharp({
+    create: { width: GROUND_CANVAS_SIZE, height: GROUND_CANVAS_SIZE, channels: 3, background: { r, g, b } },
+  })
+    .composite([
+      { input: shadow, left: 0, top: 0 },
+      { input: resizedProduct, left: placement.left, top: placement.top },
+    ])
+    .jpeg({ quality: 90 })
+    .toBuffer()
+}
+
 // ─── Per-product processing ───────────────────────────────────────────────
 
 interface PlanEntry {
@@ -257,15 +300,17 @@ async function processEntry(entry: PlanEntry, cp: Checkpoint): Promise<void> {
     const { imageUrl: transparentUrl } = await removeBackground(originalUrl)
     const pngBuffer = await fetchBuffer(transparentUrl)
 
-    const filename = `${product.handle}-nobg.png`
-    const altText  = product.featuredImage?.altText ?? product.title
+    const uploadBuffer  = GROUND ? await compositeOnGround(pngBuffer, GROUND) : pngBuffer
+    const filename      = GROUND ? `${product.handle}-ground.jpg` : `${product.handle}-nobg.png`
+    const contentType   = GROUND ? 'image/jpeg' as const : 'image/png' as const
+    const altText       = product.featuredImage?.altText ?? product.title
 
     const newMediaGid = await uploadThumbnailToProduct(
       product.id,
-      pngBuffer,
+      uploadBuffer,
       filename,
       altText,
-      'image/png',
+      contentType,
     )
 
     // Wait for Shopify to process the media before reorder / delete calls
@@ -334,10 +379,12 @@ async function main() {
   if (!process.env['SHOPIFY_STORE_DOMAIN'] || !process.env['SHOPIFY_ADMIN_ACCESS_TOKEN']) {
     throw new Error('SHOPIFY_STORE_DOMAIN and SHOPIFY_ADMIN_ACCESS_TOKEN must be set')
   }
+  if (GROUND) hexToRgb(GROUND) // fail fast on a bad --ground value before any spend
 
   const cp = RESUME || LIVE ? loadCheckpoint() : {}
 
   console.log(`Mode: ${LIVE ? 'LIVE' : 'DRY-RUN'}${DELETE_ORIGINALS ? ' (deletes originals)' : ''}`)
+  if (GROUND) console.log(`Ground: #${GROUND} (${GROUND_CANVAS_SIZE}x${GROUND_CANVAS_SIZE} JPEG composite)`)
   if (ONLY_HANDLE) console.log(`Filter: handle=${ONLY_HANDLE}`)
   if (LIMIT) console.log(`Limit: ${LIMIT}`)
   if (RESUME) console.log(`Resume: ${Object.keys(cp).length} products in checkpoint will be skipped`)

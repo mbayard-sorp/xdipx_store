@@ -42,3 +42,69 @@ export function chunk<T>(items: T[], size: number): T[][] {
   for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size))
   return out
 }
+
+/** The Nalpac main feed's "Image 1" column for a zero-media product's SKU, or null. */
+export function nalpacImageOneUrl(mainRow: Record<string, string> | undefined): string | null {
+  return mainRow?.['Image 1']?.trim() || null
+}
+
+// ─── Layer 2: signature-ground compositing (docs/store-team/shop-image-strategy.md) ───
+
+/** '#FFE6DD' or 'FFE6DD' (3- or 6-digit) -> {r,g,b}. Throws on an unparseable value. */
+export function hexToRgb(hex: string): { r: number; g: number; b: number } {
+  const stripped = hex.trim().replace(/^#/, '')
+  const full = stripped.length === 3 ? stripped.split('').map(c => c + c).join('') : stripped
+  if (!/^[0-9a-f]{6}$/i.test(full)) throw new Error(`invalid hex color: ${hex}`)
+  return {
+    r: parseInt(full.slice(0, 2), 16),
+    g: parseInt(full.slice(2, 4), 16),
+    b: parseInt(full.slice(4, 6), 16),
+  }
+}
+
+export interface GroundPlacement {
+  width: number
+  height: number
+  left: number
+  top: number
+}
+
+/**
+ * Resize-and-center placement for a product cutout on a square ground canvas:
+ * the product's longer edge becomes `scale` of `canvasSize`, aspect ratio is
+ * preserved, and the result is centered. Pure arithmetic so it is testable
+ * without decoding an actual image.
+ */
+export function computeGroundPlacement(
+  productWidth: number,
+  productHeight: number,
+  canvasSize: number,
+  scale: number,
+): GroundPlacement {
+  if (productWidth <= 0 || productHeight <= 0) throw new Error('product dimensions must be positive')
+  const longEdge = Math.max(productWidth, productHeight)
+  const factor = (canvasSize * scale) / longEdge
+  const width = Math.max(1, Math.round(productWidth * factor))
+  const height = Math.max(1, Math.round(productHeight * factor))
+  return {
+    width,
+    height,
+    left: Math.round((canvasSize - width) / 2),
+    top: Math.round((canvasSize - height) / 2),
+  }
+}
+
+/**
+ * A soft contact-shadow ellipse, sized off the placed product and anchored to
+ * where it meets the ground, as an SVG string ready for sharp to rasterize and
+ * blur. Kept pure (string in, string out) so geometry is unit-testable without
+ * an image library.
+ */
+export function contactShadowSvg(canvasSize: number, placement: GroundPlacement): string {
+  const rx = Math.max(1, Math.round(placement.width * 0.4))
+  const ry = Math.max(1, Math.round(rx * 0.22))
+  const cx = canvasSize / 2
+  const cy = placement.top + placement.height - Math.round(ry * 0.6)
+  return `<svg width="${canvasSize}" height="${canvasSize}" xmlns="http://www.w3.org/2000/svg">`
+    + `<ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}" fill="black" fill-opacity="0.22" /></svg>`
+}
