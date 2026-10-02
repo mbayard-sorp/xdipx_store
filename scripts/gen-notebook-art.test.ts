@@ -7,8 +7,9 @@
 // (app/lib/social-vision-gate.server.ts) the hero path now calls on every
 // candidate before it can reach disk or Sanity.
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { gateHeroBuffer, splitByVerdict, billableCandidateCount, remoteVisionCallVision, heroVisionDeps, sniffImageMediaType } from './gen-notebook-art'
+import { gateHeroBuffer, splitByVerdict, splitByFidelity, billableCandidateCount, remoteVisionCallVision, heroVisionDeps, sniffImageMediaType } from './gen-notebook-art'
 import type { VisionVerdict } from '../app/lib/social-vision-gate.server'
+import type { ProductFidelityVerdict } from '../app/lib/social-product-fidelity.server'
 
 const CLEAN_VERDICT = {
   pass: true,
@@ -262,6 +263,61 @@ describe('splitByVerdict', () => {
     const buffers = [Buffer.from('a'), Buffer.from('b')]
     const verdicts = [CLEAN_VERDICT, CLEAN_VERDICT] as unknown as VisionVerdict[]
     const { passing, failing } = splitByVerdict(buffers, verdicts)
+    expect(passing).toEqual(buffers)
+    expect(failing).toEqual([])
+  })
+})
+
+// Ticket #13119, incidents run 1182/1202: the anatomy gate above has no
+// concept of product identity, so a hero whose embedded product is a
+// C-shaped couples ring could pass clean while rendering a rabbit-style
+// twin-arm vibrator instead. splitByFidelity is the composite ladder's
+// decision function for the sibling product-fidelity check.
+describe('splitByFidelity', () => {
+  const CLEAN_FIDELITY: ProductFidelityVerdict = {
+    silhouette: 'match', colour: 'match', finish: 'match', brandMark: 'match',
+    notes: 'faithful to reference', checkedAt: '2026-10-02T00:00:00.000Z', checkCompleted: true,
+  }
+
+  // The run-1182 regression case verbatim: We-Vibe Chorus (a C-shaped
+  // horseshoe couples ring) rendered as a rabbit-style twin-arm vibrator.
+  const RABBIT_VS_C_RING_VERDICT: ProductFidelityVerdict = {
+    silhouette: 'drift', colour: 'match', finish: 'match', brandMark: 'not-applicable',
+    notes: 'Reference is a C-shaped horseshoe couples ring; render depicts a rabbit-style twin-arm vibrator.',
+    checkedAt: '2026-10-02T00:00:00.000Z', checkCompleted: true,
+  }
+
+  it('keeps only the buffers whose paired fidelity verdict passed', () => {
+    const buffers = [Buffer.from('a'), Buffer.from('b'), Buffer.from('c')]
+    const verdicts = [CLEAN_FIDELITY, RABBIT_VS_C_RING_VERDICT, CLEAN_FIDELITY]
+    const { passing, failing } = splitByFidelity(buffers, verdicts)
+    expect(passing).toEqual([Buffer.from('a'), Buffer.from('c')])
+    expect(failing).toEqual([RABBIT_VS_C_RING_VERDICT])
+  })
+
+  it('rejects every candidate when every verdict reproduces the run-1182 product-identity drift', () => {
+    const buffers = [Buffer.from('a'), Buffer.from('b')]
+    const verdicts = [RABBIT_VS_C_RING_VERDICT, RABBIT_VS_C_RING_VERDICT]
+    const { passing, failing } = splitByFidelity(buffers, verdicts)
+    expect(passing).toEqual([])
+    expect(failing).toHaveLength(2)
+  })
+
+  it('rejects a candidate whose fidelity check never completed, not just a genuine drift', () => {
+    const incomplete: ProductFidelityVerdict = {
+      silhouette: null, colour: null, finish: null, brandMark: null,
+      notes: 'could not complete', checkedAt: '2026-10-02T00:00:00.000Z', checkCompleted: false,
+    }
+    const buffers = [Buffer.from('a')]
+    const { passing, failing } = splitByFidelity(buffers, [incomplete])
+    expect(passing).toEqual([])
+    expect(failing).toEqual([incomplete])
+  })
+
+  it('passes every candidate through when every verdict is a clean match', () => {
+    const buffers = [Buffer.from('a'), Buffer.from('b')]
+    const verdicts = [CLEAN_FIDELITY, CLEAN_FIDELITY]
+    const { passing, failing } = splitByFidelity(buffers, verdicts)
     expect(passing).toEqual(buffers)
     expect(failing).toEqual([])
   })
