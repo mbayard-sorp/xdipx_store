@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   NEW_PRODUCT_WEEKLY_CAP,
+  isInstagramEligibleProduct,
   newProductPostExcludeReason,
   restockPostExcludeReason,
 } from './new-product-social-filter'
@@ -95,6 +96,50 @@ describe('newProductPostExcludeReason', () => {
     expect(
       newProductPostExcludeReason({ title: 'Rose Air Pulse', productType: 'Air Pulsation' }),
     ).toBeNull()
+  })
+
+  // Ticket #12877: all three weekly slots were dildos Instagram cannot run,
+  // which starved out every genuinely postable launch that week. Checked
+  // before the weekly cap, so an ineligible product never consumes a slot.
+  describe('Instagram category exclude (#12877)', () => {
+    it('excludes a dildo-family product type', () => {
+      const reason = newProductPostExcludeReason({
+        title: 'Realrock Realistic Dildo 5"', productType: 'Realistic Dildo', weeklyCount: 0,
+      })
+      expect(reason).toMatch(/not Instagram-eligible by category/)
+    })
+
+    it('does not count toward the weekly cap: a dildo followed by two genuine launches all post', () => {
+      // Simulates the exact incident: weeklyCount reflects only rows that
+      // were actually filed, and an ineligible product is never filed, so it
+      // never inflates weeklyCount for the launches that follow it.
+      const dildo = newProductPostExcludeReason({
+        title: 'Realistic Dildo', productType: 'Realistic Dildo', weeklyCount: 0,
+      })
+      expect(dildo).not.toBeNull()
+      // weeklyCount stays 0 (the dildo above never incremented it), so both
+      // genuine launches below still clear the cap of 3.
+      expect(newProductPostExcludeReason({ title: 'Genuine Launch 1', productType: 'Vibrator', weeklyCount: 0 })).toBeNull()
+      expect(newProductPostExcludeReason({ title: 'Genuine Launch 2', productType: 'Wand Massager', weeklyCount: 1 })).toBeNull()
+    })
+  })
+})
+
+describe('isInstagramEligibleProduct', () => {
+  it('excludes every dildo family type', () => {
+    for (const type of ['Dildo', 'Fantasy Dildo', 'Realistic Dildo', 'Silicone Dildo', 'Strap-On Dildo', 'Vibrating Dildo']) {
+      expect(isInstagramEligibleProduct(type)).toBe(false)
+    }
+  })
+
+  it('excludes an anatomically realistic product (sex doll)', () => {
+    expect(isInstagramEligibleProduct('Sex Doll')).toBe(false)
+  })
+
+  it('allows an ordinary category, and a null/missing type', () => {
+    expect(isInstagramEligibleProduct('Wand Massager')).toBe(true)
+    expect(isInstagramEligibleProduct(null)).toBe(true)
+    expect(isInstagramEligibleProduct(undefined)).toBe(true)
   })
 })
 
