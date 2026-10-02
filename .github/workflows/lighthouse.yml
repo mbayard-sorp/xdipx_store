@@ -56,6 +56,14 @@ on:
       - 'server/**'
       - 'vercel.json'
       - 'package.json'
+      # Build config and dependency changes alter what the browser downloads
+      # without touching app/**. PR #1479 (a fontaine config fix in
+      # vite.config.ts that removed a 0.11 desktop CLS) got no Lighthouse run
+      # because none of these were listed.
+      - 'vite.config.ts'
+      - 'react-router.config.ts'
+      - 'package-lock.json'
+      - 'public/**'
       - '.github/workflows/lighthouse.yml'
       # Budgets and run count live here; a change to them must re-measure.
       - 'lighthouserc.json'
