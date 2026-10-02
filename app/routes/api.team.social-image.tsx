@@ -65,7 +65,7 @@ import { assertTeamAuth, gate, recordEvent } from '~/lib/team.server'
 import { SOCIAL_ARCHETYPES, type SocialArchetype } from '~/lib/social-media.server'
 import { apiError } from '~/lib/api-error.server'
 import { logImageCost } from '~/lib/token-log.server'
-import { parseSceneAxes, requireSceneAxesForGeneration } from '~/lib/social-scene-vocab'
+import { applyNonSkinAxisDefaults, parseSceneAxes, requireSceneAxesForGeneration } from '~/lib/social-scene-vocab'
 import { Sentry } from '~/lib/sentry.server'
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
@@ -124,7 +124,10 @@ export async function action({ request }: ActionFunctionArgs) {
     // which is why that path backfills instead.
     const parsedAxes = parseSceneAxes(b)
     if (!parsedAxes.ok) return new Response(parsedAxes.error, { status: 400 })
-    const sceneAxes = parsedAxes.axes
+    // Ticket #13096: a wide/medium crop has no on-skin zone to report by
+    // construction, so the sentinel is applied here rather than relying on the
+    // caller to remember it (see applyNonSkinAxisDefaults's own doc comment).
+    const sceneAxes = applyNonSkinAxisDefaults(parsedAxes.axes)
 
     // Required, not merely validated-if-present (ticket #10501). This route
     // is a direct team-token surface, so the CLI's own requirement

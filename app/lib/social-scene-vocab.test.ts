@@ -8,6 +8,7 @@ import {
   CONTACT_MODES,
   CROP_SCALES,
   NON_SKIN_SENTINEL,
+  applyNonSkinAxisDefaults,
   hasAllSceneAxes,
   mergeSceneAxes,
   parseSceneAxes,
@@ -180,5 +181,48 @@ describe('requireSceneAxesForGeneration', () => {
     expect(requireSceneAxesForGeneration({
       sceneLocation: 'bedroom-loft', cropScale: 'close', bodyZone: 'hip-hollow', contactMode: 'resting',
     })).toEqual({ ok: true })
+  })
+})
+
+describe('applyNonSkinAxisDefaults (ticket #13096)', () => {
+  it('fills bodyZone and contactMode with the none sentinel for a wide crop with neither', () => {
+    expect(applyNonSkinAxisDefaults({ sceneLocation: 'bedroom-loft', cropScale: 'wide' })).toEqual({
+      sceneLocation: 'bedroom-loft', cropScale: 'wide', bodyZone: NON_SKIN_SENTINEL, contactMode: NON_SKIN_SENTINEL,
+    })
+  })
+
+  it('does the same for a medium crop', () => {
+    expect(applyNonSkinAxisDefaults({ sceneLocation: 'bedroom-loft', cropScale: 'medium' })).toEqual({
+      sceneLocation: 'bedroom-loft', cropScale: 'medium', bodyZone: NON_SKIN_SENTINEL, contactMode: NON_SKIN_SENTINEL,
+    })
+  })
+
+  it('never overrides a value the caller actually supplied', () => {
+    expect(applyNonSkinAxisDefaults({
+      sceneLocation: 'bedroom-loft', cropScale: 'wide', bodyZone: 'forearm', contactMode: 'self-held',
+    })).toEqual({
+      sceneLocation: 'bedroom-loft', cropScale: 'wide', bodyZone: 'forearm', contactMode: 'self-held',
+    })
+  })
+
+  it('fills only the missing one when the caller supplied one of the two', () => {
+    expect(applyNonSkinAxisDefaults({ sceneLocation: 'bedroom-loft', cropScale: 'wide', bodyZone: 'forearm' }))
+      .toEqual({ sceneLocation: 'bedroom-loft', cropScale: 'wide', bodyZone: 'forearm', contactMode: NON_SKIN_SENTINEL })
+  })
+
+  it('leaves a macro/close crop untouched — those still require a real zone, never the sentinel', () => {
+    expect(applyNonSkinAxisDefaults({ sceneLocation: 'bedroom-loft', cropScale: 'macro' }))
+      .toEqual({ sceneLocation: 'bedroom-loft', cropScale: 'macro' })
+    expect(applyNonSkinAxisDefaults({ sceneLocation: 'bedroom-loft', cropScale: 'close' }))
+      .toEqual({ sceneLocation: 'bedroom-loft', cropScale: 'close' })
+  })
+
+  it('leaves axes with no cropScale at all untouched', () => {
+    expect(applyNonSkinAxisDefaults({ sceneLocation: 'bedroom-loft' })).toEqual({ sceneLocation: 'bedroom-loft' })
+  })
+
+  it('composes with requireSceneAxesForGeneration so a bare wide/medium call now always passes', () => {
+    const defaulted = applyNonSkinAxisDefaults({ sceneLocation: 'bedroom-loft', cropScale: 'wide' })
+    expect(requireSceneAxesForGeneration(defaulted)).toEqual({ ok: true })
   })
 })
