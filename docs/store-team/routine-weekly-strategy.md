@@ -65,6 +65,17 @@ If `ok:false`: post `{"op":"update","id":$RUN_ID,"update":{"status":"skipped","f
   charter, it is factually wrong, or the owner asked.
 - Citation spot-check (zero infra): web-search 3 rotating queries from the approved keyword bank
   and note in the brief whether xdipx.com is cited or linked in the answers/results.
+- **AI-assistant referrals** (owner all-hands 2026-09-30, ticket #12673): GA4
+  `sessionDefaultChannelGroup = 'AI Assistant'` (sessions, addToCarts, checkouts,
+  ecommercePurchases) for the trailing 7 and 28 days, split by `sessionSource` (chatgpt.com,
+  perplexity.ai, claude.ai, gemini.google.com, copilot.microsoft.com). Orders: until
+  `order_attribution` exists, count Shopify orders in the window whose `customAttributes` carry
+  `_utm_source` in that host list (Admin API `order.customAttributes`); once the
+  `order_attribution` table lands, read `channel_group='ai-assistant'` from it instead. Report raw
+  counts (the 300-sessions weighting rule applies), and name the landing pages ChatGPT sends people
+  to (GA4 `landingPagePlusQueryString` filtered to `sessionSource` chatgpt.com, top 10). Baseline
+  2026-09-30: 50 sessions, 11 add-to-carts, 4 checkouts, 2 orders ($198.97) in September, zero in
+  any earlier month.
 - Cross-team activity: `POST /api/team/event {"op":"list","sinceDays":7}`.
 - Improvement bus state: `POST /api/team/suggestion {"op":"list"}`.
 - Outcomes: `daily_profit_summary` (orders/revenue/margin/AOV/ad_spend), GA4 via the
@@ -324,6 +335,12 @@ its payload server-side, so a relay error still cannot write something the API i
 None of these five call `/api/team/*` themselves — you relay every event and suggestion/calendar
 payload under `$RUN_ID` with the originating agent's name in `agentRole`, per the curl shapes above.
 
+**Monthly AI-assistant surface audit (first Monday of each month only, ticket #12673).** Invoke
+`aeo-geo-auditor` against the AI-assistant acquisition surface: `robots.txt` AI allow-list,
+`/llms.txt` and `/llms-full.txt`, every `*[.md]` twin route, and Product/FAQPage/OnlineStore
+JSON-LD. File one `code` ticket per FAIL with file:line evidence. A PASS-only run writes a single
+`/event` line under `$RUN_ID` — no ticket.
+
 ## Step 5 — Publish the brief
 
 One markdown doc: the week's focus, per-team directives (homepage, social, ads, email, content +
@@ -339,6 +356,11 @@ never re-derived: the active treatment, the date the owner set it, the owner's o
 one short quote, and then one line per surface saying adopt, exclude, or open owner question. It is
 a restatement of the router and nothing more; if the router and your memory disagree, the router
 wins, and a surface whose status you cannot find in it is reported as unknown rather than guessed.
+
+Include a required **AI-assistant channel** line, sourced from Step 2's AI-assistant referrals
+read (ticket #12673): `AI-assistant channel: <sessions> sessions / <ATC> / <checkouts> / <orders>
+($<revenue>), top landing pages: ...`. The line is never omitted; if GA4 was unreadable say
+UNMEASURED instead of skipping it.
 
 Include a **Video Plan** section when the video program is enabled (`video_program_enabled`), and
 omit it honestly when it is not. The Video Plan is a product shortlist, not a script slate: product
