@@ -2380,5 +2380,48 @@ with stock this run.
 
 ---
 
+## Notebook §0-H keeper — content run 1182, "Why Can You Orgasm Alone But Not With a Partner?"
+
+`cast: jade` + Rechargeable Silicone Bullet Massager Pink, FemmeFunn Ultra Bullet
+(`femmefunn-ultra-bullet-massager-rechargeable-silicone-vibrator-pink`),
+`blogPost-why-you-can-orgasm-alone-but-not-with-a-partner` (`podcast-notes`, † health-adjacent: no
+levity, no scale exaggeration, sincere staging). Gesture per the "Is this normal? / Is it just me?"
+row: pink bullet held up at eye level, head tilted, brow raised, free hand palm-up. Casting: `jade`
+(`reflective`, `reassured`); `vivian` excluded (09-24 hero, inside no-repeat-within-5). Route:
+`composeSceneFrame()` via `gen-notebook-art.ts --cast jade --feature content-blog`, Atlas
+`seedream-4.5-edit`, landscape 4:3. Gate PASS (digit counts [5,5]); the first composite rung was
+rejected by the code gate (exposure-confirmation parse failure plus a [4,5] digit read), the
+`composite-retry` rung returned the keeper. Placed asset:
+`image-b0a5eca6299eef4aec1a93e040afadb2db592660-1200x900-png`.
+
+**Checker note (catalog defect, not a content issue):** the productPage title for this handle is
+"Rechargeable Silicone Bullet Massager Pink", whose every token is in `GENERIC_TOKENS`, so
+`distinctiveTokens()` is empty and `heroNamesAnyProduct` can never pass for it whatever the alt or
+prompt says. Fix is the catalog title (add the brand/model, e.g. FemmeFunn Ultra) or the matcher,
+not the hero.
+
+## Notebook §0-H keeper — content run 1182, "My Partner Feels Threatened by My Vibrator"
+
+`cast: sofia` + Adjustable We-Vibe Chorus Couples Vibrator Cosmic Pink
+(`chorus-couples-vibrator-cosmic-pink`), `blogPost-what-if-a-partner-feels-replaced-by-a-toy`
+(`real-talk`, not health-adjacent, sincere with an edge, no sight gag). Gesture per the "Why does
+nobody talk about this?" row: product held up beside the face like the exhibit in an argument,
+free hand thrown open, mid-sentence. Casting: `sofia` (last human hero 09-17, sixth back, clear of
+no-repeat-within-5). Route: `composeSceneFrame()` via `gen-notebook-art.ts --cast sofia
+--feature content-blog --run-id 1182`, landscape 4:3.
+- **Round 1 (rejected on curatorial review, though it passed the code gate on upload):** muted
+  expression, product small at the frame edge, right wall a saturated peach-coral block (the known
+  saturated-wall failure). Asset `image-315f368f...` was placed briefly then overwritten.
+- **Round 2 (keeper):** prompt corrected to "mouth open mid-word, one brow sharply raised",
+  "at shoulder height beside her face", and walls "plain white, at most a barely-there pale
+  lavender tint". Gate PASS (digits [5,5]). Placed asset
+  `image-b9a2cf5ef073eca661b7bc1d617b858a3eba3d4c-1200x900-png`. Note the product renders with
+  rabbit-style twin arms in magenta-pink; close enough to the Chorus plate to pass the gate, but
+  a reviewer may find the pink more magenta than "cosmic".
+- **Checker note:** `check-hero-embed-match.ts` needs EVERY distinctive token of the title
+  ("adjustable", "chorus", "cosmic") in alt + prompt; the alt must carry the full title text.
+
+---
+
 *Seeded 2026-07-17 from the doctrine §4 directives and the mission-brief §2 image rules.
 Owner: `media-manager` (append keepers/rejects each run); pruned monthly.*
