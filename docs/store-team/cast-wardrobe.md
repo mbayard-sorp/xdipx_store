@@ -53,7 +53,9 @@ brief and the data to fill it. This file is the data.
    and vulva."* So: the smallest cut that covers the nipple and the vulva, sheer everywhere it can
    be, opaque only in the detail over each nipple and a narrow front panel over the vulva. The
    nipple detail covers the whole areola (about five centimetres across); a small appliqué leaves
-   the areola edge showing through sheer lace, which is a stop-list fail. A piece
+   the areola edge showing through sheer lace, which is a stop-list fail. The front panel is
+   opaque and lined, named as its own object, and just wide enough to cover the mons and vulva; a
+   "small triangle" on a sheer bottom renders sheer (asset 896). A piece
    that covers more than that (full cups, full-back briefs, boyshorts, opaque bodysuits) is a REVISE.
 2. **No bulky fabric.** Chunky or cable knits, terry, waffle weave, fleece, sweats, cardigans, towels
    and duvets never appear on a body in a bodyscape. A robe is silk, satin, chiffon or fine jersey,

@@ -167,7 +167,7 @@ Styling (MANDATORY on every cast frame, owner direction 2026-10-02, `instagram-c
   Piece: <one piece from the cast member's closet in `cast-wardrobe.md`, at the register-9 cut: the smallest that covers the nipple and the vulva, sheer everywhere else (owner 2026-10-02: "as small as possible on the body but cover the nipples and vulva"); a short silk robe falling open over the set; or "bare" plus the story reason>
   Worn: <how it was styled for the shot: band under the breast, waistband at the hip bone, strap off the shoulder, robe slipping to the elbows>
   Skin left bare: <the contact zone, always bare, plus everything else; the piece covers what the stop list needs and nothing more>
-  Opaque detail: <on a woman, the ONLY opaque parts: the object over each nipple (an embroidered appliqué or motif, named as its own object, never "a band", about five centimetres across so it covers the whole areola) and a narrow front panel over the vulva; everything else sheer>
+  Opaque detail: <on a woman, the ONLY opaque parts: the object over each nipple (an embroidered appliqué or motif, named as its own object, never "a band", about five centimetres across so it covers the whole areola) and an opaque, lined front panel named as its own object and just wide enough to cover the mons and vulva; everything else sheer>
   Grip: <the fingers holding the product the way the category is gripped in use; never an open palm presenting it like a tray (owner, asset 869)>
   Edge it closes: <which edge the lingerie line closes>
   Coverage class: <one class from `cast-wardrobe.md`; `bedding-on-body`, `towel` and `bulky` are REVISE>

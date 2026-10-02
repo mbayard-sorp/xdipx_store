@@ -234,7 +234,10 @@ said nothing.
     everywhere it can be (mesh, tulle, fine lace), and the only opaque parts are the detail over
     each nipple and a narrow front panel over the vulva. The nipple detail covers the whole
     areola, not just the nipple (brief it as a motif about five centimetres across): a small
-    appliqué on sheer lace left the areola edge showing and the gate failed it (proof run 3). Full cups, full-back briefs, boyshorts,
+    appliqué on sheer lace left the areola edge showing and the gate failed it (proof run 3). The
+    vulva gets the same treatment: an opaque, lined front panel named as its own object and just
+    wide enough to cover the mons and vulva. A "small triangle" on a sheer string bottom rendered
+    sheer and showed the outline through it (asset 896, a genitaliaAbsent fail). Full cups, full-back briefs, boyshorts,
     opaque bodysuits and opaque slips over the breast under-deliver and are a REVISE. On a man the
     same rule reads as the smallest brief that covers the penis, low on the hip.
   - **No bulky fabric, no draped bedding.** Knits, terry, waffle, fleece, sweats, cardigans and
