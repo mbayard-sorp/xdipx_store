@@ -233,10 +233,13 @@ said nothing.
     rule (§3.2c).
   - **Sheer and lace are licensed; the female nipple sits under an opaque detail.** An embroidered
     appliqué, a satin panel, a lace motif, a strap, her hand, named in the brief. Owner, same message:
-    *"we can usually show faint nipples through transparent lingerie."* That part is NOT licensed
-    yet: Meta's adult-nudity standard prohibits visible female nipples and age-restricts (18+, reduced
-    distribution) "certain instances of nudity obscured by see-through clothing", and X cannot carry
-    it at all because we cannot label sensitive media. It is an open owner decision, not a brief call.
+    *"we can usually show faint nipples through transparent lingerie."* Weighed and settled the same
+    day: Meta's adult-nudity standard prohibits visible female nipples and age-restricts (18+,
+    reduced distribution) "certain instances of nudity obscured by see-through clothing", and X
+    cannot carry it at all because we cannot label sensitive media. Offered (A) sheer everywhere
+    with an opaque detail over the nipple, or (B) an Instagram-only faint-nipple pilot, the owner
+    chose A (*"codify, go with option A"*, 2026-10-02). A faint nipple through fabric stays on the
+    stop list below; reopening it is the owner's call, never a brief's.
   - **Men's chests are bare by default.** Male nipples are not nudity (stop list below, 2026-10-02).
   - **Close-crop lingerie closers are proven before they ship.** Robe 4 of 4, cardigan 2 of 2 and a
     waistband 2 of 2 held at medium crop; at close crop nothing has been tested. Before the first
