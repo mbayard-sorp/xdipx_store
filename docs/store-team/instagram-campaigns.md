@@ -641,7 +641,11 @@ campaign heroes.
   are placing actual products."* Packaging junk (barcodes, labels, cartons) and baked-in captions
   stay out. The three-case rule lives in `docs/design-doctrine.md` §4 item 4.
 - **Ban the word "paper" from image prompts.** The brand token name renders as literal sheets of
-  paper: a prop in 4 of 7 frames before the ban, 0 of 33 after. Say "warm off-white linen".
+  paper: a prop in 4 of 7 frames before the ban, 0 of 33 after. For a fabric, name it by colour and
+  weave from `cast-wardrobe.md` (default "crisp white cotton percale"). "Warm off-white linen" was the
+  substitute until 2026-10-02 and became the name of every fabric in the feed: 140 of 172 cast
+  prompts named bedding and 0 gave it a colour, which is the beige-sheet look the owner named
+  ("our social media images show cast members wearing what looks like beige sheets").
 
 **Surfaces.** Instagram and X share one imagery fence until X can label sensitive media. The
 posting path (`postTweet` in `app/lib/twitter.server.ts`) sends text and media ids only; X permits
@@ -884,6 +888,17 @@ live session (not Social Studio), given verbatim, on a post that actually shippe
 
 Add a new row here whenever the owner praises a live post as on-message; do not let the precedent
 live only in a run's decision event, where the next run cannot find it.
+
+### 3.2f Fabric is named, and the sheet has a job (owner direction 2026-10-02)
+
+Every textile in a cast frame, bedding, towel or garment, follows the fabric rules and the closet in
+`docs/store-team/cast-wardrobe.md`: named by colour and weave, never "linen", "off-white", "cream",
+"beige", "nude" or "neutral" on its own; contrasting with the skin; opaque by construction over a
+stop zone; the cast member's own metal, not default gold. Bedding closes an edge by an action the
+person did (pulled up, knotted at the hip, held to the chest) and never wraps the torso like a dress
+(#360) or sits folded on the groin as a cover (#364); either is a REVISE. Every cast-frame negative
+list carries "no nude-tone underwear, no skin-tone bodysuit" unless the brief names one. This section
+changes no ceiling and no licence; whether a frame may carry a garment stays with §3.2a.
 
 ### 3.3 Carousel arc: six slides
 

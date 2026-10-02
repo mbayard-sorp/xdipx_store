@@ -1462,6 +1462,13 @@ instead **what closes each edge of the frame**: the drawn object or the named ac
 exclusion, use an inanimate closer or a limb named by the action it is performing rather than by
 region, and never brief the supine-from-above composition with breasts in frame.
 
+**Name every fabric (owner direction 2026-10-02, `instagram-campaigns.md` §3.2f).** Whatever closes
+the frame, if it is a textile it is named by colour and weave from the cast member's closet in
+`cast-wardrobe.md`, and it is there because of something the person did. "Warm off-white linen" is
+retired as the default fabric: it is why the owner saw "cast members wearing what looks like beige
+sheets". The bodyscape shot bank's prompts keep their pose, camera and closer; swap their fabric for
+the closet's bedding pick.
+
 Check the mix with the `mixReport` op (Step 7) BEFORE briefing, not only in the retro. A cap you
 only measure afterwards is a cap you break first.
 
