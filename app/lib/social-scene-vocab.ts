@@ -234,6 +234,32 @@ export function requireSceneAxesForGeneration(axes: SceneAxes): { ok: true } | {
   return { ok: true }
 }
 
+/**
+ * Fill bodyZone/contactMode with the `none` sentinel for a wide or medium
+ * crop when the caller omitted them (ticket #13096). `requireSceneAxesForGeneration`
+ * above only REQUIRES a real zone/contact for macro/close crops; for wide/medium
+ * "the art director is instructed to emit `bodyZone: 'none'`" (this file's own
+ * header, point 4) but nothing enforced that instruction, so a drafting call
+ * that simply omitted the fields (rather than sending the sentinel) produced an
+ * asset with no bodyZone/contactMode tag at all — indistinguishable from "not
+ * measured" in the mix report's coverage line, which is exactly the failure
+ * mode #10479 already named and fixed for sceneLocation: never rely on a model
+ * re-asserting a value the system can determine for itself. A wide/medium crop
+ * has no on-skin zone to report BY CONSTRUCTION, so apply the sentinel here
+ * rather than asking the caller to remember it. Called once, at generation
+ * time (`api.team.social-image.tsx`), before axes are validated and stamped
+ * onto the asset row; a value the caller DID supply always wins.
+ */
+export function applyNonSkinAxisDefaults(axes: SceneAxes): SceneAxes {
+  if (axes.cropScale !== 'medium' && axes.cropScale !== 'wide') return axes
+  if (axes.bodyZone && axes.contactMode) return axes
+  return {
+    ...axes,
+    bodyZone: axes.bodyZone ?? NON_SKIN_SENTINEL,
+    contactMode: axes.contactMode ?? NON_SKIN_SENTINEL,
+  }
+}
+
 // --- Asset tag encoding ----------------------------------------------------
 
 /**
