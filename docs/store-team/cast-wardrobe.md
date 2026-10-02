@@ -45,10 +45,14 @@ brief and the data to fill it. This file is the data.
 
 ## The styling rules (binding on every cast frame)
 
-1. **Styled for the shot, at register 9.** If a garment is in frame it is lingerie, a robe worn open
-   or slipping, or one deliberate editorial piece, and it reads like a lingerie campaign styled it.
-   The test is the owner's: a bra line beats a piece of fabric. A garment that covers more than the
-   stop list needs is a REVISE.
+1. **Styled for the shot, at register 9, and the lingerie is register 9 too.** If a garment is in
+   frame it is lingerie, a robe worn open or slipping over lingerie, or one deliberate editorial
+   piece, and it reads like a lingerie campaign styled it. The test is the owner's: a bra line beats
+   a piece of fabric. Owner, verbatim, on the lingerie itself: *"It should be skimpy, sheer where
+   possible, and sexy. It should really be as small as possible on the body but cover the nipples
+   and vulva."* So: the smallest cut that covers the nipple and the vulva, sheer everywhere it can
+   be, opaque only in the detail over each nipple and a narrow front panel over the vulva. A piece
+   that covers more than that (full cups, full-back briefs, boyshorts, opaque bodysuits) is a REVISE.
 2. **No bulky fabric.** Chunky or cable knits, terry, waffle weave, fleece, sweats, cardigans, towels
    and duvets never appear on a body in a bodyscape. A robe is silk, satin, chiffon or fine jersey,
    short, and falls open or slips; never a bathrobe.
@@ -92,72 +96,88 @@ Each closet below names which bedding contrasts with that skin.
 ## The closets
 
 Each piece lists how it is worn, the skin it leaves bare, and its coverage class (the vocabulary the
-`wardrobeCoverage` axis records). Every woman's piece over a stop zone names the opaque detail that
-sits there. The off-character line binds as much as the pieces.
+`wardrobeCoverage` axis records). Every piece is the register-9 cut (styling rule 1): the smallest
+that covers the nipple and the vulva, sheer everywhere else, and every woman's piece names the
+opaque detail over each nipple and the front panel over the vulva. The off-character line binds as
+much as the pieces.
 
 ### Emma (guide, fair with pink undertones)
 Persona: warm, direct, delighted and curious rather than sultry. Emma gets BEFORE or CHOOSING frames
 only (§3.2c), so her styling is the most playful in the cast and the least sultry.
 - **Palette:** white, washed denim blue, coral. **Metal:** fine silver chain.
 - **Bedding:** lilac washed cotton or coral-soft (white washes her out).
-- White cotton-and-lace bralette with a scalloped edge, opaque cups. Bare: waist, shoulders, back. `bralette`
-- Matching high-cut lace briefs, opaque front panel. Bare: hip hollow, thigh, lower back. `briefs-highcut`
-- Coral fine-jersey slip, thin straps, one off the shoulder. Bare: shoulders, arms, legs. `slip`
-- Washed-denim-blue short silk robe, open, sleeves pushed up. Bare: the centre line, legs. `robe`
+- White sheer tulle triangle bralette with a scalloped lace edge, a small embroidered white daisy over
+  each nipple. Bare: waist, shoulders, back, and everything the tulle shows. `bralette`
+- Matching sheer tulle micro brief, high-cut, a narrow opaque lace front panel. Bare: hip hollow,
+  thigh, lower back. `briefs-highcut`
+- Washed-denim-blue short silk robe worn open over the set, sleeves pushed up. Bare: the centre
+  line, legs. `robe`
 - Off-character: black leather, corsetry, latex, red satin, anything costumey.
 
 ### Maya (warm brown skin, natural curls)
 Persona: warm, playful, the reassuring one.
 - **Palette:** coral, white, lilac. **Metal:** gold hoops.
 - **Bedding:** crisp white percale or lilac washed cotton.
-- Coral balconette bra in sheer tulle, embroidered appliqué over the nipple. Bare: cleavage, waist. `bra`
-- Matching coral high-cut briefs with a sheer back. Bare: hip hollow, lower back, tops of the cheeks. `briefs-highcut`
-- White cotton string bikini-cut thong. Bare: hips, buttocks below the waistband line. `thong`
-- Lilac short satin robe, belt untied, falling off one shoulder. Bare: shoulder, centre line, legs. `robe`
+- Coral sheer tulle plunge bralette, an embroidered coral appliqué over each nipple. Bare: cleavage,
+  waist, and everything the tulle shows. `bralette`
+- Matching coral sheer micro thong, a narrow opaque front panel, thin side strings high over the hip
+  bone. Bare: hips, buttocks, lower back. `thong`
+- White sheer mesh string bikini set, small opaque white triangles over the nipple and the vulva.
+  Bare: almost everything. `bra`
+- Lilac short satin robe, belt untied, falling off one shoulder over the set. Bare: shoulder, centre
+  line, legs. `robe`
 - Off-character: black severe sets, mesh harnesses, greige, anything bulky.
 
 ### Jade (light warm skin with pink undertones, sleek bob)
 Persona: calm minimalist, says little, clean lines.
 - **Palette:** ink black, white, deep plum. **Metal:** one silver ring.
 - **Bedding:** crisp white percale or deep plum sateen.
-- Black triangle bralette in sheer mesh, a narrow opaque band over the nipple. Bare: everything but
-  the band, from the side. `bralette`
-- Black high-cut briefs, a single clean leg line at the hip bone. Bare: hip hollow, thigh. `briefs-highcut`
-- Deep plum open-back bodysuit, high-cut, matte at the front. Bare: spine to the waist, legs. `bodysuit`
-- Black silk kimono, short, slipped to the elbows from behind. Bare: the full back. `robe`
+- Black sheer mesh triangle bralette, a small embroidered black motif over each nipple (name it as
+  its own object; a "band" does not render). Bare: everything the mesh shows, from the side. `bralette`
+- Black sheer mesh micro brief, high-cut, a narrow opaque front panel. Bare: hip hollow, thigh,
+  buttocks. `briefs-highcut`
+- Deep plum sheer mesh open-back bodysuit, high-cut, opaque only at the nipples and the front panel.
+  Bare: spine to the waist, legs, and everything the mesh shows. `bodysuit`
+- Black silk kimono, short, slipped to the elbows over the set. Bare: the back and shoulders. `robe`
 - Off-character: ruffles, florals, pastels, chunky anything.
 
 ### Sofia (warm olive skin, long dark waves)
 Persona: bold confidante, names the want directly; sleek, a touch dramatic.
 - **Palette:** black, brand coral, deep plum. **Metal:** gold statement cuff.
 - **Bedding:** deep plum sateen or crisp white percale.
-- Black lace underwire bra, scalloped, opaque floral motif over the nipple. Bare: cleavage, ribs. `bra`
-- Black high-cut thong with thin side strings. Bare: hips, buttocks. `thong`
-- Brand-coral satin slip, bias cut, thin straps. Bare: shoulders, back to the waist. `slip`
-- Black suspender belt over high-cut briefs, no stockings. Bare: thighs, hips. `garter`
+- Black sheer lace balconette, an opaque black floral motif over each nipple. Bare: cleavage, ribs,
+  and everything the lace shows. `bra`
+- Black micro thong in sheer lace, thin side strings, a narrow opaque front panel. Bare: hips,
+  buttocks. `thong`
+- Black suspender belt in sheer mesh over the micro thong, no stockings. Bare: thighs, hips. `garter`
+- Brand-coral sheer chiffon babydoll, open down the front over the black set. Bare: the centre line,
+  legs. `slip`
 - Off-character: pastels, cutesy prints, anything bulky, anything beige.
 
 ### Priya (warm medium brown skin, long dark hair)
 Persona: witty, bright, quick to laugh; playful but elevated.
 - **Palette:** lilac, coral-pink, sage, white with a coral stripe. **Metal:** stacked fine rose-gold rings.
 - **Bedding:** white percale with a fine coral stripe, or lilac washed cotton.
-- Lilac plunge bralette in sheer mesh, embroidered daisies over the nipple. Bare: cleavage, waist. `bralette`
-- Matching lilac high-cut briefs. Bare: hip hollow, lower back. `briefs-highcut`
-- Coral-pink satin cami and tap shorts, cami strap fallen. Bare: shoulder, waist, legs. `slip`
-- Sage short silk robe, open. Bare: centre line, legs. `robe`
+- Lilac plunge bralette in sheer mesh, an embroidered daisy over each nipple. Bare: cleavage, waist,
+  and everything the mesh shows. `bralette`
+- Matching lilac sheer mesh micro brief, high-cut, a narrow opaque front panel. Bare: hip hollow,
+  lower back. `briefs-highcut`
+- Coral-pink sheer tulle string bikini set, small opaque triangles over the nipple and the vulva.
+  Bare: almost everything. `bra`
+- Sage short silk robe worn open over the set. Bare: centre line, legs. `robe`
 - Off-character: severe black, leather, grey minimalism, anything bulky.
 
 ### Vivian (mid 50s, light skin with pink undertones, silver-streaked hair)
 Persona: seen it all, unshockable; soft and elevated. First choice for midlife topics. Styled at the
-same register as everyone else: a woman in her fifties in good lingerie is the point, not a
+same register as everyone else, sheer and minimal: a woman in her fifties in good lingerie is the point, not a
 compromise.
 - **Palette:** deep plum, coral-soft, slate blue. **Metal:** pearl studs, a silver bangle.
 - **Bedding:** lilac washed cotton or deep plum sateen.
-- Deep plum lace bra, full-cup line, opaque floral motif over the nipple. Bare: décolletage,
-  shoulders, waist. `bra`
-- Matching deep plum high-waisted lace briefs, opaque front. Bare: thigh, hip, lower back. `briefs-highcut`
-- Coral-soft silk robe, long, open and slipping off both shoulders. Bare: back, shoulders. `robe`
-- Slate-blue satin slip, cowl neck. Bare: shoulders, arms, legs. `slip`
+- Deep plum sheer lace plunge bra, an opaque floral motif over each nipple. Bare: décolletage,
+  shoulders, waist, and everything the lace shows. `bra`
+- Matching deep plum sheer lace thong, a narrow opaque front panel. Bare: thigh, hip, buttocks. `thong`
+- Coral-soft silk robe, long, open and slipping off both shoulders over the set. Bare: back,
+  shoulders, the centre line. `robe`
 - Off-character: beige twinsets, anything "age-appropriate" and frumpy, bulky knits.
   #360 (wrapped in a cream sheet in a doorway) is exactly what this closet replaces.
 
@@ -166,19 +186,19 @@ Persona: polished flirt; sharp and put-together. His chest is bare by default on
 amendment lands (male nipples are not nudity); until then a robe closes the chest.
 - **Palette:** black, navy, white. **Metal:** steel watch, thin silver chain.
 - **Bedding:** crisp white percale or deep plum sateen.
-- Black fitted trunks, low on the hip. Bare: chest, abdomen, thighs, back. `briefs-highcut`
+- Black micro briefs, low on the hip, opaque at the front. Bare: chest, abdomen, thighs, back. `briefs-highcut`
 - Navy silk robe, untied, open down the centre. Bare: chest, abdomen, legs. `robe`
-- White dress shirt fully unbuttoned, cuffs rolled, nothing under. Bare: chest, abdomen. `shirt-open`
+- White dress shirt fully unbuttoned, cuffs rolled, over the briefs. Bare: chest, abdomen, legs. `shirt-open`
 - Off-character: athleisure, graphic tees, sweats, anything bulky.
 
 ### Marcus (deep brown skin, athletic, short beard)
 Persona: easygoing charmer; elevated casual. Same chest rule as Diego.
 - **Palette:** white, sage, cobalt. **Metal:** matte black ring.
 - **Bedding:** crisp white percale or coral-soft washed cotton.
-- White fitted boxer briefs. Bare: chest, abdomen, thighs, back. `briefs-highcut`
-- Cobalt silk robe, open. Bare: chest, abdomen, legs. `robe`
-- Sage cotton drawstring trousers, worn low on the hip, chest bare. Bare: chest, abdomen,
-  hip line. `trousers`
+- White micro briefs, low on the hip, opaque at the front. Bare: chest, abdomen, thighs, back. `briefs-highcut`
+- Cobalt silk robe, open over the briefs. Bare: chest, abdomen, legs. `robe`
+- Sage cotton drawstring trousers worn low on the hip, chest bare, for the one clothed-adjacent
+  frame. Bare: chest, abdomen, hip line. `trousers`
 - Off-character: beige, flashy logos, sweats, anything bulky.
 
 ## Coverage classes

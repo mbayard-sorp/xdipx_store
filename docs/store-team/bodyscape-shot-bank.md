@@ -132,6 +132,15 @@ under the 300 s limit. **Two keepers (870, 876), and the owner UP on three of R1
 brief, is now the bottleneck: 5 of the 12 renders failed only on the hidden-thumb digit count (#13174), and every R1
 render also hit the back-read negation bug (#13175, PR #1483).
 
+**Owner scores on run 2 (2026-10-02, 23:00 UTC):** UP on 10 of 11, including every Jade frame
+(872 to 875) and 877, all of which the gate failed (hidden-thumb count, unparsable verdicts). DOWN on
+870, *"Fingers are distorted"*: it passed the gate with a five count, and the session that wrote this
+section called it a keeper, so read hands by eye, finger by finger, before calling one. On 869:
+*"I'd rather have the cast member holding it with the fingers than displaying in the hand like it's
+on a tray."* That is now the Grip line in the art director's Styling block. Same evening the owner
+set the lingerie itself to register 9 (`cast-wardrobe.md` styling rule 1): run 3 briefs the
+smallest sheer cuts with opaque detail only over the nipple and the vulva.
+
 ## R5: choosing, robe open over lace, cast emma. Result: KEEPER (876 clean; 877 failed the gate only on the hidden-thumb count)
 
 Washed-denim-blue silk robe hanging open over a white lace bralette and briefs, the wand held upright in front of her waist, fine silver chain, lilac bedding. The CHOOSING frame Emma is licensed for, styled at the register the owner asked for.

@@ -226,6 +226,15 @@ said nothing.
     more, and its line (a band under the breast, a waistband at the hip bone, a strap off the
     shoulder, a thong string) is what closes the frame's edge. A garment covering more than that is
     a REVISE, and so is any garment over the contact zone, which is always bare skin.
+  - **The lingerie itself is register 9 (owner direction 2026-10-02).** Owner, verbatim: *"I want to
+    make sure the lingerie coverage is also at a 9 register. It should be skimpy, sheer where
+    possible, and sexy. It should really be as small as possible on the body but cover the nipples
+    and vulva."* So the piece is the smallest cut that covers the nipple and the vulva: triangle
+    and plunge bralettes, string and micro cuts, thongs, high-cut micro briefs. It is sheer
+    everywhere it can be (mesh, tulle, fine lace), and the only opaque parts are the detail over
+    each nipple and a narrow front panel over the vulva. Full cups, full-back briefs, boyshorts,
+    opaque bodysuits and opaque slips over the breast under-deliver and are a REVISE. On a man the
+    same rule reads as the smallest brief that covers the penis, low on the hip.
   - **No bulky fabric, no draped bedding.** Knits, terry, waffle, fleece, sweats, cardigans and
     towels never sit on a body in a bodyscape. Bedding is the set she lies on, never wrapped or pulled
     over her: nobody drapes fabric over themselves to use a product, and the customer has to picture
@@ -792,7 +801,10 @@ out the sheets and it's AI sloppy."* Four rules, binding on every bodyscape brie
   CHOOSING only, permanently: an AFTER frame of Emma is testimony in pixels. The story reads from the
   frame alone; the caption never tells it and never describes the picture.
 - **Held for use, not set down as decoration.** The product is in her hand, gripped the way the
-  category is gripped in use, and the hand is at a zone where that grip is plausible. Resting on a
+  category is gripped in use, and the hand is at a zone where that grip is plausible. **Held in the
+  fingers, never presented on an open palm** (owner, 2026-10-02, on asset 869: *"I'd rather have the
+  cast member holding it with the fingers than displaying in the hand like it's on a tray."*): an
+  open hand offering the product to the camera is a REVISE, however clean the frame. Resting on a
   limb is now the exception and the brief states the reason (weight is the product, or a second
   person's hand). "Held" never means pressed: the hand holds it and the product touches skin lightly
   without denting it. The before-or-after moment is told by the cue and by where the hand is (hip,

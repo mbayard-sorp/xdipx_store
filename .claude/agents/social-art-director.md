@@ -164,10 +164,11 @@ On-skin block (MANDATORY on every product post while the standing order below is
   - Sternum and chest frames: the crop closes above the areola, or a hand or the second cast member occludes it, and the brief says which. Belly frames may carry the under-curve of the breasts at the top edge; a hint of pubic hair at the bottom edge is licensed at most once per rolling 7.
 
 Styling (MANDATORY on every cast frame, owner direction 2026-10-02, `instagram-campaigns.md` §3.2a)
-  Piece: <one piece from the cast member's closet in `cast-wardrobe.md`: lingerie, a slip, a bodysuit, a short silk robe falling open; or "bare" plus the story reason>
+  Piece: <one piece from the cast member's closet in `cast-wardrobe.md`, at the register-9 cut: the smallest that covers the nipple and the vulva, sheer everywhere else (owner 2026-10-02: "as small as possible on the body but cover the nipples and vulva"); a short silk robe falling open over the set; or "bare" plus the story reason>
   Worn: <how it was styled for the shot: band under the breast, waistband at the hip bone, strap off the shoulder, robe slipping to the elbows>
   Skin left bare: <the contact zone, always bare, plus everything else; the piece covers what the stop list needs and nothing more>
-  Opaque detail: <on a woman, what sits over the nipple and the labia under any sheer or lace: appliqué, satin panel, lace motif, strap, her hand>
+  Opaque detail: <on a woman, the ONLY opaque parts: the object over each nipple (an embroidered appliqué or motif, named as its own object, never "a band") and a narrow front panel over the vulva; everything else sheer>
+  Grip: <the fingers holding the product the way the category is gripped in use; never an open palm presenting it like a tray (owner, asset 869)>
   Edge it closes: <which edge the lingerie line closes>
   Coverage class: <one class from `cast-wardrobe.md`; `bedding-on-body`, `towel` and `bulky` are REVISE>
   The colour and weave go on the Fabric line above. Owner, 2026-10-02: *"I'd rather see a bra line
