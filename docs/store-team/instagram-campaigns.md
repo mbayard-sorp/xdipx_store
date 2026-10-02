@@ -872,6 +872,19 @@ non-campaign post (the retreat §3.6's related discussion already diagnosed as t
 so in the run summary and let the frame be missing. A missing frame is visible; an adhered one is
 not.
 
+### 3.2e Owner-praised live precedents (reference bank for fallback shapes)
+
+When Step 1b rung 3 or a campaign kickoff needs a shape with a live precedent to draft from, use
+this bank rather than inventing a fresh reference from zero. Each entry is owner feedback from a
+live session (not Social Studio), given verbatim, on a post that actually shipped.
+
+- **https://www.instagram.com/p/DdrKEBUIKEt/** — praised 2026-09-24, verbatim: *"exactly on message
+  with bodyscapes."* Treat as the positive reference for the on-skin bodyscape treatment (§3.2c)
+  under the current campaign.
+
+Add a new row here whenever the owner praises a live post as on-message; do not let the precedent
+live only in a run's decision event, where the next run cannot find it.
+
 ### 3.3 Carousel arc: six slides
 
 The previously filed four-slide reveal shape (metaphor → cast reaction → product reveal →
@@ -1233,6 +1246,24 @@ warm-light mandate in `docs/design-doctrine.md` §4 still bind, and the ceiling 
   in data (ticket filed 2026-08-19), derive it by reading the last 8 posted and drafted rows.
 - **Two cast members in frame is licensed and encouraged**, including one giving the product to the
   other. §3.2a already licenses two people touching.
+
+**`mixReport`'s castVolume line (cap 4 per rolling 14) is informational, not a rule that can be
+satisfied or broken, on either platform, under the current mandates.** `app/lib/social-mix-report.server.ts`
+says so explicitly in its own header ("NOT A GATE... never wired into social-publish-gate.server.ts
+or any BLOCK/REVISE/HOLD path") and is never a human-approval gate. The cap predates two
+since-landed standing rules that make near-universal cast presence the doctrine rather than drift:
+§3.7's mandatory cast-member-in-every-product-post (owner ruling 2026-08-19) and the bodyscape
+standing order that every IG and X frame carries a body zone (§3.2c, owner direction 2026-09-27,
+"every post should be a bodyscape post until I say stop"). On X, which carries no per-day cast cap
+by design (§3.2a imagery notes; X gets the rotation floor below instead), a castVolume reading at
+or near 14/14 is the *expected* state of a fully compliant week, not a breach to correct. On
+Instagram, the same holds for any run working inside the standing order: a castVolume "BREACH"
+reading is explained by the mandate, not a drafting failure, and does not call for fewer cast
+frames. **What stays binding, on both platforms, is the rotation floor above** (no cast member
+carries more than 2 of any 5 consecutive product posts, no location repeat inside 8) — that is the
+actual variety mechanism, and it is a doctrine rule, unlike the volume cap. Read a castVolume line
+as a diagnostic for "is the rotation column populated at all" (a null `castSlugs` field reads as
+zero cast presence even on a row that visibly carries one), never as a target to draft down to.
 
 ## 4. Cadence and continuity
 

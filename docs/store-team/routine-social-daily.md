@@ -106,6 +106,15 @@ and the publish gate; nothing here softens a verdict.
    21-day cooldown and in a different product type, on the same on-skin bodyscape treatment. A
    simpler silhouette (single colour, no accent stripe, no nozzle detail) breaks a tie between two
    fresh candidates; it does not license going back to a product that has already posted; change the product, body zone, or crop scale, never the treatment.
+
+   **The two-failure pivot has no memory across runs by default, and that is exactly how the same
+   SKU+bodyZone concept gets re-attempted the same UTC day** (ticket #11964: rows 342 and 346,
+   2026-09-27, two consecutive runs BLOCKed the identical b-swish-bthrilled-premium-mini-wand-noir
+   shoulder-blade concept, five of eight attempts). Before drafting a new concept, pull today's
+   UTC-day BLOCK events (`POST /api/team/event {"op":"list","team":"social","sinceDays":1}`) and
+   note any SKU+bodyZone pair that already shows two or more product-identity/age-ambiguity BLOCKs
+   today. Treat that pair as already-exhausted for the rest of the UTC day exactly as if this run
+   had failed it twice itself, and pivot per the rule above instead of re-attempting it.
 3. **Fall back to a proven shape.** List `status:'posted'` rows for the platform from the last 14
    days. Those rows PASSed this exact gate and stayed live; their shape is the calibration. Draft the
    next attempt in a shape that has at least two live precedents: the same slot, the same format,
