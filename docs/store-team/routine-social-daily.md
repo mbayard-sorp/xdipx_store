@@ -1455,9 +1455,11 @@ per-campaign total:
   worked treatments in §3.2c (plug, cock ring, paddle, lipstick bullet, beads, pasties). Pointer,
   not a restatement: read the section.
 
-**The closer-object rule replaces the garment line in every prompt template below.** The templates
-say "wardrobe with its coverage", and on an on-skin frame there is no wardrobe to state. State
-instead **what closes each edge of the frame**: the drawn object or the named action holding it.
+**The closer-object rule sits beside the garment line in every prompt template below (owner direction
+2026-10-02).** The templates say "wardrobe with its coverage": on an on-skin frame that is the
+closet piece from the brief's Styling block, named with its colour and the action holding it, or
+"bare" when the story line says why. State as well **what closes each edge of the frame**: the
+closet piece, the drawn object, or the named action holding it.
 §3.2b's three binding craft rules apply to the words you type: write the frame and never the
 exclusion, use an inanimate closer or a limb named by the action it is performing rather than by
 region, and never brief the supine-from-above composition with breasts in frame.

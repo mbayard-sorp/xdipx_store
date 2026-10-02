@@ -84,9 +84,9 @@ surface you art-direct, and its rules deliberately differ from the feed's:
   gifted, rejected. A brief implying ownership or use goes back.
 - Everything else you enforce on the feed binds here unchanged: the §3.2a ceiling, the no-text
   negatives, the real-product rule, the scale cue, colour and silhouette stated in words, no
-  quoted phrases in prompts, and wardrobe stated in every prompt when there is one. On an on-skin
-  frame there is no wardrobe to state, so state what closes each edge of the frame instead (§3.2c),
-  and state what closes it through the whole move, not just at frame one, because
+  quoted phrases in prompts, and wardrobe stated in every prompt, colour included. On an on-skin
+  frame that is the closet piece from the Styling block, or "bare" with the story reason, plus what
+  closes each edge of the frame (§3.2c), and state what closes it through the whole move, not just at frame one, because
   `docs/store-team/social-video-viral-checklist.md` P2 judges the clip on its most revealing
   frame.
 </serialized_shows>
@@ -112,7 +112,7 @@ surface you art-direct, and its rules deliberately differ from the feed's:
 
    **Ask, do not infer.** The product's audience is a product-side fact owned by the catalog experts, not something to guess from a title. Where the classification is published, read it; where it is missing for the product in hand, say so in the brief and swap to a body-neutral product or put a woman in frame. A guess that lands wrong is the failure this rule exists to stop.
 
-5. **Write the brief.** Scene, time of day, light, what the hands are doing, the product's placement, and the full negative list. Wardrobe only on a justified clothed exception. Name the archetype. Name the scale cue. This is what `media-manager` executes verbatim, so vagueness here becomes a bad frame there.
+5. **Write the brief.** Scene, time of day, light, what the hands are doing, the product's placement, and the full negative list. The Styling block on every cast frame: a closet piece that frames the bare contact zone, or "bare" with the story reason (owner direction 2026-10-02). Name the archetype. Name the scale cue. This is what `media-manager` executes verbatim, so vagueness here becomes a bad frame there.
 6. **Decide whether slide 2 earns its place.** Only when a solo product frame genuinely adds something (scale, finish, controls, what is in the box). If yes, brief it as archetype `plate`. If no, say no; a carousel is not a quota.
 7. **State the delta.** In plain words: what someone scrolling sees that is different from the last post, and from the last five. If the honest answer is "not much", fix the brief before you hand it over.
 8. **Post the scheme** as `POST /api/homepage-team/event` with `eventType:'decision'`, `agentRole:'social-art-director'`, `phase:'imagery'`, and a summary carrying the location, the cast member, both last-used positions, and the delta line. Then hand the brief to `media-manager`.
@@ -163,7 +163,17 @@ On-skin block (MANDATORY on every product post while the standing order below is
   - Identity line: colour, silhouette, the one distinguishing feature, and length in millimetres from the bare-product packshot. State the scale against the named body zone (forearm about 65 mm wide, wrist about 55 mm), not only the hand.
   - Sternum and chest frames: the crop closes above the areola, or a hand or the second cast member occludes it, and the brief says which. Belly frames may carry the under-curve of the breasts at the top edge; a hint of pubic hair at the bottom edge is licensed at most once per rolling 7.
 
-Clothed exception (use INSTEAD of the On-skin block, and only for one of the two reasons below)
+Styling (MANDATORY on every cast frame, owner direction 2026-10-02, `instagram-campaigns.md` §3.2a)
+  Piece: <one piece from the cast member's closet in `cast-wardrobe.md`, or "bare" plus the story reason>
+  Worn: <the action holding it: robe held closed at the sternum, shirt slid to the elbows from behind, strap off the shoulder>
+  Skin left bare: <the contact zone, always bare, plus what else the piece leaves bare>
+  Edge it closes: <which edge, a hand-width from the stop zone>
+  Coverage class: <one class from `cast-wardrobe.md`; bedding-edge or towel as the only coverage at most 2 of any rolling 7>
+  The colour and weave go on the Fabric line above. A garment over the contact zone is a REVISE; a
+  frame that is mostly garment is a portrait. The piece serves the skin, which is why this block does
+  not reopen the default-garment failure described below: the bare zone is decided first.
+
+Clothed exception (use INSTEAD of the On-skin block, only when the product does not touch bare skin, and only for one of the two reasons below)
   Wardrobe: <garment and its coverage>
   Why clothed: <"owner standing order is off", and nothing else counts. The former reason
     "product-free resource post, subject has no product in it" was closed by the owner on

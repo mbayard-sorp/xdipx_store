@@ -208,19 +208,44 @@ said nothing.
 - **Wardrobe and skin.** Per the owner's list above. Lingerie, a thong, tiny high-cut bottoms, an
   open shirt, or nothing above the waist with the nipple covered. Bare back, stomach, legs,
   shoulders, cleavage, buttocks. Fabric is opaque where it covers the nipple or the labia.
-  **On-skin frames (owner direction 2026-09-19, §3.2c) carry no clothing at all.** Owner, verbatim:
-  *"no clothes on any of the bodies. No underwear or bras. Jewelry is ok."* For those frames the
-  body is bare, fine jewelry is licensed and encouraged, and the occluder is the crop, the pose, a
-  hand or forearm, the hair, a sheet edge, or the product. Bedding is not clothing and stays
-  available. Breast presence is the default on any on-skin chest or torso frame, not the exception:
+  **On-skin frames are styled, and the styling frames the skin (owner direction 2026-10-02,
+  supersedes the 2026-09-19 no-clothing line).** Owner, verbatim: *"They need to be in something
+  that still can show skin when needed. What is the right way to do this so we get great looking
+  outfits that are both sexy and interesting in the scene?"* The 09-19 line (*"no clothes on any of
+  the bodies. No underwear or bras. Jewelry is ok."*) left a sheet doing the work a wardrobe should:
+  15 of 20 on-skin frames, measured 2026-10-02, and the owner's *"beige sheets"*. So every cast frame
+  is styled from that member's closet in `cast-wardrobe.md`, and the piece frames the skin rather
+  than hiding it:
+  - **The contact zone is always bare skin.** A garment over the zone the product touches is a
+    REVISE. The garment works at an edge: a robe held closed at the sternum, matte high-cut briefs
+    with the leg line at the hip bone, a shirt slid to the elbows (from behind only, because from the
+    front its edge sits on the nipple), a strap off the shoulder.
+  - **Opaque by construction, held by an action, a hand-width from the stop zone.** Lingerie per the
+    owner's list above, matte where it covers a nipple or the labia; lace, satin and mesh only away
+    from a stop zone.
+  - **Bare stays licensed** when the story line names why (a bath, after a shower, the bed in the
+    morning). Jewelry stays licensed either way.
+  - **Bedding is a set, not a garment.** It may close an edge, never wrap the body, and bedding or a
+    towel as the frame's only coverage runs at most 2 of any rolling 7 (reported in `mixReport`
+    once ticket #13158 lands, never blocking).
+  - **Men's chest frames close with a garment.** Shirtless frames failed on nipples in 5 of 6 tests
+    (707 to 710, 741); a robe closed over the chest passed 2 of 2.
+  - **Close-crop garment closers are untested.** Robe 4 of 4, cardigan 2 of 2 and a waistband 2 of
+    2 held at MEDIUM crop. A garment closer enters `bodyscape-shot-bank.md` at close or macro crop
+    only after the bank's two-render loop holds for that shape; until then brief it at medium.
+  - **This does not lower the charge.** §3.2b's ratio and the 2026-09-27 every-post-is-a-bodyscape
+    order stand unchanged. A styled frame whose product is on bare skin is an on-skin frame; a frame
+    that is mostly garment is a portrait and counts against the portrait cap.
+
+  Breast presence is the default on any on-skin chest or torso frame, not the exception:
   the owner's dominant note across 18 reviewed frames was *"as much breast as possible, but no
   nipple"*, *"the tops of her breasts"*, *"bottom of breasts"*, *"cleavage"*. A chest frame that
   crops the breasts out entirely has under-delivered and is a REVISE. The stop list below does not
-  move. **State plainly what this costs:** wardrobe was the visible evidence of compliance to a
-  HUMAN reviewer, a thong reads as a lingerie campaign, and a bare body with a product at the right
-  line reads as nothing until the reviewer decides. Exposure rises deliberately. The removal watcher
-  (ticket #2741) and the step-down ladder in §4 below are more load-bearing from the
-  first on-skin post, and the first removal on one is the signal this latitude was priced wrong.
+  move. **What the 2026-10-02 change does to risk:** a garment at the edge is the visible evidence
+  of compliance to a HUMAN reviewer, and a closer that contrasts with the skin is easier for the
+  vision gate to read than beige on skin (the gate read a beige throw as underwear on #698). The
+  removal watcher (ticket #2741) and the step-down ladder in §4 below stay load-bearing, and the
+  first removal on an on-skin post is still the signal this latitude was priced wrong.
 - **Beds and posture.** On or in a bed. Arched, prone, tangled in sheets, gripping fabric. Aftermath
   and anticipation are both licensed: the quiet after, the reach toward, the unopened box.
 - **Product against a body.** The product may touch or rest on skin: collarbone, sternum, stomach,
@@ -458,15 +483,16 @@ axes replace the room when the crop eats it, and they rotate the way §3.8 rotat
   nine is four gluteal frames if shot naively; the window is what stops that.
 - **Contact mode**: resting, held by the subject, pressed by a second person's hand, drawn along
   the skin, worn, balanced against the body's own curve.
-- **Crop scale**: macro, close, medium. With clothing gone the wardrobe edge is gone as a location
-  proxy, so the trace of the world comes from the sheet, the surface, the hour of the light, or a
+- **Crop scale**: macro, close, medium. The closet piece at the edge is a location proxy again
+  (2026-10-02); where the frame is bare, the trace of the world comes from the sheet, the surface, the hour of the light, or a
   second body, and the brief names which.
 
 **STANDING ORDER, 2026-09-22: ON-SKIN IS THE DEFAULT ON EVERY INSTAGRAM AND X PRODUCT POST, UNTIL
 THE OWNER SAYS STOP.** Owner, verbatim: *"The two posts that went out to IG are boring. Why weren't they
 on-skin posts? I want to see on-skin posts until I say stop. No more boring posts."* This has no end
-date. It ends when he says it ends, and until then a clothed product frame is an exception that has
-to justify itself in writing (`social-art-director.md`, Clothed exception block).
+date. It ends when he says it ends, and until then a clothed product frame (one where the product does not
+touch bare skin) is an exception that has to justify itself in writing (`social-art-director.md`,
+Clothed exception block). A styled on-skin frame (§3.2a, 2026-10-02) is not a clothed frame.
 
 **STANDING ORDER, 2026-09-27: EVERY INSTAGRAM AND X POST IS A BODYSCAPE, UNTIL THE OWNER SAYS STOP.**
 The 2026-09-22 order above still exempted the product-free resource post ("a subject with no product
