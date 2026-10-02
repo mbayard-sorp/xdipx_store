@@ -68,22 +68,40 @@ async function storefront<T>(query: string, variables?: Record<string, unknown>)
   return data
 }
 
+// A 429 means the request was never processed (the REST Admin API's own
+// leaky-bucket limiter, same backend adminGraphQL retries above), so retrying
+// here is safe for every caller including the PUT/POST/DELETE ones. Mirrors
+// adminGraphQL's short-retry shape (ticket #13115): the batch pricing apply
+// loop (pricing-apply-v2.server.ts) calls updateVariantPricing -> shopifyAdmin
+// sequentially per variant with no pacing of its own, and this function had no
+// retry at all, so every 429 fell straight through as a terminal apply error
+// that the next recompute run then superseded as 'rejected' — a silently
+// dropped price update, not a retried one.
+const ADMIN_REST_MAX_ATTEMPTS = 4
+
 export async function shopifyAdmin<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
-  const res = await fetch(`${ADMIN_ENDPOINT}${path}`, {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Shopify-Access-Token': process.env['SHOPIFY_ADMIN_ACCESS_TOKEN']!,
-    },
-    body: body ? JSON.stringify(body) : null,
-  })
-  if (!res.ok) {
-    // 4xx bodies name the invalid field (e.g. {"errors":{"product":[...]}}) —
-    // without them a 422 is undiagnosable from logs.
-    const errBody = await res.text().catch(() => '')
-    throw new Error(`Shopify Admin API error: ${res.status} ${path}${errBody ? ` ${errBody.slice(0, 500)}` : ''}`)
+  for (let attempt = 1; ; attempt++) {
+    const res = await fetch(`${ADMIN_ENDPOINT}${path}`, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Shopify-Access-Token': process.env['SHOPIFY_ADMIN_ACCESS_TOKEN']!,
+      },
+      body: body ? JSON.stringify(body) : null,
+    })
+    if (res.status === 429 && attempt < ADMIN_REST_MAX_ATTEMPTS) {
+      const retryAfter = Number(res.headers.get('retry-after')) || 1
+      await new Promise(r => setTimeout(r, Math.min(retryAfter * 1000, 5000)))
+      continue
+    }
+    if (!res.ok) {
+      // 4xx bodies name the invalid field (e.g. {"errors":{"product":[...]}}) —
+      // without them a 422 is undiagnosable from logs.
+      const errBody = await res.text().catch(() => '')
+      throw new Error(`Shopify Admin API error: ${res.status} ${path}${errBody ? ` ${errBody.slice(0, 500)}` : ''}`)
+    }
+    return res.json() as Promise<T>
   }
-  return res.json() as Promise<T>
 }
 
 /** Shopify's leaky-bucket cost block, as it arrives on a GraphQL response. */
