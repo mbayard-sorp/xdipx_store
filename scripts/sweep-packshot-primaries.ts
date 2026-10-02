@@ -44,19 +44,26 @@
  *   - --alt-text also writes alt text to every image on a scanned product
  *     that has none (title plus brand, "view N" for later images), via
  *     fileUpdate in batches of 50. Honors --apply like the reorder does.
+ *   - --zero-media reports (never writes) active products with no media at
+ *     all, alongside the Nalpac main feed's "Image 1" URL for that SKU when
+ *     one is on file, so shopify-ops has a ready link to pull from. A product
+ *     with zero media cannot be approved on Shop (SKU 101629).
  *
  *   npx tsx scripts/sweep-packshot-primaries.ts --alt-text           # dry-run both
  *   npx tsx scripts/sweep-packshot-primaries.ts --alt-text --apply   # write both
+ *   npx tsx scripts/sweep-packshot-primaries.ts --zero-media         # report only
  */
 
 import 'dotenv/config'
-import { adminGraphQL, setMediaAsPrimary } from '../app/lib/shopify.server'
-import { altTextFor, chunk, isApparelTitle } from './lib/shop-image-hygiene'
+import { adminGraphQL, setMediaAsPrimary, parseMetafield } from '../app/lib/shopify.server'
+import { altTextFor, chunk, isApparelTitle, nalpacImageOneUrl } from './lib/shop-image-hygiene'
+import { fetchAllNalpacFeeds } from '../app/lib/nalpac-feeds.server'
 
 const argv = process.argv.slice(2)
 const APPLY = argv.includes('--apply')
 const PIXELS = argv.includes('--pixels')
 const ALT_TEXT = argv.includes('--alt-text')
+const ZERO_MEDIA = argv.includes('--zero-media')
 const INCLUDE_APPAREL = argv.includes('--include-apparel')
 function flag(name: string): string | undefined {
   const i = argv.indexOf(`--${name}`)
@@ -79,6 +86,14 @@ interface ProductNode {
   title: string
   vendor?: string | null
   media: { nodes: MediaNode[] }
+  metafields: ({ namespace: string; key: string; value: string } | null)[]
+}
+
+interface ZeroMediaEntry {
+  handle: string
+  title: string
+  nalpacSku: string | null
+  nalpacImageOneUrl: string | null
 }
 
 /**
@@ -141,6 +156,9 @@ async function* iterateProducts(): AsyncGenerator<ProductNode> {
                 ... on MediaImage { image { url width height altText } }
               }
             }
+            metafields(identifiers: [{ namespace: "xdipx", key: "nalpac_sku" }]) {
+              namespace key value
+            }
           }
         }
       }`,
@@ -200,6 +218,7 @@ async function main(): Promise<number> {
   // Alt text is labelled by FINAL position, so it is computed after the
   // reorder decision: the promoted image gets the bare description.
   const altQueue: { product: ProductNode; images: (MediaNode & { image: { url: string } })[] }[] = []
+  const zeroMediaProducts: { handle: string; title: string; nalpacSku: string | null }[] = []
   const promotedFor = new Map<string, string>()
   let skippedApparel = 0
   let scanned = 0
@@ -213,6 +232,13 @@ async function main(): Promise<number> {
         m.mediaContentType === 'IMAGE' && typeof m.image?.url === 'string',
     )
     if (ALT_TEXT) altQueue.push({ product, images })
+    if (ZERO_MEDIA && images.length === 0) {
+      zeroMediaProducts.push({
+        handle: product.handle,
+        title: product.title,
+        nalpacSku: parseMetafield(product.metafields, 'nalpac_sku') || null,
+      })
+    }
     if (images.length < 2) continue
     if (!INCLUDE_APPAREL && isApparelTitle(product.title)) {
       skippedApparel++
@@ -273,6 +299,22 @@ async function main(): Promise<number> {
     })
   }
 
+  // Zero-media report (--zero-media). Report-only, never writes: the fix is
+  // pulling the Nalpac main-feed image, which is a shopify-ops action, not a
+  // media reorder this script can apply.
+  let zeroMedia: ZeroMediaEntry[] = []
+  if (ZERO_MEDIA && zeroMediaProducts.length > 0) {
+    const { snapshots } = await fetchAllNalpacFeeds()
+    zeroMedia = zeroMediaProducts.map((p) => ({
+      handle: p.handle,
+      title: p.title,
+      nalpacSku: p.nalpacSku,
+      nalpacImageOneUrl: p.nalpacSku
+        ? nalpacImageOneUrl(snapshots.get(p.nalpacSku)?.raw.mainRow)
+        : null,
+    }))
+  }
+
   process.stderr.write(`scanned ${scanned} product(s)\n`)
   process.stdout.write(
     `${JSON.stringify(
@@ -283,6 +325,7 @@ async function main(): Promise<number> {
         ...(ALT_TEXT ? { altTextWrites: altWrites.length } : {}),
         confident: candidates,
         ...(PIXELS ? { pixelFlagged: pixelFlags } : {}),
+        ...(ZERO_MEDIA ? { zeroMedia } : {}),
       },
       null,
       2,
@@ -294,6 +337,7 @@ async function main(): Promise<number> {
       `dry-run: ${candidates.length} confident candidate(s)` +
         (PIXELS ? `, ${pixelFlags.length} pixel-flagged for eyeballing` : '') +
         (ALT_TEXT ? `, ${altWrites.length} image(s) missing alt text` : '') +
+        (ZERO_MEDIA ? `, ${zeroMedia.length} product(s) with zero media` : '') +
         `, ${skippedApparel} apparel product(s) skipped` +
         '. Re-run with --apply to write.\n',
     )
