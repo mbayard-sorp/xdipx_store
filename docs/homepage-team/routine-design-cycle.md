@@ -419,3 +419,16 @@ changes.
 - **Reasoning on Max** — no calls to the site's Anthropic-keyed endpoints.
 - **Weekly, capped** — own turn cap + `build_cents`; one team run at a time (the gate enforces it).
 - **Emit `/run` + `/event` updates** throughout so the dashboard shows the cycle and links the PR.
+- **A content field must never be able to silently delete a doctrine requirement.** (#12616) When a
+  renderer's content input fails validation or is missing a value a doctrine rule depends on, it
+  degrades **toward** the rule, not away from it — fall back to the same compliant default an unset
+  field already gets, never to omitting the doctrine element entirely. Found live in run 1162:
+  `EmphasizedHeading` rendered a heading entirely plain whenever the supplied emphasis word was
+  absent from the text, which was correct in intent (stop a stray unspaced `<em>`) but meant an
+  independently-edited `emmaHero.headline` with a stale `emmaHero.emphasisWord` silently shipped the
+  live hero H1 with zero plum emphasis against design-doctrine.md section 2's "exactly one per
+  headline" — and nothing caught it, because the component behaved exactly as written and the page
+  looked fine to anything not counting `<em>` elements. Audit any renderer whose content input gates
+  a doctrine requirement against this lens before shipping it, in particular `mood_image_url` behind
+  `card_art_blocked` and any additive block field whose absence is a fallback path rather than a hard
+  requirement.
