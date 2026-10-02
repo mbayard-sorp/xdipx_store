@@ -250,7 +250,7 @@ they outlive any single run. Every merchandising image obeys all of them.
    negative prompt. Drop any blanket "no logo, no brand name" language for
    the product body itself, since it now over-forbids case 1.
 5. **Hard limits (legal / processor / ad-platform):** no nudity, meaning no visible
-   nipples, labia, penis, or anus (owner definition 2026-09-20), and no sex acts.
+   female nipples, labia, penis, or anus (owner definition 2026-09-20), and no sex acts.
    Short of the hard limits, push toward playful curiosity with charge
    underneath. The per-surface ceiling lives in §4.3.
 6. **Self-review before upload.** Reads clearly at 375px; hands/bodies/objects
@@ -477,7 +477,7 @@ skin; its wardrobe rule is the owner's 2026-10-02 direction, styled from each ca
 with the contact zone always bare). It licenses lingerie and bare skin, beds and arched posture, product resting against skin,
 lubricant texture, two people touching, arousal on a face, and use implied by framing or by
 occlusion under a sheet when the occluded shape is the product. It fences nudity, which the
-owner defined on 2026-09-20 as visible nipples, labia, penis, or anus, outlined included, hands on genitals, depicted or discernible sex acts, fluid on or near
+owner defined on 2026-09-20 as visible female nipples, labia, penis, or anus, outlined included, hands on genitals, depicted or discernible sex acts, fluid on or near
 genitalia, product against genitalia, anything age-ambiguous, and anything built to defeat a
 classifier. **This doctrine defers to §3.2a on social imagery and does not restate it**, so the
 ceiling has one home and cannot drift out of sync again. Platform policy still outranks the

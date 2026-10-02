@@ -208,31 +208,43 @@ said nothing.
 - **Wardrobe and skin.** Per the owner's list above. Lingerie, a thong, tiny high-cut bottoms, an
   open shirt, or nothing above the waist with the nipple covered. Bare back, stomach, legs,
   shoulders, cleavage, buttocks. Fabric is opaque where it covers the nipple or the labia.
-  **On-skin frames are styled, and the styling frames the skin (owner direction 2026-10-02,
-  supersedes the 2026-09-19 no-clothing line).** Owner, verbatim: *"They need to be in something
-  that still can show skin when needed. What is the right way to do this so we get great looking
-  outfits that are both sexy and interesting in the scene?"* The 09-19 line (*"no clothes on any of
-  the bodies. No underwear or bras. Jewelry is ok."*) left a sheet doing the work a wardrobe should:
-  15 of 20 on-skin frames, measured 2026-10-02, and the owner's *"beige sheets"*. So every cast frame
-  is styled from that member's closet in `cast-wardrobe.md`, and the piece frames the skin rather
-  than hiding it:
-  - **The contact zone is always bare skin.** A garment over the zone the product touches is a
-    REVISE. The garment works at an edge: a robe held closed at the sternum, matte high-cut briefs
-    with the leg line at the hip bone, a shirt slid to the elbows (from behind only, because from the
-    front its edge sits on the nipple), a strap off the shoulder.
-  - **Opaque by construction, held by an action, a hand-width from the stop zone.** Lingerie per the
-    owner's list above, matte where it covers a nipple or the labia; lace, satin and mesh only away
-    from a stop zone.
-  - **Bare stays licensed** when the story line names why (a bath, after a shower, the bed in the
-    morning). Jewelry stays licensed either way.
-  - **Bedding is a set, not a garment.** It may close an edge, never wrap the body, and bedding or a
-    towel as the frame's only coverage runs at most 2 of any rolling 7 (reported in `mixReport`
-    once ticket #13158 lands, never blocking).
-  - **Men's chest frames close with a garment.** Shirtless frames failed on nipples in 5 of 6 tests
-    (707 to 710, 741); a robe closed over the chest passed 2 of 2.
-  - **Close-crop garment closers are untested.** Robe 4 of 4, cardigan 2 of 2 and a waistband 2 of
-    2 held at MEDIUM crop. A garment closer enters `bodyscape-shot-bank.md` at close or macro crop
-    only after the bank's two-render loop holds for that shape; until then brief it at medium.
+  **On-skin frames are styled like a lingerie campaign (owner direction 2026-10-02, supersedes the
+  2026-09-19 no-clothing line).** Owner, verbatim: *"Lingerie can be back on the bodyscape shots...
+  Robes are good, draped items. Lingerie is good... I just want to stay away from the bulky fabric
+  look. Garments should be sexy when they are in the frame and should stay at a register 9 for
+  explicitness. I'd rather see a bra line than a piece of fabric. Our customers need to imagine they
+  are using the product. No one drapes fabric over themselves to use a vibrator or any of our
+  products. If they are going to be wearing something, it needs to look like it's been styled for
+  the shot."* The 09-19 line (*"no clothes on any of the bodies. No underwear or bras. Jewelry is
+  ok."*) left a sheet doing the work a wardrobe should: 15 of 20 on-skin frames, measured
+  2026-10-02, and the owner's *"beige sheets"*. So:
+  - **Lingerie, a silk robe worn open, or bare.** Every cast frame is styled from that member's
+    closet in `cast-wardrobe.md` (bra, bralette, high-cut briefs, thong, slip, bodysuit, suspender
+    belt, a short silk robe falling open), or bare with jewellery. Nothing else goes on a body in a
+    bodyscape.
+  - **A bra line beats a piece of fabric.** The garment covers what the stop list needs and nothing
+    more, and its line (a band under the breast, a waistband at the hip bone, a strap off the
+    shoulder, a thong string) is what closes the frame's edge. A garment covering more than that is
+    a REVISE, and so is any garment over the contact zone, which is always bare skin.
+  - **No bulky fabric, no draped bedding.** Knits, terry, waffle, fleece, sweats, cardigans and
+    towels never sit on a body in a bodyscape. Bedding is the set she lies on, never wrapped or pulled
+    over her: nobody drapes fabric over themselves to use a product, and the customer has to picture
+    the moment of use. This retires the sheet as a closer (§3.2b craft rules) and in the buttocks
+    rule (§3.2c).
+  - **Sheer and lace are licensed; the female nipple sits under an opaque detail.** An embroidered
+    appliqué, a satin panel, a lace motif, a strap, her hand, named in the brief. Owner, same message:
+    *"we can usually show faint nipples through transparent lingerie."* That part is NOT licensed
+    yet: Meta's adult-nudity standard prohibits visible female nipples and age-restricts (18+, reduced
+    distribution) "certain instances of nudity obscured by see-through clothing", and X cannot carry
+    it at all because we cannot label sensitive media. It is an open owner decision, not a brief call.
+  - **Men's chests are bare by default.** Male nipples are not nudity (stop list below, 2026-10-02).
+  - **Close-crop lingerie closers are proven before they ship.** Robe 4 of 4, cardigan 2 of 2 and a
+    waistband 2 of 2 held at medium crop; at close crop nothing has been tested. Before the first
+    styled bodyscape posts, the bank's two-render loop runs one shot per closer shape (band under the
+    breast, waistband at the hip bone, thong line from behind, strap off the shoulder, silk robe
+    slipping) and the shots that pass replace the sheet shots in `bodyscape-shot-bank.md`. A routine
+    copies what is proven; if the only proven shots are sheet shots, it reverts to them, which is how
+    this becomes boring again.
   - **This does not lower the charge.** §3.2b's ratio and the 2026-09-27 every-post-is-a-bodyscape
     order stand unchanged. A styled frame whose product is on bare skin is an on-skin frame; a frame
     that is mostly garment is a portrait and counts against the portrait cap.
@@ -241,8 +253,8 @@ said nothing.
   the owner's dominant note across 18 reviewed frames was *"as much breast as possible, but no
   nipple"*, *"the tops of her breasts"*, *"bottom of breasts"*, *"cleavage"*. A chest frame that
   crops the breasts out entirely has under-delivered and is a REVISE. The stop list below does not
-  move. **What the 2026-10-02 change does to risk:** a garment at the edge is the visible evidence
-  of compliance to a HUMAN reviewer, and a closer that contrasts with the skin is easier for the
+  move. **What the 2026-10-02 change does to risk:** lingerie at the edge reads as a lingerie
+  campaign to a HUMAN reviewer, and a line that contrasts with the skin is easier for the
   vision gate to read than beige on skin (the gate read a beige throw as underwear on #698). The
   removal watcher (ticket #2741) and the step-down ladder in §4 below stay load-bearing, and the
   first removal on an on-skin post is still the signal this latitude was priced wrong.
@@ -297,9 +309,12 @@ g-spot held to a bare shoulder from behind) passed the gate and are the mid-char
 
 **The ceiling stops here, and these do not move:**
 
-- Nipples visible or outlined, sheer fabric included. Labia visible or outlined. A penis, in any
-  state, visible or outlined. The anus visible or outlined (owner definition of nudity,
-  2026-09-20: nipples, labia, penis, anus; everything else is allowed). A plug laid between the
+- Female nipples visible or outlined, sheer fabric included. Labia visible or outlined. A penis, in
+  any state, visible or outlined. The anus visible or outlined (owner definition of nudity,
+  2026-09-20, amended 2026-10-02: female nipples, labia, penis, anus; everything else is allowed).
+  **Male nipples are not on this list** (owner, verbatim, 2026-10-02: *"Only men are allowed to show
+  their nipples"*; Meta's standard restricts female nipples only). No product on or at any nipple,
+  a man's included: Meta prohibits "stimulation of visible human nipples". A plug laid between the
   cheeks under §3.2c must therefore keep the cleft closed by the pose, a hand, or the product.
 - Hands on genitals, over or under clothing.
 - A depicted or discernible sex act.
@@ -377,7 +392,10 @@ every brief:
   a region and the model puts the arm somewhere else that is anatomically plausible. Where a limb
   DID hold it was performing an action only possible at that exact spot: arms crossed tight, a hand
   cupping from below, a second person's hand pressing an object, a pastie adhered. Name the action,
-  not the region, or use an object.
+  not the region, or use an object. **Amended 2026-10-02:** the sheet and the towel are retired as
+  body covers (§3.2a, Wardrobe and skin: *"No one drapes fabric over themselves to use a
+  vibrator"*). The preferred closer is now the lingerie line, and the 5 of 5 above is why each
+  lingerie shape is proven in the shot bank before it ships.
 - **The camera angle decides more than the wording.** Every fence breach on a breast-in-frame
   brief (6 of 6) shared one composition: the subject supine, the camera above, both breasts in the
   picture. In that pose the breasts separate and the model fills the gap with the limb instead of
@@ -784,11 +802,14 @@ out the sheets and it's AI sloppy."* Four rules, binding on every bodyscape brie
   the inner thigh; a miss floating with no fingers on it. Plug, ring and lube keep their §3.2c
   treatments above. A product balanced on a calf, an ankle, a forearm or a knee with no hand on it
   (library 685, 686, 687) reads as attached to the limb and is a REVISE, however clean the frame.
-- **The buttocks rule.** In any face-down or standing-from-behind frame, the sheet or towel is drawn
-  up across the buttocks so that only the top of the cleft shows above its edge, and the crop never
-  includes the full curve of both cheeks below that edge. The brief says what she did with the sheet
-  (pulled it up, knotted it at the hip, held it to her chest), because a sheet with no action behind
-  it is the "coming out of the sheets" read.
+- **The buttocks rule (amended 2026-10-02).** In any face-down or standing-from-behind frame the
+  buttocks are dressed from the closet, never covered by a sheet or towel: high-cut briefs, or a
+  thong whose waistband sits just above the top of the cleft. Bare cheeks with a thong are licensed
+  (§3.2a); the brief names the thong string and the cleft stays closed by it or by the pose, because
+  the model drops the string when nobody names it. The 2026-09-23 version drew a sheet up over the
+  buttocks; the owner retired that on 2026-10-02 (*"No one drapes fabric over themselves to use a
+  vibrator"*). Its point survives: whatever she wears was put on for the shot, never left lying on
+  her.
 - **Body hair follows real anatomy (owner direction 2026-09-23, test 4, library 690 and 691).** Owner,
   verbatim: *"the female bodies don't typically have pubic hair in the cleft of the butt cheeks... They
   only will have it on their pubic mounds."* When the brief puts the top of the cleft in frame (the
@@ -920,9 +941,9 @@ live only in a run's decision event, where the next run cannot find it.
 Every textile in a cast frame, bedding, towel or garment, follows the fabric rules and the closet in
 `docs/store-team/cast-wardrobe.md`: named by colour and weave, never "linen", "off-white", "cream",
 "beige", "nude" or "neutral" on its own; contrasting with the skin; opaque by construction over a
-stop zone; the cast member's own metal, not default gold. Bedding closes an edge by an action the
-person did (pulled up, knotted at the hip, held to the chest) and never wraps the torso like a dress
-(#360) or sits folded on the groin as a cover (#364); either is a REVISE. Every cast-frame negative
+stop zone; the cast member's own metal, not default gold. Bedding is the set, never on the body
+(§3.2a, 2026-10-02): a sheet wrapped like a dress (#360), a towel folded on the groin (#364), or any
+fabric pulled over her is a REVISE. Every cast-frame negative
 list carries "no nude-tone underwear, no skin-tone bodysuit" unless the brief names one. This section
 changes no ceiling and no licence; whether a frame may carry a garment stays with §3.2a.
 

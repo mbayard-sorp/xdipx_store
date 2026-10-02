@@ -376,12 +376,12 @@ drafter had no way to tell a defect in the draft from a defect in the gate. So:
 - **The imagery ceiling is `instagram-campaigns.md` §3.2a, read whole, with the on-skin
   treatment in §3.2c.** Read §3.2c beside §3.2a on any frame that touches bare skin: it carries
   what an on-skin frame is, the body-zone / contact-mode / crop-scale axes, the set cap, and the
-  binding brief-craft list. **Nudity means visible nipples, labia, penis, or anus (owner definition
+  binding brief-craft list. **Nudity means visible female nipples, labia, penis, or anus (owner definition
   2026-09-20), and nothing else is nudity.** A bare body that reads implied-nude is inside the
   ceiling and is not a BLOCK for being bare; judge it against the §3.2a stop list, which has not
   moved. Eyes closed, head back,
   parted lips, an open shirt, aftermath and anticipation, product against skin, are licensed there
-  at zero policy cost. The hard stops are the ones §3.2a lists (nipples, labia, penis, hands on
+  at zero policy cost. The hard stops are the ones §3.2a lists (female nipples, labia, penis, hands on
   genitals, a depicted or discernible act, fluid near genitalia, product against genitalia, age
   ambiguity, classifier evasion). A frame that uses a licensed element is not a BLOCK for using it;
   a frame that crosses a hard stop is, regardless of how good it is.

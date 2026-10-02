@@ -838,7 +838,7 @@ or a new-arrival share below 3 in 7, is a finding the next run corrects before a
 **Owner direction 2026-08-22, binding at run start:** "I'm officially saying, our posts should be at
 a 9 for the explicit register. That's an order. I want innuendo, suggestive phrases, skin in the
 images (not nudity)." **Read "nudity" there with the owner's own definition of 2026-09-20: visible
-nipples, labia, penis, or anus, and nothing else.** A bare body that shows none of those is not
+female nipples, labia, penis, or anus, and nothing else.** A bare body that shows none of those is not
 nudity and is licensed, which is what the on-skin treatment in `instagram-campaigns.md` §3.2c
 runs on. Instagram captions now run at **9 by implication** per the social addendum in
 `docs/emma-voice.md` (v5.5) and `instagram-campaigns.md` §3.2b: the wanting is nameable, the heat
@@ -1328,7 +1328,7 @@ and a blocked draft is rewritten or dropped, never softened until it squeaks pas
 3. Does the image cross the ceiling in `docs/store-team/instagram-campaigns.md` §3.2a? That section
    is the operative rule and it is a specification, not a ban list: a bed, a body, product against
    skin, lubricant texture, two people touching, and implied use are all **licensed**. What blocks
-   is narrow and fixed: genitalia or nipples visible or outlined (sheer included), hands on genitals
+   is narrow and fixed: genitalia or female nipples visible or outlined (sheer included), hands on genitals
    over or under clothing, a depicted or discernible sex act, fluid on or near genitalia, product
    against genitalia, and anything age-ambiguous.
 
@@ -1459,7 +1459,10 @@ per-campaign total:
 2026-10-02).** The templates say "wardrobe with its coverage": on an on-skin frame that is the
 closet piece from the brief's Styling block, named with its colour and the action holding it, or
 "bare" when the story line says why. State as well **what closes each edge of the frame**: the
-closet piece, the drawn object, or the named action holding it.
+lingerie line first, then a named action; never a sheet or towel on the body. **Before the first
+styled bodyscape posts after the 2026-10-02 change, run the shot bank's two-render loop for the five
+closer shapes in `instagram-campaigns.md` §3.2a** and add the ones that pass to
+`bodyscape-shot-bank.md`; until a close-crop shape has passed, brief that shape at medium crop.
 §3.2b's three binding craft rules apply to the words you type: write the frame and never the
 exclusion, use an inanimate closer or a limb named by the action it is performing rather than by
 region, and never brief the supine-from-above composition with breasts in frame.

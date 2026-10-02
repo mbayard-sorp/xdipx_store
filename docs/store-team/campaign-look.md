@@ -12,7 +12,7 @@ The active treatment is **on-skin**, set by the owner on 2026-09-19: "products
 against skin on the body. I want to see the edges of breasts, the pubic mounds,
 bellies, backs, butt cheeks. No full nudity, but the suggestion that the subject
 is nude is what I want". On 2026-09-20 the owner defined the one hard word in
-that sentence: nudity means visible nipples, labia, penis, or anus, and
+that sentence: nudity means visible female nipples, labia, penis, or anus, and
 everything else is allowed. At the same all-hands the owner extended the
 treatment past social: "On-skin extends to all areas of the site".
 

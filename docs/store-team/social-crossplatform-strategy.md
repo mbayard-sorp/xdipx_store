@@ -176,7 +176,7 @@ gate cannot see is advisory.
   the labeling constraint above is exactly what bounds it.** The standing order in
   `instagram-campaigns.md` §3.2c now covers both surfaces. It changes the default position under the
   ceiling; it does not move the ceiling, and the bullet above still holds in full. The thing to
-  understand is that the §3.2a stop list is now doing double duty on X: no visible nipples, labia,
+  understand is that the §3.2a stop list is now doing double duty on X: no visible female nipples, labia,
   penis or anus is not only the brand ceiling there, it is the only thing keeping our frames out of
   label-required territory on a publisher that cannot label. An on-skin frame that honours the stop
   list is implied-nude, not nude, and does not need a flag. One that breaks it needs a flag we

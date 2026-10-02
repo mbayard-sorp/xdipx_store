@@ -91,7 +91,7 @@ ground lock. The rules below stand; the doctrine wins where they drift.
   posing. The product stays the hero; a cast member is context, not the
   subject. The doctrine's depicted-people hard rules bind unchanged:
   unambiguous adulthood, and vary age, body type, and skin tone across
-  assets. For how much skin a frame may carry, the imagery ceiling is `docs/store-team/instagram-campaigns.md` §3.2a with the on-skin treatment of §3.2c (owner direction 2026-09-20, "On-skin extends to all areas of the site"), pointed at and never restated; its stop list and the nudity definition (visible nipples, labia, penis, or anus) still bind. Faces are
+  assets. For how much skin a frame may carry, the imagery ceiling is `docs/store-team/instagram-campaigns.md` §3.2a with the on-skin treatment of §3.2c (owner direction 2026-09-20, "On-skin extends to all areas of the site"), pointed at and never restated; its stop list and the nudity definition (visible female nipples, labia, penis, or anus) still bind. Faces are
   welcome (the never-face-on rule was withdrawn 2026-07-28). Emma's
   likeness continues under the approved Emma-likeness policy.
 - **Bright, colorful, bold** (Mike, 2026-07-05, second directive). No dark,
@@ -126,8 +126,8 @@ ground lock. The rules below stand; the doctrine wins where they drift.
 - **The mood is playful curiosity with charge underneath.** A visitor
   should feel on the edge of finding something that will bring them
   pleasure, and smile on the way. Hard limits for legal / processor /
-  ad-platform safety: no nudity, meaning no visible nipples, labia, penis,
-  or anus, and no sex acts. Otherwise the imagery ceiling is `docs/store-team/instagram-campaigns.md` §3.2a with the on-skin treatment of §3.2c (owner direction 2026-09-20, "On-skin extends to all areas of the site"), pointed at and never restated; its stop list and the nudity definition (visible nipples, labia, penis, or anus) still bind. Short of that,
+  ad-platform safety: no nudity, meaning no visible female nipples, labia, penis,
+  or anus, and no sex acts. Otherwise the imagery ceiling is `docs/store-team/instagram-campaigns.md` §3.2a with the on-skin treatment of §3.2c (owner direction 2026-09-20, "On-skin extends to all areas of the site"), pointed at and never restated; its stop list and the nudity definition (visible female nipples, labia, penis, or anus) still bind. Short of that,
   push.
 - Every generated image gets a self-review before upload. Check: does it
   read clearly at 375px, are objects and hands and bodies undistorted, is

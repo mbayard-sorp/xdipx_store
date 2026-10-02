@@ -22,7 +22,13 @@
 >
 > Amended 2026-09-04 on Mike's explicit direction ("I'd rather push the limits and get a strike, rather than be read as timid in a market that demands plain language" / "these characters are interested in products because they want to feel sensation themselves or for another person to feel sensations. They can say they have 'felt' things before. We are only staying away from language that explicitly says they have 'tested' or 'tried' a specific product."): the video addendum gains a scoped **serialized video program override**. For the serialized recurring-cast program (`docs/store-team/series-bible-the-group-chat.md`) only, the posted spoken/voiceover track runs at register 9 with plain desire-forward language, and the machine-moderation vocabulary fence is lifted on that track, because the owner posts those episodes manually (editing in CapCut) and accepts the platform risk. The program's cast are written as real people who may want to feel sensation, want another person to feel it, and reference having felt things before; the one hard product line that remains for them is claiming a character tested or tried a specific product, and every factual product line is still a spec or an audibly-aggregated review pattern. Nothing else moves: **Emma's no-lived-experience rule stands everywhere** (she is the guide, not a character with a history), and every non-program surface (site, email, blog, support, product copy, the social team's separate Instagram/TikTok/X posting, and the register table's default rows for any non-program video) is unchanged. Still v5.5.
 
-> Amended 2026-09-20 on Mike's explicit clarification, codified at all-hands: **"nudity" in this charter means visible nipples, labia, penis, or anus. Everything else is allowed.** This supersedes the 2026-08-22 parenthetical "skin in the images (not nudity)" wherever it was read as a clothing rule: a bare body with those four things out of frame or occluded is not nudity, and the on-skin treatment in `docs/store-team/instagram-campaigns.md` §3.2c (owner direction 2026-09-19: product resting on bare skin, no clothing, the suggestion of nudity) is fully inside the charter. The brand values are named in plain words in "What xdipx is" below so an agent can grep for them: sex-positive, shame-free, judgment-free, a safe place to shop. The word ban on "sexy" as a branding adjective is a copy rule, not a look rule.
+> Amended 2026-09-20 on Mike's explicit clarification, codified at all-hands: **"nudity" in this charter means visible female nipples, labia, penis, or anus. Everything else is allowed.** This supersedes the 2026-08-22 parenthetical "skin in the images (not nudity)" wherever it was read as a clothing rule: a bare body with those four things out of frame or occluded is not nudity, and the on-skin treatment in `docs/store-team/instagram-campaigns.md` §3.2c (owner direction 2026-09-19: product resting on bare skin, no clothing, the suggestion of nudity) is fully inside the charter. The brand values are named in plain words in "What xdipx is" below so an agent can grep for them: sex-positive, shame-free, judgment-free, a safe place to shop. The word ban on "sexy" as a branding adjective is a copy rule, not a look rule.
+
+> Amended 2026-10-02 on Mike's direction at all-hands, verbatim *"Only men are allowed to show their
+> nipples"*: the nipple in that definition is the **female** nipple. A man's bare chest is not nudity
+> on any owned surface. Paid creative keeps every nipple out (`docs/ads-policy.md`), and no product
+> touches any nipple, a man's included, because Meta prohibits "stimulation of visible human
+> nipples".
 
 > Amended 2026-09-20, same all-hands, on Mike's direction **"On-skin extends to all areas of the site."**: the imagery register and the surface-scoped hard lines below now give every owned surface (homepage hero and rails, PLP cards, PDP mood images and hero-video stills, discovery, Notebook heroes, email and SMS art) the same ceiling social carries, `docs/store-team/instagram-campaigns.md` §3.2a with the on-skin treatment of §3.2c, by pointer and never by restatement. The stop list and the nudity definition do not move. Video Reels adopted the same ceiling on 2026-09-20 (owner answer to blocker #192, "Yes") and carry the motion clause in `docs/store-team/social-video-viral-checklist.md` P2 on top. Emma's own likeness in an implied-nude frame was licensed the same day (owner answer to blocker #193, "Yes, Emma can and she has a body reference"), so she is a cast member for on-skin purposes like any other. Paid advertising (`docs/ads-policy.md`) is excluded and stays as it was. Still v5.5: no register, cap, or hard line for words changes.
 
@@ -106,7 +112,7 @@ The authorship test, which is what actually degrades from 9 to 10: at 9 the copy
 
 ## Imagery register
 
-The visual register is scoped by surface (aligned 2026-09-01; the 2026-08-19 hard-lines ruling below already scoped the bans, this line now matches it). On owned merchandising surfaces (homepage, PLP, PDP, discovery, Notebook heroes, email and SMS art) imagery carries the same ceiling as social, by owner direction 2026-09-20 ("On-skin extends to all areas of the site"): `docs/store-team/instagram-campaigns.md` §3.2a with the on-skin treatment of §3.2c. This charter points at that section and does not restate it. On social, imagery follows the social addendum: skin in frame is the default for product posts per the §3.2a ceiling in `docs/store-team/instagram-campaigns.md`, and bare, implied-nude close crops are licensed per §3.2c; nudity, which this charter defines as visible nipples, labia, penis, or anus, never. Everywhere, sensory, elegant, charged:
+The visual register is scoped by surface (aligned 2026-09-01; the 2026-08-19 hard-lines ruling below already scoped the bans, this line now matches it). On owned merchandising surfaces (homepage, PLP, PDP, discovery, Notebook heroes, email and SMS art) imagery carries the same ceiling as social, by owner direction 2026-09-20 ("On-skin extends to all areas of the site"): `docs/store-team/instagram-campaigns.md` §3.2a with the on-skin treatment of §3.2c. This charter points at that section and does not restate it. On social, imagery follows the social addendum: skin in frame is the default for product posts per the §3.2a ceiling in `docs/store-team/instagram-campaigns.md`, and bare, implied-nude close crops are licensed per §3.2c; nudity, which this charter defines as visible female nipples, labia, penis, or anus, never. Everywhere, sensory, elegant, charged:
 
 - **Sensory anticipation:** tension, softness, warmth, the moment before. A hand hovering just above a petal, silk pulled taut, condensation, a finger denting ripe fruit, dripping honey. Feeling over joke.
 - **Shape and texture rhyme:** the product beside a form that echoes it (orchid, halved peach, fig), composed as editorial still life.
@@ -446,7 +452,7 @@ Draft against both, and understand which one you are avoiding.
   time** ("before it's too late", "while you still can", "the nights you don't want to be quick"):
   there is no scarcity of time, and urgency was already banned.
 - **Skin in frame is the default for product posts, and a bare body is licensed; nudity never,
-  where nudity means visible nipples, labia, penis, or anus (owner definition 2026-09-20).**
+  where nudity means visible female nipples, labia, penis, or anus (owner definition 2026-09-20).**
   `instagram-campaigns.md` §3.2a is the ceiling, §3.2c is the on-skin treatment inside it, and
   neither moves; what moved on 2026-08-22 is the floor: a product post whose
   lead frame carries no skin, touch, posture, or expression is the exception that needs a reason,
@@ -506,7 +512,7 @@ Draft against both, and understand which one you are avoiding.
   people touching, arousal on a face, and use implied by framing or occlusion under a sheet.
   Read §3.2a before briefing any social image. Do not reason from this list alone.
 
-  What §3.2a still fences, and these do not move: nipples, labia, penis, or anus visible or
+  What §3.2a still fences, and these do not move: female nipples, labia, penis, or anus visible or
   outlined, sheer fabric included; hands on genitals over or under clothing; a depicted or discernible sex
   act; fluid on or near genitalia; product against genitalia; anything age-ambiguous, judged on
   ambiguity rather than intent; anything built to defeat a classifier. Platform policy still
@@ -589,7 +595,7 @@ operation); the product touching a second cast member's body as application. Ski
 licensed, and a wearable shown worn as designed is wardrobe, not use. For how much a frame may carry, the imagery ceiling is
 `docs/store-team/instagram-campaigns.md` §3.2a with the on-skin treatment of §3.2c (owner answer to
 blocker #192, 2026-09-20), pointed at and never restated; its stop list and the nudity definition
-(visible nipples, labia, penis, or anus) bind unchanged. Because this is video, the ceiling must
+(visible female nipples, labia, penis, or anus) bind unchanged. Because this is video, the ceiling must
 hold on every frame of the clip and not the opening one: `docs/store-team/social-video-viral-checklist.md`
 P2 carries that motion clause and, for season 1 product-talk clips, `docs/store-team/video-realism-recipe.md` carries the same clause, with the render constraints that follow from it. Emma has no lived experience, on camera exactly as in text:
 she speaks to what the viewer will feel, never what she has felt (this is unchanged everywhere;

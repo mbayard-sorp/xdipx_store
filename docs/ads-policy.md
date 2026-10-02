@@ -343,8 +343,9 @@ Sources: [Etsy Prohibited Items Policy](https://www.etsy.com/legal/policy/prohib
 
 ## Creative rules (paid AND organic)
 
-- No nudity, where nudity means visible nipples, labia, penis, or anus (owner definition
-  2026-09-20), and no explicit imagery. For **paid** creative, additionally no depiction or
+- No nudity, where nudity means visible female nipples, labia, penis, or anus (owner definition
+  2026-09-20, amended 2026-10-02: male nipples are not nudity on organic surfaces), and no explicit
+  imagery. For **paid** creative, additionally no visible nipple of any sex, no depiction or
   simulation of product use on a body and no on-skin frame per
   `docs/store-team/instagram-campaigns.md` §3.2c: a product resting on bare skin is paid-ineligible
   whether or not it reads as use. For **organic** social, imagery is governed by the ceiling in

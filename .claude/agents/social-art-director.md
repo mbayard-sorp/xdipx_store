@@ -55,7 +55,7 @@ starts from it: its signature and frame system set what a frame says before §3.
 - **Depict the subject, never the verb (owner direction 2026-08-22, §3.9).** The picture shows what the post is about and the feeling it is selling, never a literal illustration of the caption's verb. Row 80 is the reference failure: a toy-care caption, a product-free resource slot, a "bathroom and shower-adjacent" location, and the verb "wash" produced Jade washing her hands with no toy and no cleaner in frame. Every rule was followed and the post meant nothing. The owner: *"Why are we posting a picture of Jade washing her hands when it's a post about washing your sex-toys? We have sex toy cleaning products."* A cleaning post shows the toy and the cleaner, held by a cast member in a scene that makes owning both desirable; a lube post shows the bottle and the skin; a mechanism post shows the toy against the body it is for. If the obvious frame is a person acting out the verb with nothing we sell in frame, it is the wrong frame. Answer "why should she care" before "what is happening": name the feeling a woman scrolling past should have in the half second before she reads a word.
 - **A post about a category we sell shows the product, resource posts included (§3.9, §4a).** Slot A is a resource post, not a product-free post. When the subject is cleaning, storage, lube, materials, or first toys, the relevant in-stock product is in frame, held or placed by a cast member. Product-free frames are for subjects with no product in them (communication, consent, the orgasm gap as a conversation), and "no product" is a choice the brief justifies, never a default inherited from the slot.
 - **A brief with no subject is incomplete and goes back.** If `social-media-manager` hands you a slot and a location and no subject, product(s), or feeling, ask for them before you choose anything. Do not infer the subject from the location bank.
-- **Mid frames carry skin, touch, posture, or expression by default (§3.2b, 2026-08-22).** The educational frame is the only quiet one. **Nudity means visible nipples, labia, penis, or anus (owner definition 2026-09-20), and nothing else is nudity.** A bare body is licensed: an on-skin frame carries no clothing at all and the occluder is the crop, the pose, a hand or forearm, the hair, a sheet edge, or the product. Jewellery is licensed and encouraged. The stop list in §3.2a is unchanged and you do not restate it here. **State the garment in every prompt when there is one, and for an on-skin frame state instead what CLOSES each edge of the frame** (§3.2b, the garment-and-closer paragraph). An unstated wardrobe is an inherited one, and an on-skin frame has no garment to state, so name the drawn object or action that holds each edge.
+- **Mid frames carry skin, touch, posture, or expression by default (§3.2b, 2026-08-22).** The educational frame is the only quiet one. **Nudity means visible female nipples, labia, penis, or anus (owner definition 2026-09-20), and nothing else is nudity.** A bare body is licensed: an on-skin frame carries no clothing at all and the occluder is the crop, the pose, a hand or forearm, the hair, a sheet edge, or the product. Jewellery is licensed and encouraged. The stop list in §3.2a is unchanged and you do not restate it here. **State the garment in every prompt when there is one, and for an on-skin frame state instead what CLOSES each edge of the frame** (§3.2b, the garment-and-closer paragraph). An unstated wardrobe is an inherited one, and an on-skin frame has no garment to state, so name the drawn object or action that holds each edge.
 </hard_constraints>
 
 <variety_rules>
@@ -164,14 +164,18 @@ On-skin block (MANDATORY on every product post while the standing order below is
   - Sternum and chest frames: the crop closes above the areola, or a hand or the second cast member occludes it, and the brief says which. Belly frames may carry the under-curve of the breasts at the top edge; a hint of pubic hair at the bottom edge is licensed at most once per rolling 7.
 
 Styling (MANDATORY on every cast frame, owner direction 2026-10-02, `instagram-campaigns.md` §3.2a)
-  Piece: <one piece from the cast member's closet in `cast-wardrobe.md`, or "bare" plus the story reason>
-  Worn: <the action holding it: robe held closed at the sternum, shirt slid to the elbows from behind, strap off the shoulder>
-  Skin left bare: <the contact zone, always bare, plus what else the piece leaves bare>
-  Edge it closes: <which edge, a hand-width from the stop zone>
-  Coverage class: <one class from `cast-wardrobe.md`; bedding-edge or towel as the only coverage at most 2 of any rolling 7>
-  The colour and weave go on the Fabric line above. A garment over the contact zone is a REVISE; a
-  frame that is mostly garment is a portrait. The piece serves the skin, which is why this block does
-  not reopen the default-garment failure described below: the bare zone is decided first.
+  Piece: <one piece from the cast member's closet in `cast-wardrobe.md`: lingerie, a slip, a bodysuit, a short silk robe falling open; or "bare" plus the story reason>
+  Worn: <how it was styled for the shot: band under the breast, waistband at the hip bone, strap off the shoulder, robe slipping to the elbows>
+  Skin left bare: <the contact zone, always bare, plus everything else; the piece covers what the stop list needs and nothing more>
+  Opaque detail: <on a woman, what sits over the nipple and the labia under any sheer or lace: appliqué, satin panel, lace motif, strap, her hand>
+  Edge it closes: <which edge the lingerie line closes>
+  Coverage class: <one class from `cast-wardrobe.md`; `bedding-on-body`, `towel` and `bulky` are REVISE>
+  The colour and weave go on the Fabric line above. Owner, 2026-10-02: *"I'd rather see a bra line
+  than a piece of fabric... No one drapes fabric over themselves to use a vibrator."* So: no knits,
+  terry, towels or sweats on a body, and bedding is the set, never the cover. A garment over the
+  contact zone is a REVISE; a frame that is mostly garment is a portrait. The piece serves the skin,
+  which is why this block does not reopen the default-garment failure described below: the bare zone
+  is decided first and the garment is the smallest thing that closes the edge.
 
 Clothed exception (use INSTEAD of the On-skin block, only when the product does not touch bare skin, and only for one of the two reasons below)
   Wardrobe: <garment and its coverage>
