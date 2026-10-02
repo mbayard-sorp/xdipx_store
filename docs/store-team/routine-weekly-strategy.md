@@ -472,6 +472,23 @@ prior "dead"/"chain is broken" verdict. A stale "dead" premise wrongly throttles
 routine's Step-3 approval volume, and it has in fact been carried for three consecutive briefs while
 live DB showed enrich+publish keeping pace daily.
 
+Include an **Acquisition** section (ticket #9315), standing every week, not only when something
+moved: index rate (`indexed_count / sitemap_urls`), `indexed_count`, `sitemap_urls`, and
+`canonical_mismatches`, read from the latest `gsc_index_daily` row, with the trend against the prior
+2-3 rows when it is informative. Below a 10% index rate, the strategy team does not propose
+channel-output increases (more imports, more content volume, more social cadence) as the answer to
+flat acquisition — the measured bottleneck is indexing, not throughput, until the rate clears 10%;
+say so plainly in the section rather than renewing a throughput directive against this evidence.
+
+Include an **AI sources** section (ticket #12686, endpoint ticket #12685): call
+`GET /api/team/ai-source-orders?days=7` over the team token and report orders and revenue by source
+(chatgpt, perplexity, copilot, gemini, claude) against the prior week, listing the order names, and
+mirror the same numbers into `metricsJson.aiSources`. AI answers cite xdipx.com pages (the AEO/GEO
+surface: `llms.txt`, per-page markdown), which is the only AI-referral route open to this catalog,
+since ChatGPT shopping cards and the Shopify Catalog exclude mature products
+(`docs/store-team/shop-image-strategy.md` section 7). When a source rises or falls sharply week over
+week, file a suggestion to the content team naming the pages most likely cited.
+
 ```bash
 curl -s -X POST "$BASE_URL/api/team/brief" \
   -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
