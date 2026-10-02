@@ -1354,4 +1354,51 @@ describe('legible text baked into the image', () => {
     expect(checks(r)).toContain('vision-legible-text')
     expect(r.blocked).toBe(true)
   })
+
+  // Ticket #13126. Real Coconu lube candidates (social_media_assets #830-836,
+  // linked via postId to social_posts #367-370) verified live in the
+  // database: the picked asset for post 368 (#833) was BLOCKed on exactly
+  // this legibleText even though the model explicitly said nothing was
+  // legible, while post 367's garbled candidate (#830, correctly BLOCKed,
+  // never picked) and post 369's picked candidate (#835, a clean wordmark
+  // plus a genuine secondary packaging-descriptor-and-size line) are kept
+  // exactly as they were — the second is documented here as correct, not a
+  // bug: docs/store-team/instagram-campaigns.md §3.2c licenses a brand mark
+  // on the bottle but not "a barcode or printed panel", and #835's unpicked
+  // sibling #834 independently describes that same secondary line as
+  // plausibly reading "CONDITIONING BODY OIL" plus a size designator — real
+  // packaging copy, not model hedging about the wordmark itself.
+  describe('explicit "no legible text" descriptions (ticket #13126)', () => {
+    it('post 368 / asset #833: a plain pattern described as having no legible letters or words is not a brand-mark misread', () => {
+      expect(classifyLegibleText('small blue dot pattern on product label, no legible letters or words')).toBe('none')
+    })
+
+    it('the full pipeline no longer blocks the post 368 candidate', async () => {
+      const r = await run('small blue dot pattern on product label, no legible letters or words')
+      expect(checks(r)).not.toContain('vision-legible-text')
+      expect(r.blocked).toBe(false)
+    })
+
+    it('post 367 / asset #830: a genuinely garbled, attempted wordmark still blocks, even though it also uses "legible" language', () => {
+      expect(classifyLegibleText(
+        'oiu. (brand wordmark, mirrored/reversed on tube); additional small text above wordmark partially legible as garbled characters; dot pattern on tube body',
+      )).toBe('unclassified')
+    })
+
+    it('post 369 / asset #835: a clean wordmark plus a genuine secondary packaging-descriptor line still blocks (correct, not a bug)', () => {
+      expect(classifyLegibleText(
+        'COCONU. (brand wordmark on tube front); additional smaller text on the tube body is present but not fully legible — appears to read something like a product descriptor line followed by a size/volume designation, but the exact characters cannot be made out at this resolution.',
+      )).toBe('unclassified')
+    })
+
+    it('a mixed report of "no legible letters" alongside the model\'s own attempted-text-defect vocabulary still blocks', () => {
+      expect(classifyLegibleText(
+        'no legible letters, though garbled dot-and-dash pseudo-text marks are visible beneath the button',
+      )).toBe('unclassified')
+    })
+
+    it('post 370 / asset #836: no text in frame at all still passes, unchanged', () => {
+      expect(classifyLegibleText('')).toBe('none')
+    })
+  })
 })
