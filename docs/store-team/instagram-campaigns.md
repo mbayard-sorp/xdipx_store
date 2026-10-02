@@ -232,7 +232,9 @@ said nothing.
     and vulva."* So the piece is the smallest cut that covers the nipple and the vulva: triangle
     and plunge bralettes, string and micro cuts, thongs, high-cut micro briefs. It is sheer
     everywhere it can be (mesh, tulle, fine lace), and the only opaque parts are the detail over
-    each nipple and a narrow front panel over the vulva. Full cups, full-back briefs, boyshorts,
+    each nipple and a narrow front panel over the vulva. The nipple detail covers the whole
+    areola, not just the nipple (brief it as a motif about five centimetres across): a small
+    appliqué on sheer lace left the areola edge showing and the gate failed it (proof run 3). Full cups, full-back briefs, boyshorts,
     opaque bodysuits and opaque slips over the breast under-deliver and are a REVISE. On a man the
     same rule reads as the smallest brief that covers the penis, low on the hip.
   - **No bulky fabric, no draped bedding.** Knits, terry, waffle, fleece, sweats, cardigans and
