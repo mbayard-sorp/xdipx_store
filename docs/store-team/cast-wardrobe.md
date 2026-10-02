@@ -1,19 +1,24 @@
 # Cast wardrobe (owner direction 2026-10-02)
 
-Owner, verbatim: *"I'm noticing a trend that our social media images show cast members wearing what
-looks like beige sheets. Sometimes it's fine, other's its odd. Do we need a styling agent or a style
-director for each of our cast members? They need to be in something that still can show skin when
-needed. What is the right way to do this so we get great looking outfits that are both sexy and
-interesting in the scene?"*
+Owner, verbatim, first ask: *"I'm noticing a trend that our social media images show cast members
+wearing what looks like beige sheets. Sometimes it's fine, other's its odd. Do we need a styling
+agent or a style director for each of our cast members? They need to be in something that still can
+show skin when needed."*
 
-This file is the answer to the second half: what each cast member wears, in what colours, with what
-metal, on what bedding. `social-art-director` reads it at every brief; `media-manager` and
-`video-producer` execute what the brief names from it.
+Owner, verbatim, same day, on what good looks like: *"Lingerie can be back on the bodyscape shots...
+Robes are good, draped items. Lingerie is good... I just want to stay away from the bulky fabric
+look. Garments should be sexy when they are in the frame and should stay at a register 9 for
+explicitness. I'd rather see a bra line than a piece of fabric. Our customers need to imagine they
+are using the product. No one drapes fabric over themselves to use a vibrator or any of our
+products. If they are going to be wearing something, it needs to look like it's been styled for the
+shot."*
 
-**This file says WHAT they wear, never WHETHER a frame may carry a garment.** That question has one
-home, `instagram-campaigns.md` §3.2a, and this file does not restate or widen it. Where §3.2a puts a
-frame bare, the closet still supplies the metal, the bedding and the colour of anything else in
-frame.
+This file is what each cast member wears, in what colours, with what metal, on what bedding.
+`social-art-director` reads it at every brief; `media-manager` and `video-producer` execute what the
+brief names from it.
+
+**This file says WHAT they wear, never WHETHER a frame may carry a garment or what may show.** Both
+questions have one home, `instagram-campaigns.md` §3.2a, and this file does not restate or widen it.
 
 ## Why it exists (measured 2026-10-02)
 
@@ -26,43 +31,51 @@ unnamed rendered cream.
 - 15 of the 20 on-skin frames in the last 40 posted rows used a sheet or towel as the coverage.
 - 140 of 172 cast-frame prompts since 09-19 name bedding; 0 give any fabric a non-neutral colour.
 - Worn garments across all generated prompts fell from 66 (week of 08-31) to 0 (week of 09-28).
-- The odd ones are sheets with no job: Vivian wrapped like a toga in a doorway (#360), a folded hand
-  towel on the groin like a loincloth (#364). The good ones give the sheet an action: knotted at the
-  hip (676, 677, the frames the owner loved).
+- The odd ones: Vivian wrapped in a sheet like a toga in a doorway (#360), a folded hand towel on the
+  groin like a loincloth (#364).
 - The clothed frames were beige too: an unnamed "plain fitted t-shirt" rendered cream (#353), and the
   model added nude-tone underwear nobody asked for (#358, #359, #360).
 - Next repeat already forming: gold jewellery in 122 of 172 cast prompts.
 
 **No styling agent, and no agent per cast member** (all-hands 2026-10-02, art director and architect
-agreeing). Wardrobe is already `social-art-director`'s lever, and it is coupled to occlusion, so a
-stylist upstream of it would be a second author of the same frame. Eight per-cast agents would be
-eight drifting prompt files with nobody owning the grid. What was missing was a field in the brief
-and the data to fill it. This file is the data.
+agreeing). Wardrobe is already `social-art-director`'s lever, and it is coupled to what the frame may
+show, so a stylist upstream of it would be a second author of the same frame. Eight per-cast agents
+would be eight drifting prompt files with nobody owning the grid. What was missing was a field in the
+brief and the data to fill it. This file is the data.
 
-## Fabric rules (binding on every prompt with a textile in it)
+## The styling rules (binding on every cast frame)
 
-1. **Name every textile by colour and weave.** Never write any of these on its own: linen,
-   off-white, cream, ivory, beige, oatmeal, taupe, greige, flax, nude, natural, neutral. "Linen"
-   alone renders as flax even with no colour word.
-2. **Bedding has a job.** It closes an edge by something the person did: pulled it up, knotted it at
-   the hip, held it to the chest, kicked it to the foot of the bed. It never wraps the torso like a
-   dress (#360) and never sits folded on the groin as a cover (#364). Either is a REVISE.
-3. **No nude-tone underwear and no skin-tone bodysuit** unless the brief names one. Put it in the
+1. **Styled for the shot, at register 9.** If a garment is in frame it is lingerie, a robe worn open
+   or slipping, or one deliberate editorial piece, and it reads like a lingerie campaign styled it.
+   The test is the owner's: a bra line beats a piece of fabric. A garment that covers more than the
+   stop list needs is a REVISE.
+2. **No bulky fabric.** Chunky or cable knits, terry, waffle weave, fleece, sweats, cardigans, towels
+   and duvets never appear on a body in a bodyscape. A robe is silk, satin, chiffon or fine jersey,
+   short, and falls open or slips; never a bathrobe.
+3. **Nobody drapes fabric over themselves to use a product.** The customer has to be able to picture
+   themselves in the moment of use, so bedding is the set, never the outfit: she lies on the sheet,
+   she does not wear it. A sheet wrapped like a dress (#360) or a towel folded on the groin (#364) is a
+   REVISE. Where `instagram-campaigns.md` still allows bedding on the body, that is a transitional
+   closer and §3.2a says when it ends.
+4. **Name every textile by colour and weave.** Never write any of these on its own: linen, off-white,
+   cream, ivory, beige, oatmeal, taupe, greige, flax, nude, natural, neutral. "Linen" alone renders
+   as flax even with no colour word.
+5. **No nude-tone underwear and no skin-tone bodysuit** unless the brief names one. Put it in the
    negative list of every cast frame; the model adds them unprompted.
-4. **Opaque by construction over a stop zone:** cotton jersey, terry, chunky or ribbed knit, matte
-   microfibre, poplin. Never thin white cotton, satin, lace or mesh over a nipple or the labia (the
-   2026-08-24 white bralette rendered sheer). Satin, silk and lace are fine away from a stop zone,
-   which in practice means from behind.
-5. **Contrast with the skin.** Pick the bedding and garment colour that separates from that cast
-   member's skin. Beige on skin is a safety problem as well as a taste one: the gate read a beige
-   throw as underwear on #698 (ticket #11468).
-6. **The metal is the closet's.** State the cast member's metal; gold is not the default.
-7. **Lock per campaign, rotate per post.** A campaign pins one colour from the lead cast member's
+6. **What covers a stop zone is decided by §3.2a.** Sheer, lace and mesh are the point of most of
+   the pieces below; §3.2a says what must sit opaque under them (on a woman, the nipple and the
+   labia), and the brief names that detail (an embroidered appliqué, a satin panel, a strap, her hand).
+   The 2026-08-24 white bralette rendered sheer over a nipple when nobody named one.
+7. **Contrast with the skin.** Pick the colour that separates from that cast member's skin. Beige on
+   skin is a safety problem as well as a taste one: the gate read a beige throw as underwear on #698
+   (ticket #11468).
+8. **The metal is the closet's.** State the cast member's metal; gold is not the default.
+9. **Lock per campaign, rotate per post.** A campaign pins one colour from the lead cast member's
    palette as its `rhymeColor` and writes `wardrobeRegister` from this file (§3 of
    `instagram-campaigns.md`). Pieces rotate post to post. The same person in the same piece twice in
    a campaign is continuity, not a repeat.
 
-## Bedding and towels
+## Bedding (the set, never the outfit)
 
 | Name it as | Use |
 |---|---|
@@ -71,117 +84,107 @@ and the data to fill it. This file is the data.
 | lilac washed cotton | the plum-soft ground in fabric |
 | white cotton percale with a fine coral stripe | playful, morning |
 | deep plum cotton sateen | evening and drama, at most 1 per rolling 7 |
-| white waffle-weave towel, or coral-soft terry towel | bath and after-shower; never cream |
 
 Each closet below names which bedding contrasts with that skin.
 
 ## The closets
 
-Each piece lists the action that holds it, the skin it leaves bare, and its coverage class (the
-vocabulary ticket #13158's `wardrobeCoverage` axis records). Pieces over a stop zone are opaque by
-construction. The off-character line is as binding as the pieces.
+Each piece lists how it is worn, the skin it leaves bare, and its coverage class (the vocabulary the
+`wardrobeCoverage` axis records). Every woman's piece over a stop zone names the opaque detail that
+sits there. The off-character line binds as much as the pieces.
 
 ### Emma (guide, fair with pink undertones)
-Persona: warm, direct, delighted and curious rather than sultry; nothing costumey. Emma gets BEFORE or
-CHOOSING frames only (§3.2c).
-- **Palette:** white, washed denim blue, heather grey, one coral accent. **Metal:** fine silver chain.
+Persona: warm, direct, delighted and curious rather than sultry. Emma gets BEFORE or CHOOSING frames
+only (§3.2c), so her styling is the most playful in the cast and the least sultry.
+- **Palette:** white, washed denim blue, coral. **Metal:** fine silver chain.
 - **Bedding:** lilac washed cotton or coral-soft (white washes her out).
-- Oversized washed-denim shirt, sleeves rolled, slid off one shoulder from behind by her own hand.
-  Bare: shoulder blade, nape. `shirt-open`
-- Heather-grey ribbed cardigan, held closed at the sternum with one hand. Bare: collarbones, thigh.
-  `knit`
-- White ribbed tank, hem at the waist. Bare: arms, shoulders, waist. `tank`
-- Coral matte high-cut briefs, leg line at the hip bone. Bare: hip hollow, thigh, lower back. `briefs-highcut`
-- High-waisted light denim for clothed frames. `trousers`
-- Off-character: lace, corsetry, latex, red satin, anything sultry-coded or costumey.
+- White cotton-and-lace bralette with a scalloped edge, opaque cups. Bare: waist, shoulders, back. `bralette`
+- Matching high-cut lace briefs, opaque front panel. Bare: hip hollow, thigh, lower back. `briefs-highcut`
+- Coral fine-jersey slip, thin straps, one off the shoulder. Bare: shoulders, arms, legs. `slip`
+- Washed-denim-blue short silk robe, open, sleeves pushed up. Bare: the centre line, legs. `robe`
+- Off-character: black leather, corsetry, latex, red satin, anything costumey.
 
 ### Maya (warm brown skin, natural curls)
-Persona: warm, playful, the reassuring one; softens the hard question with food or a blanket.
+Persona: warm, playful, the reassuring one.
 - **Palette:** coral, white, lilac. **Metal:** gold hoops.
 - **Bedding:** crisp white percale or lilac washed cotton.
-- His white poplin shirt, slid down to the elbows, from behind only. Bare: back, shoulders. `shirt-open`
-- Chunky coral cardigan, held closed at the sternum. Bare: thigh, hip. `knit`
-- Coral matte high-cut briefs. Bare: back, waist, tops of the cheeks. `briefs-highcut`
-- Lilac terry robe, belt knotted at the waist. Bare: collarbones, cleavage line, legs. `robe`
-- White ribbed cropped tank, hem at the under-curve, side view. Bare: waist, underboob line. `tank`
-- Off-character: leather, corsetry, mesh, greige.
+- Coral balconette bra in sheer tulle, embroidered appliqué over the nipple. Bare: cleavage, waist. `bra`
+- Matching coral high-cut briefs with a sheer back. Bare: hip hollow, lower back, tops of the cheeks. `briefs-highcut`
+- White cotton string bikini-cut thong. Bare: hips, buttocks below the waistband line. `thong`
+- Lilac short satin robe, belt untied, falling off one shoulder. Bare: shoulder, centre line, legs. `robe`
+- Off-character: black severe sets, mesh harnesses, greige, anything bulky.
 
 ### Jade (light warm skin with pink undertones, sleek bob)
 Persona: calm minimalist, says little, clean lines.
-- **Palette:** ink black, white, lilac, deep plum. **Metal:** one silver ring.
+- **Palette:** ink black, white, deep plum. **Metal:** one silver ring.
 - **Bedding:** crisp white percale or deep plum sateen.
-- Black ribbed cropped tank, hem at the under-curve, side view only. Bare: underboob, waist. `tank`
-- Black matte high-cut briefs. Bare: leg line, hip hollow. `briefs-highcut`
-- Charcoal fine knit pulled off one shoulder by her own hand. Bare: shoulder blade, nape. `knit`
-- Lilac short silk kimono, from behind. Bare: the full back below it. `robe`
-- Deep plum open-back bodysuit, high-cut, matte. Bare: spine to the waist, legs. `bodysuit`
-- Off-character: lace, ruffles, florals, chunky knits, blush.
+- Black triangle bralette in sheer mesh, a narrow opaque band over the nipple. Bare: everything but
+  the band, from the side. `bralette`
+- Black high-cut briefs, a single clean leg line at the hip bone. Bare: hip hollow, thigh. `briefs-highcut`
+- Deep plum open-back bodysuit, high-cut, matte at the front. Bare: spine to the waist, legs. `bodysuit`
+- Black silk kimono, short, slipped to the elbows from behind. Bare: the full back. `robe`
+- Off-character: ruffles, florals, pastels, chunky anything.
 
 ### Sofia (warm olive skin, long dark waves)
 Persona: bold confidante, names the want directly; sleek, a touch dramatic.
-- **Palette:** black, brand coral, white. **Metal:** gold statement cuff.
+- **Palette:** black, brand coral, deep plum. **Metal:** gold statement cuff.
 - **Bedding:** deep plum sateen or crisp white percale.
-- Black tailored blazer worn over nothing, held closed at the sternum by one hand. Bare: cleavage
-  line, legs. `shirt-open`
-- Black matte high-cut one-piece, open back. Bare: spine, hips, legs. `bodysuit`
-- Coral matte high-cut briefs. Bare: hip hollow, lower back. `briefs-highcut`
-- White poplin shirt, cuffs undone, falling off both shoulders from behind. Bare: back, shoulders. `shirt-open`
-- Deep plum satin slip, from behind, one strap off the shoulder. Bare: shoulder blade. `slip`
-- Off-character: pastels, cutesy prints, chunky knits, anything beige.
+- Black lace underwire bra, scalloped, opaque floral motif over the nipple. Bare: cleavage, ribs. `bra`
+- Black high-cut thong with thin side strings. Bare: hips, buttocks. `thong`
+- Brand-coral satin slip, bias cut, thin straps. Bare: shoulders, back to the waist. `slip`
+- Black suspender belt over high-cut briefs, no stockings. Bare: thighs, hips. `garter`
+- Off-character: pastels, cutesy prints, anything bulky, anything beige.
 
 ### Priya (warm medium brown skin, long dark hair)
 Persona: witty, bright, quick to laugh; playful but elevated.
-- **Palette:** lilac, coral-pink, white with a coral stripe, sage. **Metal:** stacked fine rose-gold rings.
+- **Palette:** lilac, coral-pink, sage, white with a coral stripe. **Metal:** stacked fine rose-gold rings.
 - **Bedding:** white percale with a fine coral stripe, or lilac washed cotton.
-- White pyjama shirt with a coral stripe, unbuttoned, slid off the shoulders from behind. Bare:
-  back. `shirt-open`
-- Matching pyjama shorts, waistband low at the hip bone. Bare: waist, hip hollow. `briefs-highcut`
-- Lilac cropped cardigan, held closed at the sternum. Bare: waist, collarbones. `knit`
-- Sage ribbed tank, hem at the waist. Bare: arms, shoulders, waist. `tank`
-- Coral-soft terry robe, belt knotted. Bare: legs, collarbones. `robe`
-- Off-character: severe black, leather, grey minimalism.
+- Lilac plunge bralette in sheer mesh, embroidered daisies over the nipple. Bare: cleavage, waist. `bralette`
+- Matching lilac high-cut briefs. Bare: hip hollow, lower back. `briefs-highcut`
+- Coral-pink satin cami and tap shorts, cami strap fallen. Bare: shoulder, waist, legs. `slip`
+- Sage short silk robe, open. Bare: centre line, legs. `robe`
+- Off-character: severe black, leather, grey minimalism, anything bulky.
 
 ### Vivian (mid 50s, light skin with pink undertones, silver-streaked hair)
-Persona: seen it all, unshockable; soft, elevated, modest. First choice for midlife topics.
-- **Palette:** plum, coral-soft, white, slate blue. **Metal:** pearl studs, a silver bangle.
+Persona: seen it all, unshockable; soft and elevated. First choice for midlife topics. Styled at the
+same register as everyone else: a woman in her fifties in good lingerie is the point, not a
+compromise.
+- **Palette:** deep plum, coral-soft, slate blue. **Metal:** pearl studs, a silver bangle.
 - **Bedding:** lilac washed cotton or deep plum sateen.
-- Plum cashmere wrap cardigan, belted loosely, slipping from one shoulder. Bare: shoulder,
-  collarbones. `knit`
-- White poplin shirt, open, slid off both shoulders from behind. Bare: back. `shirt-open`
-- Coral-soft silk robe, held closed at the sternum. Bare: neck, collarbones, legs. `robe`
-- Deep plum matte high-waisted briefs. Bare: thigh, hip, lower back. `briefs-highcut`
-- Slate-blue fine knit for clothed frames. `knit`
-- Off-character: beige twinsets, anything "age-appropriate" and frumpy, costumey, sheer.
+- Deep plum lace bra, full-cup line, opaque floral motif over the nipple. Bare: décolletage,
+  shoulders, waist. `bra`
+- Matching deep plum high-waisted lace briefs, opaque front. Bare: thigh, hip, lower back. `briefs-highcut`
+- Coral-soft silk robe, long, open and slipping off both shoulders. Bare: back, shoulders. `robe`
+- Slate-blue satin slip, cowl neck. Bare: shoulders, arms, legs. `slip`
+- Off-character: beige twinsets, anything "age-appropriate" and frumpy, bulky knits.
   #360 (wrapped in a cream sheet in a doorway) is exactly what this closet replaces.
 
 ### Diego (light olive skin, swept-back dark hair, light stubble)
-Persona: polished flirt; sharp and put-together.
-- **Palette:** white, navy, black. **Metal:** steel watch, thin silver chain.
+Persona: polished flirt; sharp and put-together. His chest is bare by default once §3.2a's 2026-10-02
+amendment lands (male nipples are not nudity); until then a robe closes the chest.
+- **Palette:** black, navy, white. **Metal:** steel watch, thin silver chain.
 - **Bedding:** crisp white percale or deep plum sateen.
-- Male chest frames need a garment closer: shirtless frames failed on nipples in 5 of 6 tests (707
-  to 710, 741); a robe closed over the chest passed 2 of 2.
-- Navy silk robe, belted, closed over the chest. Bare: neck, forearms, legs. `robe`
-- Crisp white dress shirt unbuttoned to the sternum, cuffs rolled. Bare: throat, forearms. `shirt-open`
-- Black matte boxer briefs. Bare: thighs, hips, back. `briefs-highcut`
-- Charcoal fitted tee for clothed frames. `tank`
-- Off-character: athleisure, graphic tees, beige linen.
+- Black fitted trunks, low on the hip. Bare: chest, abdomen, thighs, back. `briefs-highcut`
+- Navy silk robe, untied, open down the centre. Bare: chest, abdomen, legs. `robe`
+- White dress shirt fully unbuttoned, cuffs rolled, nothing under. Bare: chest, abdomen. `shirt-open`
+- Off-character: athleisure, graphic tees, sweats, anything bulky.
 
 ### Marcus (deep brown skin, athletic, short beard)
-Persona: easygoing charmer; elevated casual.
+Persona: easygoing charmer; elevated casual. Same chest rule as Diego.
 - **Palette:** white, sage, cobalt. **Metal:** matte black ring.
 - **Bedding:** crisp white percale or coral-soft washed cotton.
-- Same male chest rule as Diego.
-- White waffle-weave robe, belted, closed over the chest. Bare: forearms, legs. `robe`
-- Sage knit henley, top buttons open. Bare: throat, forearms. `knit`
-- Grey marl sweatpants low on the hip, with the robe or henley above. Bare: hip line. `trousers`
-- White matte boxer briefs. Bare: thighs, back. `briefs-highcut`
-- Cobalt overshirt, open, from behind only. Bare: neck, back of the shoulders. `shirt-open`
-- Off-character: beige, flashy logos, anything costumey.
+- White fitted boxer briefs. Bare: chest, abdomen, thighs, back. `briefs-highcut`
+- Cobalt silk robe, open. Bare: chest, abdomen, legs. `robe`
+- Sage cotton drawstring trousers, worn low on the hip, chest bare. Bare: chest, abdomen,
+  hip line. `trousers`
+- Off-character: beige, flashy logos, sweats, anything bulky.
 
 ## Coverage classes
 
-`bare-jewellery`, `bedding-edge`, `towel`, `robe`, `shirt-open`, `knit`, `tank`, `briefs-highcut`,
-`bodysuit`, `slip`, `trousers`. One per frame, the class that does the covering work.
+`bare-jewellery`, `bra`, `bralette`, `briefs-highcut`, `thong`, `garter`, `bodysuit`, `slip`, `robe`,
+`shirt-open`, `trousers`, `bedding-on-body`, `towel`, `bulky`. One per frame, the class that does the
+covering work. `bedding-on-body`, `towel` and `bulky` exist so the mix report can count them; the
+target for all three is zero.
 
 ## Changing a closet
 
