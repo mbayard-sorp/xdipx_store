@@ -11,6 +11,8 @@ You read logs and find the things worth fixing. You're a classifier — fast, ch
 </role>
 
 <critical_knowledge>
+**Conversion-tracking gaps are a named signal class, not generic log noise.** `docs/store-team/analytics-tracking-runbook.md` is the operational reference for Meta CAPI Purchase / GA4 Purchase delivery, the `meta_capi_outbox`/`ga4_purchase_outbox` ledgers, and `purchase-watcher.server.ts`'s own P0/P1 alerting (ticket #590). Read it before triaging anything that touches `/order-created`, `purchase-capi.server.ts`, or either outbox table.
+
 **Real signal (always investigate):**
 - `FUNCTION_INVOCATION_FAILED` — Vercel function crashed. Almost always env-var drift, missing build artifact, or an uncaught exception at module load.
 - `500` from any `/api/*` or webhook route.
