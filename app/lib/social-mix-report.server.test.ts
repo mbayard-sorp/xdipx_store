@@ -219,6 +219,59 @@ describe('computeSocialMixReport, lube-treatment', () => {
   })
 })
 
+// ── Ticket #12876 (owner 2026-10-01): "14 distinct products posted in 21
+// days against ~4,800 in stock". Every other line above measures variety
+// WITHIN a post; this is the first to measure variety ACROSS posts.
+describe('computeSocialMixReport, product diversity (#12876)', () => {
+  it('is UNKNOWN with no product-forward posts in window', () => {
+    const rows = [row(), row(), row()]
+    const report = computeSocialMixReport(rows)
+    expect(report.lines.productDiversity.status).toBe('unknown')
+  })
+
+  it('flags BREACH on Instagram when distinct/total falls below the 0.8 floor', () => {
+    // 7 product posts, only 2 distinct products: 2/7 ~= 0.286, well under 0.8.
+    const ids = ['a', 'a', 'a', 'a', 'a', 'a', 'b']
+    const rows = ids.map((id, i) => row({ id: i + 1, shopifyProductId: `gid://shopify/Product/${id}` }))
+    const report = computeSocialMixReport(rows, 'instagram')
+    expect(report.lines.productDiversity.status).toBe('breach')
+    expect(report.lines.productDiversity.detail).toContain('2/7 distinct (last 7)')
+    expect(report.lines.productDiversity.detail).toContain('top product 86% of last 21')
+  })
+
+  it('reads ok on Instagram when every post in window features a different product', () => {
+    const rows = Array.from({ length: 7 }, (_, i) => row({ id: i + 1, shopifyProductId: `gid://shopify/Product/${i}` }))
+    const report = computeSocialMixReport(rows, 'instagram')
+    expect(report.lines.productDiversity.status).toBe('ok')
+    expect(report.lines.productDiversity.detail).toContain('7/7 distinct (last 7)')
+  })
+
+  it('does not apply the Instagram floor on X', () => {
+    const ids = ['a', 'a', 'a', 'a', 'a', 'a', 'b']
+    const rows = ids.map((id, i) => row({ id: i + 1, platform: 'x', shopifyProductId: `gid://shopify/Product/${id}` }))
+    const report = computeSocialMixReport(rows, 'x')
+    expect(report.lines.productDiversity.status).toBe('ok')
+  })
+
+  it('reports distinct/total separately for the last 7 and last 21', () => {
+    // 21 posts: the first 7 (newest, since computeSocialMixReport reads
+    // newest-first) are all the same product; the next 14 are all distinct.
+    const rows = [
+      ...Array.from({ length: 7 }, (_, i) => row({ id: i + 1, shopifyProductId: 'gid://shopify/Product/same' })),
+      ...Array.from({ length: 14 }, (_, i) => row({ id: i + 8, shopifyProductId: `gid://shopify/Product/${i}` })),
+    ]
+    const report = computeSocialMixReport(rows, 'x')
+    expect(report.lines.productDiversity.detail).toContain('1/7 distinct (last 7)')
+    expect(report.lines.productDiversity.detail).toContain('15/21 distinct (last 21)')
+  })
+
+  it('new-arrival share is always UNKNOWN: no column marks a post as featuring a new arrival', () => {
+    const rows = Array.from({ length: 7 }, (_, i) => row({ id: i + 1, shopifyProductId: `gid://shopify/Product/${i}` }))
+    const report = computeSocialMixReport(rows, 'instagram')
+    expect(report.lines.newArrivalShare.status).toBe('unknown')
+  })
+})
+
 // ── Ticket #10340: the §3.2b/§3.2c caps that were left unmeasured ─────────
 
 describe('computeSocialMixReport, cast rotation and volume (§3.2b)', () => {
@@ -421,7 +474,7 @@ describe('formatSocialMixReportLines', () => {
   it('prints one line per report line with an explicit status marker', () => {
     const report = computeSocialMixReport([row(), row(), row()])
     const lines = formatSocialMixReportLines(report)
-    expect(lines).toHaveLength(18)
+    expect(lines).toHaveLength(20)
     for (const line of lines) expect(line).toMatch(/^\[mix-report\] instagram /)
     // Everything in this all-null fixture is either UNKNOWN (enrichment
     // columns absent) or a hard floor breach (0 carousels, 0 product-free
@@ -461,7 +514,12 @@ describe('computeSocialMixReport, UNKNOWN alarms (#10478 defect 1)', () => {
       contactMode: modes[i]!,
       cropScale: crops[i]!,
       sceneLocation: `room-${i + 1}`,
-      shopifyProductId: 'gid://shopify/Product/1',
+      // Distinct per row (ticket #12876's product-diversity line): this
+      // fixture is about the axis-coverage/breach-vs-unknown separation, not
+      // product variety, so every row gets its own product id to clear the
+      // new 0.8-distinct floor and keep that line 'ok' rather than
+      // incidentally flagging the fixture's own repeated placeholder id.
+      shopifyProductId: `gid://shopify/Product/${i + 1}`,
       // One carousel clears the rolling-14 floor of 1.
       ...(i === 0 ? { mediaUrls: ['https://cdn.example/a.jpg', 'https://cdn.example/b.jpg'] } : {}),
     }))
@@ -606,7 +664,7 @@ describe('computeSocialMixReportBundle, per platform (#10478 defect 3)', () => {
     )
     expect(lines.some(l => l.startsWith('[mix-report] instagram '))).toBe(true)
     expect(lines.some(l => l.startsWith('[mix-report] x '))).toBe(true)
-    expect(lines).toHaveLength(36)
+    expect(lines).toHaveLength(40)
   })
 })
 

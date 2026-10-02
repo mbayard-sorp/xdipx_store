@@ -145,6 +145,8 @@ export interface SocialMixReport {
     plug: MixReportLine
     lubeTreatment: MixReportLine
     carousel: MixReportLine
+    productDiversity: MixReportLine
+    newArrivalShare: MixReportLine
   }
   /**
    * True if ANY line is not `ok`, UNKNOWN included (#10478). The old version
@@ -258,12 +260,38 @@ const CONTACT_MODE_WINDOW = 5
 // published." Same rolling-14 window as PRODUCT_WINDOW above.
 const CAROUSEL_MIN = 1
 
+// Ticket #12876 (owner 2026-10-01, Step 2.9 item 8): "distinct products over
+// product posts" and "the top product's share" for the trailing 7 and 21
+// days. Every other line here measures variety WITHIN one post (zone, crop,
+// cast); none measured variety ACROSS posts of which product gets picked --
+// which is exactly how 14 distinct products in 21 days against ~4,800 in
+// stock went unnoticed for weeks. Step 2.9 item 8's own floor: "distinct over
+// product posts below 0.8 on Instagram... is a finding the next run corrects
+// before anything else."
+const DIVERSITY_WINDOW_SHORT = 7
+const DIVERSITY_WINDOW_LONG = 21
+const DIVERSITY_DISTINCT_FLOOR = 0.8
+
 function isCarousel(row: SocialMixReportRow): boolean {
   return (row.mediaUrls?.length ?? 0) > 1
 }
 
 function isProductForward(row: SocialMixReportRow): boolean {
   return !!row.shopifyProductId
+}
+
+/**
+ * Distinct products and the busiest single product's share, over a slice of
+ * already product-forward rows. Pure arithmetic over `shopifyProductId` --
+ * no new column, no new query -- so it works for any window this report
+ * already slices.
+ */
+function diversityStats(productRows: SocialMixReportRow[]): { distinct: number; total: number; topShare: number | null } {
+  const ids = productRows.map(r => r.shopifyProductId).filter((id): id is string => !!id)
+  if (!ids.length) return { distinct: 0, total: 0, topShare: null }
+  const counts = new Map<string, number>()
+  for (const id of ids) counts.set(id, (counts.get(id) ?? 0) + 1)
+  return { distinct: counts.size, total: ids.length, topShare: Math.max(...counts.values()) / ids.length }
 }
 
 /**
@@ -612,11 +640,43 @@ export function computeSocialMixReport(
   const carouselCount = last14.filter(isCarousel).length
   const carousel = minFloorLine('Carousel (last 14)', carouselCount, PRODUCT_WINDOW, CAROUSEL_MIN)
 
+  // --- Product diversity (last 7 / 21): distinct products, top-product share ---
+  const last7Products = rows.slice(0, DIVERSITY_WINDOW_SHORT).filter(isProductForward)
+  const last21Products = rows.slice(0, DIVERSITY_WINDOW_LONG).filter(isProductForward)
+  const d7 = diversityStats(last7Products)
+  const d21 = diversityStats(last21Products)
+  let productDiversity: MixReportLine
+  if (d21.total === 0) {
+    productDiversity = unknownLine('Product diversity (last 7 / 21)', 'no product-forward posts in window')
+  } else {
+    const distinctShare = d21.distinct / d21.total
+    const belowFloor = platform === 'instagram' && distinctShare < DIVERSITY_DISTINCT_FLOOR
+    productDiversity = {
+      label: 'Product diversity (last 7 / 21)',
+      detail:
+        `${d7.distinct}/${d7.total} distinct (last 7), ${d21.distinct}/${d21.total} distinct (last 21), ` +
+        `top product ${Math.round((d21.topShare ?? 0) * 100)}% of last 21 ` +
+        `(floor ${DIVERSITY_DISTINCT_FLOOR} distinct/total on Instagram)` +
+        (belowFloor ? ' -- BREACH' : ''),
+      status: belowFloor ? 'breach' : 'ok',
+    }
+  }
+
+  // --- New-arrival share: no column exists, same honest-gap convention as
+  // lubeTreatment above. Step 2.9 item 8 asks for "new-arrival posts over
+  // product posts"; nothing on social_posts marks a post's product as a new
+  // arrival, so this prints the gap rather than guessing it from shopifyProductId.
+  const newArrivalShare = unknownLine(
+    'New-arrival share (last 7 product posts)',
+    'no column marks a post\'s product as a new arrival',
+  )
+
   const lines = {
     coverage, videoRows, removals,
     ceiling, mid, educational, closeCrop, productForward, productFree,
     bodyZoneWindow, contactModeWindow, locationWindow,
     castRotation, castVolume, wideCeiling, plug, lubeTreatment, carousel,
+    productDiversity, newArrivalShare,
   }
   // Non-ok, not breach-only (#10478 defect 1). An unpopulated column is the
   // most-decayed signal in the system and it used to read clean.
@@ -656,6 +716,7 @@ const LINE_ORDER: (keyof SocialMixReport['lines'])[] = [
   'ceiling', 'mid', 'educational', 'closeCrop', 'productForward', 'productFree',
   'bodyZoneWindow', 'contactModeWindow', 'locationWindow',
   'castRotation', 'castVolume', 'wideCeiling', 'plug', 'lubeTreatment', 'carousel',
+  'productDiversity', 'newArrivalShare',
 ]
 
 /**
@@ -698,6 +759,8 @@ const LINE_LABELS: Record<keyof SocialMixReport['lines'], string> = {
   plug: 'Plug between cheeks (last 7)',
   lubeTreatment: 'Lube-treatment repeats',
   carousel: 'Carousel (last 14)',
+  productDiversity: 'Product diversity (last 7 / 21)',
+  newArrivalShare: 'New-arrival share (last 7 product posts)',
 }
 
 /**
