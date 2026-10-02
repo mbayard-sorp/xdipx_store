@@ -2,6 +2,13 @@
 // fetch layer: item containers -> parent CAROUSEL container -> media_publish.
 // Container polls return FINISHED on the first tick (no sleep), so no timers.
 import { describe, it, expect, vi, afterEach } from 'vitest'
+// Ticket #13153: getInstagramAccessToken does its own DB read (via the Neon
+// HTTP driver, which also goes through `fetch`), which this file's global
+// `fetch` stub would otherwise intercept as a bogus Graph API call. Proxy
+// straight to env, same as every call site's old direct read.
+vi.mock('~/lib/instagram-token.server', () => ({
+  getInstagramAccessToken: async () => process.env['IG_GRAPH_ACCESS_TOKEN']?.trim() || null,
+}))
 import { instagramPublisher } from './instagram.server'
 
 interface Captured { path: string; params: Record<string, string> }

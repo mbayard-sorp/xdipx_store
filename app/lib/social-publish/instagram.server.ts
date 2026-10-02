@@ -22,6 +22,7 @@
  */
 
 import type { SocialPublisher, PublishInput, PublishResult } from './types'
+import { getInstagramAccessToken } from '~/lib/instagram-token.server'
 
 const DEFAULT_API_VERSION = 'v23.0'
 /** IG caption ceiling. Drafts are far shorter; this is a guard, not a feature. */
@@ -200,7 +201,7 @@ export const instagramPublisher: SocialPublisher = {
   },
 
   async publish(input: PublishInput): Promise<PublishResult> {
-    const token = process.env['IG_GRAPH_ACCESS_TOKEN']?.trim()
+    const token = await getInstagramAccessToken()
     const igId = process.env['IG_BUSINESS_ACCOUNT_ID']?.trim()
     if (!token || !igId) return { ok: false, reason: 'not_configured' }
 
@@ -300,7 +301,7 @@ export const instagramPublisher: SocialPublisher = {
 export async function getInstagramMediaState(
   mediaId: string,
 ): Promise<{ state: 'live' | 'gone' | 'unknown'; detail?: string }> {
-  const token = process.env['IG_GRAPH_ACCESS_TOKEN']?.trim()
+  const token = await getInstagramAccessToken()
   if (!token) return { state: 'unknown', detail: 'Instagram keys are not configured' }
 
   const res = await igRequest(`/${mediaId}`, { method: 'GET', params: { fields: 'id' }, token })
@@ -320,7 +321,7 @@ export async function getInstagramMediaState(
 export async function getInstagramPublishingLimit(): Promise<
   { ok: true; quota: number; used: number } | { ok: false; detail: string }
 > {
-  const token = process.env['IG_GRAPH_ACCESS_TOKEN']?.trim()
+  const token = await getInstagramAccessToken()
   const igId = process.env['IG_BUSINESS_ACCOUNT_ID']?.trim()
   if (!token || !igId) return { ok: false, detail: 'Instagram keys are not configured' }
 
