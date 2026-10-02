@@ -53,7 +53,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const homeConfig = await getHomeConfig().catch(() => null)
   const welcomeBackEnabled = homeConfig?.welcomeBackEnabled ?? true
   const adminUser = await getAdminUser(request).catch(() => null)
-  const value = await loadVariantAData(request, { welcomeBackEnabled, isAdmin: !!adminUser })
+  // Ticket #13144: same admin live-rebuild opt-in as `/` — admin reads the
+  // precompute-blob path by default, and `?fresh=1` is the explicit escape
+  // hatch for previewing an unsaved Sanity edit.
+  const value = await loadVariantAData(request, { welcomeBackEnabled, isAdmin: !!adminUser, fresh: url.searchParams.get('fresh') === '1' })
   const payload = { ...value, initialDiscoveryState }
   return adminUser ? data(payload, { headers: ADMIN_BYPASS_HEADERS }) : payload
 }
