@@ -240,6 +240,10 @@ said nothing.
     with an opaque detail over the nipple, or (B) an Instagram-only faint-nipple pilot, the owner
     chose A (*"codify, go with option A"*, 2026-10-02). A faint nipple through fabric stays on the
     stop list below; reopening it is the owner's call, never a brief's.
+  - **No pubic hair on a lingerie frame.** Owner, on asset 846 (2026-10-02): *"The pubic hair above
+    the panties is not needed."* The 1-per-rolling-7 pubic-hair licence in the bodyscape list below
+    is for a bare front frame only; with lingerie on, the skin above and around the garment is smooth,
+    stated positively in the brief and named in the negatives.
   - **Men's chests are bare by default.** Male nipples are not nudity (stop list below, 2026-10-02).
   - **Close-crop lingerie closers are proven before they ship.** Robe 4 of 4, cardigan 2 of 2 and a
     waistband 2 of 2 held at medium crop; at close crop nothing has been tested. Before the first

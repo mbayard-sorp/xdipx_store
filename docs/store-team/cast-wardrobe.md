@@ -61,7 +61,9 @@ brief and the data to fill it. This file is the data.
    cream, ivory, beige, oatmeal, taupe, greige, flax, nude, natural, neutral. "Linen" alone renders
    as flax even with no colour word.
 5. **No nude-tone underwear and no skin-tone bodysuit** unless the brief names one. Put it in the
-   negative list of every cast frame; the model adds them unprompted.
+   negative list of every cast frame; the model adds them unprompted. **No pubic hair above or
+   around a garment** (owner on asset 846: *"The pubic hair above the panties is not needed."*):
+   write "smooth bare skin above the waistband" and carry the negative.
 6. **What covers a stop zone is decided by §3.2a.** Sheer, lace and mesh are the point of most of
    the pieces below; §3.2a says what must sit opaque under them (on a woman, the nipple and the
    labia), and the brief names that detail (an embroidered appliqué, a satin panel, a strap, her hand).

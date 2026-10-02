@@ -75,7 +75,13 @@ candidates each, caller `owner-test-lingerie-proof-2026-10-02`. **What it proved
 lingerie line closed the edge, rendered in the named colour, with no sheet and nothing beige, so the
 wardrobe half works. **What failed was composition, not wardrobe:** hands behind the back or at a back-view hip
 (the gate's finger count failed every judged L3 render), air-pulse on a back view, a front crop that slid to the crotch, and hair at the sacrum in
-3 of 4 back renders. Next proof run: hands in front of the body, air-pulse on front frames, knees
+3 of 4 back renders. **Owner scores, same day (library):** UP on 848, 850, 851, 852, 853, 857, 859, 860 and 861,
+which is nine of the eleven lingerie renders, including the hands-behind-the-back frames the gate
+failed. DOWN on 846 (*"The pubic hair above the panties is not needed."*) and 847 (product drift on
+the rose). So the gate's finger count was wrong, not the pose: a hand gripping the product hides its
+thumb, the gate counts four, and the override fails anything but five (ticket #13174). Until that
+lands, a hand behind the back cannot ship, which is the only reason to prefer hands in front. Next
+proof run: hands in front of the body, air-pulse on front frames, knees
 together, and the sacrum-hair gate check (#13160) live.
 
 ## L4: band: strap off the shoulder, cast vivian. Result: borderline, the keeper (852 clean, 1 of 2)
