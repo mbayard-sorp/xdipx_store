@@ -1093,7 +1093,11 @@ returns the verdict block to you; **you post it verbatim** as an `/event` row
 
 - **PASS** — proceed to Step 8.
 - **REVISE** — proceed, but file the defects it returned as a suggestion on its behalf
-  (`POST /api/team/suggestion {op:'create', team:'homepage', kind:'process', ...}`).
+  (`POST /api/team/suggestion {op:'create', team:'homepage', kind:'process', ...}`). **Before filing
+  a layout defect, grep the repo for an existing pin test naming the same mechanism** (ticket
+  #12615): ticket #468 was fixed and pinned by `product-carousel-header.test.ts`, then re-filed as a
+  fresh defect two runs later because nothing checked for the existing pin at filing time. If a pin
+  test already covers the defect, cite it in the filed suggestion rather than filing it as new.
 - **BLOCK** — a doctrine hard rule is broken on the live page: trigger the existing Sanity
   last-good rollback path (same as a failed Step 7 validation), record status `rolled_back`.
 
