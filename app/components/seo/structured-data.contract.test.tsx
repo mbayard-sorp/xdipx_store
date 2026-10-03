@@ -123,7 +123,13 @@ describe('structured-data contract — required JSON-LD is present, typed, and p
 // Each target route must still reference its structured-data component in source.
 // If a refactor drops the JSON-LD from a route, this fails the PR.
 const ROUTE_STRUCTURED_DATA: Array<{ route: string; component: string }> = [
-  { route: 'app/routes/_layout._index.tsx',            component: 'ProductStructuredData' },
+  // The homepage's legacy-variant render (where ProductStructuredData is
+  // actually used) was extracted to its own lazily-loaded module, LegacyHome
+  // (ticket #13146), so the route file itself no longer references the
+  // component directly; it only lazy-imports LegacyHome. Pointing this entry
+  // at LegacyHome keeps the same regression guard against the file that
+  // genuinely renders the JSON-LD today.
+  { route: 'app/components/store/LegacyHome.tsx',       component: 'ProductStructuredData' },
   { route: 'app/routes/_layout.products.$slug.tsx',    component: 'ProductStructuredData' },
   { route: 'app/routes/_layout.collections.$handle.tsx', component: 'CollectionStructuredData' },
   { route: 'app/routes/_layout.notebook.$slug.tsx',    component: 'BlogStructuredData' },
