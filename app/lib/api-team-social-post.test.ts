@@ -388,6 +388,53 @@ describe('draft op, sceneLocation/bodyZone/contactMode/cropScale pass-through (m
   })
 })
 
+// Ticket #13163: wardrobeCoverage joined SCENE_AXIS_KEYS as a fifth axis, so
+// it threads through `...sceneAxes` the same way the other four already do
+// (no route change was needed), validates against the same closed vocab,
+// and is optional for the same reason (the frame is already billed).
+describe('draft op, wardrobeCoverage pass-through (ticket #13163)', () => {
+  it('threads wardrobeCoverage to createDraftSocialPost', async () => {
+    const res = await post({
+      op: 'draft', platform: 'instagram', tweetText: 'a bra line, not a sheet', voiceGate,
+      wardrobeCoverage: 'bra',
+    })
+    expect(res.status).toBe(200)
+    expect(createDraftMock).toHaveBeenCalledWith(expect.objectContaining({ wardrobeCoverage: 'bra' }))
+  })
+
+  it('is optional: a draft with no wardrobeCoverage omits it entirely', async () => {
+    const res = await post({ op: 'draft', platform: 'instagram', tweetText: 'no wardrobe here', voiceGate })
+    expect(res.status).toBe(200)
+    expect(createDraftMock.mock.calls[0]![0]).not.toHaveProperty('wardrobeCoverage')
+  })
+
+  it('400s an out-of-vocabulary wardrobeCoverage instead of persisting it', async () => {
+    const res = await post({
+      op: 'draft', platform: 'instagram', tweetText: 'typo coverage', voiceGate, wardrobeCoverage: 'lingerie',
+    })
+    expect(res.status).toBe(400)
+    expect(await res.text()).toMatch(/wardrobeCoverage must be one of/)
+    expect(createDraftMock).not.toHaveBeenCalled()
+  })
+})
+
+// DONE WHEN (ticket #13163): "a draft row created with wardrobeCoverage
+// persists it and returns it on list". listSocialPosts selects every column
+// (db.select().from(socialPosts)), so once the draft call above persists the
+// value, the 'list' op's response carries it with no separate mapping step.
+describe('list op, wardrobeCoverage round-trip (ticket #13163)', () => {
+  it('returns wardrobeCoverage on a listed post, unmodified from what was drafted', async () => {
+    const { listSocialPosts } = await import('~/lib/team.server')
+    vi.mocked(listSocialPosts).mockResolvedValue([
+      { id: 42, platform: 'instagram', wardrobeCoverage: 'bra' } as never,
+    ])
+    const res = await post({ op: 'list' })
+    expect(res.status).toBe(200)
+    const body = await res.json() as { posts: Array<{ wardrobeCoverage: string }> }
+    expect(body.posts[0]!.wardrobeCoverage).toBe('bra')
+  })
+})
+
 // Ticket #10480: the axes are validated against the single-source vocabulary
 // in app/lib/social-scene-vocab.ts, not by string length. A length-only check
 // let `hip_hollow` persist and then match neither ceiling nor mid, which is a

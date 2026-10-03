@@ -110,6 +110,8 @@ export interface SocialMixReportRow {
    * for this row (UNKNOWN); an empty array means a known cast-free frame.
    */
   castSlugs: string[] | null
+  /** migration 113 (ticket #13163). Null until a caller starts sending it. */
+  wardrobeCoverage: string | null
 }
 
 export type LineStatus = 'ok' | 'breach' | 'unknown'
@@ -147,6 +149,9 @@ export interface SocialMixReport {
     carousel: MixReportLine
     productDiversity: MixReportLine
     newArrivalShare: MixReportLine
+    retiredCoverage: MixReportLine
+    coverageWindow: MixReportLine
+    styledShare: MixReportLine
   }
   /**
    * True if ANY line is not `ok`, UNKNOWN included (#10478). The old version
@@ -259,6 +264,28 @@ const CONTACT_MODE_WINDOW = 5
 // #10110: "misses the standing two-week floor of... at least one carousel
 // published." Same rolling-14 window as PRODUCT_WINDOW above.
 const CAROUSEL_MIN = 1
+
+// Ticket #13163 (owner all-hands 2026-10-02): wardrobe coverage was not
+// measured, so a folded sheet or towel became the feed's de facto uniform
+// and nothing went red -- 15 of the last 20 on-skin frames used a sheet or
+// towel as the coverage, invisible until the owner said so by hand.
+// `bedding-on-body`/`towel`/`bulky` are the three the owner retired
+// ("stay away from the bulky fabric look"); target is zero, same window as
+// the other rolling-7 charge lines.
+const RETIRED_COVERAGE_CAP = 0
+export const RETIRED_COVERAGE = new Set(['bedding-on-body', 'towel', 'bulky'])
+// No repeat inside 3 consecutive known-coverage frames -- the same rotation
+// discipline as body zone and contact mode, at a shorter window because a
+// closet only has a handful of outfits per cast member (docs/store-team/
+// cast-wardrobe.md) and a strict 5-window would flag normal rotation.
+const WARDROBE_COVERAGE_WINDOW = 3
+// "Styled" = a lingerie piece or the robe -- what the owner asked to see
+// more of ("I'd rather see a bra line than a piece of fabric"). shirt-open
+// and trousers are everyday-clothing coverage classes, not lingerie, so they
+// are deliberately excluded from this count.
+export const STYLED_COVERAGE = new Set([
+  'bra', 'bralette', 'briefs-highcut', 'thong', 'garter', 'bodysuit', 'slip', 'robe',
+])
 
 // Ticket #12876 (owner 2026-10-01, Step 2.9 item 8): "distinct products over
 // product posts" and "the top product's share" for the trailing 7 and 21
@@ -420,14 +447,16 @@ export function computeSocialMixReport(
   const last7 = rows.slice(0, CHARGE_WINDOW)
   const last14 = rows.slice(0, PRODUCT_WINDOW)
 
-  // --- Axis coverage: how many of the last 7 stills carry all four axes ---
+  // --- Axis coverage: how many of the last 7 stills carry every axis ---
   // The line ticket #10479 exists to move. 0/7 is the state migrations 093
-  // and 099 both shipped into, twice, undetected.
+  // and 099 both shipped into, twice, undetected. wardrobeCoverage (ticket
+  // #13163) joined the set hasAllSceneAxes checks, so it joins this call too.
   const coveredIn7 = last7.filter(r => hasAllSceneAxes({
     bodyZone: r.bodyZone ?? undefined,
     contactMode: r.contactMode ?? undefined,
     cropScale: r.cropScale ?? undefined,
     sceneLocation: r.sceneLocation ?? undefined,
+    wardrobeCoverage: r.wardrobeCoverage ?? undefined,
   })).length
   const coverage = minFloorLine('Axis coverage (last 7)', coveredIn7, CHARGE_WINDOW, CHARGE_WINDOW)
 
@@ -636,6 +665,42 @@ export function computeSocialMixReport(
         CHARGE_WINDOW, PLUG_CAP, false,
       )
 
+  // --- Wardrobe coverage (ticket #13163) ---
+  const coverageKnown = rows.filter(r => r.wardrobeCoverage != null)
+  let retiredCoverage: MixReportLine
+  let coverageWindow: MixReportLine
+  let styledShare: MixReportLine
+  if (coverageKnown.length === 0) {
+    retiredCoverage = unknownLine('Retired coverage (last 7)', 'wardrobe_coverage unpopulated on every row')
+    coverageWindow = unknownLine('Coverage window (last 3)', 'wardrobe_coverage unpopulated on every row')
+    styledShare = unknownLine('Styled vs bare-jewellery (last 7)', 'wardrobe_coverage unpopulated on every row')
+  } else {
+    const coverageKnownIn7 = last7.filter(r => r.wardrobeCoverage != null).length
+    retiredCoverage = coverageKnownIn7 === 0
+      ? unknownLine('Retired coverage (last 7)', 'wardrobe_coverage unpopulated on every row in window')
+      : maxCapLine(
+          'Retired coverage (last 7)',
+          last7.filter(r => r.wardrobeCoverage && RETIRED_COVERAGE.has(r.wardrobeCoverage)).length,
+          CHARGE_WINDOW, RETIRED_COVERAGE_CAP, false,
+        )
+
+    coverageWindow = repeatWindowLine(
+      'Coverage window (last 3)',
+      coverageKnown.map(r => r.wardrobeCoverage!),
+      WARDROBE_COVERAGE_WINDOW,
+    )
+
+    const styledIn7 = last7.filter(r => r.wardrobeCoverage && STYLED_COVERAGE.has(r.wardrobeCoverage)).length
+    const bareIn7 = last7.filter(r => r.wardrobeCoverage === 'bare-jewellery').length
+    styledShare = coverageKnownIn7 === 0
+      ? unknownLine('Styled vs bare-jewellery (last 7)', 'wardrobe_coverage unpopulated on every row in window')
+      : {
+          label: 'Styled vs bare-jewellery (last 7)',
+          detail: `${styledIn7} styled, ${bareIn7} bare-jewellery, out of ${coverageKnownIn7} known / ${CHARGE_WINDOW}`,
+          status: 'ok',
+        }
+  }
+
   // --- Carousel count (last 14, floor 1) ---
   const carouselCount = last14.filter(isCarousel).length
   const carousel = minFloorLine('Carousel (last 14)', carouselCount, PRODUCT_WINDOW, CAROUSEL_MIN)
@@ -677,6 +742,7 @@ export function computeSocialMixReport(
     bodyZoneWindow, contactModeWindow, locationWindow,
     castRotation, castVolume, wideCeiling, plug, lubeTreatment, carousel,
     productDiversity, newArrivalShare,
+    retiredCoverage, coverageWindow, styledShare,
   }
   // Non-ok, not breach-only (#10478 defect 1). An unpopulated column is the
   // most-decayed signal in the system and it used to read clean.
@@ -717,6 +783,7 @@ const LINE_ORDER: (keyof SocialMixReport['lines'])[] = [
   'bodyZoneWindow', 'contactModeWindow', 'locationWindow',
   'castRotation', 'castVolume', 'wideCeiling', 'plug', 'lubeTreatment', 'carousel',
   'productDiversity', 'newArrivalShare',
+  'retiredCoverage', 'coverageWindow', 'styledShare',
 ]
 
 /**
@@ -761,6 +828,9 @@ const LINE_LABELS: Record<keyof SocialMixReport['lines'], string> = {
   carousel: 'Carousel (last 14)',
   productDiversity: 'Product diversity (last 7 / 21)',
   newArrivalShare: 'New-arrival share (last 7 product posts)',
+  retiredCoverage: 'Retired coverage (last 7)',
+  coverageWindow: 'Coverage window (last 3)',
+  styledShare: 'Styled vs bare-jewellery (last 7)',
 }
 
 /**
@@ -837,6 +907,7 @@ async function liveLoadRows(limit: number): Promise<SocialMixReportRow[]> {
       cropScale: socialPosts.cropScale,
       sceneLocation: socialPosts.sceneLocation,
       castSlugs: socialPosts.castSlugs,
+      wardrobeCoverage: socialPosts.wardrobeCoverage,
     })
     .from(socialPosts)
     .where(and(
@@ -863,6 +934,7 @@ async function liveLoadRows(limit: number): Promise<SocialMixReportRow[]> {
       cropScale: r.cropScale ?? null,
       sceneLocation: r.sceneLocation ?? null,
       castSlugs: r.castSlugs ?? null,
+      wardrobeCoverage: r.wardrobeCoverage ?? null,
     }]
   })
 }

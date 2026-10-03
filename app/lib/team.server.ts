@@ -3076,6 +3076,10 @@ export interface DraftSocialPostInput {
   bodyZone?: string | undefined
   contactMode?: string | undefined
   cropScale?: string | undefined
+  // Wardrobe coverage (migration 113, ticket #13163). Same optionality and
+  // same draft-time-confirmation treatment as the three siblings above;
+  // report-only (social-mix-report.server.ts), not required at generation.
+  wardrobeCoverage?: string | undefined
   // Pairing-presence self-check reason (migration 100, ticket #10560). The
   // explicit reason a toy-featuring draft records for why no lube pairing
   // applies, read by the deterministic pairing-missing check at gate time.
@@ -3148,6 +3152,7 @@ export async function createDraftSocialPost(
       contactMode: p.contactMode,
       cropScale: p.cropScale,
       sceneLocation: p.sceneLocation,
+      wardrobeCoverage: p.wardrobeCoverage,
     },
     p.mediaUrls,
   )
@@ -3184,6 +3189,7 @@ export async function createDraftSocialPost(
       bodyZone:      axes.bodyZone ?? null,
       contactMode:   axes.contactMode ?? null,
       cropScale:     axes.cropScale ?? null,
+      wardrobeCoverage: axes.wardrobeCoverage ?? null,
       pairingNoneReason: p.pairingNoneReason ?? null,
     })
     .returning({ id: socialPosts.id })

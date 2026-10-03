@@ -273,6 +273,11 @@ export const socialPosts = pgTable('social_posts', {
   bodyZone:        varchar('body_zone', { length: 40 }),
   contactMode:     varchar('contact_mode', { length: 20 }),
   cropScale:       varchar('crop_scale', { length: 10 }),
+  // Wardrobe coverage (migration 113, ticket #13163, owner all-hands
+  // 2026-10-02). Sibling to the three fields above, same optionality: not
+  // every post has a wardrobe to report, and this one is report-only (the
+  // mix report's rolling-7 counts) rather than required at generation.
+  wardrobeCoverage: varchar('wardrobe_coverage', { length: 20 }),
   // Pairing-presence self-check reason (migration 100, ticket #10560). The
   // deterministic pairing-missing check (social-publish-gate.server.ts) has
   // accepted `pairingNoneReason` since it was written, but nothing wrote it:

@@ -8,6 +8,7 @@ import {
   CONTACT_MODES,
   CROP_SCALES,
   NON_SKIN_SENTINEL,
+  WARDROBE_COVERAGE_CLASSES,
   applyNonSkinAxisDefaults,
   hasAllSceneAxes,
   mergeSceneAxes,
@@ -18,11 +19,38 @@ import {
   validateSceneAxis,
 } from './social-scene-vocab'
 
+// Ticket #13163's own DONE WHEN: this list must match the "Coverage classes"
+// section of docs/store-team/cast-wardrobe.md exactly. That doc ships on a
+// separate, not-yet-merged docs PR (#1481, ticket #13162), so it does not
+// exist in this branch's working tree yet -- reading it here would make this
+// test fail on CI ordering rather than on an actual drift. This mirrors the
+// doc's list verbatim (confirmed byte-identical against PR #1481's content
+// at authoring time) as the next-best check available right now: once #1481
+// merges, tighten this to read the file directly (fs.readFileSync +
+// extract the fenced list) so a future edit to the doc is caught here
+// automatically instead of needing a second manual sync.
+const CAST_WARDROBE_DOC_COVERAGE_CLASSES = [
+  'bare-jewellery', 'bra', 'bralette', 'briefs-highcut', 'thong', 'garter',
+  'bodysuit', 'slip', 'robe', 'shirt-open', 'trousers', 'bedding-on-body',
+  'towel', 'bulky',
+]
+
 describe('validateSceneAxis', () => {
   it('accepts every token in the vocabulary', () => {
     for (const zone of BODY_ZONES) expect(validateSceneAxis('bodyZone', zone).ok).toBe(true)
     for (const mode of CONTACT_MODES) expect(validateSceneAxis('contactMode', mode).ok).toBe(true)
     for (const crop of CROP_SCALES) expect(validateSceneAxis('cropScale', crop).ok).toBe(true)
+    for (const cls of WARDROBE_COVERAGE_CLASSES) expect(validateSceneAxis('wardrobeCoverage', cls).ok).toBe(true)
+  })
+
+  it('refuses a wardrobeCoverage value outside the closed enum', () => {
+    const parsed = validateSceneAxis('wardrobeCoverage', 'lingerie')
+    expect(parsed.ok).toBe(false)
+    if (!parsed.ok) expect(parsed.error).toContain('wardrobeCoverage must be one of')
+  })
+
+  it('has no "none" sentinel for wardrobeCoverage: bare-jewellery already names the bare case', () => {
+    expect(validateSceneAxis('wardrobeCoverage', NON_SKIN_SENTINEL).ok).toBe(false)
   })
 
   it('refuses the typo shapes a length-only check used to let through', () => {
@@ -128,10 +156,16 @@ describe('mergeSceneAxes / hasAllSceneAxes', () => {
     })
   })
 
-  it('reports coverage only when all four are present', () => {
+  it('reports coverage only when all five are present', () => {
     expect(hasAllSceneAxes({ bodyZone: 'sternum', contactMode: 'resting', cropScale: 'macro' })).toBe(false)
+    // Ticket #13163: adding wardrobeCoverage to SCENE_AXIS_KEYS means the
+    // original four are no longer sufficient on their own.
     expect(hasAllSceneAxes({
       bodyZone: 'sternum', contactMode: 'resting', cropScale: 'macro', sceneLocation: 'bedroom-loft',
+    })).toBe(false)
+    expect(hasAllSceneAxes({
+      bodyZone: 'sternum', contactMode: 'resting', cropScale: 'macro', sceneLocation: 'bedroom-loft',
+      wardrobeCoverage: 'bra',
     })).toBe(true)
   })
 })
@@ -224,5 +258,12 @@ describe('applyNonSkinAxisDefaults (ticket #13096)', () => {
   it('composes with requireSceneAxesForGeneration so a bare wide/medium call now always passes', () => {
     const defaulted = applyNonSkinAxisDefaults({ sceneLocation: 'bedroom-loft', cropScale: 'wide' })
     expect(requireSceneAxesForGeneration(defaulted)).toEqual({ ok: true })
+  })
+})
+
+// Ticket #13163's explicit DONE WHEN: "the doc list and the enum match".
+describe('WARDROBE_COVERAGE_CLASSES matches docs/store-team/cast-wardrobe.md', () => {
+  it('is the same set, in the same order, as the Coverage classes list', () => {
+    expect([...WARDROBE_COVERAGE_CLASSES]).toEqual(CAST_WARDROBE_DOC_COVERAGE_CLASSES)
   })
 })
