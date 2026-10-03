@@ -11,6 +11,10 @@
  * names (`sniffImageMediaType`, `remoteVisionCallVision`, `heroVisionDeps`,
  * `gateHeroBuffer`) as thin re-exports of this module, since its own test
  * (`scripts/gen-notebook-art.test.ts`) imports them by those names.
+ *
+ * Ticket #13333 gave the product-fidelity sibling gate
+ * (`gateProductFidelityBuffer`) the same remote-fallback treatment: see
+ * `remoteFidelityCallVision`/`fidelityDepsForEnv` below.
  */
 
 import type { VisionGateDeps, VisionVerdict } from './social-vision-gate.server'
@@ -124,6 +128,77 @@ export function visionDepsForEnv(runId?: number, team?: TeamId): VisionGateDeps 
   return process.env['ANTHROPIC_API_KEY']?.trim() ? undefined : { callVision: remoteVisionCallVision(runId, team) }
 }
 
+/**
+ * Remote fallback for the product-fidelity gate's `callVision` hook (ticket
+ * #13333), the sibling of `remoteVisionCallVision` above for
+ * `social-product-fidelity.server.ts`'s own default `callVision`, which
+ * builds `new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })` IN THIS
+ * process the same way the anatomy gate's did. A cloud content run carries
+ * no such key, so every fidelity check failed closed and
+ * `scripts/gen-notebook-art.ts`'s unconditional upload-time check (ticket
+ * #13119) refused the upload rather than ship an unchecked image, even when
+ * the anatomy gate right above it had already completed cleanly via its own
+ * remote fallback.
+ *
+ * By the time this hook runs, `gateProductFidelityBuffer` has already
+ * fetched the reference image locally (a plain, unauthenticated GET — no
+ * secret involved), so both images travel to the route as base64, mirroring
+ * `remoteVisionCallVision`'s `imageBase64`/`mediaType` shape rather than
+ * asking the route to re-fetch a url it would have to be given separately.
+ * Throws on any transport/HTTP failure and when the server could not
+ * complete the check (`checkCompleted: false`), exactly like
+ * `remoteVisionCallVision`, so `runProductFidelityCheckOnImages` (this
+ * function's caller, via `gateProductFidelityBuffer`) produces the same
+ * fail-closed verdict a route outage or a local auth failure always has.
+ */
+export function remoteFidelityCallVision(runId?: number, team?: TeamId): NonNullable<ProductFidelityDeps['callVision']> {
+  const BASE_URL = (process.env['BASE_URL'] ?? 'https://xdipx.com').replace(/\/$/, '')
+  const TEAM_TOKEN = process.env['TEAM_TOKEN'] ?? process.env['HOMEPAGE_TEAM_TOKEN'] ?? process.env['CRON_SECRET'] ?? ''
+  return async (renderedImage, referenceImage) => {
+    if (!TEAM_TOKEN) throw new Error('vision-gate: no TEAM_TOKEN/HOMEPAGE_TEAM_TOKEN/CRON_SECRET in env for the remote route')
+    const res = await fetch(`${BASE_URL}/api/team/vision-gate`, {
+      method: 'POST',
+      headers: { 'x-team-secret': TEAM_TOKEN, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        mode: 'fidelity',
+        imageBase64: renderedImage.data,
+        mediaType: renderedImage.mediaType,
+        referenceImageBase64: referenceImage.data,
+        referenceMediaType: referenceImage.mediaType,
+        ...(runId !== undefined ? { runId } : {}),
+        ...(team ? { team } : {}),
+      }),
+    })
+    if (!res.ok) throw new Error(`vision-gate route HTTP ${res.status}`)
+    const verdict = (await res.json()) as ProductFidelityVerdict
+    if (!verdict.checkCompleted) {
+      throw new Error(`vision-gate route could not complete the fidelity check: ${verdict.notes}`)
+    }
+    // Return the raw rating shape, not the full verdict: the caller
+    // (`runProductFidelityCheckOnImages`) re-validates via
+    // `isValidFidelityShape` and stamps its own fresh `checkedAt` /
+    // `checkCompleted: true`, the same contract `remoteVisionCallVision`
+    // keeps with `getOneVerdict` above.
+    return {
+      silhouette: verdict.silhouette,
+      colour: verdict.colour,
+      finish: verdict.finish,
+      brandMark: verdict.brandMark,
+      notes: verdict.notes,
+    }
+  }
+}
+
+/**
+ * Which `callVision` `gateProductFidelityBuffer`'s default should use: the
+ * in-process Anthropic call when `ANTHROPIC_API_KEY` is present, the
+ * privileged route when it is not. Exact sibling of `visionDepsForEnv`
+ * above, for the product-fidelity gate instead of the anatomy gate.
+ */
+export function fidelityDepsForEnv(runId?: number, team?: TeamId): ProductFidelityDeps | undefined {
+  return process.env['ANTHROPIC_API_KEY']?.trim() ? undefined : { callVision: remoteFidelityCallVision(runId, team) }
+}
+
 /** Base64-encode a candidate buffer and run it through the shared anatomy /
  *  imagery-ceiling vision gate. Never throws — same fail-closed contract as
  *  the social and Notebook-hero paths. `team` (default: the route's own
@@ -146,13 +221,22 @@ export async function gateImageBuffer(buf: Buffer, deps?: VisionGateDeps, runId?
  * `checkCompleted: false` fail-closed shape `runProductFidelityCheckOnImages`
  * itself already produces for a model-call failure, via the same
  * `failClosedVerdict` helper.
+ *
+ * `runId`/`team` (ticket #13333) are threaded straight through to
+ * `fidelityDepsForEnv` when the caller passes no explicit `deps`, the same
+ * env-aware-default treatment `gateImageBuffer` already gives the anatomy
+ * gate above — a scheduled sandbox with no `ANTHROPIC_API_KEY` falls back to
+ * the privileged route instead of failing every fidelity check closed.
  */
 export async function gateProductFidelityBuffer(
   buf: Buffer,
   referenceImageUrl: string,
   deps?: ProductFidelityDeps,
+  runId?: number,
+  team?: TeamId,
 ): Promise<ProductFidelityVerdict> {
-  const fetchFn = deps?.fetchImageBase64 ?? defaultFetchImageBase64
+  const resolvedDeps = deps ?? fidelityDepsForEnv(runId, team)
+  const fetchFn = resolvedDeps?.fetchImageBase64 ?? defaultFetchImageBase64
   let reference: { data: string; mediaType: string }
   try {
     reference = await fetchFn(referenceImageUrl)
@@ -163,7 +247,7 @@ export async function gateProductFidelityBuffer(
   return runProductFidelityCheckOnImages(
     { data: buf.toString('base64'), mediaType: sniffImageMediaType(buf) },
     reference,
-    deps,
+    resolvedDeps,
   )
 }
 
@@ -210,6 +294,11 @@ export interface VisionPreflightResult {
   ok: boolean
   reason?: VisionPreflightReason
   message?: string
+  /** Which dependency failed, when `ok` is false (ticket #13333): the
+   *  anatomy gate and the product-fidelity gate are two independent
+   *  Anthropic call paths with two independent remote-fallback routes, so a
+   *  caller needs to know which one is actually broken. Omitted when `ok`. */
+  dependency?: 'anatomy' | 'fidelity'
 }
 
 // Smallest possible valid PNG (1x1, transparent). The preflight only cares
@@ -220,18 +309,43 @@ const PREFLIGHT_PNG_BASE64 =
 
 /**
  * A cheap, minimal vision-gate call whose only purpose is to prove the hero
- * path's Anthropic dependency can actually complete a check, with the
+ * path's Anthropic dependencies can actually complete a check, with the
  * failure reason classified. Meant to run right after a routine's own
  * budget/lock gate and before it spends a draft's worth of work on a post
  * that would end up heroless regardless — see the module doc comment above
  * for the two incidents this replaces a 40-minutes-late discovery for.
- * Never throws: `gateImageBuffer` itself never throws, and a `checkCompleted:
- * false` verdict here is the expected shape for "could not tell", not an
- * exceptional path.
+ *
+ * Ticket #13333: extended to also prove the product-fidelity gate's own,
+ * independent Anthropic dependency, not just the anatomy gate's. Run 1220
+ * discovered that a content run's anatomy preflight passing clean said
+ * nothing about whether the fidelity gate (a separate remote route call,
+ * added later by ticket #13119) could complete at all — it died at upload
+ * time instead, 40 minutes into the run, which is exactly the late-discovery
+ * shape this preflight exists to prevent. Checks the anatomy dependency
+ * first and returns immediately on failure, since a run with no working
+ * anatomy gate cannot usefully reach the fidelity gate's reference-image
+ * flow anyway and there is no reason to spend the second call.
+ *
+ * Never throws: neither `gateImageBuffer` nor `runProductFidelityCheckOnImages`
+ * ever throws, and a `checkCompleted: false` verdict here is the expected
+ * shape for "could not tell", not an exceptional path.
  */
 export async function runVisionGatePreflight(runId?: number, team?: TeamId): Promise<VisionPreflightResult> {
   const verdict = await gateImageBuffer(Buffer.from(PREFLIGHT_PNG_BASE64, 'base64'), undefined, runId, team)
-  if (verdict.checkCompleted) return { ok: true }
-  const message = verdict.notes ?? 'vision gate did not complete'
-  return { ok: false, reason: classifyVisionPreflightFailure(message), message }
+  if (!verdict.checkCompleted) {
+    const message = verdict.notes ?? 'vision gate did not complete'
+    return { ok: false, reason: classifyVisionPreflightFailure(message), message, dependency: 'anatomy' }
+  }
+
+  // Same cheapest-possible-payload reasoning as the anatomy check above: the
+  // preflight only cares whether the fidelity check completes, never what it
+  // finds, so the same 1x1 PNG stands in for both the "rendered" and
+  // "reference" images rather than fetching or generating a real pair.
+  const pngImage = { data: PREFLIGHT_PNG_BASE64, mediaType: 'image/png' as const }
+  const fidelityVerdict = await runProductFidelityCheckOnImages(pngImage, pngImage, fidelityDepsForEnv(runId, team))
+  if (!fidelityVerdict.checkCompleted) {
+    const message = fidelityVerdict.notes ?? 'product-fidelity gate did not complete'
+    return { ok: false, reason: classifyVisionPreflightFailure(message), message, dependency: 'fidelity' }
+  }
+  return { ok: true }
 }

@@ -1,8 +1,9 @@
 /**
- * POST /api/team/vision-gate — server-side anatomy vision-gate check.
+ * POST /api/team/vision-gate — server-side anatomy / product-fidelity vision-gate check.
  *
  *   { imageUrl, assetId? } -> VisionVerdict (+ recorded:true, assetId when assetId given)
  *   { imageBase64, mediaType } -> VisionVerdict
+ *   { mode: 'fidelity', imageBase64, mediaType, referenceImageBase64, referenceMediaType, team?, runId? } -> ProductFidelityVerdict
  *
  * Why this route exists (ticket #8989). scripts/gen-notebook-art.ts gates
  * every Notebook hero candidate through the same anatomy check the social
@@ -48,6 +49,24 @@
  * invalidated it with no way to clear the backlog short of regenerating the
  * art. Omit `assetId` to keep the old judge-only behavior (imageBase64
  * candidates have no asset row yet to record against).
+ *
+ * `mode: 'fidelity'` (ticket #13333) is a second, independent check: whether
+ * a rendered candidate stayed faithful to the real bare product reference it
+ * was generated against (`app/lib/social-product-fidelity.server.ts`,
+ * ticket #11487), not an anatomy read at all. `gateProductFidelityBuffer`'s
+ * own default `callVision` builds the Anthropic client IN THE CALLER
+ * PROCESS exactly like the anatomy gate's does, so it hit the same wall: a
+ * cloud content run with no `ANTHROPIC_API_KEY` could never complete a
+ * fidelity check, and `scripts/gen-notebook-art.ts`'s unconditional
+ * upload-time check (ticket #13119) refused the upload rather than ship an
+ * unchecked image, even on a run whose anatomy gate had completed cleanly
+ * through its own remote fallback right above. Both images travel here as
+ * base64 (the caller already fetched the reference locally, a plain
+ * unauthenticated GET) rather than as a second url for this route to fetch,
+ * mirroring the anatomy branch's own `imageBase64`/`mediaType` shape.
+ * Returns the `ProductFidelityVerdict` from `runProductFidelityCheckOnImages`
+ * unchanged, including `checkCompleted`, the same way the anatomy branch
+ * returns `VisionVerdict` unchanged.
  */
 import type { ActionFunctionArgs } from 'react-router'
 import { assertTeamAuth, gate, isTeamId, type TeamId } from '~/lib/team.server'
@@ -66,19 +85,43 @@ export async function action({ request }: ActionFunctionArgs) {
   const b = (await request.json().catch(() => ({}))) as Record<string, unknown>
 
   try {
-    const imageUrl = str(b['imageUrl'])
+    const mode = str(b['mode'])
     const imageBase64 = str(b['imageBase64'])
     const mediaType = str(b['mediaType'])
+
+    // Money gate: both checks are a Sonnet vision call, so both gate the
+    // same as every other model-spend surface reachable with a team token.
+    // `team` (ticket #11856) is the CALLER's own team, defaulting to
+    // 'content' for the original Notebook hero caller, which never sends one.
+    const teamParam = str(b['team'])
+    const team: TeamId = teamParam && isTeamId(teamParam) ? teamParam : 'content'
+
+    if (mode === 'fidelity') {
+      const referenceImageBase64 = str(b['referenceImageBase64'])
+      const referenceMediaType = str(b['referenceMediaType'])
+      if (!imageBase64 || !mediaType) {
+        return new Response('Bad Request: imageBase64 + mediaType required for a fidelity request', { status: 400 })
+      }
+      if (!referenceImageBase64 || !referenceMediaType) {
+        return new Response('Bad Request: referenceImageBase64 + referenceMediaType required for a fidelity request', { status: 400 })
+      }
+      const gateResult = await gate(team, num(b['runId']))
+      if (!gateResult.ok) {
+        return Response.json({ error: 'gated', reason: gateResult.reason, gate: gateResult }, { status: 403 })
+      }
+      const { runProductFidelityCheckOnImages } = await import('~/lib/social-product-fidelity.server')
+      const verdict = await runProductFidelityCheckOnImages(
+        { data: imageBase64, mediaType },
+        { data: referenceImageBase64, mediaType: referenceMediaType },
+      )
+      return Response.json(verdict, { headers: { 'Cache-Control': 'no-store' } })
+    }
+
+    const imageUrl = str(b['imageUrl'])
     if (!imageUrl && !(imageBase64 && mediaType)) {
       return new Response('Bad Request: imageUrl, or imageBase64 + mediaType, required', { status: 400 })
     }
 
-    // Money gate: the check is a Sonnet vision call, so it gates the same as
-    // every other model-spend surface reachable with a team token. `team`
-    // (ticket #11856) is the CALLER's own team, defaulting to 'content' for
-    // the original Notebook hero caller, which never sends one.
-    const teamParam = str(b['team'])
-    const team: TeamId = teamParam && isTeamId(teamParam) ? teamParam : 'content'
     const gateResult = await gate(team, num(b['runId']))
     if (!gateResult.ok) {
       return Response.json({ error: 'gated', reason: gateResult.reason, gate: gateResult }, { status: 403 })

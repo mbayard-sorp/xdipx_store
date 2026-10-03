@@ -5,8 +5,21 @@
 // content-default behavior is already covered by
 // scripts/gen-notebook-art.test.ts and must stay unchanged.
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { classifyVisionPreflightFailure, remoteVisionCallVision, runVisionGatePreflight, gateProductFidelityBuffer, productFidelityPasses } from './vision-gate-buffer.server'
+import {
+  classifyVisionPreflightFailure,
+  remoteVisionCallVision,
+  remoteFidelityCallVision,
+  fidelityDepsForEnv,
+  runVisionGatePreflight,
+  gateProductFidelityBuffer,
+  productFidelityPasses,
+} from './vision-gate-buffer.server'
 import type { ProductFidelityDeps, ProductFidelityVerdict } from './social-product-fidelity.server'
+
+const CLEAN_FIDELITY_VERDICT: ProductFidelityVerdict = {
+  silhouette: 'match', colour: 'match', finish: 'match', brandMark: 'match',
+  notes: 'faithful to reference', checkedAt: '2026-10-03T00:00:00.000Z', checkCompleted: true,
+}
 
 const CLEAN_VERDICT = {
   pass: true,
@@ -59,6 +72,125 @@ describe('remoteVisionCallVision team plumbing (ticket #11856)', () => {
     const callVision = remoteVisionCallVision(1099, 'homepage')
     await callVision('abc', 'image/png')
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+// Ticket #13333: the product-fidelity gate's own remote fallback, the
+// sibling of remoteVisionCallVision/visionDepsForEnv above. A cloud content
+// run carries no ANTHROPIC_API_KEY, so without this the fidelity check
+// failed closed on every run even when the anatomy gate right above it had
+// already completed cleanly through its own remote fallback.
+describe('remoteFidelityCallVision (ticket #13333)', () => {
+  const realFetch = global.fetch
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    global.fetch = realFetch
+  })
+
+  it('posts both images as base64 in fidelity mode and returns the raw rating shape', async () => {
+    vi.stubEnv('TEAM_TOKEN', 'test-team-token')
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(init!.body as string)
+      expect(body.mode).toBe('fidelity')
+      expect(body.imageBase64).toBe('rendered-b64')
+      expect(body.mediaType).toBe('image/png')
+      expect(body.referenceImageBase64).toBe('reference-b64')
+      expect(body.referenceMediaType).toBe('image/jpeg')
+      expect(body.team).toBe('homepage')
+      expect(body.runId).toBe(1099)
+      return new Response(JSON.stringify(CLEAN_FIDELITY_VERDICT), { status: 200 })
+    })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    const callVision = remoteFidelityCallVision(1099, 'homepage')
+    const result = await callVision({ data: 'rendered-b64', mediaType: 'image/png' }, { data: 'reference-b64', mediaType: 'image/jpeg' })
+    expect(result).toEqual({ silhouette: 'match', colour: 'match', finish: 'match', brandMark: 'match', notes: 'faithful to reference' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('throws when the route could not complete the check, so the caller fails closed rather than passing a half-read', async () => {
+    vi.stubEnv('TEAM_TOKEN', 'test-team-token')
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({
+      silhouette: null, colour: null, finish: null, brandMark: null,
+      notes: 'model call failed', checkedAt: '2026-10-03T00:00:00.000Z', checkCompleted: false,
+    }), { status: 200 })) as unknown as typeof fetch
+
+    const callVision = remoteFidelityCallVision()
+    await expect(callVision({ data: 'a', mediaType: 'image/png' }, { data: 'b', mediaType: 'image/png' }))
+      .rejects.toThrow('could not complete the fidelity check')
+  })
+
+  it('throws when no team token is configured', async () => {
+    vi.stubEnv('TEAM_TOKEN', '')
+    vi.stubEnv('HOMEPAGE_TEAM_TOKEN', '')
+    vi.stubEnv('CRON_SECRET', '')
+    const callVision = remoteFidelityCallVision()
+    await expect(callVision({ data: 'a', mediaType: 'image/png' }, { data: 'b', mediaType: 'image/png' }))
+      .rejects.toThrow('no TEAM_TOKEN/HOMEPAGE_TEAM_TOKEN/CRON_SECRET')
+  })
+})
+
+describe('fidelityDepsForEnv (ticket #13333)', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it('selects the remote fallback when ANTHROPIC_API_KEY is absent', () => {
+    vi.stubEnv('ANTHROPIC_API_KEY', '')
+    const deps = fidelityDepsForEnv()
+    expect(deps).toBeDefined()
+    expect(deps!.callVision).toBeDefined()
+  })
+
+  it('does not select the remote fallback when ANTHROPIC_API_KEY is present', () => {
+    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-real-key')
+    expect(fidelityDepsForEnv()).toBeUndefined()
+  })
+
+  it('treats a whitespace-only key the same as absent, matching visionDepsForEnv', () => {
+    vi.stubEnv('ANTHROPIC_API_KEY', '   ')
+    const deps = fidelityDepsForEnv()
+    expect(deps).toBeDefined()
+  })
+})
+
+// Ticket #13333: gateProductFidelityBuffer gained the same env-aware-default
+// treatment gateImageBuffer already had, threading runId/team through to
+// fidelityDepsForEnv when the caller passes no explicit deps.
+describe('gateProductFidelityBuffer env-aware default (ticket #13333)', () => {
+  const realFetch = global.fetch
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    global.fetch = realFetch
+  })
+
+  it('falls back to the remote route when no deps are given and ANTHROPIC_API_KEY is absent', async () => {
+    vi.stubEnv('ANTHROPIC_API_KEY', '')
+    vi.stubEnv('TEAM_TOKEN', 'test-team-token')
+    // No explicit deps passed at all, so both the reference-image fetch (a
+    // plain GET, matching defaultFetchImageBase64) and the vision-gate POST
+    // go through the global fetch mock, branching on method.
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (!init || init.method === undefined) {
+        return new Response('reference-bytes', { status: 200, headers: { 'content-type': 'image/jpeg' } })
+      }
+      const body = JSON.parse(init.body as string)
+      expect(body.mode).toBe('fidelity')
+      expect(body.runId).toBe(1220)
+      return new Response(JSON.stringify(CLEAN_FIDELITY_VERDICT), { status: 200 })
+    })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    const verdict = await gateProductFidelityBuffer(
+      Buffer.from('rendered-bytes'),
+      'https://cdn.shopify.com/files/ref.jpg',
+      undefined,
+      1220,
+    )
+    expect(verdict.checkCompleted).toBe(true)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 })
 
@@ -197,16 +329,26 @@ describe('runVisionGatePreflight (ticket #12371)', () => {
     global.fetch = realFetch
   })
 
-  it('reports ok:true when the remote check completes, regardless of the verdict', async () => {
+  it('reports ok:true when both the anatomy and fidelity remote checks complete, regardless of verdict', async () => {
     vi.stubEnv('ANTHROPIC_API_KEY', '')
     vi.stubEnv('TEAM_TOKEN', 'test-team-token')
-    global.fetch = vi.fn(async () => new Response(JSON.stringify(CLEAN_VERDICT), { status: 200 })) as unknown as typeof fetch
+    // Mode-aware mock: the preflight now makes two remote calls, one for
+    // each independent dependency (ticket #13333), so the fixture has to
+    // answer both shapes rather than reusing the anatomy-only CLEAN_VERDICT
+    // for every call.
+    global.fetch = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(init!.body as string)
+      if (body.mode === 'fidelity') {
+        return new Response(JSON.stringify(CLEAN_FIDELITY_VERDICT), { status: 200 })
+      }
+      return new Response(JSON.stringify(CLEAN_VERDICT), { status: 200 })
+    }) as unknown as typeof fetch
 
     const result = await runVisionGatePreflight()
     expect(result).toEqual({ ok: true })
   })
 
-  it('reports a classified no-credential failure without throwing', async () => {
+  it('reports a classified no-credential failure on the anatomy dependency without throwing', async () => {
     vi.stubEnv('ANTHROPIC_API_KEY', '')
     vi.stubEnv('TEAM_TOKEN', 'test-team-token')
     global.fetch = vi.fn(async () => { throw new Error('Could not resolve authentication method') }) as unknown as typeof fetch
@@ -215,6 +357,7 @@ describe('runVisionGatePreflight (ticket #12371)', () => {
     expect(result.ok).toBe(false)
     expect(result.reason).toBe('no-credential')
     expect(result.message).toContain('Could not resolve authentication method')
+    expect(result.dependency).toBe('anatomy')
   })
 
   it('reports a classified no-credit failure without throwing', async () => {
@@ -227,5 +370,28 @@ describe('runVisionGatePreflight (ticket #12371)', () => {
     const result = await runVisionGatePreflight()
     expect(result.ok).toBe(false)
     expect(result.reason).toBe('no-credit')
+    expect(result.dependency).toBe('anatomy')
+  })
+
+  // Ticket #13333: run 1220's actual failure shape — the anatomy dependency
+  // is healthy (it completes clean) but the fidelity dependency's own,
+  // separate remote call cannot complete. Before this ticket, nothing told
+  // a routine the fidelity gate was the broken one until it died at upload
+  // time, 40 minutes and a whole draft later.
+  it('reports a classified failure on the fidelity dependency when anatomy is healthy but fidelity is not', async () => {
+    vi.stubEnv('ANTHROPIC_API_KEY', '')
+    vi.stubEnv('TEAM_TOKEN', 'test-team-token')
+    global.fetch = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(init!.body as string)
+      if (body.mode === 'fidelity') {
+        throw new Error('Could not resolve authentication method. Expected either apiKey or authToken to be set.')
+      }
+      return new Response(JSON.stringify(CLEAN_VERDICT), { status: 200 })
+    }) as unknown as typeof fetch
+
+    const result = await runVisionGatePreflight()
+    expect(result.ok).toBe(false)
+    expect(result.reason).toBe('no-credential')
+    expect(result.dependency).toBe('fidelity')
   })
 })

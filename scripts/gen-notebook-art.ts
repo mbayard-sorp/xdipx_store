@@ -38,13 +38,14 @@
  *     --upload .notebook-art/category-care-1.png --alt "..." --prompt "..." \
  *     [--run-id <contentRunId>]
  *
- *   # Preflight (ticket #12371) — a cheap check that the hero anatomy vision
- *   # gate's one Anthropic dependency can actually complete a check, meant to
- *   # run right after a routine's own budget gate and before it spends a
- *   # whole draft on a post that would end up heroless regardless. Exits 0
- *   # when the check completes; exits 1 with a classified reason
- *   # ('no-credential' | 'no-credit' | 'unknown') printed as JSON when it
- *   # cannot. No --surface required.
+ *   # Preflight (ticket #12371, extended #13333) — a cheap check that the hero
+ *   # anatomy gate's AND the product-fidelity gate's Anthropic dependencies
+ *   # can each actually complete a check, meant to run right after a
+ *   # routine's own budget gate and before it spends a whole draft on a post
+ *   # that would end up heroless regardless. Exits 0 when both complete;
+ *   # exits 1 with a classified reason ('no-credential' | 'no-credit' |
+ *   # 'unknown') plus which dependency failed ('anatomy' | 'fidelity')
+ *   # printed as JSON when either cannot. No --surface required.
  *   npx tsx scripts/gen-notebook-art.ts --preflight [--run-id <contentRunId>]
  *
  *   # Hero cast-plus-product composite (--cast <castSlug> on --surface hero):
@@ -379,7 +380,7 @@ async function generateHeroComposite(slug: string, castSlug: string, opts: {
     // secondary-scale rung still carries one, the single-figure fallback
     // below never does.
     if (!productImageUrl) return { rung, buffers: passing, provider: 'fal', model: res.costKey }
-    const fidelityVerdicts = await Promise.all(passing.map(buf => gateProductFidelityBuffer(buf, productImageUrl)))
+    const fidelityVerdicts = await Promise.all(passing.map(buf => gateProductFidelityBuffer(buf, productImageUrl, undefined, opts.runId)))
     const fidelitySplit = splitByFidelity(passing, fidelityVerdicts)
     if (!fidelitySplit.passing.length) {
       throw new Error(
@@ -592,7 +593,7 @@ async function upload(surface: Surface, slug: string | undefined, filePath: stri
     const uploadProductHandle = await resolveHeroProductHandle(slug!)
     const uploadProductImageUrl = uploadProductHandle ? await resolveProductPhotoUrl(uploadProductHandle) : null
     if (uploadProductImageUrl) {
-      const fidelityVerdict = await gateProductFidelityBuffer(buffer, uploadProductImageUrl)
+      const fidelityVerdict = await gateProductFidelityBuffer(buffer, uploadProductImageUrl, undefined, runId)
       if (!productFidelityPasses(fidelityVerdict)) {
         if (!fidelityVerdict.checkCompleted) {
           console.error(`[gen-notebook-art] UPLOAD REFUSED: the product-fidelity check did not evaluate this candidate, so the upload is blocked rather than shipped unchecked.`)
@@ -707,12 +708,13 @@ async function main() {
   const runIdArg = arg('run-id')
   const runId = runIdArg && /^\d+$/.test(runIdArg) ? Number(runIdArg) : undefined
 
-  // Ticket #12371: a cheap check that the hero anatomy vision gate's one
-  // Anthropic dependency can actually complete a check, meant to run right
-  // after a routine's own budget gate and before it spends a whole draft on
-  // a post that would end up heroless regardless. No --surface required.
-  // Exits 0 when the check completes; exits 1 with a classified reason
-  // ('no-credential' | 'no-credit' | 'unknown') when it cannot.
+  // Ticket #12371, extended #13333: a cheap check that the hero anatomy
+  // gate's AND the product-fidelity gate's Anthropic dependencies can each
+  // actually complete a check, meant to run right after a routine's own
+  // budget gate and before it spends a whole draft on a post that would end
+  // up heroless regardless. No --surface required. Exits 0 when both
+  // complete; exits 1 with a classified reason ('no-credential' |
+  // 'no-credit' | 'unknown') when either cannot.
   if (hasFlag('preflight')) {
     const result = await runVisionGatePreflight(runId)
     console.log(JSON.stringify({ preflight: true, ...result }))
