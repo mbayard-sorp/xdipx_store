@@ -27,7 +27,15 @@
  *  3. Anomaly tickets. Real regressions file a ticket on the improvement bus
  *     with a dedupe_key of the form `seo:{signal}:{iso-week}`, so a signal
  *     that trips every day for a week produces one ticket, not seven. A live
- *     canonical/noindex failure also emails the owner immediately.
+ *     canonical/noindex failure also emails the owner immediately. The
+ *     indexed-drop signal (ticket #13117) files that ticket only when at
+ *     least one regressed URL carries a genuine outage signature (404/5xx,
+ *     or a noindex directive) — see `hasTechnicalDefectSignature` below. A
+ *     raw count drop with every URL fetching healthy is frequently Google
+ *     folding near-duplicate product variants under one canonical, which is
+ *     an editorial question, not a code defect R-DEV can fix; it still
+ *     surfaces in `anomalies` (the owner digest, `/api/team/seo-status`)
+ *     as an informational note instead of filing a ticket nobody can act on.
  *
  * Runs at 12:30 UTC, 30 minutes before the 13:00 owner digest, so the digest
  * reads a fresh row. Server-only.
@@ -87,6 +95,11 @@ export interface RegressedUrl {
   coverageState: string | null
   verdict: string | null
   changedAt: string | null
+  /** Google URL Inspection API fields (ticket #13117), carried through so the
+   *  indexed-drop anomaly can tell a genuine outage from editorial/crawl-budget
+   *  noise. See `hasTechnicalDefectSignature` below. */
+  pageFetchState: string | null
+  indexingState: string | null
 }
 
 export interface SeoDailyResult {
@@ -164,6 +177,39 @@ export function formatRegressedUrlsSuffix(regressedUrls: readonly RegressedUrl[]
     .map(u => `${u.url} (${u.previousCoverageState ?? 'indexed'} -> ${u.coverageState ?? u.verdict ?? 'unknown'})`)
     .join('; ')
   return ` Affected: ${list}${rest > 0 ? `; +${rest} more` : ''}`
+}
+
+/**
+ * Page Fetch states (Google URL Inspection API, `indexStatusResult
+ * .pageFetchState`) that mean the page itself is genuinely broken: a 404
+ * class response or a 5xx server error — the two literal signatures ticket
+ * #13117 names.
+ */
+const BROKEN_PAGE_FETCH_STATES = new Set(['NOT_FOUND', 'SOFT_404', 'SERVER_ERROR'])
+
+/**
+ * Indexing states (`indexStatusResult.indexingState`) that mean a noindex
+ * directive is actively blocking the page: a meta robots tag, or the
+ * `X-Robots-Tag` HTTP header — the other two signatures ticket #13117 names.
+ */
+const NOINDEX_INDEXING_STATES = new Set(['BLOCKED_BY_META_TAG', 'BLOCKED_BY_HTTP_HEADER'])
+
+/**
+ * True when a regressed URL carries the real outage signature the
+ * indexed-drop anomaly exists to catch (ticket #13117): a 404/5xx page-fetch
+ * failure, or a noindex directive via meta tag or `X-Robots-Tag`. False for
+ * the ordinary editorial/crawl-budget noise — Search Console's own
+ * Duplicate / Crawled-not-indexed labels on an otherwise healthy page — that
+ * burned two R-DEV claims as pure false positives (#7415, #13102): both
+ * tickets live-checked every flagged URL and found 200 status, a correct
+ * self-referencing canonical, and no noindex/`X-Robots-Tag` anywhere: Google
+ * algorithmically folding near-duplicate product variants under one
+ * canonical, not a technical defect.
+ */
+export function hasTechnicalDefectSignature(u: RegressedUrl): boolean {
+  if (u.pageFetchState && BROKEN_PAGE_FETCH_STATES.has(u.pageFetchState)) return true
+  if (u.indexingState && NOINDEX_INDEXING_STATES.has(u.indexingState)) return true
+  return false
 }
 
 /** ISO week label, e.g. 2026-W31. The dedupe_key grain: a signal that trips
@@ -345,6 +391,7 @@ export async function runSeoDaily(): Promise<SeoDailyResult> {
   const regressedUrls = await guard('regressed url list', async () => {
     const r = await db.execute(sql`
       SELECT url, previous_coverage_state, coverage_state, verdict,
+             page_fetch_state, indexing_state,
              coverage_changed_at::text AS changed_at
       FROM gsc_url_inspections
       WHERE coverage_changed_at >= now() - interval '7 days'
@@ -360,6 +407,8 @@ export async function runSeoDaily(): Promise<SeoDailyResult> {
         coverageState:          r2['coverage_state'] != null ? String(r2['coverage_state']) : null,
         verdict:                r2['verdict'] != null ? String(r2['verdict']) : null,
         changedAt:              r2['changed_at'] != null ? String(r2['changed_at']) : null,
+        pageFetchState:         r2['page_fetch_state'] != null ? String(r2['page_fetch_state']) : null,
+        indexingState:          r2['indexing_state'] != null ? String(r2['indexing_state']) : null,
       }
     })
   }, [] as RegressedUrl[])
@@ -430,7 +479,19 @@ export async function runSeoDaily(): Promise<SeoDailyResult> {
       // entirely, which regressedUrls does not capture).
       const text = `Indexed URLs fell ${Math.abs(pct).toFixed(1)}% week over week: ${weekAgo.indexed_count} on ${weekAgo.day} to ${today.indexed_count} on ${today.day}.${formatRegressedUrlsSuffix(regressedUrls)}`
       anomalies.push(text)
-      signals.push({ signal: 'indexed-drop', priority: 2, text })
+      // Ticket #13117: a raw count drop alone is not a technical defect — it
+      // is frequently Google folding near-duplicate product variants under
+      // one canonical, or ordinary crawl-budget variance, and R-DEV can only
+      // ever block a ticket filed on that alone (#7415, #13102, two wasted
+      // claims). File the code ticket only when at least one regressed URL
+      // actually carries the real outage signature (404/5xx, or a noindex
+      // directive via meta tag or X-Robots-Tag). Otherwise the drop still
+      // surfaces above in `anomalies`, read by the owner digest and
+      // /api/team/seo-status, as an informational note rather than a ticket
+      // R-DEV cannot act on.
+      if (regressedUrls.some(hasTechnicalDefectSignature)) {
+        signals.push({ signal: 'indexed-drop', priority: 2, text })
+      }
     }
   }
 

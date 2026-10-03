@@ -18,7 +18,7 @@ vi.mock('~/lib/checkout-probe.server', () => ({ checkUrl: vi.fn() }))
 vi.mock('~/lib/team.server', () => ({ createSuggestion: vi.fn() }))
 vi.mock('~/lib/owner-alerts.server', () => ({ sendOwnerEmail: vi.fn(), escapeHtml: (s: string) => s }))
 
-import { formatRegressedUrlsSuffix, type RegressedUrl } from './seo-daily.server'
+import { formatRegressedUrlsSuffix, hasTechnicalDefectSignature, type RegressedUrl } from './seo-daily.server'
 
 function url(over: Partial<RegressedUrl> = {}): RegressedUrl {
   return {
@@ -27,6 +27,8 @@ function url(over: Partial<RegressedUrl> = {}): RegressedUrl {
     coverageState: 'Crawled - currently not indexed',
     verdict: 'NEUTRAL',
     changedAt: '2026-09-02T10:00:00Z',
+    pageFetchState: 'SUCCESSFUL',
+    indexingState: 'INDEXING_ALLOWED',
     ...over,
   }
 }
@@ -75,5 +77,47 @@ describe('formatRegressedUrlsSuffix', () => {
   it('omits the "+N more" suffix when nothing was truncated', () => {
     const out = formatRegressedUrlsSuffix([url(), url({ url: 'https://xdipx.com/products/b' })])
     expect(out).not.toContain('more')
+  })
+})
+
+// hasTechnicalDefectSignature (ticket #13117). Two R-DEV claims (#7415,
+// #13102) were burned blocking a code ticket filed on a bare week-over-week
+// indexed-count drop whose flagged URLs all fetched 200 with a correct
+// self-referencing canonical and no noindex anywhere — Google folding
+// near-duplicate product variants under one canonical, not a defect. This
+// predicate is the gate that now keeps that case from ever reaching a ticket.
+describe('hasTechnicalDefectSignature', () => {
+  it('is false for the #7415/#13102 false-positive shape: healthy fetch, Duplicate/Crawled-not-indexed label only', () => {
+    expect(hasTechnicalDefectSignature(url({
+      coverageState: 'Duplicate without user-selected canonical',
+      pageFetchState: 'SUCCESSFUL',
+      indexingState: 'INDEXING_ALLOWED',
+    }))).toBe(false)
+    expect(hasTechnicalDefectSignature(url({
+      coverageState: 'Crawled - currently not indexed',
+      pageFetchState: 'SUCCESSFUL',
+      indexingState: 'INDEXING_ALLOWED',
+    }))).toBe(false)
+  })
+
+  it('is true for a 404-class fetch failure', () => {
+    expect(hasTechnicalDefectSignature(url({ pageFetchState: 'NOT_FOUND' }))).toBe(true)
+    expect(hasTechnicalDefectSignature(url({ pageFetchState: 'SOFT_404' }))).toBe(true)
+  })
+
+  it('is true for a 5xx server error', () => {
+    expect(hasTechnicalDefectSignature(url({ pageFetchState: 'SERVER_ERROR' }))).toBe(true)
+  })
+
+  it('is true for a noindex meta tag', () => {
+    expect(hasTechnicalDefectSignature(url({ indexingState: 'BLOCKED_BY_META_TAG' }))).toBe(true)
+  })
+
+  it('is true for an X-Robots-Tag header block', () => {
+    expect(hasTechnicalDefectSignature(url({ indexingState: 'BLOCKED_BY_HTTP_HEADER' }))).toBe(true)
+  })
+
+  it('is false when both fields are null (never inspected, or inspected before this ticket)', () => {
+    expect(hasTechnicalDefectSignature(url({ pageFetchState: null, indexingState: null }))).toBe(false)
   })
 })
