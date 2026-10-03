@@ -12,6 +12,7 @@ const gateMock = vi.hoisted(() => vi.fn())
 const runVisionGateMock = vi.hoisted(() => vi.fn())
 const runVisionGateOnImageMock = vi.hoisted(() => vi.fn())
 const regateAssetMock = vi.hoisted(() => vi.fn())
+const runProductFidelityCheckOnImagesMock = vi.hoisted(() => vi.fn())
 
 const TEAM_IDS = ['homepage', 'social', 'ads', 'email', 'strategy', 'content', 'product', 'video', 'support']
 vi.mock('~/lib/team.server', () => ({
@@ -23,6 +24,9 @@ vi.mock('~/lib/social-vision-gate.server', () => ({
   runVisionGate: runVisionGateMock,
   runVisionGateOnImage: runVisionGateOnImageMock,
   regateAsset: regateAssetMock,
+}))
+vi.mock('~/lib/social-product-fidelity.server', () => ({
+  runProductFidelityCheckOnImages: runProductFidelityCheckOnImagesMock,
 }))
 vi.mock('~/lib/api-error.server', () => ({
   apiError: (_scope: string, err: unknown) =>
@@ -52,12 +56,18 @@ const VERDICT = {
   legibleText: '',
 }
 
+const FIDELITY_VERDICT = {
+  silhouette: 'match', colour: 'match', finish: 'match', brandMark: 'match',
+  notes: 'faithful to reference', checkedAt: '2026-10-03T00:00:00Z', checkCompleted: true,
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   gateMock.mockResolvedValue({ ok: true })
   runVisionGateMock.mockResolvedValue(VERDICT)
   runVisionGateOnImageMock.mockResolvedValue(VERDICT)
   regateAssetMock.mockResolvedValue(VERDICT)
+  runProductFidelityCheckOnImagesMock.mockResolvedValue(FIDELITY_VERDICT)
 })
 
 describe('judge-only (no assetId)', () => {
@@ -146,5 +156,74 @@ describe('calling team (ticket #11856)', () => {
     const res = await post({ imageUrl: 'https://cdn.shopify.com/files/x.jpg', runId: 1099, team: 'homepage' })
     expect(res.status).toBe(200)
     expect(runVisionGateMock).toHaveBeenCalled()
+  })
+})
+
+// Ticket #13333: the product-fidelity mode, the server-side sibling of the
+// anatomy branch above for gateProductFidelityBuffer's own remote fallback.
+// A cloud content run has no ANTHROPIC_API_KEY, so without this route
+// support the fidelity check failed closed on every run.
+describe('fidelity mode (ticket #13333)', () => {
+  it('runs the fidelity check and returns the ProductFidelityVerdict unchanged', async () => {
+    const res = await post({
+      mode: 'fidelity',
+      imageBase64: 'rendered-b64',
+      mediaType: 'image/png',
+      referenceImageBase64: 'reference-b64',
+      referenceMediaType: 'image/jpeg',
+    })
+    expect(res.status).toBe(200)
+    expect(runProductFidelityCheckOnImagesMock).toHaveBeenCalledWith(
+      { data: 'rendered-b64', mediaType: 'image/png' },
+      { data: 'reference-b64', mediaType: 'image/jpeg' },
+    )
+    const body = await res.json()
+    expect(body).toEqual(FIDELITY_VERDICT)
+    expect(runVisionGateOnImageMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects a fidelity request with no reference image', async () => {
+    const res = await post({ mode: 'fidelity', imageBase64: 'rendered-b64', mediaType: 'image/png' })
+    expect(res.status).toBe(400)
+    expect(runProductFidelityCheckOnImagesMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects a fidelity request with no candidate image', async () => {
+    const res = await post({ mode: 'fidelity', referenceImageBase64: 'reference-b64', referenceMediaType: 'image/jpeg' })
+    expect(res.status).toBe(400)
+    expect(runProductFidelityCheckOnImagesMock).not.toHaveBeenCalled()
+  })
+
+  it('gates on the calling team like the anatomy branch, defaulting to content', async () => {
+    const res = await post({
+      mode: 'fidelity',
+      imageBase64: 'rendered-b64',
+      mediaType: 'image/png',
+      referenceImageBase64: 'reference-b64',
+      referenceMediaType: 'image/jpeg',
+      runId: 1220,
+    })
+    expect(res.status).toBe(200)
+    expect(gateMock).toHaveBeenCalledWith('content', 1220)
+  })
+
+  it('refuses when the team is gated, without ever running the fidelity check', async () => {
+    gateMock.mockResolvedValue({ ok: false, reason: 'over_budget' })
+    const res = await post({
+      mode: 'fidelity',
+      imageBase64: 'rendered-b64',
+      mediaType: 'image/png',
+      referenceImageBase64: 'reference-b64',
+      referenceMediaType: 'image/jpeg',
+    })
+    expect(res.status).toBe(403)
+    expect(runProductFidelityCheckOnImagesMock).not.toHaveBeenCalled()
+  })
+
+  it('does not take the fidelity branch when mode is omitted, preserving the anatomy default', async () => {
+    const res = await post({ imageBase64: 'rendered-b64', mediaType: 'image/png' })
+    expect(res.status).toBe(200)
+    expect(runVisionGateOnImageMock).toHaveBeenCalled()
+    expect(runProductFidelityCheckOnImagesMock).not.toHaveBeenCalled()
   })
 })
