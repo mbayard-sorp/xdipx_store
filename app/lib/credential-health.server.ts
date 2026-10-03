@@ -124,6 +124,52 @@ const CHECKERS: Record<string, Checker> = {
     return xVerifyCredentials()
   },
 
+  anthropic: async () => {
+    // Dynamic imports: this checker runs once every six hours, so there is no
+    // reason to pull the SDK and the vision-gate module into every module
+    // that imports credential-health.server.ts.
+    const Anthropic = (await import('@anthropic-ai/sdk')).default
+    const { HAIKU } = await import('~/lib/models.server')
+    const { classifyVisionPreflightFailure } = await import('~/lib/vision-gate-buffer.server')
+    const client = new Anthropic({ apiKey: process.env['ANTHROPIC_API_KEY']!.trim() })
+    try {
+      await client.messages.create({
+        model: HAIKU,
+        max_tokens: 1,
+        messages: [{ role: 'user', content: 'hi' }],
+      })
+      return { state: 'live', detail: `${HAIKU} answered a 1-token probe` }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      const reason = classifyVisionPreflightFailure(message)
+      // Same rule as every other checker: only an authoritative rejection is
+      // dead. A missing/invalid key and an empty credit balance are both the
+      // API telling us the request cannot be served, so both are dead; a
+      // network error or an unrecognised shape stays unknown.
+      if (reason === 'no-credit' || reason === 'no-credential') {
+        return { state: 'dead', detail: `${reason}: ${message.slice(0, 160)}` }
+      }
+      return { state: 'unknown', detail: `could not ask: ${message.slice(0, 160)}` }
+    }
+  },
+
+  atlas: async () => {
+    const { ATLAS_PUBLIC_BASE, atlasHeaders } = await import('~/lib/atlas.server')
+    const key = process.env['ATLAS_CLOUD_API_KEY']!.trim()
+    const res = await timedFetch(`${ATLAS_PUBLIC_BASE}/balance`, { headers: atlasHeaders(key) })
+    if (res.status < 200 || res.status >= 300) {
+      return { state: stateFromStatus(res.status), detail: `balance HTTP ${res.status}` }
+    }
+    const body = await res.json().catch(() => null) as { available?: { value?: string; currency?: string } } | null
+    const value = Number(body?.available?.value)
+    if (!Number.isFinite(value)) {
+      return { state: 'unknown', detail: 'balance answered 200 with an unrecognised shape' }
+    }
+    const currency = body?.available?.currency ?? ''
+    if (value <= 0) return { state: 'dead', detail: `available balance is ${value} ${currency}`.trim() }
+    return { state: 'live', detail: `available balance ${value} ${currency}`.trim() }
+  },
+
   klaviyo: async () => {
     const res = await timedFetch('https://a.klaviyo.com/api/accounts/', {
       headers: {
@@ -201,7 +247,7 @@ export async function checkCredential(key: string): Promise<CredentialVerdict> {
   }
 }
 
-/** Check everything, in parallel. Nine cheap reads, once every six hours. */
+/** Check everything, in parallel. Eleven cheap reads, once every six hours. */
 export async function checkAllCredentials(): Promise<CredentialVerdict[]> {
   return Promise.all(INTEGRATIONS.map(i => checkCredential(i.key)))
 }

@@ -134,6 +134,32 @@ export const INTEGRATIONS: readonly Integration[] = [
     whereToGo: 'Vercel > Account Settings > Tokens',
   },
   {
+    key: 'anthropic',
+    label: 'Anthropic API',
+    envVars: ['ANTHROPIC_API_KEY'],
+    required: true,
+    ownerTeam: 'strategy',
+    breaks:
+      'Every vision, fidelity, voice, and publish gate across every team: content, social, '
+      + 'homepage, and video all fail closed without a usable key and credit balance, and a dead '
+      + 'key is otherwise discovered only after a run has already spent its whole budget.',
+    moneyPath: false,
+    whereToGo: 'console.anthropic.com > Plans and Billing (separate from the Max subscription)',
+  },
+  {
+    key: 'atlas',
+    label: 'Atlas Cloud',
+    envVars: ['ATLAS_CLOUD_API_KEY'],
+    required: true,
+    ownerTeam: 'strategy',
+    breaks:
+      'Atlas Cloud image generation, the primary stills provider for homepage, content, and '
+      + 'social art (generate-image.server.ts). Every caller falls back to fal.ai and then Google '
+      + 'Imagen, so quality and cost both degrade silently rather than failing loud.',
+    moneyPath: false,
+    whereToGo: 'atlascloud.ai dashboard > Billing to top up credit, or API keys if the key itself was revoked',
+  },
+  {
     key: 'twilio',
     label: 'Twilio',
     envVars: ['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN'],

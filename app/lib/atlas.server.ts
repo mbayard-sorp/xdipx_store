@@ -35,6 +35,15 @@ import { classifyProviderResponse, type MediaFailure } from '~/lib/media-block'
 export const ATLAS_BASE = 'https://api.atlascloud.ai/api/v1'
 
 /**
+ * Separate host path for the Billing Public API (atlascloud.ai/docs/en/public-api),
+ * distinct from the model-generation host above. `GET /balance` is the one free,
+ * authenticated, side-effect-free read on this provider — used only by the
+ * credential-health sweep (ticket #13154) to tell a dead key apart from a live
+ * key sitting on an empty balance. Never called from the generation path.
+ */
+export const ATLAS_PUBLIC_BASE = 'https://api.atlascloud.ai/public/v1'
+
+/**
  * Cloudflare in front of api.atlascloud.ai answers 403 "error code: 1010" to a
  * default Python-urllib User-Agent (bake-off 2026-09-23). Node fetch was fine,
  * but an explicit UA costs nothing and removes the dependency on the runtime's
