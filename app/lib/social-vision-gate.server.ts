@@ -457,15 +457,38 @@ export const EXPOSURE_CHECK_NAMES: readonly VisionCheckName[] = ['nippleOccluded
 export function backAnatomyReadsAsDefect(read: string): boolean {
   const text = read.trim()
   if (!text) return false
-  if (/\b(pubic|vulva|labia|genital)/i.test(text)) return true
-  // A navel mention is significant only when reported as actually present.
-  // The prompt's own clean-case example ("no navel visible") must not trip
-  // this, so a negation word within a few words either side of the mention
-  // reads as a clean report rather than a defect.
-  const navelMatch = /\bnavel\b|\bbelly[\s-]?button\b/i.exec(text)
-  if (navelMatch) {
-    const window = text.slice(Math.max(0, navelMatch.index - 20), navelMatch.index + navelMatch[0].length + 20)
-    if (!/\b(no|not|none|absent|never|without|isn't|isnt)\b/i.test(window)) return true
+  // A mention is significant only when reported as actually present. The
+  // model reports clean frames in the prompt's own vocabulary ("no navel
+  // visible", and, since the prompt's defect example names pubic hair, "no
+  // pubic-hair-like patch"), so a negation inside the same clause as the
+  // mention reads as a clean report. Ticket #13175: the genital-word branch
+  // used to have no negation handling at all, and failed owner-approved back
+  // views (assets 862-865) on their own clean read.
+  return (
+    hasUnnegatedMention(text, /\b(pubic|vulva|labia|genital)/gi) ||
+    hasUnnegatedMention(text, /\bnavel\b|\bbelly[\s-]?button\b/gi)
+  )
+}
+
+const CLAUSE_BOUNDARY = /[,.;:]|\b(?:and|but|with)\b/gi
+const NEGATION = /\b(no|not|none|absent|never|without|isn't|isnt)\b/i
+
+/** True when any match of `pattern` sits in a clause with no negation word. */
+function hasUnnegatedMention(text: string, pattern: RegExp): boolean {
+  for (const match of text.matchAll(pattern)) {
+    const start = match.index ?? 0
+    const end = start + match[0].length
+    let clauseStart = 0
+    let clauseEnd = text.length
+    for (const boundary of text.matchAll(CLAUSE_BOUNDARY)) {
+      const at = boundary.index ?? 0
+      if (at + boundary[0].length <= start) clauseStart = at + boundary[0].length
+      else if (at >= end) {
+        clauseEnd = at
+        break
+      }
+    }
+    if (!NEGATION.test(text.slice(clauseStart, clauseEnd))) return true
   }
   return false
 }

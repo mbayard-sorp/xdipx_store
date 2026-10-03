@@ -754,6 +754,20 @@ describe('backAnatomyReadsAsDefect (ticket #11029)', () => {
   it('does not flag an empty read (not a back view, or nothing there)', () => {
     expect(backAnatomyReadsAsDefect('')).toBe(false)
   })
+
+  // Ticket #13175: the clean reads on owner-approved assets 862-865, verbatim
+  // in shape, failed faceBodyIntegrity through the override.
+  it('does not flag a clean read that negates the pubic-hair patch', () => {
+    expect(backAnatomyReadsAsDefect('smooth skin at sacrum/top of gluteal cleft, no navel visible, no pubic-hair-like patch')).toBe(false)
+    expect(backAnatomyReadsAsDefect('no visible pubic hair at the cleft')).toBe(false)
+    expect(backAnatomyReadsAsDefect('pubic hair is not present on the lower back')).toBe(false)
+  })
+
+  it('still flags a described patch even when another clause carries a negation', () => {
+    expect(backAnatomyReadsAsDefect('faint pubic-hair-like line above the cleft')).toBe(true)
+    expect(backAnatomyReadsAsDefect('no navel visible, a pubic-hair-like patch at the sacrum')).toBe(true)
+    expect(backAnatomyReadsAsDefect('no hair but a crease reading as vulva-like')).toBe(true)
+  })
 })
 
 describe('enforceEnumeratedAnatomy (ticket #11029)', () => {
