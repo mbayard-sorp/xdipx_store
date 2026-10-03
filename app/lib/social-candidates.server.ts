@@ -19,18 +19,20 @@
  * newness / type-variety / stock-depth ordering, the date-seeded shuffle —
  * is unit-testable with fixture data and never touches the network.
  *
- * NOTE ON THE TICKET'S OWN TEXT: it asks to "reuse isInstagramEligible" for
- * the category filter. No such function exists anywhere in this codebase
- * (grepped before writing this file) — the only place "Instagram-eligible by
- * category" is defined is prose, `docs/store-team/instagram-campaigns.md`
- * §4b, "Picking the product", filter 2: "Never a dildo, never an
- * anatomically realistic product." `isInstagramEligibleCategory` below is
- * new code codifying that literal text, not a reuse of prior art, and it is
- * deliberately conservative: a product type the doctrine doesn't name in
- * words is never excluded here, and the editorial read
- * routine-social-daily.md Step 2.9 item 1 already requires stays the
- * backstop for everything this regex doesn't catch.
+ * `isInstagramEligibleCategory` below codifies `docs/store-team/
+ * instagram-campaigns.md` §4b, "Picking the product", filter 2: "Never a
+ * dildo, never an anatomically realistic product." Ticket #13099: this used
+ * to say no shared function existed and that this file's own regex was new
+ * code — by the time that ticket was filed, two other independent
+ * implementations of the identical check already existed
+ * (`scripts/pick-todays-product.ts`'s `isInstagramEligible`,
+ * `app/lib/new-product-social-filter.ts`'s `isInstagramEligibleProduct`),
+ * each filed the same day on a separate branch, none aware of the others.
+ * All three now delegate to the single reconciled list in
+ * `app/lib/instagram-category-eligibility.ts`.
  */
+
+import { isInstagramEligibleByCategory } from './instagram-category-eligibility'
 
 export interface RawSocialCandidate {
   handle: string
@@ -97,18 +99,12 @@ const DEFAULT_NEW_WITHIN_DAYS = 21
 const DEFAULT_LIMIT = 20
 
 // docs/store-team/instagram-campaigns.md §4b, "Picking the product", filter 2.
-// See the file header for why this is new code, not a reuse of a prior
-// function. Matches the dildo family in product-type-derive.ts's
-// CANONICAL_PRODUCT_TYPES ("Dildo", "Fantasy Dildo", "Realistic Dildo",
-// "Silicone Dildo", "Strap-On Dildo", "Vibrating Dildo") plus "Sex Doll", the
-// one other canonical type that is unambiguously "anatomically realistic" by
-// the doctrine's own wording. A type this pattern doesn't name is never
-// excluded here — see the file header note on why that's deliberate.
-const INSTAGRAM_INELIGIBLE_PRODUCT_TYPE = /dildo|realistic|sex\s*doll/i
-
+// See the file header: delegates to the shared, reconciled pattern list
+// (ticket #13099) rather than its own copy. This wrapper keeps the
+// productType-only signature this file's call site and its own test file
+// already pin.
 export function isInstagramEligibleCategory(productType: string | null | undefined): boolean {
-  if (!productType) return true
-  return !INSTAGRAM_INELIGIBLE_PRODUCT_TYPE.test(productType)
+  return isInstagramEligibleByCategory({ productType }).eligible
 }
 
 function isInCooldown(lastFeaturedAt: string | null, cooldownDays: number, now: Date): boolean {

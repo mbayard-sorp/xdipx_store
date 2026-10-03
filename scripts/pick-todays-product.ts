@@ -32,6 +32,7 @@
  */
 
 import './_load-env'
+import { isInstagramEligibleByCategory } from '../app/lib/instagram-category-eligibility'
 
 // ── Pure logic (unit-tested in pick-todays-product.test.ts) ────────────────
 
@@ -84,27 +85,15 @@ export const CAMPAIGN_SCOPES: Record<string, CampaignScope> = {
  * realistic product. Those do not survive Meta moderation, and a deeply
  * discounted slow mover is disproportionately likely to be exactly this
  * category, which is why the filter runs at selection.
+ *
+ * Ticket #13099: this used to be a local copy of the same check duplicated
+ * (with a different, narrower pattern list) in social-candidates.server.ts
+ * and new-product-social-filter.ts. Delegates to the shared, reconciled
+ * implementation now; this wrapper exists only to keep the signature this
+ * script's own test file already pins.
  */
-const IG_EXCLUDED_PATTERNS: readonly RegExp[] = [
-  /\bdildos?\b/i,
-  /\bdongs?\b/i,
-  /realistic/i,
-  /dual densit/i,
-  /triple densit/i,
-  /celebrity molded/i,
-  /\bpussy\b/i,
-  /\bvagina\b/i,
-  /anatomically/i,
-]
-
 export function isInstagramEligible(p: Pick<PickerProduct, 'title' | 'productType'>): { eligible: boolean; reason: string } {
-  const haystack = `${p.productType} ${p.title}`
-  for (const re of IG_EXCLUDED_PATTERNS) {
-    if (re.test(haystack)) {
-      return { eligible: false, reason: `excluded category: matches ${re} in "${haystack.slice(0, 80)}"` }
-    }
-  }
-  return { eligible: true, reason: 'no excluded-category match in product type or title' }
+  return isInstagramEligibleByCategory(p)
 }
 
 export function isInScope(p: Pick<PickerProduct, 'productTypeDial'>, scope: CampaignScope): { inScope: boolean; reason: string } {

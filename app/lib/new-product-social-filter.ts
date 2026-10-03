@@ -16,6 +16,8 @@
  * the source of truth and this file is the bug.
  */
 
+import { isInstagramEligibleByCategory } from './instagram-category-eligibility'
+
 /**
  * At most this many product-triggered social rows per rolling week. The arrival
  * pattern is bursty (~15/day when an import batch lands), and section 4c budgets
@@ -69,20 +71,14 @@ function matchesAny(haystack: string, patterns: readonly RegExp[]): boolean {
 
 // Instagram category hard exclude (ticket #12877; instagram-campaigns.md
 // §4b, "Picking the product", filter 2: "Never a dildo, never an
-// anatomically realistic product.") NOTE: the ticket that filed this asked
-// to "reuse isInstagramEligible" -- no function by that name exists anywhere
-// in this codebase (grepped before writing this). This is new code
-// codifying that literal doctrine text, matching the independently-filed
-// ticket #12876's `isInstagramEligibleCategory` in
-// `app/lib/social-candidates.server.ts` (same pattern, same doctrine
-// citation; the two tickets landed the same day on separate branches,
-// neither depending on the other, hence the duplication rather than a
-// shared import).
-const INSTAGRAM_INELIGIBLE_PRODUCT_TYPE = /dildo|realistic|sex\s*doll/i
-
+// anatomically realistic product.") Ticket #13099: this used to carry its own
+// copy of the pattern, duplicating `social-candidates.server.ts`'s (same
+// doctrine citation; the two tickets landed the same day on separate
+// branches, neither depending on the other) plus a third, independently
+// broader copy in `scripts/pick-todays-product.ts`. All three now delegate to
+// the single reconciled list in `app/lib/instagram-category-eligibility.ts`.
 export function isInstagramEligibleProduct(productType?: string | null | undefined): boolean {
-  if (!productType) return true
-  return !INSTAGRAM_INELIGIBLE_PRODUCT_TYPE.test(productType)
+  return isInstagramEligibleByCategory({ productType }).eligible
 }
 
 export interface NewProductGateInput {
