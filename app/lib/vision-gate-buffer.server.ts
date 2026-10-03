@@ -104,6 +104,9 @@ export function remoteVisionCallVision(runId?: number, team?: TeamId): NonNullab
       // parsed response; omitting them here would fail-close every remote
       // (sandbox-with-no-ANTHROPIC_API_KEY) call as a malformed shape.
       handDigitCounts: verdict.handDigitCounts,
+      // Ticket #13174: forwarded so the caller's own enforceEnumeratedAnatomy
+      // pass sees the same hidden-digit counts the route judged with.
+      handOccludedDigits: verdict.handOccludedDigits ?? null,
       backAnatomyRead: verdict.backAnatomyRead,
     }
   }
