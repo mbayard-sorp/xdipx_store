@@ -65,7 +65,8 @@ type Checker = () => Promise<{ state: CredentialState; detail: string }>
 const CHECKERS: Record<string, Checker> = {
   'shopify-admin': async () => {
     const domain = process.env['SHOPIFY_STORE_DOMAIN']!.trim()
-    const res = await timedFetch(`https://${domain}/admin/api/2025-01/shop.json`, {
+    // Ticket #13279: bumped off 2025-01 alongside every other Admin API pin.
+    const res = await timedFetch(`https://${domain}/admin/api/2026-01/shop.json`, {
       headers: { 'X-Shopify-Access-Token': process.env['SHOPIFY_ADMIN_ACCESS_TOKEN']!.trim() },
     })
     return { state: stateFromStatus(res.status), detail: `shop.json HTTP ${res.status}` }
@@ -73,7 +74,8 @@ const CHECKERS: Record<string, Checker> = {
 
   'shopify-storefront': async () => {
     const domain = process.env['SHOPIFY_STORE_DOMAIN']!.trim()
-    const res = await timedFetch(`https://${domain}/api/2025-01/graphql.json`, {
+    // Ticket #13279: bumped off 2025-01 alongside every other Admin API pin.
+    const res = await timedFetch(`https://${domain}/api/2026-01/graphql.json`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
