@@ -137,7 +137,8 @@ async function webhookRegistered(arg: string): Promise<ProbeVerdict> {
 
   let topics: string[]
   try {
-    const res = await fetch(`https://${domain}/admin/api/2024-10/graphql.json`, {
+    // Ticket #13279: bumped off 2024-10 alongside every other Admin API pin.
+    const res = await fetch(`https://${domain}/admin/api/2026-01/graphql.json`, {
       method: 'POST',
       headers: { 'X-Shopify-Access-Token': token, 'Content-Type': 'application/json' },
       body: JSON.stringify({ query: '{ webhookSubscriptions(first: 100) { nodes { topic } } }' }),

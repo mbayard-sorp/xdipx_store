@@ -24,12 +24,18 @@ function ptToHtml(value: unknown): string | undefined {
 // Ticket #13156: 2024-10 was already being silently served as a newer,
 // about-to-retire version with a deprecation warning (measured 2026-10-02;
 // see the ticket). Bumped the Storefront pin to 2026-01 after validating
-// every Storefront operation in this file against the live schema. The
-// Admin endpoints below are a separate, larger validation pass tracked as
-// its own follow-up ticket.
+// every Storefront operation in this file against the live schema.
+// Ticket #13279 (split from #13156): bumped the Admin pins to 2026-01 too,
+// after validating every Admin operation in this file against the live
+// schema — one real break found and fixed (Return.reverseDeliveries moved to
+// ReverseFulfillmentOrder.reverseDeliveries; see getReturn below). Several
+// operations also carry deprecation notices (e.g. productCreateMedia,
+// InventoryItem.variant, Product.featuredImage) that are out of scope here:
+// deprecated-but-present fields still work, so only removed/renamed fields
+// are a 2025-10 retirement blocker.
 const STOREFRONT_ENDPOINT   = `https://${process.env['SHOPIFY_STORE_DOMAIN']}/api/2026-01/graphql.json`
-const ADMIN_ENDPOINT        = `https://${process.env['SHOPIFY_STORE_DOMAIN']}/admin/api/2024-10`
-const ADMIN_GQL_ENDPOINT    = `https://${process.env['SHOPIFY_STORE_DOMAIN']}/admin/api/2024-10/graphql.json`
+const ADMIN_ENDPOINT        = `https://${process.env['SHOPIFY_STORE_DOMAIN']}/admin/api/2026-01`
+const ADMIN_GQL_ENDPOINT    = `https://${process.env['SHOPIFY_STORE_DOMAIN']}/admin/api/2026-01/graphql.json`
 
 // ─── Clients ──────────────────────────────────────────────────────────────
 
@@ -6753,6 +6759,17 @@ export async function closeReturn(
 
 /**
  * Fetch a return's current state (used by webhook + admin lookups).
+ *
+ * Ticket #13279 (2026-01 Admin API validation): `reverseDeliveries` moved off
+ * `Return` onto `ReverseFulfillmentOrder` at some point after 2024-10 — the
+ * old query (`return(id) { reverseDeliveries }`) fails validation against the
+ * 2026-01 schema with "Cannot query field reverseDeliveries on type Return".
+ * The query now goes through `reverseFulfillmentOrders`, and the mapping
+ * flattens every reverse delivery across every reverse fulfillment order back
+ * into the same flat array this function has always returned (a return can
+ * have more than one reverse fulfillment order, e.g. split across locations,
+ * but the only caller, `server/webhooks.ts`'s returns-update handler, already
+ * only reads `reverseDeliveries[0]` — we buy one shipping label per RMA).
  */
 export async function getReturn(returnId: string): Promise<{
   id: string
@@ -6768,14 +6785,20 @@ export async function getReturn(returnId: string): Promise<{
     return: {
       id: string
       status: string
-      reverseDeliveries: {
+      reverseFulfillmentOrders: {
         edges: {
           node: {
-            id: string
-            deliverable: {
-              __typename: string
-              tracking?: { number: string | null; url: string | null } | null
-            } | null
+            reverseDeliveries: {
+              edges: {
+                node: {
+                  id: string
+                  deliverable: {
+                    __typename: string
+                    tracking?: { number: string | null; url: string | null } | null
+                  } | null
+                }
+              }[]
+            }
           }
         }[]
       }
@@ -6785,14 +6808,20 @@ export async function getReturn(returnId: string): Promise<{
       return(id: $id) {
         id
         status
-        reverseDeliveries(first: 5) {
+        reverseFulfillmentOrders(first: 10) {
           edges {
             node {
-              id
-              deliverable {
-                __typename
-                ... on ReverseDeliveryShippingDeliverable {
-                  tracking { number url }
+              reverseDeliveries(first: 5) {
+                edges {
+                  node {
+                    id
+                    deliverable {
+                      __typename
+                      ... on ReverseDeliveryShippingDeliverable {
+                        tracking { number url }
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -6806,12 +6835,14 @@ export async function getReturn(returnId: string): Promise<{
   return {
     id: data.return.id,
     status: data.return.status,
-    reverseDeliveries: data.return.reverseDeliveries.edges.map(({ node }) => ({
-      id:             node.id,
-      trackingNumber: node.deliverable?.tracking?.number ?? null,
-      trackingUrl:    node.deliverable?.tracking?.url ?? null,
-      deliveredAt:    null, // Shopify exposes delivery state via webhook, not query
-    })),
+    reverseDeliveries: data.return.reverseFulfillmentOrders.edges.flatMap(({ node: rfo }) =>
+      rfo.reverseDeliveries.edges.map(({ node }) => ({
+        id:             node.id,
+        trackingNumber: node.deliverable?.tracking?.number ?? null,
+        trackingUrl:    node.deliverable?.tracking?.url ?? null,
+        deliveredAt:    null, // Shopify exposes delivery state via webhook, not query
+      })),
+    ),
   }
 }
 
