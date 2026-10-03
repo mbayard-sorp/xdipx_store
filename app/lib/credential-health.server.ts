@@ -96,11 +96,17 @@ const CHECKERS: Record<string, Checker> = {
 
   instagram: async () => {
     const { igRequest } = await import('~/lib/social-publish/instagram.server')
+    const { getInstagramAccessToken } = await import('~/lib/instagram-token.server')
     const id = process.env['IG_BUSINESS_ACCOUNT_ID']!.trim()
+    // The best current token (DB-refreshed if one exists, env fallback
+    // otherwise) — not the raw env var directly, so this check never reports
+    // a successfully auto-refreshed credential as dead against a stale env
+    // value (ticket #13153).
+    const token = (await getInstagramAccessToken()) ?? process.env['IG_GRAPH_ACCESS_TOKEN']!.trim()
     const r = await igRequest(`/${id}`, {
       method: 'GET',
       params: { fields: 'id,username' },
-      token: process.env['IG_GRAPH_ACCESS_TOKEN']!.trim(),
+      token,
     })
     if (r.ok) return { state: 'live', detail: `@${String(r.data['username'] ?? id)}` }
     const msg = r.error.message ?? 'unknown Graph error'

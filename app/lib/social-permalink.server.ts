@@ -9,6 +9,7 @@
  * sweep backfills whatever was missed.
  */
 import { igRequest } from './social-publish/instagram.server'
+import { getInstagramAccessToken } from './instagram-token.server'
 import { xPermalink } from './social-publish/x-limits'
 
 export interface PermalinkDeps {
@@ -28,7 +29,7 @@ export async function permalinkFor(
   if (platform !== 'instagram') return null
 
   const token = deps.igToken === undefined
-    ? process.env['IG_GRAPH_ACCESS_TOKEN']?.trim()
+    ? await getInstagramAccessToken()
     : deps.igToken
   if (!token) return null
   const igGet = deps.igGet ?? ((path, params) => igRequest(path, { method: 'GET', params, token }))

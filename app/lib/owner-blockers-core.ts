@@ -147,6 +147,10 @@ export const PROBE_DESCRIPTIONS: Record<string, (arg: string) => string> = {
    * Re-runs the same authenticated read that filed the row, so the row closes
    * itself the moment a renewed token answers. */
   credential_live: a => `the ${a} credential answers an authenticated read`,
+  /* No arg. Re-runs the Instagram token expiry-ahead check (ticket #13153):
+   * clears once the stored token is more than EXPIRY_WARNING_DAYS from
+   * expiring AND a refresh has succeeded within STALE_REFRESH_DAYS. */
+  instagram_token_healthy: () => 'the Instagram token is not close to expiring and refreshes are succeeding',
   /* Arg is `table|keyColumn|keyValue|column|expectedValue`.
    *
    * The scoped answer to the trap `rows_exist` walks into. `rows_exist` asks

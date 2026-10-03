@@ -171,7 +171,14 @@ describe('the cron expectation manifest', () => {
     // discount codes for approved promos; a failure here has a direct next
     // actor (the strategy lane) and a money angle, exactly the "next actor"
     // bar this set exists to hold.
-    expect(RECORDED_CRON_ROUTES.size).toBeLessThanOrEqual(19)
+    //
+    // Raised 19 -> 20 for /cron/instagram-token-refresh (ticket #13153):
+    // WEEKLY, so +1 row a week, cheaper arithmetic than any DAILY raise
+    // above. Its own janitor-sweep blocker (instagram-token-expiring)
+    // explicitly tells the owner to check this route's cron_runs history
+    // when the expiry-ahead warning keeps firing, so recording it is not
+    // optional bookkeeping — it is the diagnostic the blocker points at.
+    expect(RECORDED_CRON_ROUTES.size).toBeLessThanOrEqual(20)
   })
 
   it('records the surfaces whose failure has a next actor', () => {

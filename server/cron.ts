@@ -1359,6 +1359,30 @@ export function createCronRoutes() {
   })
 
   /**
+   * GET|POST /cron/instagram-token-refresh
+   * Schedule: weekly. Extends the long-lived Instagram Graph API token
+   * before it lapses (ticket #13153, owner-away all-hands 2026-10-02):
+   * IG_GRAPH_ACCESS_TOKEN is a 60-day token that never refreshed itself.
+   * Calls Meta's refresh_access_token endpoint with the current best token
+   * (DB-stored if a prior refresh succeeded, env otherwise) and records the
+   * result in instagram_token_refreshes — success or failure, so a bad
+   * attempt never overwrites the last known-good token. The expiry-ahead
+   * owner warning lives in /cron/janitor-sweep, not here, since that needs
+   * to watch for staleness on its own 6-hour cadence rather than only once a
+   * week when this route itself fires.
+   */
+  cronRoute('/instagram-token-refresh', async (_req, res) => {
+    try {
+      const { refreshInstagramAccessToken } = await import('../app/lib/instagram-token.server.js')
+      const result = await refreshInstagramAccessToken()
+      res.status(result.ok ? 200 : 502).json(result)
+    } catch (err) {
+      console.error('[cron:instagram-token-refresh] failed:', err)
+      res.status(500).json({ ok: false, error: (err as Error).message })
+    }
+  })
+
+  /**
    * GET|POST /cron/warm
    * Schedule: every 15 min (Vercel cron; see vercel.json).
    * (1) Rebuilds the discovery index via the warm-discovery-index handler.
@@ -1771,6 +1795,41 @@ export function createCronRoutes() {
         if (c.state === 'dead') console.error(`[cron:janitor-sweep] CREDENTIAL DEAD ${c.key}: ${c.detail}`)
         else if (c.state === 'unconfigured') console.warn(`[cron:janitor-sweep] credential unconfigured ${c.key}: ${c.detail}`)
         else if (c.state === 'unknown') console.warn(`[cron:janitor-sweep] credential could-not-ask ${c.key}: ${c.detail}`)
+      }
+
+      // Instagram token expiry-ahead warning (ticket #13153), separate from
+      // the live/dead/unknown credential check above: a token can still
+      // answer live today while being close to expiring, or while its
+      // weekly refresh has been silently failing. Files its own blocker
+      // (never piggybacks the `instagram` credential's dedupe key, which is
+      // reserved for "it already stopped answering") and auto-clears via the
+      // `instagram_token_healthy` probe once a refresh lands a healthy
+      // future expiry.
+      try {
+        const { checkInstagramTokenExpiryWarning } = await import('../app/lib/instagram-token.server.js')
+        const warning = await checkInstagramTokenExpiryWarning()
+        if (warning.warn) {
+          const { fileBlocker } = await import('../app/lib/owner-blockers.server.js')
+          await fileBlocker({
+            dedupeKey: 'instagram-token-expiring',
+            title: 'Instagram token is close to expiring: renewal is not keeping up',
+            detail:
+              `${warning.reason}\n\nEnv fallback: IG_GRAPH_ACCESS_TOKEN. The weekly `
+              + '/cron/instagram-token-refresh job should be extending this automatically; if it keeps '
+              + 'firing this blocker, something is wrong with the refresh itself (check cron_runs / the '
+              + 'instagram_token_refreshes table for recent errors), not just the token.',
+            unblocks: 'Instagram publishing, engagement capture, and removal detection once the token actually lapses.',
+            whereToGo: 'Meta App Dashboard > Instagram > API setup with Instagram business login, then update IG_GRAPH_ACCESS_TOKEN in Vercel if the automated refresh cannot recover it.',
+            category: 'credential',
+            priority: 2,
+            source: 'sweep',
+            sourceRef: 'cron:janitor-sweep',
+            verifyProbe: 'instagram_token_healthy',
+            verifyArg: '',
+          })
+        }
+      } catch (err) {
+        console.error('[cron:janitor-sweep] instagram token expiry check failed (ignored):', err)
       }
 
       // The actuator. Until this shipped, everything above was measured every
