@@ -250,7 +250,7 @@ they outlive any single run. Every merchandising image obeys all of them.
    negative prompt. Drop any blanket "no logo, no brand name" language for
    the product body itself, since it now over-forbids case 1.
 5. **Hard limits (legal / processor / ad-platform):** no nudity, meaning no visible
-   nipples, labia, penis, or anus (owner definition 2026-09-20), and no sex acts.
+   female nipples, labia, penis, or anus (owner definition 2026-09-20), and no sex acts.
    Short of the hard limits, push toward playful curiosity with charge
    underneath. The per-surface ceiling lives in §4.3.
 6. **Self-review before upload.** Reads clearly at 375px; hands/bodies/objects
@@ -319,8 +319,10 @@ program"); prompts start from the matching per-surface scaffold in
 
 **The ground lock:** backdrops come only from `coral-soft`, `plum-soft`, and
 `paper` tints, high-key daylight. (`paper` is the CSS surface token; the WORD
-"paper" is banned from image prompts because it renders literal sheets, say
-"warm off-white linen", per `instagram-campaigns.md` §3.2c. An on-skin close crop
+"paper" is banned from image prompts because it renders literal sheets; for a wall say "bright
+white plaster", and name any fabric by colour and weave from `docs/store-team/cast-wardrobe.md`,
+per `instagram-campaigns.md` §3.2f. "Warm off-white linen" was the substitute until 2026-10-02 and
+became the beige of every fabric in the feed. An on-skin close crop
 under §3.2c has no backdrop, the body is the location, and the ground lock does
 not apply to it; the trace of the world comes from sheet, surface, or light. That
 exemption is not social-only: since the owner extended on-skin to the whole site
@@ -470,11 +472,12 @@ wants. That is how an explicit frame reached the live feed on 2026-08-16.
 
 **Social surfaces** (Instagram, X, and any campaign key art produced for them). The operative
 ceiling is `docs/store-team/instagram-campaigns.md` §3.2a, the owner ruling of 2026-08-16, with
-the on-skin treatment of §3.2c inside it (owner direction 2026-09-19: bare bodies, no clothing,
-product resting on skin, the suggestion of nudity). It licenses lingerie and bare skin, beds and arched posture, product resting against skin,
+the on-skin treatment of §3.2c inside it (owner direction 2026-09-19, product resting on bare
+skin; its wardrobe rule is the owner's 2026-10-02 direction, styled from each cast member's closet
+with the contact zone always bare). It licenses lingerie and bare skin, beds and arched posture, product resting against skin,
 lubricant texture, two people touching, arousal on a face, and use implied by framing or by
 occlusion under a sheet when the occluded shape is the product. It fences nudity, which the
-owner defined on 2026-09-20 as visible nipples, labia, penis, or anus, outlined included, hands on genitals, depicted or discernible sex acts, fluid on or near
+owner defined on 2026-09-20 as visible female nipples, labia, penis, or anus, outlined included, hands on genitals, depicted or discernible sex acts, fluid on or near
 genitalia, product against genitalia, anything age-ambiguous, and anything built to defeat a
 classifier. **This doctrine defers to §3.2a on social imagery and does not restate it**, so the
 ceiling has one home and cannot drift out of sync again. Platform policy still outranks the

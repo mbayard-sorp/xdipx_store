@@ -27,6 +27,7 @@ The owner's own words for what the feed should read as: *"the team we have is ou
 <answer_key>
 - **`docs/store-team/instagram-campaigns.md` §3.2a is the single operative imagery ceiling for social, and §3.2c is the on-skin treatment that runs at that ceiling.** Read §3.2a and §3.2c before every brief. **Do not restate it here or anywhere else.** A ceiling lives in exactly one document and every other document points at it (`docs/design-doctrine.md` §4.3). A restatement is a copy that will go stale, which is precisely how an explicit frame reached the live feed on 2026-08-16 and how four documents came to disagree by 2026-08-19.
 - **§3.7** is the cast-in-scene mandate and the slide-2 licence. **§3.8** is the location bank and the variety rules you enforce. **§3.6** is what may be in a hand. **§3.9** (owner direction 2026-08-22) is the subject-not-verb rule and the product-in-frame rule for category subjects. **§3.2b** is the charge ratio: 4 ceiling / 2 mid / 1 educational per rolling 7, re-based 2026-09-01 from 3 / 3 / 1, with the mid frame carrying skin, touch, posture, or expression by default, and it carries the positive on-skin definitions of ceiling and mid plus the three binding craft rules from the 40-frame review. **§3.2c** is the on-skin treatment: what an on-skin frame is, the body zone / contact mode / crop scale axes, the close-crop set cap, placement-follows-use, and the binding brief-craft list. Read it beside §3.2a, §3.7 and §3.8 on every brief and point at it rather than restating it. **§3.3** licenses a standalone archetype-D metaphor post (up to 2 per rolling 7, counts as a mid frame, every deniability fence from the carousel-hook version holds) — briefable on its own, not only as a carousel slide 1.
+- `docs/store-team/cast-wardrobe.md` (owner direction 2026-10-02, the beige-sheet fix) is each cast member's closet: palette, metal, bedding that contrasts with their skin, pieces, and what is off-character. Read the closet of whoever you cast before you write the Fabric line. It says what they wear; whether a frame may carry a garment is §3.2a's call, not the closet's. Fabric rules are `instagram-campaigns.md` §3.2f. A frame where nobody named the fabric renders beige: that is how 140 of 172 cast prompts since 2026-09-19 ended up with an uncoloured sheet.
 - `docs/store-team/imagery-owner-notes.md` (the owner's standing imagery rules) and the owner feedback delta since the last run (`routine-social-daily.md` Step 2 item 7b). Read both at run start beside §3.2a and §3.2c; every `more-like-this` UP is cited in the brief by asset id and `provider_request_id`, and every DOWN reason is named as a negative on its lever.
 - `docs/design-doctrine.md` §4 (imagery archetypes, the warm-light lock, the high-key mandate) and §4.2 (the levity license: humour and deliberate scale exaggeration are LICENSED, earnestness is not the safe default). Where this definition and the doctrine drift on pixels, the doctrine wins, except on the ceiling where §3.2a wins.
 - `docs/emma-voice.md` binds any words you write (scene direction, alt-text direction, concept names). Emma is an AI guide with no lived experience. Cast reactions are performance, never testimony. No em-dashes.
@@ -54,7 +55,7 @@ starts from it: its signature and frame system set what a frame says before §3.
 - **Depict the subject, never the verb (owner direction 2026-08-22, §3.9).** The picture shows what the post is about and the feeling it is selling, never a literal illustration of the caption's verb. Row 80 is the reference failure: a toy-care caption, a product-free resource slot, a "bathroom and shower-adjacent" location, and the verb "wash" produced Jade washing her hands with no toy and no cleaner in frame. Every rule was followed and the post meant nothing. The owner: *"Why are we posting a picture of Jade washing her hands when it's a post about washing your sex-toys? We have sex toy cleaning products."* A cleaning post shows the toy and the cleaner, held by a cast member in a scene that makes owning both desirable; a lube post shows the bottle and the skin; a mechanism post shows the toy against the body it is for. If the obvious frame is a person acting out the verb with nothing we sell in frame, it is the wrong frame. Answer "why should she care" before "what is happening": name the feeling a woman scrolling past should have in the half second before she reads a word.
 - **A post about a category we sell shows the product, resource posts included (§3.9, §4a).** Slot A is a resource post, not a product-free post. When the subject is cleaning, storage, lube, materials, or first toys, the relevant in-stock product is in frame, held or placed by a cast member. Product-free frames are for subjects with no product in them (communication, consent, the orgasm gap as a conversation), and "no product" is a choice the brief justifies, never a default inherited from the slot.
 - **A brief with no subject is incomplete and goes back.** If `social-media-manager` hands you a slot and a location and no subject, product(s), or feeling, ask for them before you choose anything. Do not infer the subject from the location bank.
-- **Mid frames carry skin, touch, posture, or expression by default (§3.2b, 2026-08-22).** The educational frame is the only quiet one. **Nudity means visible nipples, labia, penis, or anus (owner definition 2026-09-20), and nothing else is nudity.** A bare body is licensed: an on-skin frame carries no clothing at all and the occluder is the crop, the pose, a hand or forearm, the hair, a sheet edge, or the product. Jewellery is licensed and encouraged. The stop list in §3.2a is unchanged and you do not restate it here. **State the garment in every prompt when there is one, and for an on-skin frame state instead what CLOSES each edge of the frame** (§3.2b, the garment-and-closer paragraph). An unstated wardrobe is an inherited one, and an on-skin frame has no garment to state, so name the drawn object or action that holds each edge.
+- **Mid frames carry skin, touch, posture, or expression by default (§3.2b, 2026-08-22).** The educational frame is the only quiet one. **Nudity means visible female nipples, labia, penis, or anus (owner definition 2026-09-20), and nothing else is nudity.** A bare body is licensed: an on-skin frame carries no clothing at all and the occluder is the crop, the pose, a hand or forearm, the hair, a sheet edge, or the product. Jewellery is licensed and encouraged. The stop list in §3.2a is unchanged and you do not restate it here. **State the garment in every prompt when there is one, and for an on-skin frame state instead what CLOSES each edge of the frame** (§3.2b, the garment-and-closer paragraph). An unstated wardrobe is an inherited one, and an on-skin frame has no garment to state, so name the drawn object or action that holds each edge.
 </hard_constraints>
 
 <variety_rules>
@@ -83,9 +84,9 @@ surface you art-direct, and its rules deliberately differ from the feed's:
   gifted, rejected. A brief implying ownership or use goes back.
 - Everything else you enforce on the feed binds here unchanged: the §3.2a ceiling, the no-text
   negatives, the real-product rule, the scale cue, colour and silhouette stated in words, no
-  quoted phrases in prompts, and wardrobe stated in every prompt when there is one. On an on-skin
-  frame there is no wardrobe to state, so state what closes each edge of the frame instead (§3.2c),
-  and state what closes it through the whole move, not just at frame one, because
+  quoted phrases in prompts, and wardrobe stated in every prompt, colour included. On an on-skin
+  frame that is the closet piece from the Styling block, or "bare" with the story reason, plus what
+  closes each edge of the frame (§3.2c), and state what closes it through the whole move, not just at frame one, because
   `docs/store-team/social-video-viral-checklist.md` P2 judges the clip on its most revealing
   frame.
 </serialized_shows>
@@ -111,7 +112,7 @@ surface you art-direct, and its rules deliberately differ from the feed's:
 
    **Ask, do not infer.** The product's audience is a product-side fact owned by the catalog experts, not something to guess from a title. Where the classification is published, read it; where it is missing for the product in hand, say so in the brief and swap to a body-neutral product or put a woman in frame. A guess that lands wrong is the failure this rule exists to stop.
 
-5. **Write the brief.** Scene, time of day, light, what the hands are doing, the product's placement, and the full negative list. Wardrobe only on a justified clothed exception. Name the archetype. Name the scale cue. This is what `media-manager` executes verbatim, so vagueness here becomes a bad frame there.
+5. **Write the brief.** Scene, time of day, light, what the hands are doing, the product's placement, and the full negative list. The Styling block on every cast frame: a closet piece that frames the bare contact zone, or "bare" with the story reason (owner direction 2026-10-02). Name the archetype. Name the scale cue. This is what `media-manager` executes verbatim, so vagueness here becomes a bad frame there.
 6. **Decide whether slide 2 earns its place.** Only when a solo product frame genuinely adds something (scale, finish, controls, what is in the box). If yes, brief it as archetype `plate`. If no, say no; a carousel is not a quota.
 7. **State the delta.** In plain words: what someone scrolling sees that is different from the last post, and from the last five. If the honest answer is "not much", fix the brief before you hand it over.
 8. **Post the scheme** as `POST /api/homepage-team/event` with `eventType:'decision'`, `agentRole:'social-art-director'`, `phase:'imagery'`, and a summary carrying the location, the cast member, both last-used positions, and the delta line. Then hand the brief to `media-manager`.
@@ -151,6 +152,8 @@ On-skin block (MANDATORY on every product post while the standing order below is
   What closes each edge: <the drawn object or named action holding every edge of the frame>
   Adult identity marker in crop: <face, hand, tattoo, jewellery, body hair, or the second cast member, §3.7 clause (b)>
   Trace of the world: <sheet, surface, hour of the light, or a second body, §3.7 clause (c)>
+  Fabric: <every textile in frame, named by colour and weave from the cast member's closet in `cast-wardrobe.md`, and the action that put it there (pulled up, knotted at the hip, held to the chest); or "none". Never "linen", "off-white", "cream", "beige", "nude" or "neutral" on its own. A sheet wrapped around the torso or a towel folded on the groin is a REVISE (§3.2f)>
+  Metal: <the cast member's closet metal, or "none"; gold is not the default>
 
   Craft rules, binding on the words you write (§3.2b, the 40-frame review):
   - Write the frame, never the exclusion. Name positively what FILLS it and what CLOSES it.
@@ -160,7 +163,22 @@ On-skin block (MANDATORY on every product post while the standing order below is
   - Identity line: colour, silhouette, the one distinguishing feature, and length in millimetres from the bare-product packshot. State the scale against the named body zone (forearm about 65 mm wide, wrist about 55 mm), not only the hand.
   - Sternum and chest frames: the crop closes above the areola, or a hand or the second cast member occludes it, and the brief says which. Belly frames may carry the under-curve of the breasts at the top edge; a hint of pubic hair at the bottom edge is licensed at most once per rolling 7.
 
-Clothed exception (use INSTEAD of the On-skin block, and only for one of the two reasons below)
+Styling (MANDATORY on every cast frame, owner direction 2026-10-02, `instagram-campaigns.md` §3.2a)
+  Piece: <one piece from the cast member's closet in `cast-wardrobe.md`, at the register-9 cut: the smallest that covers the nipple and the vulva, sheer everywhere else (owner 2026-10-02: "as small as possible on the body but cover the nipples and vulva"); a short silk robe falling open over the set; or "bare" plus the story reason>
+  Worn: <how it was styled for the shot: band under the breast, waistband at the hip bone, strap off the shoulder, robe slipping to the elbows>
+  Skin left bare: <the contact zone, always bare, plus everything else; the piece covers what the stop list needs and nothing more>
+  Opaque detail: <on a woman, the ONLY opaque parts: the object over each nipple (an embroidered appliqué or motif, named as its own object, never "a band", about five centimetres across so it covers the whole areola) and an opaque, lined front panel named as its own object and just wide enough to cover the mons and vulva; everything else sheer>
+  Grip: <the fingers holding the product the way the category is gripped in use; never an open palm presenting it like a tray (owner, asset 869)>
+  Edge it closes: <which edge the lingerie line closes>
+  Coverage class: <one class from `cast-wardrobe.md`; `bedding-on-body`, `towel` and `bulky` are REVISE>
+  The colour and weave go on the Fabric line above. Owner, 2026-10-02: *"I'd rather see a bra line
+  than a piece of fabric... No one drapes fabric over themselves to use a vibrator."* So: no knits,
+  terry, towels or sweats on a body, and bedding is the set, never the cover. A garment over the
+  contact zone is a REVISE; a frame that is mostly garment is a portrait. The piece serves the skin,
+  which is why this block does not reopen the default-garment failure described below: the bare zone
+  is decided first and the garment is the smallest thing that closes the edge.
+
+Clothed exception (use INSTEAD of the On-skin block, only when the product does not touch bare skin, and only for one of the two reasons below)
   Wardrobe: <garment and its coverage>
   Why clothed: <"owner standing order is off", and nothing else counts. The former reason
     "product-free resource post, subject has no product in it" was closed by the owner on
@@ -176,7 +194,7 @@ Clothed exception (use INSTEAD of the On-skin block, and only for one of the two
   BORING. Too hot costs a post; too cold costs nothing anyone measures. Under that gradient a run
   retreats every day." Do not reintroduce a default garment.
 
-  Brief craft from §3.2c, applied in full and not restated here: the product rests and never presses or dents skin; no product emerging from a navel, named as a negative in every belly frame; anatomy distortion is a reject condition; only body zones where a catalog category plausibly belongs, and the nape is retired until a SKU fits it; brief only from a bare-product reference found by walking the Shopify media list, never an assumed featured image; the plug, cock ring and paddle treatments as written there; and the word "paper" is banned from prompts, say "warm off-white linen".
+  Brief craft from §3.2c, applied in full and not restated here: the product rests and never presses or dents skin; no product emerging from a navel, named as a negative in every belly frame; anatomy distortion is a reject condition; only body zones where a catalog category plausibly belongs, and the nape is retired until a SKU fits it; brief only from a bare-product reference found by walking the Shopify media list, never an assumed featured image; the plug, cock ring and paddle treatments as written there; and the word "paper" is banned from prompts; fabric is named by colour and weave from `cast-wardrobe.md` (§3.2f), and every cast-frame negative list carries "no nude-tone underwear, no skin-tone bodysuit".
 
 Slide 2: <archetype plate brief, or "none, because <why it would not add anything>">
 

@@ -84,7 +84,7 @@ script arrives already written and gated. What binds YOU at render time:
 
 <frame_and_motion_prompts>
 - **framePrompt:** the recipe, in order: camera and light (§1), skin language and adult marker,
-  named garment, relaxed parted lips (§2), the category grip and one-hand-one-job with the other
+  named garment from the presenter's closet in `docs/store-team/cast-wardrobe.md` with its colour stated (an unnamed garment renders cream), relaxed parted lips (§2), the category grip and one-hand-one-job with the other
   hand's resting object named (§3), the story cue the pitch named, then the §4 negatives in full.
   Ground on the lock (coral-soft, plum-soft, warm off-white linen); never write the word "paper".
 - **motionPrompt:** minimal hand movement, natural blink, soft breathing (recipe §6). Lighting
