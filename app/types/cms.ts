@@ -607,6 +607,24 @@ export interface BlogPostCard {
   productHandle?: string
 }
 
+/**
+ * `NotebookRail`'s actual field needs (ticket #13147): `_id`, `title`,
+ * `slug`, `excerpt`, `heroImageUrl`, `heroImageAlt`, `productHandle`. The
+ * homepage's rail never reads `heroLqip` (~7.6 KB of inline base64 per
+ * post), `author`, or `category`, but `getBlogPosts`'s shared projection
+ * fetches all of it, and the full `BlogPostCard[]` used to ride into the
+ * homepage's turbo-stream payload unread. Narrowing the homepage's own
+ * notebookPosts type to this `Pick` turns a future read of a removed field
+ * into a compile error instead of a silent blank, the same principle ticket
+ * #13147 applies to the product card view-model. A full `BlogPostCard` is
+ * still structurally assignable here, so every other `NotebookRail` caller
+ * (collections, PDP) that passes the full shape is unaffected.
+ */
+export type NotebookCardLean = Pick<
+  BlogPostCard,
+  '_id' | 'title' | 'slug' | 'excerpt' | 'heroImageUrl' | 'heroImageAlt' | 'productHandle'
+>
+
 export interface BlogPost extends BlogPostCard {
   _updatedAt?: string
   body: unknown[]

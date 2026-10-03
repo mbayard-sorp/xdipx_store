@@ -281,6 +281,63 @@ describe('hydrateStorefrontPayloadB', () => {
     expect(data.curiosityShelf).toEqual(p.curiosityShelf)
   })
 
+  // Ticket #13147: the homepage payload diet. heroLqip (~7.6 KB base64 per
+  // post), author, and category ride in the stored HomepagePayloadB blob
+  // (so getBlogPosts/other NotebookRail callers keep the full shape) but
+  // must never reach the served StorefrontData/turbo-stream payload.
+  it('projects notebookPosts down to NotebookCardLean, dropping heroLqip/author/category', () => {
+    const fullPost = {
+      _id: 'post-1',
+      title: 'Test Post',
+      slug: 'test-post',
+      excerpt: 'An excerpt.',
+      publishedAt: '2026-10-01',
+      featured: false,
+      heroImageUrl: 'https://cdn.sanity.io/images/x/y/hero.jpg',
+      heroImageAlt: 'A hero image',
+      heroLqip: 'data:image/jpeg;base64,'.padEnd(7600, 'A'),
+      heroWidth: 1200,
+      heroHeight: 800,
+      author: { name: 'Emma', slug: 'emma', bio: 'bio', avatarUrl: 'https://x/y.jpg', role: 'Guide' },
+      category: { name: 'Education', slug: 'education', color: 'coral' },
+      readingTime: 4,
+      productHandle: 'a-product',
+    }
+    const data = hydrateStorefrontPayloadB(payload({ notebookPosts: [fullPost] }))
+    expect(data.notebookPosts).toEqual([{
+      _id: 'post-1',
+      title: 'Test Post',
+      slug: 'test-post',
+      excerpt: 'An excerpt.',
+      heroImageUrl: 'https://cdn.sanity.io/images/x/y/hero.jpg',
+      heroImageAlt: 'A hero image',
+      productHandle: 'a-product',
+    }])
+    const keys = Object.keys(data.notebookPosts[0]!)
+    expect(keys).not.toContain('heroLqip')
+    expect(keys).not.toContain('author')
+    expect(keys).not.toContain('category')
+    expect(keys).not.toContain('heroWidth')
+    expect(keys).not.toContain('heroHeight')
+    expect(keys).not.toContain('publishedAt')
+    expect(keys).not.toContain('featured')
+    expect(keys).not.toContain('readingTime')
+  })
+
+  it('omits optional notebook-post fields rather than writing them as undefined', () => {
+    // exactOptionalPropertyTypes: an absent field must be OMITTED, not set to
+    // `undefined`, or the lean object's own type would reject it.
+    const bareMinimumPost = {
+      _id: 'post-2', title: 'Bare', slug: 'bare', excerpt: 'e.',
+      publishedAt: '2026-10-01', featured: false, readingTime: 1,
+    }
+    const data = hydrateStorefrontPayloadB(payload({ notebookPosts: [bareMinimumPost] }))
+    const keys = Object.keys(data.notebookPosts[0]!)
+    expect(keys).not.toContain('heroImageUrl')
+    expect(keys).not.toContain('heroImageAlt')
+    expect(keys).not.toContain('productHandle')
+  })
+
   it('passes the anchor collection products through verbatim (ticket #464)', () => {
     // Curated collection order is merchandising, not a rotation set, so it must
     // reach the component unchanged (never reshuffled like `rails`).

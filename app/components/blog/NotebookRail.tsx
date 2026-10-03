@@ -1,5 +1,5 @@
 import { Link } from 'react-router'
-import type { BlogPostCard } from '~/types/cms'
+import type { NotebookCardLean } from '~/types/cms'
 import { sanityImageUrl, sanityImageSrcSet } from '~/lib/sanity-image'
 
 /**
@@ -23,7 +23,7 @@ export function NotebookRail({
   seeAllLabel,
   showProductChips = false,
 }: {
-  posts: BlogPostCard[]
+  posts: NotebookCardLean[]
   heading?: string
   className?: string
   /** Target for the trailing see-all link. Only rendered when `seeAllLabel` is set. */
