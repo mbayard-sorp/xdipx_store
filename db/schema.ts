@@ -497,6 +497,23 @@ export const socialComments = pgTable('social_comments', {
   statusIdx:    index('idx_social_comments_status').on(t.status),
 }))
 
+// Instagram Graph API access-token auto-refresh (migration 112, ticket
+// #13153). Append-only history, newest row first by attemptedAt: one row per
+// refresh attempt, success or failure, so a failed attempt never overwrites
+// the last known-good token and "no refresh has succeeded in N days" is a
+// plain query. See app/lib/instagram-token.server.ts.
+export const instagramTokenRefreshes = pgTable('instagram_token_refreshes', {
+  id:           serial('id').primaryKey(),
+  // NULL on a failed attempt — never overwrite the prior good token with a bad read.
+  accessToken:  text('access_token'),
+  expiresAt:    timestamp('expires_at', { withTimezone: true }),
+  success:      boolean('success').notNull(),
+  error:        text('error'),
+  attemptedAt:  timestamp('attempted_at', { withTimezone: true }).defaultNow().notNull(),
+}, t => ({
+  attemptedIdx: index('idx_instagram_token_refreshes_attempted').on(t.attemptedAt),
+}))
+
 export const adminRoles = pgTable('admin_roles', {
   id:              serial('id').primaryKey(),
   neonAuthUserId:  varchar('neon_auth_user_id', { length: 60 }).notNull().unique(),

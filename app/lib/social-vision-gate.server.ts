@@ -216,6 +216,18 @@ export interface VisionVerdict {
    */
   handDigitCounts: number[] | null
   /**
+   * Ticket #13174. Per hand, in the same order as `handDigitCounts`: how many
+   * digits are hidden behind something visible in the frame (the gripped
+   * product, the other hand, the body, fabric, the frame edge). A hand
+   * gripping a product hides its thumb behind the handle, so a correct hand
+   * reports 4 visible + 1 hidden; before this field the override failed every
+   * such hand as a four-digit hand (owner-approved assets 848, 850, 859 and
+   * eight more, 2026-10-02). Optional and lenient on purpose: absent or
+   * malformed reads as all zeros, which is exactly the pre-#13174 behaviour,
+   * so no older or remote response fails closed for lacking it.
+   */
+  handOccludedDigits?: number[] | null
+  /**
    * Ticket #11029. REPORT field, same idiom as `legibleText`: what the model
    * sees at the top of the gluteal cleft/sacrum and at the navel, for any
    * back-view frame (`''` when the frame is not a back view or nothing is
@@ -340,14 +352,16 @@ REPORT ONLY, not a check, does not affect "pass": skinMarks. Look at every patch
 
 REPORT ONLY, not a check, does not affect "pass": productPhysics. Look at whether any product depicted is in contact with a body. If no product touches a body anywhere in the frame (a product-only shot, or a body with no product against it), answer "not_applicable". Otherwise judge whether the contact is physically supported: answer "supported" when a hand is gripping the product (fingers visibly wrapped around it, or a palm cupped underneath it bearing its weight from below) OR the product rests on a surface that faces upward in the frame (so gravity could plausibly hold it there). Answer "unsupported" when neither is true: nothing in frame explains why the product is not falling, for example a product adhered to the side of a vertical surface (a shin, a hip, a wall) with no hand touching it, or an open flat palm merely laid flat beside or in front of a product with no fingers wrapped around it, or a hand resting on TOP of a product with no grip beneath or around it. An open flat palm beside a product is not support, and a hand resting on top of a product is not support; only a wrapped grip or a true underneath-cupping hold, or an upward-facing resting surface, counts. This is NOT a size or proportion check: a product rendered at an exaggerated, larger-than-real-life scale is completely normal for this brand and must still answer "supported" as long as the grip or resting surface is physically plausible; scale exaggeration and physical support are unrelated questions, and you must never answer "unsupported" because a product simply looks large relative to the body. Only fake or missing support is the fail condition here, never scale.
 
-REPORT, feeds handDigitCounts: for every hand visible anywhere in the frame, actually count its fingers one at a time, including any digit that trails off separated from the rest of the hand. Return one integer per visible hand, in the order encountered left to right, as "handDigitCounts". Return an empty array if no hand is visible anywhere in the frame. Do not round to 5 out of habit; report the count you actually see, even if it disagrees with your handAnatomy answer above.
+REPORT, feeds handDigitCounts: for every hand visible anywhere in the frame, count the digits you can actually see on it, thumb included, one at a time, including any digit that trails off separated from the rest of the hand. Return one integer per visible hand, in the order encountered left to right, as "handDigitCounts". Return an empty array if no hand is visible anywhere in the frame. Do not round to 5 out of habit; report the count you actually see, even if it disagrees with your handAnatomy answer above.
+
+REPORT, feeds handOccludedDigits: for the same hands in the same order, how many digits are hidden from view by something you can point to in the frame (the product the hand is gripping, the other hand, the body, fabric, or the edge of the frame) where the hand's pose makes it certain the digit is there behind it, for example a thumb wrapped behind a handle or fingertips curled under. Return 0 for a hand when nothing hides any of its digits. Never use this to explain away a digit that is missing, fused, malformed, or extra: a hand with the wrong number of digits is reported as exactly what you see, with 0 hidden.
 
 REPORT, feeds backAnatomyRead: for any back-view frame only (the camera facing the person's back), name exactly what you see at the top of the gluteal cleft/sacrum area and at the navel region, in one short phrase (for example "smooth skin, no navel visible" or "a dense dark patch above the cleft resembling pubic hair"). Answer "" if the frame is not a back view, or is a back view with nothing notable in that area.
 
 Respond with ONLY a JSON object, no prose before or after, in exactly this shape:
-{"pass": true|false, "checks": {"limbCount": "pass"|"fail", "handAnatomy": "pass"|"fail", "faceBodyIntegrity": "pass"|"fail", "extraOrMergedLimbs": "pass"|"fail", "nippleOccluded": "pass"|"fail", "genitaliaAbsent": "pass"|"fail", "anusNotVisible": "pass"|"fail", "adultUnambiguous": "pass"|"fail"}, "notes": "one or two sentences on what you saw, especially for any fail", "legibleText": "<transcription of any legible text found, or empty string if none>", "skinMarks": "<description of any unbriefed mark on skin, or empty string if none>", "productPhysics": "supported"|"unsupported"|"not_applicable", "handDigitCounts": [<one integer per visible hand, left to right, empty array if none>], "backAnatomyRead": "<phrase describing the cleft/sacrum/navel area on a back-view frame, or empty string>"}
+{"pass": true|false, "checks": {"limbCount": "pass"|"fail", "handAnatomy": "pass"|"fail", "faceBodyIntegrity": "pass"|"fail", "extraOrMergedLimbs": "pass"|"fail", "nippleOccluded": "pass"|"fail", "genitaliaAbsent": "pass"|"fail", "anusNotVisible": "pass"|"fail", "adultUnambiguous": "pass"|"fail"}, "notes": "one or two sentences on what you saw, especially for any fail", "legibleText": "<transcription of any legible text found, or empty string if none>", "skinMarks": "<description of any unbriefed mark on skin, or empty string if none>", "productPhysics": "supported"|"unsupported"|"not_applicable", "handDigitCounts": [<one integer per visible hand, left to right, empty array if none>], "handOccludedDigits": [<one integer per visible hand, same order, 0 when nothing hides a digit>], "backAnatomyRead": "<phrase describing the cleft/sacrum/navel area on a back-view frame, or empty string>"}
 
-"pass" is true only when all eight checks in "checks" are "pass"; "legibleText", "skinMarks", "productPhysics", "handDigitCounts", and "backAnatomyRead" never affect your own "pass" answer directly (a separate deterministic check reads productPhysics/handDigitCounts/backAnatomyRead afterward, and skinMarks/legibleText are pure report fields). If the image has no visible people or hands at all (a product-only shot), checks 1-4 pass trivially; checks 5-8 still apply to any depicted skin or body part even without hands or a face; legibleText still applies to any text in the frame regardless; skinMarks still applies to any bare skin in the frame regardless; productPhysics answers "not_applicable" when there is no product-on-body contact to judge; handDigitCounts is an empty array and backAnatomyRead is "" when there is no hand or back view to report on. When in doubt about a genuine anatomy defect or an exposure/age-ambiguity issue, fail the check; this gate exists specifically to catch what a fast human scroll would catch, and a false block costs one regeneration while a false pass can publish something it must not. "legibleText" and "skinMarks" are always present in your response, even when they are ""; "productPhysics" is always present in your response, and is always one of "supported", "unsupported", or "not_applicable"; "handDigitCounts" is always present, even when it is []; "backAnatomyRead" is always present, even when it is "".`
+"pass" is true only when all eight checks in "checks" are "pass"; "legibleText", "skinMarks", "productPhysics", "handDigitCounts", "handOccludedDigits", and "backAnatomyRead" never affect your own "pass" answer directly (a separate deterministic check reads productPhysics/handDigitCounts/handOccludedDigits/backAnatomyRead afterward, and skinMarks/legibleText are pure report fields). If the image has no visible people or hands at all (a product-only shot), checks 1-4 pass trivially; checks 5-8 still apply to any depicted skin or body part even without hands or a face; legibleText still applies to any text in the frame regardless; skinMarks still applies to any bare skin in the frame regardless; productPhysics answers "not_applicable" when there is no product-on-body contact to judge; handDigitCounts is an empty array and backAnatomyRead is "" when there is no hand or back view to report on. When in doubt about a genuine anatomy defect or an exposure/age-ambiguity issue, fail the check; this gate exists specifically to catch what a fast human scroll would catch, and a false block costs one regeneration while a false pass can publish something it must not. "legibleText" and "skinMarks" are always present in your response, even when they are ""; "productPhysics" is always present in your response, and is always one of "supported", "unsupported", or "not_applicable"; "handDigitCounts" is always present, even when it is []; "backAnatomyRead" is always present, even when it is "".`
 
 export interface VisionCallOpts {
   /**
@@ -457,17 +471,57 @@ export const EXPOSURE_CHECK_NAMES: readonly VisionCheckName[] = ['nippleOccluded
 export function backAnatomyReadsAsDefect(read: string): boolean {
   const text = read.trim()
   if (!text) return false
-  if (/\b(pubic|vulva|labia|genital)/i.test(text)) return true
-  // A navel mention is significant only when reported as actually present.
-  // The prompt's own clean-case example ("no navel visible") must not trip
-  // this, so a negation word within a few words either side of the mention
-  // reads as a clean report rather than a defect.
-  const navelMatch = /\bnavel\b|\bbelly[\s-]?button\b/i.exec(text)
-  if (navelMatch) {
-    const window = text.slice(Math.max(0, navelMatch.index - 20), navelMatch.index + navelMatch[0].length + 20)
-    if (!/\b(no|not|none|absent|never|without|isn't|isnt)\b/i.test(window)) return true
+  // A mention is significant only when reported as actually present. The
+  // model reports clean frames in the prompt's own vocabulary ("no navel
+  // visible", and, since the prompt's defect example names pubic hair, "no
+  // pubic-hair-like patch"), so a negation inside the same clause as the
+  // mention reads as a clean report. Ticket #13175: the genital-word branch
+  // used to have no negation handling at all, and failed owner-approved back
+  // views (assets 862-865) on their own clean read.
+  return (
+    hasUnnegatedMention(text, /\b(pubic|vulva|labia|genital)/gi) ||
+    hasUnnegatedMention(text, /\bnavel\b|\bbelly[\s-]?button\b/gi)
+  )
+}
+
+const CLAUSE_BOUNDARY = /[,.;:]|\b(?:and|but|with)\b/gi
+const NEGATION = /\b(no|not|none|absent|never|without|isn't|isnt)\b/i
+
+/** True when any match of `pattern` sits in a clause with no negation word. */
+function hasUnnegatedMention(text: string, pattern: RegExp): boolean {
+  for (const match of text.matchAll(pattern)) {
+    const start = match.index ?? 0
+    const end = start + match[0].length
+    let clauseStart = 0
+    let clauseEnd = text.length
+    for (const boundary of text.matchAll(CLAUSE_BOUNDARY)) {
+      const at = boundary.index ?? 0
+      if (at + boundary[0].length <= start) clauseStart = at + boundary[0].length
+      else if (at >= end) {
+        clauseEnd = at
+        break
+      }
+    }
+    if (!NEGATION.test(text.slice(clauseStart, clauseEnd))) return true
   }
   return false
+}
+
+/**
+ * Ticket #13174. The visible counts of hands that do not add up to five once
+ * each hand's hidden digits are counted back in. More than five visible is
+ * always bad, whatever is claimed hidden. `occluded` is trusted only when it
+ * is an array of finite non-negative numbers the same length as `visible`;
+ * anything else reads as all zeros (the pre-#13174 rule: five visible or bad).
+ */
+export function badHandDigitCounts(visible: readonly number[], occluded: readonly number[] | null | undefined): number[] {
+  const hidden =
+    Array.isArray(occluded) &&
+    occluded.length === visible.length &&
+    occluded.every((n) => typeof n === 'number' && Number.isFinite(n) && n >= 0)
+      ? occluded
+      : null
+  return visible.filter((n, i) => n > 5 || n + (hidden?.[i] ?? 0) !== 5)
 }
 
 /**
@@ -484,7 +538,7 @@ export function backAnatomyReadsAsDefect(read: string): boolean {
 export function enforceEnumeratedAnatomy(verdict: VisionVerdict): VisionVerdict {
   if (!verdict.checkCompleted || !verdict.checks) return verdict
 
-  const badHandCounts = (verdict.handDigitCounts ?? []).filter((n) => n !== 5)
+  const badHandCounts = badHandDigitCounts(verdict.handDigitCounts ?? [], verdict.handOccludedDigits)
   const backDefect = backAnatomyReadsAsDefect(verdict.backAnatomyRead ?? '')
   if (badHandCounts.length === 0 && !backDefect) return verdict
 
@@ -492,7 +546,9 @@ export function enforceEnumeratedAnatomy(verdict: VisionVerdict): VisionVerdict 
   const overrides: string[] = []
   if (badHandCounts.length > 0 && checks.handAnatomy !== 'fail') {
     checks.handAnatomy = 'fail'
-    overrides.push(`handDigitCounts ${JSON.stringify(verdict.handDigitCounts)} includes a non-five count`)
+    overrides.push(
+      `handDigitCounts ${JSON.stringify(verdict.handDigitCounts)} with handOccludedDigits ${JSON.stringify(verdict.handOccludedDigits ?? [])} includes a hand that does not add up to five`,
+    )
   }
   if (backDefect && checks.faceBodyIntegrity !== 'fail') {
     checks.faceBodyIntegrity = 'fail'

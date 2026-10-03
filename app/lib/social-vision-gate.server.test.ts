@@ -11,6 +11,7 @@ import {
   isValidVerdictShape,
   enforceEnumeratedAnatomy,
   backAnatomyReadsAsDefect,
+  badHandDigitCounts,
   VISION_CHECK_NAMES,
   VISION_SYSTEM_PROMPT,
   VisionParseError,
@@ -714,6 +715,14 @@ describe('runVisionGateOnImage', () => {
   // Ticket #11029, end to end: the enumerated fields ride all the way through
   // getOneVerdict into the final verdict object, and a bad count fails the
   // whole gate even when the model's own checks self-graded clean.
+  it('carries handOccludedDigits through and passes a gripping hand end to end (ticket #13174)', async () => {
+    const callVision = vi.fn(async () => ({ ...CLEAN_RESPONSE, handDigitCounts: [4], handOccludedDigits: [1], backAnatomyRead: '' }))
+    const verdict = await runVisionGateOnImage({ data: 'ZmFrZQ==', mediaType: 'image/jpeg' }, { callVision })
+    expect(verdict.handOccludedDigits).toEqual([1])
+    expect(verdict.pass).toBe(true)
+    expect(verdict.checks!.handAnatomy).toBe('pass')
+  })
+
   it('carries handDigitCounts/backAnatomyRead through to the final verdict and enforces a bad count', async () => {
     const callVision = vi.fn(async () => ({ ...CLEAN_RESPONSE, handDigitCounts: [6], backAnatomyRead: '' }))
     const verdict = await runVisionGateOnImage({ data: 'ZmFrZQ==', mediaType: 'image/jpeg' }, { callVision })
@@ -754,6 +763,20 @@ describe('backAnatomyReadsAsDefect (ticket #11029)', () => {
   it('does not flag an empty read (not a back view, or nothing there)', () => {
     expect(backAnatomyReadsAsDefect('')).toBe(false)
   })
+
+  // Ticket #13175: the clean reads on owner-approved assets 862-865, verbatim
+  // in shape, failed faceBodyIntegrity through the override.
+  it('does not flag a clean read that negates the pubic-hair patch', () => {
+    expect(backAnatomyReadsAsDefect('smooth skin at sacrum/top of gluteal cleft, no navel visible, no pubic-hair-like patch')).toBe(false)
+    expect(backAnatomyReadsAsDefect('no visible pubic hair at the cleft')).toBe(false)
+    expect(backAnatomyReadsAsDefect('pubic hair is not present on the lower back')).toBe(false)
+  })
+
+  it('still flags a described patch even when another clause carries a negation', () => {
+    expect(backAnatomyReadsAsDefect('faint pubic-hair-like line above the cleft')).toBe(true)
+    expect(backAnatomyReadsAsDefect('no navel visible, a pubic-hair-like patch at the sacrum')).toBe(true)
+    expect(backAnatomyReadsAsDefect('no hair but a crease reading as vulva-like')).toBe(true)
+  })
 })
 
 describe('enforceEnumeratedAnatomy (ticket #11029)', () => {
@@ -790,6 +813,49 @@ describe('enforceEnumeratedAnatomy (ticket #11029)', () => {
     expect(result.checks!.handAnatomy).toBe('fail')
     expect(result.notes).toContain('enumerated-anatomy override')
     expect(result.notes).toContain('[6]')
+  })
+
+  // Ticket #13174: a hand gripping a product hides its thumb behind the
+  // handle. Owner-approved assets 848, 850 and 859 (2026-10-02) failed only on
+  // a [4] read of a correct gripping hand.
+  it('passes a gripping hand that shows four digits and hides the thumb', () => {
+    const verdict: VisionVerdict = { ...CLEAN_ENUMERATED, handDigitCounts: [4], handOccludedDigits: [1], backAnatomyRead: '' }
+    expect(enforceEnumeratedAnatomy(verdict)).toEqual(verdict)
+  })
+
+  it('still fails four visible digits when nothing is reported hidden, or the field is absent', () => {
+    const variants: Array<Pick<VisionVerdict, 'handOccludedDigits'>> = [{ handOccludedDigits: [0] }, {}, { handOccludedDigits: null }]
+    for (const variant of variants) {
+      const result = enforceEnumeratedAnatomy({ ...CLEAN_ENUMERATED, handDigitCounts: [4], ...variant, backAnatomyRead: '' })
+      expect(result.pass).toBe(false)
+      expect(result.checks!.handAnatomy).toBe('fail')
+    }
+  })
+
+  it('fails six visible digits whatever is claimed hidden', () => {
+    const result = enforceEnumeratedAnatomy({ ...CLEAN_ENUMERATED, handDigitCounts: [6], handOccludedDigits: [0], backAnatomyRead: '' })
+    expect(result.pass).toBe(false)
+    expect(result.notes).toContain('handOccludedDigits')
+  })
+
+  it('judges each hand separately when one grips and one is open', () => {
+    const ok: VisionVerdict = { ...CLEAN_ENUMERATED, handDigitCounts: [5, 4], handOccludedDigits: [0, 1], backAnatomyRead: '' }
+    expect(enforceEnumeratedAnatomy(ok)).toEqual(ok)
+    const bad = enforceEnumeratedAnatomy({ ...CLEAN_ENUMERATED, handDigitCounts: [5, 3], handOccludedDigits: [0, 1], backAnatomyRead: '' })
+    expect(bad.checks!.handAnatomy).toBe('fail')
+  })
+
+  it('asks the model for digits with the thumb included, and for hidden digits separately', () => {
+    expect(VISION_SYSTEM_PROMPT).toContain('thumb included')
+    expect(VISION_SYSTEM_PROMPT).toContain('"handOccludedDigits"')
+    expect(VISION_SYSTEM_PROMPT).not.toContain('count its fingers')
+  })
+
+  it('ignores a malformed hidden-digit array and falls back to the five-visible rule', () => {
+    expect(badHandDigitCounts([4], [1, 0])).toEqual([4])
+    expect(badHandDigitCounts([4], [-1])).toEqual([4])
+    expect(badHandDigitCounts([4, 5], [1, 0])).toEqual([])
+    expect(badHandDigitCounts([], [])).toEqual([])
   })
 
   it('forces handAnatomy to fail when any one of multiple hands has a bad count', () => {

@@ -276,6 +276,22 @@ export const CRON_EXPECTATIONS: readonly CronExpectation[] = [
       + 'stop showing up in the /admin/socials/comments queue, so a support reply never happens.',
   },
   {
+    route: '/cron/instagram-token-refresh',
+    plane: 'vercel',
+    schedule: '0 5 * * 0',
+    periodMinutes: WEEKLY,
+    graceMinutes: 1440,
+    recorded: true,
+    moneyRelevant: false,
+    ownerTeam: 'social',
+    notes:
+      'Extends the long-lived Instagram token before it lapses (ticket #13153). Absence is silent '
+      + 'in the same way the token itself lapsing is: everything degrades quietly until the credential '
+      + 'sweep (janitor-sweep) or an actual publish failure surfaces it, which is the whole reason this '
+      + 'ticket exists. 24h grace: a missed weekly fire is not urgent on its own against a 60-day token, '
+      + 'but the janitor-sweep expiry-ahead warning is the real floor here, not this one.',
+  },
+  {
     route: '/cron/discontinued-sweep',
     plane: 'vercel',
     schedule: '45 23 * * *',

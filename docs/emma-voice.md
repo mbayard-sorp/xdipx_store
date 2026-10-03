@@ -1,4 +1,4 @@
-# xdipx Voice Charter (v5.6)
+# xdipx Voice Charter (v5.7)
 
 > The single source of truth for how xdipx speaks, everywhere: site copy, product copy, homepage merchandising, SMS/chat, email, ads, IVR, and support. Every AI prompt and every agent that writes customer-facing words loads this file before writing. If any other document disagrees with this one, this one wins.
 >
@@ -35,6 +35,8 @@
 > Amended 2026-09-23 on Mike's rulings in the video-program session, codified by his merge of this change: the core gains **The thesis**, the one idea every channel carries ("The door doesn't have to stay closed", his own sentence of 2026-08-22), with three pillars, and the channel table sits under Channel addenda outside every runtime fence; the video addendum gains a second owner-gated carve-out, **product-talk clips**, whose spoken track runs at register 9, plain, on every platform with the fence narrowed to graphic detail, conditioned on every final cut being owner-approved and posted by hand; and "Talking heads never show the product in frame" is replaced by "a talking presenter may hold, show, or set down the product", with the frame-level stops named. The Group Chat is shelved for the season; its 2026-09-04 override stands unchanged for when it returns. Emma's no-lived-experience rule, the §3.2a stop list, and the nudity definition do not move. This moves the charter to v5.6.
 
 > Amended 2026-09-30 on Mike's direction, all-hands on Shop and agentic channels: **"go, use the SEO register"**. The AI shopping catalog (the Shopify Catalog feed that ChatGPT, Copilot, and other agentic channels read, carried in the product metafield `xdipx.catalog_description`) is a new surface and runs at the SEO register, 4 to 5: factual, plain, what the product is and how it is used, with no desire-forward copy and no health, efficacy, or proof claim beyond what the label states. The site's own descriptions and every other register are unchanged, so this stays v5.6.
+
+> Amended 2026-10-01 on Mike's direction, **"make it a standing rule to use the skill for all future writings"**, after a measured test on that day's Notebook post (blind-judged AI-tell density fell from 1.55 to 0.65 per 100 words, voice and accuracy gates both PASS, published live). The core gains **Write like a person**: everything written on every surface runs the vendored humanizer skill (`.claude/skills/humanizer/SKILL.md`, MIT, from blader/humanizer), and this charter wins every conflict with it. The blog addendum's short-standalone-sentence rule now requires the sentence to carry a new fact or a reaction. No register, cap, or hard line moves. This moves the charter to v5.7.
 
 <!-- core:start -->
 
@@ -143,6 +145,18 @@ Never reuse a coined phrase across products, rails, or campaigns. Retire these h
 - "the one I'd..." as the default aside opener
 
 The desire-forward register invites its own tics; watch for and rotate out any phrase that starts repeating ("minus the mercy", "the whole way down", "orgasm after orgasm", "is waiting") so each product gets language earned from its specifics.
+
+## Write like a person
+
+Everything we write runs a humanizer pass before it reaches a gate or a reader. That covers every channel, every surface, and every agent. An agent session reads `.claude/skills/humanizer/SKILL.md` and runs its whole process: mark the tells, draft, check, write the final. A runtime prompt that cannot open the file applies its strongest checks directly. No contrast that invents a claim nobody made so the real point sounds bigger ("not just X, it's Y"). No one-line closer that repeats the paragraph. No staged run-up ("here's the thing", "let's dive in"). No triad that is there for rhythm. No saying dressed up as insight. No sentence about the text itself.
+
+The pass changes how a thing is said. It never changes what is said or who is saying it:
+
+- It adds no fact, number, name, quote, or source. A claim it cannot support gets cut or said more simply.
+- It keeps the voice. First-person lines, Emma's opinions, humor, and candid asides (including the shopkeeper's admission that we sell the thing) stay. The first test pass on 2026-10-01 cut exactly these and had to put them back.
+- This charter wins every conflict with the skill. Where the skill would soften a claim, the authority rules hold. Dashes stay banned. A temptation closer in selling copy is a charter device, not a closer tell. A short sentence stays when it carries a new fact or a reaction.
+
+The voice gate checks in both directions: tells that survived the pass, and voice the pass removed.
 
 ## Hard rules (unchanged from v3)
 
@@ -261,7 +275,9 @@ rules below were owner-codified 2026-07-28.
   a joke load-bearing on a clinical or safety fact (joke about the awkwardness, never the pain).
   The license is owned-channels only; social recycling stays capped by the social addendum.
 - **Rhythm rules (the anti-AI-tells).** Vary sentence length; at least one short standalone
-  sentence per section. Cap the aphorism-as-closer construction (e.g. "bracing is what has been
+  sentence per section, and it carries a new fact or a reaction. A short sentence that only
+  re-weights the one before it ("Sit with that.", "Start there.") is a tell, not rhythm (see Write
+  like a person). Cap the aphorism-as-closer construction (e.g. "bracing is what has been
   killing the moment") at one per section and three per post, because it is a house tic under the
   fresh-language rule. Never two in one paragraph.
 

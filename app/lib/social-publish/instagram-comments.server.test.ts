@@ -45,6 +45,13 @@ const h = vi.hoisted(() => {
 })
 
 vi.mock('~/lib/db.server', () => ({ db: h.db }))
+// Ticket #13153: getInstagramAccessToken does its own db.select() against
+// instagram_token_refreshes, which would otherwise consume this file's
+// shared FIFO queue meant for recentInstagramMediaIds()/socialComments
+// queries. Proxy straight to env, same as every call site's old direct read.
+vi.mock('~/lib/instagram-token.server', () => ({
+  getInstagramAccessToken: async () => process.env['IG_GRAPH_ACCESS_TOKEN']?.trim() || null,
+}))
 
 import {
   describeCommentsApiError,

@@ -36,6 +36,7 @@ import { and, desc, eq, isNotNull } from 'drizzle-orm'
 import { db } from './db.server'
 import { socialPosts } from '../../db/schema'
 import { igRequest, describeInstagramApiError } from './social-publish/instagram.server'
+import { getInstagramAccessToken } from './instagram-token.server'
 import { lookupTweets } from './twitter.server'
 
 export interface InstagramEngagementMetrics {
@@ -90,7 +91,7 @@ export async function fetchInstagramEngagement(
   mediaId: string,
   opts: { reels?: boolean } = {},
 ): Promise<{ ok: true; metrics: InstagramEngagementMetrics } | { ok: false; detail: string }> {
-  const token = process.env['IG_GRAPH_ACCESS_TOKEN']?.trim()
+  const token = await getInstagramAccessToken()
   if (!token) return { ok: false, detail: 'Instagram keys are not configured' }
 
   const res = await igRequest(`/${mediaId}/insights`, {
@@ -167,7 +168,7 @@ const ACCOUNT_FIELDS = 'followers_count,follows_count,media_count'
 export async function fetchInstagramAccount(): Promise<
   { ok: true; metrics: InstagramAccountMetrics } | { ok: false; detail: string }
 > {
-  const token = process.env['IG_GRAPH_ACCESS_TOKEN']?.trim()
+  const token = await getInstagramAccessToken()
   const igId = process.env['IG_BUSINESS_ACCOUNT_ID']?.trim()
   if (!token || !igId) return { ok: false, detail: 'Instagram keys are not configured' }
 

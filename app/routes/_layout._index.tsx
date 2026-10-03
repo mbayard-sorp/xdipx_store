@@ -121,6 +121,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   ])
   const { variant } = resolveHomeVariant(request, homeConfig?.activeVariant ?? null)
 
+  // Ticket #13144: the live-rebuild opt-in for an admin session (template /
+  // Sanity preview before a save). Only meaningful when an admin cookie is
+  // also present below — an anonymous `?fresh=1` is a no-op, never a live
+  // rebuild, so this stays load-bearing only for the editor path.
+  const wantsFresh = new URL(request.url).searchParams.get('fresh') === '1'
+
   // Team-editable SERP snippet (singleton.homeSeo), with brand-default fallback.
   // Attached to every loader return so the `meta` export can read `data.seo`
   // without an async fetch of its own. This is the homepage "update strategy":
@@ -136,7 +142,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // bot-fallback) lives in loadVariantAData so `/discover` reuses it verbatim.
     const welcomeBackEnabled = homeConfig?.welcomeBackEnabled ?? true
     const adminUser = await getAdminUser(request).catch(() => null)
-    const value = { ...await loadVariantAData(request, { welcomeBackEnabled, isAdmin: !!adminUser }), seo }
+    const value = { ...await loadVariantAData(request, { welcomeBackEnabled, isAdmin: !!adminUser, fresh: wantsFresh }), seo }
     return adminUser ? data(value, { headers: ADMIN_BYPASS_HEADERS }) : value
   }
 
@@ -146,12 +152,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // 'legacy'/'a' until HOME_VARIANT=b (or Sanity activeVariant='b') flips it on.
   if (variant === 'b') {
     const adminUser = await getAdminUser(request).catch(() => null)
-    // Admins bypass the precomputed blob entirely and pay the full live
-    // assembly, so a Sanity/settings edit is visible on the next reload rather
-    // than after the blob's next warm. This is the data-freshness half of the
-    // same contract ADMIN_BYPASS_HEADERS enforces at the cache layer — without
-    // it an admin would get no-store HTML built from a blob up to 15 min old.
-    const value = { ...await assembleStorefrontHome({ fresh: !!adminUser }), seo }
+    // Admin reads the precomputed blob like everyone else by default (ticket
+    // #13144 — the live assembly measured 2-4s+ of origin TTFB against prod,
+    // paid on every homepage load for anyone who had used /admin within the
+    // cookie's 7-day window). ADMIN_BYPASS_HEADERS below still keeps the
+    // response private/no-store so a shared cache never stores admin HTML;
+    // only an explicit `?fresh=1` still pays the full live assembly, for
+    // previewing an unsaved Sanity edit. A saved edit already busts the blob
+    // via bustHomepagePayload, so default admin freshness is unchanged.
+    const value = { ...await assembleStorefrontHome({ fresh: !!adminUser && wantsFresh }), seo }
     if (adminUser) return data(value, { headers: ADMIN_BYPASS_HEADERS })
     // Cold KV / degraded assembly (no rails, no featured product) — never let
     // the edge cache pin a blank storefront for the next window.

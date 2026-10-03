@@ -469,6 +469,10 @@ and an owner ask must land on the blocker list or the 13:00 digest, never only i
   (agents never write `pipeline_settings`).
 - **Sales channels.** Owner direction 2026-08-19: the owner's operating time goes to developing
   sales channels. Teams do not file him operational homework; they file him decisions.
+- **Before any absence:** [`owner-away-checklist.md`](./owner-away-checklist.md). A few things
+  expire, run dry, or have no actuator, and owner email is not an actuator while he is away (owner
+  direction 2026-10-02, ahead of the 10-03 to 10-12 absence). When a gap on that list gets an
+  automatic actuator, delete its line in the same PR.
 
 What came OFF this list on 2026-08-19: per-team triage (auto-approve is the norm; a team with the
 valve off is an exception someone should question, not a default), authoring protected-path code

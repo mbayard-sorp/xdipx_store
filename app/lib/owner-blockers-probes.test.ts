@@ -182,6 +182,34 @@ describe('migration_applied probe', () => {
   })
 })
 
+describe('instagram_token_healthy probe (ticket #13153)', () => {
+  afterEach(() => {
+    vi.doUnmock('~/lib/instagram-token.server')
+    vi.resetModules()
+  })
+
+  it('clears the blocker once the expiry-ahead check no longer warns', async () => {
+    vi.doMock('~/lib/instagram-token.server', () => ({
+      checkInstagramTokenExpiryWarning: async () => ({ warn: false, reason: null, expiresAt: null, lastSuccessAt: null }),
+    }))
+    const { PROBES } = await import('./owner-blockers.server')
+    expect(await PROBES['instagram_token_healthy']!.run('')).toBe(true)
+  })
+
+  it('leaves the blocker open while the expiry-ahead check still warns', async () => {
+    vi.doMock('~/lib/instagram-token.server', () => ({
+      checkInstagramTokenExpiryWarning: async () => ({ warn: true, reason: 'expires in 3.0 days', expiresAt: null, lastSuccessAt: null }),
+    }))
+    const { PROBES } = await import('./owner-blockers.server')
+    expect(await PROBES['instagram_token_healthy']!.run('')).toBe(false)
+  })
+
+  it('describes itself', () => {
+    expect(PROBE_DESCRIPTIONS['instagram_token_healthy']!(''))
+      .toBe('the Instagram token is not close to expiring and refreshes are succeeding')
+  })
+})
+
 describe('the vocabulary and the runners cannot drift apart', () => {
   it('gives every runner a description, or it is silently not a probe at all', async () => {
     // Caught in the act, 2026-09-02. `PROBES` is built by filtering

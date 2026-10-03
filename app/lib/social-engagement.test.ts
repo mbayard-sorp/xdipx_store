@@ -4,6 +4,15 @@
  * social-publish/instagram.server.test.ts. Never hits the live API.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest'
+// Ticket #13153: getInstagramAccessToken reads a DB-stored refreshed token
+// before falling back to env. These tests exercise the Graph API call
+// surface, not the token-storage layer (covered by its own test file), so
+// this proxies straight to the env var exactly like the old direct
+// `process.env['IG_GRAPH_ACCESS_TOKEN']` read did, keeping every existing
+// `vi.stubEnv` call load-bearing.
+vi.mock('./instagram-token.server', () => ({
+  getInstagramAccessToken: async () => process.env['IG_GRAPH_ACCESS_TOKEN']?.trim() || null,
+}))
 import {
   fetchInstagramEngagement,
   fetchInstagramAccount,

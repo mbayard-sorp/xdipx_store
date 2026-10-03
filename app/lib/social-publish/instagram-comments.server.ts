@@ -25,6 +25,7 @@ import { and, desc, eq, gte } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
 import { socialComments, socialPosts } from '../../../db/schema'
 import { igRequest, describeInstagramApiError, type MetaError } from './instagram.server'
+import { getInstagramAccessToken } from '~/lib/instagram-token.server'
 
 const RECENT_POST_WINDOW_DAYS = 14
 
@@ -141,7 +142,7 @@ async function ingestMediaComments(
  * (rendered as an admin banner) instead of failing the cron invocation.
  */
 export async function ingestRecentComments(): Promise<IngestResult> {
-  const token = process.env['IG_GRAPH_ACCESS_TOKEN']?.trim()
+  const token = await getInstagramAccessToken()
   if (!token) {
     return { ok: false, postsChecked: 0, fetched: 0, inserted: 0, detail: 'IG_GRAPH_ACCESS_TOKEN is not configured' }
   }
@@ -205,7 +206,7 @@ export interface ReplyResult {
 
 /** Post one reply to a comment, via POST /{comment_id}/replies. */
 export async function postCommentReply(externalCommentId: string, text: string): Promise<ReplyResult> {
-  const token = process.env['IG_GRAPH_ACCESS_TOKEN']?.trim()
+  const token = await getInstagramAccessToken()
   if (!token) return { ok: false, detail: 'IG_GRAPH_ACCESS_TOKEN is not configured' }
   const trimmed = text.trim()
   if (!trimmed) return { ok: false, detail: 'Reply text is empty' }

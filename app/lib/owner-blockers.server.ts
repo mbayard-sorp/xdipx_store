@@ -285,6 +285,20 @@ async function credentialLive(key: string): Promise<ProbeVerdict> {
 }
 
 /**
+ * Re-run the Instagram token expiry-ahead check (ticket #13153). Distinct
+ * from `credentialLive`'s `instagram` arg: that asks "does the token answer
+ * a live Graph API read right now", which stays true until the token
+ * actually dies. This asks the proactive question the ticket exists for —
+ * "is it close to expiring, or has the refresh cron gone quiet" — which can
+ * be true while the token still answers fine today.
+ */
+async function instagramTokenHealthy(): Promise<ProbeVerdict> {
+  const { checkInstagramTokenExpiryWarning } = await import('~/lib/instagram-token.server')
+  const result = await checkInstagramTokenExpiryWarning()
+  return !result.warn
+}
+
+/**
  * `table|keyColumn|keyValue|column|expectedValue` — does one identified row hold
  * one expected value?
  *
@@ -342,6 +356,7 @@ const RUNNERS: Record<string, (arg: string) => Promise<ProbeVerdict>> = {
   check_green:   checkGreen,
   endpoint_200:  endpoint200,
   credential_live: credentialLive,
+  instagram_token_healthy: instagramTokenHealthy,
   row_matches:   rowMatches,
   migration_applied: migrationApplied,
 }
