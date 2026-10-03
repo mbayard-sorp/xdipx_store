@@ -557,6 +557,27 @@ This runs in addition to, not instead of, the enumeration-consistency scan in St
 stays scoped to the rewrite cycle: this pre-flight catches it on first submit, before a gate cycle is
 spent on it.
 
+**Humanizer pre-flight (mandatory, before Step 5; charter "Write like a person", owner direction
+2026-10-01):** once the draft is complete, read `.claude/skills/humanizer/SKILL.md` and run its full
+process on the body, the excerpt, and the FAQ answers: mark the tells, draft, check, final. Then
+patch the result into the Sanity draft. The 2026-10-01 test on
+`why-you-can-orgasm-alone-but-not-with-a-partner` halved blind-judged tell density, and it also
+taught the three ways the pass goes wrong. Guard against each one:
+
+- **It drops voice.** The first pass cut the opening first-person line, a candid "we can sell you"
+  aside, and a reader-addressed line. Each cost a gate REVISE. After the pass, diff your draft
+  against the humanized version and restore every first-person line, opinion, and aside that
+  was cut only for rhythm.
+- **It edits facts by accident.** Rewording put quotation marks around a paraphrase and turned a
+  neutral account into a judgment ("skipped the confession"). Neither added a fact, but both
+  changed what the sentence claimed. Re-read every sentence that carries an attribution.
+- **It leaves the corrective negative.** "Does not diagnose it", "nothing further", and "no warning
+  on its own" survived both passes. Say the point positively when you can.
+
+Run this pre-flight before the solidarity count below, so that count catches anything the pass
+removed. Record the tell count before and after in the Step 4 `step` event summary
+(`humanizer: <before>→<after>`), so the retro can see whether the pass is still earning its time.
+
 **Solidarity-voice pre-flight (mandatory, before Step 5):** count the first-person markers (`I` /
 `we` / `our`) in the body. If the count is under about 4, or they are not distributed across the
 opening, middle, and close, add solidarity seams **now**, not after a REVISE — missing solidarity voice
