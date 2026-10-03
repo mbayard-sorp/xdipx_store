@@ -69,6 +69,7 @@
  */
 
 import { sql } from 'drizzle-orm'
+import type Anthropic from '@anthropic-ai/sdk'
 import { socialMediaAssets } from '../../db/schema'
 import { SONNET } from './models.server'
 import { stripUrlQuery } from './social-asset-library.server'
@@ -392,6 +393,39 @@ export interface VisionCallOpts {
   strict?: boolean
 }
 
+/**
+ * Ticket #13176. The first (non-strict) call now asks via a forced tool call
+ * rather than free-text JSON: `tool_choice: {type:'tool', name: ...}` makes a
+ * structured response structurally mandatory instead of merely requested, so
+ * the model cannot reply with prose at all on this leg. Before this, a sheer
+ * lace frame returned prose ("I need to...") instead of JSON on 3 of 4 reads
+ * in one 2026-10-02 proof run (generationBatchId e4969648-...), which an
+ * unjudged frame can never recover from on the unattended path. The strict
+ * retry (`VisionCallOpts.strict`) stays a free-text fallback for providers
+ * without tool use; this tool is only used on the first attempt.
+ */
+export const VISION_VERDICT_TOOL_NAME = 'emit_vision_verdict'
+
+export const VISION_VERDICT_TOOL_INPUT_SCHEMA = {
+  type: 'object' as const,
+  properties: {
+    pass: { type: 'boolean' },
+    checks: {
+      type: 'object',
+      properties: Object.fromEntries(VISION_CHECK_NAMES.map((name) => [name, { type: 'string', enum: ['pass', 'fail'] }])),
+      required: [...VISION_CHECK_NAMES],
+    },
+    notes: { type: 'string' },
+    legibleText: { type: 'string' },
+    skinMarks: { type: 'string' },
+    productPhysics: { type: 'string', enum: [...PRODUCT_PHYSICS_VALUES] },
+    handDigitCounts: { type: 'array', items: { type: 'integer' } },
+    handOccludedDigits: { type: 'array', items: { type: 'integer' } },
+    backAnatomyRead: { type: 'string' },
+  },
+  required: ['pass', 'checks', 'notes', 'legibleText', 'skinMarks', 'productPhysics', 'handDigitCounts', 'backAnatomyRead'],
+}
+
 export interface VisionGateDeps {
   fetchImageBase64?: (url: string) => Promise<{ data: string; mediaType: string }>
   callVision?: (imageBase64: string, mediaType: string, opts?: VisionCallOpts) => Promise<unknown>
@@ -425,6 +459,23 @@ const defaultDeps: Required<VisionGateDeps> = {
       // formatting rather than re-asking the substantive question; the first
       // attempt keeps the SDK default.
       ...(strict ? { temperature: 0 } : {}),
+      // Ticket #13176: the first attempt forces the verdict through a tool
+      // call instead of asking for free-text JSON, so a reply shaped like
+      // prose ("I need to...") is structurally impossible on this leg. The
+      // strict retry below stays free-text, as the documented fallback for
+      // providers without tool use.
+      ...(strict
+        ? {}
+        : {
+            tools: [
+              {
+                name: VISION_VERDICT_TOOL_NAME,
+                description: 'Emit the vision-gate verdict. You MUST call this tool with the full verdict; never reply in prose.',
+                input_schema: VISION_VERDICT_TOOL_INPUT_SCHEMA,
+              },
+            ],
+            tool_choice: { type: 'tool' as const, name: VISION_VERDICT_TOOL_NAME },
+          }),
       messages: [
         {
           role: 'user',
@@ -437,6 +488,22 @@ const defaultDeps: Required<VisionGateDeps> = {
     })
     const { logMessageUsage } = await import('./token-log.server')
     logMessageUsage('social-vision-gate', SONNET, 'social-vision-gate/callVision', msg.usage)
+
+    if (!strict) {
+      const toolBlock = msg.content.find(
+        (block): block is Anthropic.Messages.ToolUseBlock => block.type === 'tool_use' && block.name === VISION_VERDICT_TOOL_NAME,
+      )
+      if (toolBlock) return toolBlock.input
+      // Forced tool_choice should make this unreachable, but fail into the
+      // same VisionParseError path (and thus the strict retry) rather than a
+      // bare throw if the model ever refuses the tool anyway.
+      const textBlock = msg.content.find((block): block is Anthropic.Messages.TextBlock => block.type === 'text')
+      throw new VisionParseError(
+        `vision gate: no ${VISION_VERDICT_TOOL_NAME} tool_use block in response (stop_reason=${msg.stop_reason})`,
+        textBlock?.text ?? '',
+      )
+    }
+
     const block = msg.content[0]
     if (block?.type !== 'text') throw new Error('vision gate: unexpected response block type')
     // Model sometimes wraps JSON in a fence despite instructions; strip it.
@@ -616,6 +683,18 @@ async function getOneVerdict(
           console.error('[social-vision-gate] response still not valid JSON after strict retry', {
             message: retryErr.message,
             rawText: retryErr.rawText,
+          })
+          // Ticket #13176: the prior console.error here never reached Sentry,
+          // so a frame the gate could never judge (an unjudged frame can never
+          // ship on the unattended path) was invisible outside server logs.
+          // Dynamically imported, matching every other dependency in this
+          // module (the Anthropic SDK, token-log, db): this file is imported
+          // by many other modules' tests, and a static Sentry import would
+          // drag the real @sentry/node into every one of them.
+          const { Sentry } = await import('./sentry.server')
+          Sentry.captureException(new Error(`[social-vision-gate] could not parse a vision verdict after a strict retry: ${retryErr.message}`), {
+            tags: { gate: 'social-vision-gate' },
+            extra: { rawText: retryErr.rawText },
           })
           // Not a genuine anatomy read in either direction: no verdict was ever
           // reached, so `checks` says so (null) rather than claiming a 'fail'
