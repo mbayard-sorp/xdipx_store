@@ -275,9 +275,52 @@ const CAPTION_TEXT_PATTERNS: readonly RegExp[] = [
 const BRAND_MARK_MAX_WORDS = 5
 const BRAND_MARK_MAX_CHARS = 40
 
+/**
+ * Ticket #13126. The vision gate's own system prompt
+ * (`PRODUCT_LEGIBLE_TEXT`-shaped instructions in social-vision-gate.server.ts)
+ * tells the model to describe ANY mark that is not cleanly readable in prose
+ * rather than return "", and to return "" only when there is truly no text
+ * or text-like mark at all. That means a plain decorative pattern with
+ * nothing attempted as text comes back as a full sentence, not an empty
+ * string, and fell straight into the 'unclassified' bucket below purely on
+ * length/punctuation — verified against a real blocked candidate (social
+ * post 368's picked asset #833): "small blue dot pattern on product label,
+ * no legible letters or words" blocked the post with the message "could not
+ * be read as a brand mark", even though the model explicitly said there was
+ * no letters or words to misread as one.
+ *
+ * Narrow and explicit on purpose: only an unambiguous first-person assertion
+ * that no legible text exists reclassifies to 'none'. Guarded against the
+ * model's own attempted-text-defect vocabulary (the real garbled/pseudo-text
+ * case this gate exists to catch, asset #830: "partially legible as garbled
+ * characters") so a mixed report ("no legible letters, though garbled
+ * dot-and-dash marks are visible") still falls through to the stricter
+ * classification below rather than being waved through.
+ */
+const EXPLICIT_NO_TEXT_PATTERNS: readonly RegExp[] = [
+  /\bno legible (letters?|words?|text|lettering)\b/i,
+  /\bno (readable|legible) (text|words?|letters?)\b/i,
+]
+const ATTEMPTED_TEXT_DEFECT_PATTERNS: readonly RegExp[] = [
+  /\bgarbled\b/i,
+  /\bpseudo-?text\b/i,
+  /\bdot-and-dash\b/i,
+  /\bresembling text\b/i,
+  /\bpartially[- ]formed characters?\b/i,
+  /\bpartially legible\b/i,
+  /\bcannot be made out\b/i,
+  /\bmirrored\b|\breversed\b/i,
+]
+
 export function classifyLegibleText(text: string | null | undefined): LegibleTextClass {
   const t = (text ?? '').trim()
   if (!t) return 'none'
+  if (
+    EXPLICIT_NO_TEXT_PATTERNS.some(re => re.test(t))
+    && !ATTEMPTED_TEXT_DEFECT_PATTERNS.some(re => re.test(t))
+  ) {
+    return 'none'
+  }
   if (PACKAGING_TEXT_PATTERNS.some(re => re.test(t))) return 'packaging'
   if (CAPTION_TEXT_PATTERNS.some(re => re.test(t))) return 'caption-or-watermark'
   const words = t.split(/\s+/).filter(Boolean)
