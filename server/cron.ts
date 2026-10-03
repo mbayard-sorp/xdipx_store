@@ -1797,6 +1797,24 @@ export function createCronRoutes() {
         else if (c.state === 'unknown') console.warn(`[cron:janitor-sweep] credential could-not-ask ${c.key}: ${c.detail}`)
       }
 
+      // Paid-but-never-shipped watchdog (ticket #13155). Fulfillment is fully
+      // automatic via the Nalpac Integration app; nothing else notices if it
+      // loses auth, is uninstalled, or Nalpac rejects an order, so an order
+      // can sit paid and unfulfilled until a customer emails an inbox nobody
+      // watches. Wrapped like every other third-party check in this sweep so
+      // a Shopify hiccup can never fail the rest of the janitor.
+      let paidUnfulfilled: { scanned: number; filed: string[] } = { scanned: 0, filed: [] }
+      try {
+        const { checkPaidUnfulfilledOrders } = await import('../app/lib/paid-unfulfilled-watchdog.server.js')
+        const result = await checkPaidUnfulfilledOrders()
+        paidUnfulfilled = { scanned: result.scanned, filed: result.filed }
+        for (const name of result.filed) {
+          console.error(`[cron:janitor-sweep] PAID UNFULFILLED ${name}: past the age floor with no fulfillment`)
+        }
+      } catch (err) {
+        console.error('[cron:janitor-sweep] paid-unfulfilled watchdog failed (ignored):', err)
+      }
+
       // Instagram token expiry-ahead warning (ticket #13153), separate from
       // the live/dead/unknown credential check above: a token can still
       // answer live today while being close to expiring, or while its
@@ -1938,6 +1956,7 @@ export function createCronRoutes() {
         },
         credentials: credentials.map(c => ({ key: c.key, state: c.state, detail: c.detail })),
         credentialBlockers,
+        paidUnfulfilled,
         pruned,
       })
     } catch (err) {

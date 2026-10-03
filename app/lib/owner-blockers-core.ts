@@ -168,6 +168,12 @@ export const PROBE_DESCRIPTIONS: Record<string, (arg: string) => string> = {
    * closes itself on the owner's own hand-run instead of needing a clear by
    * hand. */
   migration_applied: a => `migration ${a} is recorded in schema_migrations_applied`,
+  /* Ticket #13155, the paid-unfulfilled watchdog. Arg is `<order name>|<order
+   * GID>` (e.g. "#1008|gid://shopify/Order/123"); the GID makes the re-check
+   * an exact single-order read instead of a fuzzy name search. Clears on
+   * fulfillment or cancellation — both are the honest ways a stuck order
+   * stops being stuck. */
+  order_fulfilled: a => `order ${a.split('|')[0]} is now fulfilled or cancelled`,
 }
 
 /**
