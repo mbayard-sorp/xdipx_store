@@ -24,7 +24,8 @@ vi.mock('~/lib/feed-processor.server', () => ({
   getPipelineSetting: getPipelineSettingMock,
 }))
 
-import { classifyCronOutcome, heartbeatKey, readCronLiveness, CRON_RUN_RETENTION_DAYS } from '~/lib/cron-runs.server'
+import { classifyCronOutcome, heartbeatKey, readCronLiveness, isRetiredRoute, computeBreached, CRON_RUN_RETENTION_DAYS } from '~/lib/cron-runs.server'
+import { CRON_EXPECTATIONS } from '~/lib/cron-expectations'
 
 describe('classifyCronOutcome', () => {
   it('reads a plain 200 as succeeded', () => {
@@ -121,5 +122,57 @@ describe('readCronLiveness valve gate (#9699)', () => {
     const row = liveness.find((l) => l.route === '/cron/seo-daily')
     expect(row).toBeDefined()
     expect(row!.breached).toBe(true)
+  })
+})
+
+describe('isRetiredRoute (#13101)', () => {
+  it('reads a retired route (removed from the manifest by ADR-016) as retired', () => {
+    // /cron/runpod-pod-watch was removed from CRON_EXPECTATIONS and vercel.json
+    // when RunPod was retired, but syncCronExpectations deliberately never
+    // deletes its `cron_expectations` row, so its staleness can only grow.
+    expect(isRetiredRoute('/cron/runpod-pod-watch')).toBe(true)
+  })
+
+  it('reads every route currently in the manifest as not retired', () => {
+    for (const e of CRON_EXPECTATIONS) {
+      expect(isRetiredRoute(e.route)).toBe(false)
+    }
+  })
+})
+
+describe('computeBreached retired-route exemption (#13101)', () => {
+  // The bug this ticket reports: /cron/runpod-pod-watch's cron_expectations
+  // row outlives its removal from the code manifest (syncCronExpectations
+  // upserts and never deletes, on purpose, for audit history), so its age
+  // only ever grows and it would breach forever with no exemption.
+  it('never breaches a retired route, however stale', () => {
+    expect(computeBreached(999_999, 60, 15, { demandDriven: false, valveOff: false, retired: true })).toBe(false)
+    expect(computeBreached(null, 60, 15, { demandDriven: false, valveOff: false, retired: true })).toBe(false)
+  })
+
+  it('still breaches an ordinary stale route with no exemption', () => {
+    expect(computeBreached(999_999, 60, 15, { demandDriven: false, valveOff: false, retired: false })).toBe(true)
+  })
+
+  it('composes with the existing demand-driven and valve-off exemptions', () => {
+    expect(computeBreached(999_999, 60, 15, { demandDriven: true, valveOff: false, retired: false })).toBe(false)
+    expect(computeBreached(999_999, 60, 15, { demandDriven: false, valveOff: true, retired: false })).toBe(false)
+  })
+})
+
+describe('readCronLiveness retired routes (#13101)', () => {
+  // The DB-backed path (loadExpectations' primary branch, where a retired
+  // route's row would actually surface) is exercised by the janitor/status
+  // health integration, not here: this suite mocks db.select to throw,
+  // driving the manifest fallback, same as every other test in this file.
+  // This asserts the fallback path's `retired` field is always false (every
+  // row there comes from the manifest itself, so none can be retired by
+  // construction) — the exemption logic itself is covered directly above.
+  it('never marks a current-manifest route as retired', async () => {
+    getPipelineSettingMock.mockResolvedValue(null)
+    const liveness = await readCronLiveness()
+    for (const l of liveness) {
+      expect(l.retired).toBe(false)
+    }
   })
 })

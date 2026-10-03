@@ -246,11 +246,16 @@ export interface CronLiveness {
   /**
    * True when age exceeds `periodMinutes + graceMinutes`, or nothing was ever
    * seen. Always false for a demand-driven route, which has no schedule to
-   * miss: silence there is the absence of demand, not the absence of health.
+   * miss: silence there is the absence of demand, not the absence of health;
+   * and always false for a retired route (ticket #13101), which has no
+   * schedule left to miss either.
    */
   breached: boolean
   /** Mirrored onto the row so a reader can tell "healthy" from "not applicable". */
   demandDriven: boolean
+  /** True when this route has no entry in the current code manifest: its
+   *  `cron_expectations` row is historical only (see `isRetiredRoute`). */
+  retired: boolean
   /** The most recent terminal status, for recorded routes only. */
   lastStatus: CronRunStatus | null
   lastError: string | null
@@ -380,10 +385,13 @@ export async function readCronLiveness(now = new Date()): Promise<CronLiveness[]
       lastSeenAt,
       source,
       ageMinutes,
-      breached: e.demandDriven || valveOff
-        ? false
-        : ageMinutes === null || ageMinutes > e.periodMinutes + e.graceMinutes,
+      breached: computeBreached(ageMinutes, e.periodMinutes, e.graceMinutes, {
+        demandDriven: e.demandDriven,
+        valveOff,
+        retired: e.retired,
+      }),
       demandDriven: e.demandDriven,
+      retired: e.retired,
       lastStatus: (row?.status as CronRunStatus | undefined) ?? null,
       lastError: row?.error ?? null,
       consecutiveFailures: row?.consecutiveFailures ?? 0,
@@ -466,6 +474,38 @@ interface LoadedExpectation {
    *  `cron_expectations` table has no column for it, and which valve (if
    *  any) gates a route is a code fact, not sweep-tunable data. */
   valveGate: string | undefined
+  /** Merged from the code manifest: true when this route's DB row has no
+   *  matching entry in the current `CRON_EXPECTATIONS` array (ticket #13101).
+   *  `syncCronExpectations` upserts and never deletes on purpose, so a
+   *  retired route's row (e.g. `/cron/runpod-pod-watch`, removed by ADR-016)
+   *  lives on forever with a `lastSeenAt` that can only get staler. Nothing
+   *  is supposed to beat it anymore, so treating that staleness as a breach
+   *  is a false alarm, not a real one. */
+  retired: boolean
+}
+
+/**
+ * True when `route` has no entry in the current code manifest. Exported so
+ * the "a retired route's lingering DB row never alarms" behavior is directly
+ * unit-testable without reproducing the DB-backed `loadExpectations` path.
+ */
+export function isRetiredRoute(route: string): boolean {
+  return !CRON_EXPECTATIONS.some((e) => e.route === route)
+}
+
+/**
+ * The breach rule itself, pulled out of `readCronLiveness`'s loop so the three
+ * exemptions (demand-driven, valve-off, retired) are directly unit-testable
+ * without reproducing the DB/heartbeat plumbing around them.
+ */
+export function computeBreached(
+  ageMinutes: number | null,
+  periodMinutes: number,
+  graceMinutes: number,
+  exemptions: { demandDriven: boolean; valveOff: boolean; retired: boolean },
+): boolean {
+  if (exemptions.demandDriven || exemptions.valveOff || exemptions.retired) return false
+  return ageMinutes === null || ageMinutes > periodMinutes + graceMinutes
 }
 
 /**
@@ -493,6 +533,7 @@ async function loadExpectations(): Promise<LoadedExpectation[]> {
         ...r,
         demandDriven: isDemandDriven(r.route),
         valveGate: valveGateFor(r.route),
+        retired: isRetiredRoute(r.route),
       }))
     }
   } catch (err) {
@@ -508,6 +549,8 @@ async function loadExpectations(): Promise<LoadedExpectation[]> {
     ownerTeam: e.ownerTeam,
     demandDriven: e.demandDriven === true,
     valveGate: e.valveGate,
+    // Every row here comes from the manifest itself, so none can be retired.
+    retired: false,
   }))
 }
 
