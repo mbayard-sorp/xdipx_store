@@ -14,10 +14,28 @@ import {
   badHandDigitCounts,
   VISION_CHECK_NAMES,
   VISION_SYSTEM_PROMPT,
+  VISION_VERDICT_TOOL_NAME,
   VisionParseError,
   type VisionVerdict,
   type VisionGateDeps,
 } from './social-vision-gate.server'
+
+// Ticket #13176: `defaultDeps.callVision` (the real Anthropic-calling
+// implementation, unreachable from every other test in this file because
+// they all inject a fake `callVision`) is exercised directly here with the
+// SDK mocked, to prove the forced-tool-call wiring itself, not just the
+// injected-seam retry logic above it.
+const h = vi.hoisted(() => ({ mockCreate: vi.fn() }))
+vi.mock('@anthropic-ai/sdk', () => ({
+  default: class MockAnthropic {
+    messages = { create: h.mockCreate }
+  },
+}))
+vi.mock('./token-log.server', () => ({ logMessageUsage: vi.fn() }))
+// Avoids pulling in the real @sentry/node (and its @opentelemetry/api
+// dependency) for every test in this file, same idiom as
+// category-healthcheck.server.test.ts.
+vi.mock('./sentry.server', () => ({ Sentry: { captureException: vi.fn() } }))
 
 const CLEAN_RESPONSE = {
   pass: true,
@@ -1214,5 +1232,60 @@ describe('generateWithVisionGate', () => {
     expect(result.attempts).toBe(1)
     expect(generate).toHaveBeenCalledTimes(1)
     expect(result.url).toBeNull()
+  })
+})
+
+describe('defaultDeps.callVision — forced tool call (ticket #13176)', () => {
+  it('parses a tool_use response into a verdict, calling the model with a forced tool_choice', async () => {
+    h.mockCreate.mockReset()
+    h.mockCreate.mockResolvedValue({
+      content: [{ type: 'tool_use', id: 'toolu_1', name: VISION_VERDICT_TOOL_NAME, input: CLEAN_RESPONSE }],
+      stop_reason: 'tool_use',
+      usage: { input_tokens: 10, output_tokens: 5 },
+    })
+
+    const verdict = await runVisionGateOnImage({ data: 'ZmFrZQ==', mediaType: 'image/jpeg' })
+
+    expect(verdict.checkCompleted).toBe(true)
+    expect(verdict.pass).toBe(true)
+    const firstCallArgs = h.mockCreate.mock.calls[0]?.[0] as { tools?: Array<{ name: string }>; tool_choice?: unknown }
+    expect(firstCallArgs.tool_choice).toEqual({ type: 'tool', name: VISION_VERDICT_TOOL_NAME })
+    expect(firstCallArgs.tools?.[0]?.name).toBe(VISION_VERDICT_TOOL_NAME)
+  })
+
+  it('falls back to the free-text strict retry when the model answers in prose instead of calling the forced tool', async () => {
+    h.mockCreate.mockReset()
+    h.mockCreate
+      // First (forced-tool) attempt: the model answers in prose anyway — the
+      // exact 2026-10-02 failure mode (ticket body: "I need to...") that the
+      // forced tool_choice exists to make structurally impossible, kept here
+      // as the defensive path in case a provider ever refuses the tool.
+      .mockResolvedValueOnce({
+        content: [{ type: 'text', text: 'I need to look more closely before I can answer.' }],
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 10, output_tokens: 5 },
+      })
+      // Strict retry: free-text JSON, no tool involved.
+      .mockResolvedValueOnce({
+        content: [{ type: 'text', text: JSON.stringify(CLEAN_RESPONSE) }],
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 10, output_tokens: 5 },
+      })
+      // Exposure-confirmation second read (ticket #11468): clean tool_use.
+      .mockResolvedValue({
+        content: [{ type: 'tool_use', id: 'toolu_2', name: VISION_VERDICT_TOOL_NAME, input: CLEAN_RESPONSE }],
+        stop_reason: 'tool_use',
+        usage: { input_tokens: 10, output_tokens: 5 },
+      })
+
+    const verdict = await runVisionGateOnImage({ data: 'ZmFrZQ==', mediaType: 'image/jpeg' })
+
+    expect(verdict.checkCompleted).toBe(true)
+    expect(verdict.pass).toBe(true)
+    const firstCallArgs = h.mockCreate.mock.calls[0]?.[0] as { tools?: unknown; tool_choice?: unknown }
+    expect(firstCallArgs.tool_choice).toEqual({ type: 'tool', name: VISION_VERDICT_TOOL_NAME })
+    const retryCallArgs = h.mockCreate.mock.calls[1]?.[0] as { tools?: unknown; tool_choice?: unknown }
+    expect(retryCallArgs.tools).toBeUndefined()
+    expect(retryCallArgs.tool_choice).toBeUndefined()
   })
 })
