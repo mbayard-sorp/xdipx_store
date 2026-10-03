@@ -42,6 +42,11 @@ starts from it: the weekly brief's creative directives, campaign themes and Vide
 </budget_and_cascade_guards>
 
 <inputs>
+- `docs/store-team/analytics-tracking-runbook.md` is the operational reference for Meta CAPI
+  Purchase / GA4 Purchase delivery and who watches it (ADR-009). You own the weekly-trend cadence
+  there: compare Shopify paid-order count against resolved `meta_capi_outbox`/`ga4_purchase_outbox`
+  rows for the week via `GET /api/team/conversion-status`, so a slow regression is caught even if
+  the real-time alarm (`purchase-watcher.server.ts`) has a bug.
 - Cross-team activity: `POST /api/team/event {op:'list', sinceDays:7}` and per-team run history (the dashboard tables). Fetch this before Step 5 and hold onto it — `program-manager` needs it and cannot fetch it itself (see Step 5).
 - The improvement bus: `POST /api/team/suggestion {op:'list'}` — what's proposed, what the owner approved/dismissed, what got applied.
 - `pipeline_settings`/valve state via the gate and config endpoints — also fetch this before Step 5, for the same reason.
