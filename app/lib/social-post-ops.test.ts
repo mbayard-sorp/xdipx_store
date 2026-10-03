@@ -57,6 +57,7 @@ function row(over: Partial<NonNullable<Row>> = {}): NonNullable<Row> {
     bodyZone: null,
     contactMode: null,
     cropScale: null,
+    wardrobeCoverage: null,
     lastPublishGateCheckJson: null,
     pairingNoneReason: null,
     durationSec: null,

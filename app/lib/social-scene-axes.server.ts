@@ -74,6 +74,7 @@ const defaultDeps: Required<SceneAxisDeps> = {
     if (axes.contactMode) set['contactMode'] = sql`coalesce(${socialPosts.contactMode}, ${axes.contactMode})`
     if (axes.cropScale) set['cropScale'] = sql`coalesce(${socialPosts.cropScale}, ${axes.cropScale})`
     if (axes.sceneLocation) set['sceneLocation'] = sql`coalesce(${socialPosts.sceneLocation}, ${axes.sceneLocation})`
+    if (axes.wardrobeCoverage) set['wardrobeCoverage'] = sql`coalesce(${socialPosts.wardrobeCoverage}, ${axes.wardrobeCoverage})`
     if (Object.keys(set).length === 0) return
     await db.update(socialPosts).set(set).where(eq(socialPosts.id, postId))
   },
@@ -127,7 +128,7 @@ export async function backfillPostSceneAxes(
   axes: SceneAxes,
   deps?: SceneAxisDeps,
 ): Promise<void> {
-  if (!axes.bodyZone && !axes.contactMode && !axes.cropScale && !axes.sceneLocation) return
+  if (!axes.bodyZone && !axes.contactMode && !axes.cropScale && !axes.sceneLocation && !axes.wardrobeCoverage) return
   try {
     await resolve(deps).patchPostAxes(postId, axes)
   } catch (err) {

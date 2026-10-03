@@ -67,6 +67,14 @@ describe('resolveDraftSceneAxes', () => {
     const axes = await resolveDraftSceneAxes({}, [ASSET_URL], { loadAssetTags })
     expect(axes).toEqual({ cropScale: 'macro' })
   })
+
+  // Ticket #13163: wardrobeCoverage rides the same asset-tag round trip as
+  // the original four, since it joined SCENE_AXIS_KEYS.
+  it('carries wardrobeCoverage through the same asset-tag fallback as the other axes', async () => {
+    const loadAssetTags = vi.fn().mockResolvedValue([sceneAxisTags({ ...GENERATED, wardrobeCoverage: 'robe' })])
+    const axes = await resolveDraftSceneAxes({}, [ASSET_URL], { loadAssetTags })
+    expect(axes).toEqual({ ...GENERATED, wardrobeCoverage: 'robe' })
+  })
 })
 
 describe('backfillPostSceneAxes, the deduped-draft branch', () => {
@@ -80,6 +88,15 @@ describe('backfillPostSceneAxes, the deduped-draft branch', () => {
     const patchPostAxes = vi.fn()
     await backfillPostSceneAxes(42, {}, { patchPostAxes })
     expect(patchPostAxes).not.toHaveBeenCalled()
+  })
+
+  // Ticket #13163: wardrobeCoverage joined the axis bag as a fifth sibling.
+  // The guard above used to check only the original four, which would have
+  // silently dropped a backfill carrying wardrobeCoverage alone.
+  it('patches when only wardrobeCoverage is present, the new fifth axis', async () => {
+    const patchPostAxes = vi.fn().mockResolvedValue(undefined)
+    await backfillPostSceneAxes(42, { wardrobeCoverage: 'bra' }, { patchPostAxes })
+    expect(patchPostAxes).toHaveBeenCalledWith(42, { wardrobeCoverage: 'bra' })
   })
 
   it('swallows a write failure: a backfill must never break a draft', async () => {

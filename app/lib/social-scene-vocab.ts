@@ -86,6 +86,43 @@ export const CROP_SCALES = ['macro', 'close', 'medium', 'wide'] as const
 export type CropScale = (typeof CROP_SCALES)[number]
 
 /**
+ * Wardrobe coverage (ticket #13163, owner all-hands 2026-10-02, superseding
+ * #13158): the garment or drape doing the covering work in a frame, exactly
+ * the "Coverage classes" list in `docs/store-team/cast-wardrobe.md`. Report-
+ * only for now (`social-mix-report.server.ts`'s rolling-7 counts and the
+ * repeat window) — not required at generation (`requireSceneAxesForGeneration`
+ * below is unchanged), per the same measure-then-require sequencing this
+ * file's header already states for the other four axes.
+ *
+ * `bedding-on-body`, `towel` and `bulky` are the three the owner retired
+ * ("stay away from the bulky fabric look... no one drapes fabric over
+ * themselves"); they stay in the vocabulary so the mix report can count them
+ * at a target of zero, exactly like `nape` stays in `BODY_ZONES` after being
+ * retired as a charge tier.
+ *
+ * No `none` sentinel: unlike bodyZone/contactMode, "no coverage at all" is not
+ * a value this axis needs to carry (`bare-jewellery` already names the
+ * bare-skin case), so an absent value here is a genuine omission.
+ */
+export const WARDROBE_COVERAGE_CLASSES = [
+  'bare-jewellery',
+  'bra',
+  'bralette',
+  'briefs-highcut',
+  'thong',
+  'garter',
+  'bodysuit',
+  'slip',
+  'robe',
+  'shirt-open',
+  'trousers',
+  'bedding-on-body',
+  'towel',
+  'bulky',
+] as const
+export type WardrobeCoverage = (typeof WARDROBE_COVERAGE_CLASSES)[number]
+
+/**
  * Scene location is deliberately NOT a closed enum. The other three axes are
  * a fixed vocabulary the campaign doc enumerates; locations are open-ended by
  * design (§3.8 asks for rotation, not for a list), and closing the set here
@@ -118,21 +155,25 @@ export function isContactMode(v: unknown): v is ContactMode {
 export function isCropScaleValue(v: unknown): v is CropScale {
   return typeof v === 'string' && (CROP_SCALES as readonly string[]).includes(v)
 }
+export function isWardrobeCoverage(v: unknown): v is WardrobeCoverage {
+  return typeof v === 'string' && (WARDROBE_COVERAGE_CLASSES as readonly string[]).includes(v)
+}
 export function isSceneLocation(v: unknown): boolean {
   if (typeof v !== 'string') return false
   const slug = normalizeSceneLocation(v)
   return slug.length > 0 && slug.length <= SCENE_LOCATION_MAX
 }
 
-/** The four axes, as one optional bag. Every field is independently optional. */
+/** The five axes, as one optional bag. Every field is independently optional. */
 export interface SceneAxes {
   bodyZone?: string | undefined
   contactMode?: string | undefined
   cropScale?: string | undefined
   sceneLocation?: string | undefined
+  wardrobeCoverage?: string | undefined
 }
 
-export const SCENE_AXIS_KEYS = ['bodyZone', 'contactMode', 'cropScale', 'sceneLocation'] as const
+export const SCENE_AXIS_KEYS = ['bodyZone', 'contactMode', 'cropScale', 'sceneLocation', 'wardrobeCoverage'] as const
 export type SceneAxisKey = (typeof SCENE_AXIS_KEYS)[number]
 
 export type SceneAxisValidation =
@@ -161,6 +202,10 @@ export function validateSceneAxis(key: SceneAxisKey, raw: unknown): SceneAxisVal
       return isCropScaleValue(value)
         ? { ok: true, value }
         : { ok: false, error: `cropScale must be one of ${CROP_SCALES.join('|')}` }
+    case 'wardrobeCoverage':
+      return isWardrobeCoverage(value)
+        ? { ok: true, value }
+        : { ok: false, error: `wardrobeCoverage must be one of ${WARDROBE_COVERAGE_CLASSES.join('|')}` }
     case 'sceneLocation':
       // Coerced to the kebab-case convention, never refused for its shape:
       // "Bedroom Loft" and "bedroom-loft" are one location, and the rotation
@@ -319,7 +364,14 @@ export function mergeSceneAxes(supplied: SceneAxes, fallback: SceneAxes): SceneA
   return out
 }
 
-/** True when all four axes carry a value. The report's coverage line. */
+/**
+ * True when every key in `SCENE_AXIS_KEYS` carries a value. The report's
+ * coverage line. Adding `wardrobeCoverage` here (ticket #13163) means the
+ * existing "Axis coverage" floor in `social-mix-report.server.ts` now also
+ * requires it, and will read UNKNOWN/low until a caller supplies it — the
+ * same honest regression bodyZone/contactMode/cropScale caused when they
+ * joined this set (migration 099) ahead of any caller sending them.
+ */
 export function hasAllSceneAxes(axes: SceneAxes): boolean {
   return SCENE_AXIS_KEYS.every(k => typeof axes[k] === 'string' && axes[k] !== '')
 }

@@ -29,6 +29,7 @@ function row(over: Partial<SocialMixReportRow> = {}): SocialMixReportRow {
     cropScale: null,
     sceneLocation: null,
     castSlugs: null,
+    wardrobeCoverage: null,
     ...over,
   }
 }
@@ -429,6 +430,80 @@ describe('computeSocialMixReport, retired nape zone (§3.2c)', () => {
   })
 })
 
+describe('computeSocialMixReport, wardrobe coverage (ticket #13163)', () => {
+  it('is UNKNOWN end to end when wardrobe_coverage is unpopulated on every row', () => {
+    const rows = [row({ id: 1 }), row({ id: 2 })]
+    const report = computeSocialMixReport(rows)
+    expect(report.lines.retiredCoverage.status).toBe('unknown')
+    expect(report.lines.coverageWindow.status).toBe('unknown')
+    expect(report.lines.styledShare.status).toBe('unknown')
+  })
+
+  it('flags the retired classes at a cap of zero, reproducing the 15-of-20 beige-sheet finding', () => {
+    const rows = [
+      row({ id: 1, wardrobeCoverage: 'towel' }),
+      row({ id: 2, wardrobeCoverage: 'bedding-on-body' }),
+      row({ id: 3, wardrobeCoverage: 'bra' }),
+    ]
+    const report = computeSocialMixReport(rows)
+    expect(report.lines.retiredCoverage.status).toBe('breach')
+    expect(report.lines.retiredCoverage.detail).toContain('2 / 7')
+  })
+
+  it('reads ok at zero retired-class frames in the rolling 7', () => {
+    const rows = [row({ id: 1, wardrobeCoverage: 'bra' }), row({ id: 2, wardrobeCoverage: 'robe' })]
+    const report = computeSocialMixReport(rows)
+    expect(report.lines.retiredCoverage.status).toBe('ok')
+    expect(report.lines.retiredCoverage.detail).toContain('0 / 7')
+  })
+
+  it('flags a coverage-class repeat inside 3 consecutive known frames', () => {
+    const rows = [
+      row({ id: 1, wardrobeCoverage: 'bra' }),
+      row({ id: 2, wardrobeCoverage: 'robe' }),
+      row({ id: 3, wardrobeCoverage: 'bra' }),
+    ]
+    expect(computeSocialMixReport(rows).lines.coverageWindow.status).toBe('breach')
+  })
+
+  it('reads ok when three consecutive known frames rotate the coverage class', () => {
+    const rows = [
+      row({ id: 1, wardrobeCoverage: 'bra' }),
+      row({ id: 2, wardrobeCoverage: 'robe' }),
+      row({ id: 3, wardrobeCoverage: 'thong' }),
+    ]
+    expect(computeSocialMixReport(rows).lines.coverageWindow.status).toBe('ok')
+  })
+
+  it('ignores a repeat that falls outside the window of 3', () => {
+    const rows = [
+      row({ id: 1, wardrobeCoverage: 'bra' }),
+      row({ id: 2, wardrobeCoverage: 'robe' }),
+      row({ id: 3, wardrobeCoverage: 'thong' }),
+      row({ id: 4, wardrobeCoverage: 'bra' }),
+    ]
+    expect(computeSocialMixReport(rows).lines.coverageWindow.status).toBe('ok')
+  })
+
+  it('reports styled vs bare-jewellery share, informational only, never a breach', () => {
+    const rows = [
+      row({ id: 1, wardrobeCoverage: 'bra' }),
+      row({ id: 2, wardrobeCoverage: 'robe' }),
+      row({ id: 3, wardrobeCoverage: 'bare-jewellery' }),
+    ]
+    const report = computeSocialMixReport(rows)
+    expect(report.lines.styledShare.status).toBe('ok')
+    expect(report.lines.styledShare.detail).toContain('2 styled')
+    expect(report.lines.styledShare.detail).toContain('1 bare-jewellery')
+  })
+
+  it('excludes shirt-open and trousers from the styled count: lingerie-or-robe only', () => {
+    const rows = [row({ id: 1, wardrobeCoverage: 'shirt-open' }), row({ id: 2, wardrobeCoverage: 'trousers' })]
+    const report = computeSocialMixReport(rows)
+    expect(report.lines.styledShare.detail).toContain('0 styled')
+  })
+})
+
 describe('getSocialMixReport, defensive fallback', () => {
   it('degrades to an all-UNKNOWN bundle instead of throwing when loadRows fails', async () => {
     const loadRows = vi.fn().mockRejectedValue(new Error('column "body_zone" does not exist'))
@@ -474,7 +549,7 @@ describe('formatSocialMixReportLines', () => {
   it('prints one line per report line with an explicit status marker', () => {
     const report = computeSocialMixReport([row(), row(), row()])
     const lines = formatSocialMixReportLines(report)
-    expect(lines).toHaveLength(20)
+    expect(lines).toHaveLength(23)
     for (const line of lines) expect(line).toMatch(/^\[mix-report\] instagram /)
     // Everything in this all-null fixture is either UNKNOWN (enrichment
     // columns absent) or a hard floor breach (0 carousels, 0 product-free
@@ -500,7 +575,7 @@ describe('computeSocialMixReport, UNKNOWN alarms (#10478 defect 1)', () => {
   })
 
   it('separates "unknown" from "breach" in worstStatus', () => {
-    // A clean fortnight: every cap inside its band and all four axes on the
+    // A clean fortnight: every cap inside its band and all five axes on the
     // last 7. The only non-ok lines left are the ones with no backing data at
     // all (educational, lube-treatment, cast_slugs, the removal count), so
     // the headline must read UNKNOWN rather than BREACH. Both alarm, and the
@@ -508,12 +583,17 @@ describe('computeSocialMixReport, UNKNOWN alarms (#10478 defect 1)', () => {
     const zones = ['hip-hollow', 'sternum', 'stomach', 'small-of-back', 'inner-wrist', 'forearm', 'behind-knee']
     const modes = ['resting', 'self-held', 'other-held', 'drawn', 'worn', 'balanced', 'resting']
     const crops = ['medium', 'wide', 'macro', 'wide', 'medium', 'wide', 'close']
+    // Seven distinct, non-retired classes: clears the coverage-window (no
+    // repeat inside 3) and the retired-coverage cap (none of these three)
+    // for free, same as the other four axes in this fixture.
+    const coverageClasses = ['bra', 'bralette', 'briefs-highcut', 'thong', 'garter', 'bodysuit', 'slip']
     const rows: SocialMixReportRow[] = zones.map((zone, i) => row({
       id: i + 1,
       bodyZone: zone,
       contactMode: modes[i]!,
       cropScale: crops[i]!,
       sceneLocation: `room-${i + 1}`,
+      wardrobeCoverage: coverageClasses[i]!,
       // Distinct per row (ticket #12876's product-diversity line): this
       // fixture is about the axis-coverage/breach-vs-unknown separation, not
       // product variety, so every row gets its own product id to clear the
@@ -630,6 +710,7 @@ describe('computeSocialMixReport, video dilution (#10478 defect 2)', () => {
     const covered = row({
       id: 1, mediaKind: null,
       bodyZone: 'hip-hollow', contactMode: 'resting', cropScale: 'medium', sceneLocation: 'bedroom-loft',
+      wardrobeCoverage: 'bra',
     })
     const report = computeSocialMixReport(Array.from({ length: 7 }, (_, i) => ({ ...covered, id: i + 1 })))
     expect(report.lines.coverage.detail).toContain('7 / 7')
@@ -664,7 +745,7 @@ describe('computeSocialMixReportBundle, per platform (#10478 defect 3)', () => {
     )
     expect(lines.some(l => l.startsWith('[mix-report] instagram '))).toBe(true)
     expect(lines.some(l => l.startsWith('[mix-report] x '))).toBe(true)
-    expect(lines).toHaveLength(40)
+    expect(lines).toHaveLength(46)
   })
 })
 
