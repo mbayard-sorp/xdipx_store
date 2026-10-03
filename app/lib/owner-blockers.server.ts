@@ -342,6 +342,29 @@ async function migrationApplied(filename: string): Promise<ProbeVerdict> {
   return (res.rows ?? []).length > 0
 }
 
+/**
+ * Re-reads one order by its exact GID (never the fuzzy `name:` search) for
+ * ticket #13155's paid-unfulfilled watchdog. Arg is `<name>|<gid>`; only the
+ * gid half is used to query. A missing order (bad arg, or Shopify not
+ * answering) is a could-not-ask, not a clear.
+ */
+async function orderFulfilled(arg: string): Promise<ProbeVerdict> {
+  const gid = (arg.split('|')[1] ?? '').trim()
+  if (!gid) return null
+  const { adminGraphQL } = await import('~/lib/shopify.server')
+  const res = await adminGraphQL<{
+    order?: { cancelledAt: string | null; displayFulfillmentStatus: string } | null
+  }>(
+    `query OrderFulfillmentStatus($id: ID!) {
+      order(id: $id) { cancelledAt displayFulfillmentStatus }
+    }`,
+    { id: gid },
+  )
+  if (!res.order) return null
+  if (res.order.cancelledAt) return true
+  return res.order.displayFulfillmentStatus === 'FULFILLED'
+}
+
 const RUNNERS: Record<string, (arg: string) => Promise<ProbeVerdict>> = {
   table_exists:  tableExists,
   column_exists: columnExists,
@@ -359,6 +382,7 @@ const RUNNERS: Record<string, (arg: string) => Promise<ProbeVerdict>> = {
   instagram_token_healthy: instagramTokenHealthy,
   row_matches:   rowMatches,
   migration_applied: migrationApplied,
+  order_fulfilled: orderFulfilled,
 }
 
 /**
