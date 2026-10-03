@@ -33,7 +33,7 @@ import { getPanelDeck } from '~/lib/panel-deck.server'
 import { withTimeout } from '~/lib/with-timeout.server'
 import { EMPTY_STATE, type DiscoveryProduct, type Rail } from '~/types/discovery'
 import type { LeanCardProduct } from '~/types'
-import type { EmmaHeroSettings, BlogPostCard, StorefrontHomeLayout, ResolvedPanelDeck } from '~/types/cms'
+import type { EmmaHeroSettings, BlogPostCard, NotebookCardLean, StorefrontHomeLayout, ResolvedPanelDeck } from '~/types/cms'
 
 const EMMA_HERO_TIMEOUT_MS = 4000
 const EDITOR_TIMEOUT_MS = 4000
@@ -147,8 +147,14 @@ export interface StorefrontData {
    * section so fresh daily content reaches the homepage with no merchandiser
    * action. A curated `editorialTiles` block (in `contentBlocks`) overrides this
    * when present; otherwise these render.
+   *
+   * Lean (ticket #13147), not the full `BlogPostCard` the KV blob stores:
+   * `hydrateStorefrontPayloadB` projects down to `NotebookCardLean` on every
+   * read (see `leanNotebookPosts` below), so `heroLqip` (~7.6 KB base64 per
+   * post), `author`, and `category` never reach the served turbo-stream
+   * payload even though `HomepagePayloadB.notebookPosts` still stores them.
    */
-  notebookPosts: BlogPostCard[]
+  notebookPosts: NotebookCardLean[]
   /**
    * Nº 07 Curiosity Shelf data: the eyebrow/heading/emphasis/band-line plus the
    * fully-resolved lanes (each a shelf of six real products). Null on a cold
@@ -254,6 +260,29 @@ export async function assembleStorefrontHome(
 }
 
 /**
+ * Project the stored (full) `BlogPostCard[]` down to what `NotebookRail`
+ * actually reads (ticket #13147). Applied at hydrate time rather than at
+ * build time so an already-stored KV blob slims too, with no
+ * `HOMEPAGE_PAYLOAD_B_VERSION` bump: `HomepagePayloadB.notebookPosts` keeps
+ * storing the full shape (unchanged), and this is the one place that ever
+ * reads it before it reaches a response.
+ */
+function leanNotebookPosts(posts: BlogPostCard[]): NotebookCardLean[] {
+  return posts.map(p => ({
+    _id: p._id,
+    title: p.title,
+    slug: p.slug,
+    excerpt: p.excerpt,
+    // `exactOptionalPropertyTypes` forbids assigning `undefined` to an
+    // optional field outright, so an absent value is omitted rather than
+    // explicitly set to `undefined`.
+    ...(p.heroImageUrl !== undefined ? { heroImageUrl: p.heroImageUrl } : {}),
+    ...(p.heroImageAlt !== undefined ? { heroImageAlt: p.heroImageAlt } : {}),
+    ...(p.productHandle !== undefined ? { productHandle: p.productHandle } : {}),
+  }))
+}
+
+/**
  * Turn a stored blob into the loader's `StorefrontData`. Pure and synchronous —
  * no upstream reads at all, which is the whole point of the precompute.
  *
@@ -308,7 +337,7 @@ export function hydrateStorefrontPayloadB(
     // it off the precomputed blob satisfies that contract by construction and
     // removes the Sanity round-trip from the request path entirely.
     contentBlocks: payload.contentBlocks,
-    notebookPosts: payload.notebookPosts,
+    notebookPosts: leanNotebookPosts(payload.notebookPosts),
     curiosityShelf: payload.curiosityShelf,
     // Resolved at build time for the same reason contentBlocks is: the shell
     // cannot decide what to render from a value that arrives after it flushes.

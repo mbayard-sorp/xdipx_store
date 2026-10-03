@@ -32,7 +32,7 @@ import { StorefrontProductCard } from '~/components/store/StorefrontProductCard'
 import { CuriosityShelf } from '~/components/store/CuriosityShelf'
 import { ContentBlockRenderer } from '~/components/cms/ContentBlockRenderer'
 import { NotebookRail } from '~/components/blog/NotebookRail'
-import type { BlogPostCard } from '~/types/cms'
+import type { NotebookCardLean } from '~/types/cms'
 import { FAQStructuredData } from '~/components/seo/FAQStructuredData'
 import { ItemListStructuredData } from '~/components/seo/ItemListStructuredData'
 import { Reveal } from '~/components/motion/Reveal'
@@ -1257,7 +1257,7 @@ const FAQS = [
  * shared NotebookRail, shown when the team has not published a curated
  * `editorialTiles` block. Renders nothing when there are no posts.
  */
-function HomeNotebookRail({ posts }: { posts: BlogPostCard[] }) {
+function HomeNotebookRail({ posts }: { posts: NotebookCardLean[] }) {
   if (!posts.length) return null
   return (
     <section className="bg-paper py-16 md:py-20">
