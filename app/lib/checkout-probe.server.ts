@@ -245,10 +245,11 @@ export async function recordAndAlertProbe(tier: 'http' | 'browser', result: Prob
 
     // Ticket the failure onto the improvement bus at top priority. This is an
     // ADDITION to the Sentry capture and the owner email above, never a
-    // replacement: checkout is a protected path, so a human is always paged and
-    // a human always fixes it. No automated fix path may touch checkout, which
-    // is why the ticket exists purely as the visible, trackable record of an
-    // incident rather than as work for an agent to claim and merge.
+    // replacement. Since 2026-08-19 checkout and cart code are not protected
+    // paths (CLAUDE.md merge policy), so this ticket is real work for R-DEV:
+    // when the owner is away it is the only actuator a non-deploy checkout
+    // failure has. Only this probe's own files stay protected, because a
+    // weakened probe would report a broken money path as healthy.
     //
     // Note the deliberate ordering: the alerting has already run by the time we
     // get here, so nothing about ticket filing can delay or suppress a page.
@@ -267,9 +268,13 @@ export async function recordAndAlertProbe(tier: 'http' | 'browser', result: Prob
           `P0 checkout probe FAILED at "${failedStep}" (${tier} tier).\n\n`
           + `The purchase path is broken up to at least this step, so the store may be taking $0.\n\n`
           + `${stepLines}\n\n`
-          + 'PROTECTED PATH: checkout, payment, and cart are owner-only. Do not open an automated '
-          + 'fix PR against them. This ticket is the incident record; the owner has already been '
-          + 'paged by email and SMS.',
+          + 'Claim and diagnose this now. Checkout and cart code are NOT protected paths (since '
+          + '2026-08-19), so if the cause is in this repo, open a fix PR; CI, QA, and post-deploy '
+          + 'smoke still gate it. Never edit, weaken, or bypass the probe itself '
+          + '(app/lib/checkout-probe*, scripts/checkout-probe-browser.mjs, '
+          + '.github/workflows/checkout-probe.yml): those stay protected. If the cause is outside '
+          + 'the repo (Shopify, payments, a third-party outage), record the evidence and block with '
+          + 'an [owner-env] note. The owner was emailed; SMS paging is off by owner decision.',
       })
     } catch (err) {
       console.error('[checkout-probe] ticket filing failed (ignored):', err)

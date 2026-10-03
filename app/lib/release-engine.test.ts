@@ -84,6 +84,8 @@ import {
   shouldBlockForAttempts,
   shouldTripCircuit,
   summarizeSmoke,
+  runReleaseSmokeWithRetry,
+  SMOKE_RETRY_DELAY_MS,
   type PullRequestFacts,
   type TicketFacts,
   ENGINE_HOLD_LABEL,
@@ -1108,6 +1110,48 @@ describe('summarizeSmoke', () => {
 
   it('treats an empty check list as a pass only vacuously, and the caller never sends one', () => {
     expect(summarizeSmoke([]).ok).toBe(true)
+  })
+})
+
+describe('runReleaseSmokeWithRetry', () => {
+  const pass = summarizeSmoke([{ name: 'home', ok: true }])
+  const transient = summarizeSmoke([{ name: 'pdp:icicles-no-87', ok: false, detail: 'HTTP 503' }])
+
+  it('returns a first-pass success without waiting or re-running', async () => {
+    const run = vi.fn(async () => pass)
+    const wait = vi.fn(async () => undefined)
+    const r = await runReleaseSmokeWithRetry(run, wait)
+    expect(r.ok).toBe(true)
+    expect(run).toHaveBeenCalledTimes(1)
+    expect(wait).not.toHaveBeenCalled()
+  })
+
+  it('does not roll back on a transient: a failed first pass that passes on retry is ok', async () => {
+    const run = vi.fn().mockResolvedValueOnce(transient).mockResolvedValueOnce(pass)
+    const wait = vi.fn(async () => undefined)
+    const r = await runReleaseSmokeWithRetry(run, wait)
+    expect(r.ok).toBe(true)
+    expect(run).toHaveBeenCalledTimes(2)
+    expect(wait).toHaveBeenCalledWith(SMOKE_RETRY_DELAY_MS)
+    // The first failure stays on the record so a flaky surface is still visible.
+    expect(r.evidence).toContain('on retry')
+    expect(r.evidence).toContain('HTTP 503')
+  })
+
+  it('still fails when the deploy really is broken: both passes fail', async () => {
+    const run = vi.fn(async () => transient)
+    const wait = vi.fn(async () => undefined)
+    const r = await runReleaseSmokeWithRetry(run, wait)
+    expect(r.ok).toBe(false)
+    expect(run).toHaveBeenCalledTimes(2)
+    expect(r.evidence).toContain('smoke failed')
+    expect(r.evidence).toContain('failed twice')
+  })
+
+  it('retries at most once', async () => {
+    const run = vi.fn(async () => transient)
+    await runReleaseSmokeWithRetry(run, async () => undefined)
+    expect(run).toHaveBeenCalledTimes(2)
   })
 })
 
