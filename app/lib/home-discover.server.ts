@@ -85,13 +85,20 @@ export async function assembleVariantAMinimal(
  */
 export async function loadVariantAData(
   request: Request,
-  opts: { welcomeBackEnabled: boolean; isAdmin: boolean },
+  opts: { welcomeBackEnabled: boolean; isAdmin: boolean; fresh?: boolean },
 ): Promise<VariantAData> {
-  const { welcomeBackEnabled, isAdmin } = opts
+  const { welcomeBackEnabled, isAdmin, fresh } = opts
 
-  // Admin always gets live + no-store so template / Sanity edits propagate
-  // immediately.
-  if (isAdmin) return assembleVariantALive(welcomeBackEnabled)
+  // Ticket #13144: admin used to always get live assembly (2-4s+ of origin
+  // TTFB measured against prod) on every homepage load, because the
+  // __xdipx_admin cookie is path '/' with a 7-day maxAge, so anyone who
+  // used /admin that week paid this on every request. Admin now reads the
+  // same precompute-blob / cold-miss path as everyone else by default — the
+  // route still forces no-store headers so a shared cache never stores
+  // admin HTML — and only an explicit `?fresh=1` still gets live + no-store,
+  // for previewing an unsaved Sanity edit (a saved edit already busts the
+  // blob via bustHomepagePayload, so default admin freshness is unchanged).
+  if (isAdmin && fresh) return assembleVariantALive(welcomeBackEnabled)
 
   // Flag: when disabled, use today's live assembly (no precompute read). Flip
   // HOMEPAGE_PRECOMPUTE_ENABLED=true after observing populated blobs in prod.
