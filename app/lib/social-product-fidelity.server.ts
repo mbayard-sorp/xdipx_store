@@ -88,7 +88,10 @@ export function formatFidelityTags(verdict: ProductFidelityVerdict): string[] {
   return tags
 }
 
-function failClosedVerdict(notes: string): ProductFidelityVerdict {
+/** Exported so a sibling buffer-based gate (vision-gate-buffer.server.ts,
+ *  ticket #13119) can produce the same fail-closed shape when its own
+ *  reference-image fetch throws, instead of re-deriving this object. */
+export function failClosedVerdict(notes: string): ProductFidelityVerdict {
   return {
     silhouette: null,
     colour: null,
@@ -153,7 +156,10 @@ export interface ProductFidelityDeps {
   ) => Promise<unknown>
 }
 
-async function defaultFetchImageBase64(url: string): Promise<{ data: string; mediaType: string }> {
+/** Exported so a sibling buffer-based gate (vision-gate-buffer.server.ts,
+ *  ticket #13119) can fetch a reference image the same way, instead of
+ *  forking a second fetch-to-base64 helper. */
+export async function defaultFetchImageBase64(url: string): Promise<{ data: string; mediaType: string }> {
   const res = await fetch(url)
   if (!res.ok) throw new Error(`fetch ${url} failed: HTTP ${res.status}`)
   const buffer = Buffer.from(await res.arrayBuffer())

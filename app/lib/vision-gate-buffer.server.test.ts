@@ -5,7 +5,8 @@
 // content-default behavior is already covered by
 // scripts/gen-notebook-art.test.ts and must stay unchanged.
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { classifyVisionPreflightFailure, remoteVisionCallVision, runVisionGatePreflight } from './vision-gate-buffer.server'
+import { classifyVisionPreflightFailure, remoteVisionCallVision, runVisionGatePreflight, gateProductFidelityBuffer, productFidelityPasses } from './vision-gate-buffer.server'
+import type { ProductFidelityDeps, ProductFidelityVerdict } from './social-product-fidelity.server'
 
 const CLEAN_VERDICT = {
   pass: true,
@@ -97,6 +98,94 @@ describe('classifyVisionPreflightFailure (ticket #12371)', () => {
     // through both layers rather than matching only an unwrapped string.
     const wrapped = 'Vision gate check could not complete: Could not resolve authentication method'
     expect(classifyVisionPreflightFailure(wrapped)).toBe('no-credential')
+  })
+})
+
+// Ticket #13119, incidents run 1182/1202: the anatomy gate above never
+// compared the rendered product against the reference plate the composite
+// was given, so a candidate depicting a different product shape passed
+// clean twice. gateProductFidelityBuffer/productFidelityPasses are the
+// buffer-based sibling that lets the hero composite ladder and --upload
+// catch that, reusing social-product-fidelity.server.ts's own check.
+describe('gateProductFidelityBuffer (ticket #13119)', () => {
+  function deps(over: Partial<ProductFidelityDeps> = {}): ProductFidelityDeps {
+    return {
+      fetchImageBase64: vi.fn(async (url: string) => ({ data: `base64-of-${url}`, mediaType: 'image/jpeg' })),
+      callVision: vi.fn(async () => ({ silhouette: 'match', colour: 'match', finish: 'match', brandMark: 'match', notes: 'faithful to reference' })),
+      ...over,
+    }
+  }
+
+  it('passes a candidate that matches the reference on every dimension', async () => {
+    const verdict = await gateProductFidelityBuffer(Buffer.from('rendered-bytes'), 'https://cdn.shopify.com/files/ref.jpg', deps())
+    expect(verdict.checkCompleted).toBe(true)
+    expect(productFidelityPasses(verdict)).toBe(true)
+  })
+
+  // The run-1182 regression case verbatim: the embedded product (We-Vibe
+  // Chorus) is a C-shaped horseshoe couples ring, and the generated hero
+  // rendered a rabbit-style twin-arm vibrator instead — a different product
+  // shape class entirely, not scale hyperbole.
+  it('rejects the run-1182 case: a rabbit-style twin-arm render against a C-ring reference plate', async () => {
+    const callVision = vi.fn(async () => ({
+      silhouette: 'drift',
+      colour: 'match',
+      finish: 'match',
+      brandMark: 'not-applicable',
+      notes: 'Reference is a C-shaped horseshoe couples ring; render depicts a rabbit-style twin-arm vibrator, a different product shape class entirely.',
+    }))
+    const verdict = await gateProductFidelityBuffer(
+      Buffer.from('rabbit-style-twin-arm-render'),
+      'https://cdn.shopify.com/files/we-vibe-chorus-c-ring.jpg',
+      deps({ callVision }),
+    )
+    expect(verdict.checkCompleted).toBe(true)
+    expect(verdict.silhouette).toBe('drift')
+    expect(productFidelityPasses(verdict)).toBe(false)
+  })
+
+  it('fails closed, and productFidelityPasses rejects, when the reference image cannot be fetched', async () => {
+    const verdict = await gateProductFidelityBuffer(
+      Buffer.from('rendered-bytes'),
+      'https://cdn.shopify.com/files/missing.jpg',
+      deps({ fetchImageBase64: vi.fn(async () => { throw new Error('fetch failed: HTTP 404') }) }),
+    )
+    expect(verdict.checkCompleted).toBe(false)
+    expect(verdict.notes).toContain('404')
+    expect(productFidelityPasses(verdict)).toBe(false)
+  })
+
+  it('fails closed, and productFidelityPasses rejects, when the vision call throws', async () => {
+    const verdict = await gateProductFidelityBuffer(
+      Buffer.from('rendered-bytes'),
+      'https://cdn.shopify.com/files/ref.jpg',
+      deps({ callVision: vi.fn(async () => { throw new Error('anthropic 529') }) }),
+    )
+    expect(verdict.checkCompleted).toBe(false)
+    expect(productFidelityPasses(verdict)).toBe(false)
+  })
+})
+
+describe('productFidelityPasses', () => {
+  const completed: ProductFidelityVerdict = {
+    silhouette: 'match', colour: 'match', finish: 'match', brandMark: 'match',
+    notes: '', checkedAt: '2026-10-02T00:00:00.000Z', checkCompleted: true,
+  }
+
+  it('passes a clean, completed verdict', () => {
+    expect(productFidelityPasses(completed)).toBe(true)
+  })
+
+  it('rejects a completed verdict with drift on any dimension', () => {
+    expect(productFidelityPasses({ ...completed, silhouette: 'drift' })).toBe(false)
+  })
+
+  it('rejects an incomplete check, unlike hasFidelityDrift alone (fail closed on "could not tell")', () => {
+    const incomplete: ProductFidelityVerdict = {
+      silhouette: null, colour: null, finish: null, brandMark: null,
+      notes: 'could not complete', checkedAt: '2026-10-02T00:00:00.000Z', checkCompleted: false,
+    }
+    expect(productFidelityPasses(incomplete)).toBe(false)
   })
 })
 

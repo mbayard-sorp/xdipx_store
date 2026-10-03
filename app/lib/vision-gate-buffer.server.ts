@@ -16,6 +16,14 @@
 import type { VisionGateDeps, VisionVerdict } from './social-vision-gate.server'
 import { runVisionGateOnImage } from './social-vision-gate.server'
 import type { TeamId } from './team-keys'
+import {
+  runProductFidelityCheckOnImages,
+  defaultFetchImageBase64,
+  hasFidelityDrift,
+  failClosedVerdict,
+  type ProductFidelityDeps,
+  type ProductFidelityVerdict,
+} from './social-product-fidelity.server'
 
 /**
  * Sniff the real container format from a candidate buffer's magic bytes.
@@ -120,6 +128,53 @@ export function visionDepsForEnv(runId?: number, team?: TeamId): VisionGateDeps 
  *  gates on when it has to fall back to the server-side route. */
 export async function gateImageBuffer(buf: Buffer, deps?: VisionGateDeps, runId?: number, team?: TeamId): Promise<VisionVerdict> {
   return runVisionGateOnImage({ data: buf.toString('base64'), mediaType: sniffImageMediaType(buf) }, deps ?? visionDepsForEnv(runId, team))
+}
+
+/**
+ * Sibling to `gateImageBuffer` for the hero cast-plus-product composite path
+ * (ticket #13119, incidents run 1182 and run 1202): compares a rendered
+ * candidate buffer against the real bare product reference image the
+ * composite was actually given, the same silhouette/colour/finish/brandMark
+ * comparison `social-product-fidelity.server.ts` already runs report-only
+ * for on-skin social assets (ticket #11487), reused here as a buffer-based
+ * check so a caller holding a not-yet-uploaded candidate can run it before
+ * anything reaches disk or Sanity, exactly like the anatomy gate above.
+ * Never throws: a reference-image fetch failure returns the same
+ * `checkCompleted: false` fail-closed shape `runProductFidelityCheckOnImages`
+ * itself already produces for a model-call failure, via the same
+ * `failClosedVerdict` helper.
+ */
+export async function gateProductFidelityBuffer(
+  buf: Buffer,
+  referenceImageUrl: string,
+  deps?: ProductFidelityDeps,
+): Promise<ProductFidelityVerdict> {
+  const fetchFn = deps?.fetchImageBase64 ?? defaultFetchImageBase64
+  let reference: { data: string; mediaType: string }
+  try {
+    reference = await fetchFn(referenceImageUrl)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return failClosedVerdict(`Product-fidelity reference image could not be fetched: ${message}`)
+  }
+  return runProductFidelityCheckOnImages(
+    { data: buf.toString('base64'), mediaType: sniffImageMediaType(buf) },
+    reference,
+    deps,
+  )
+}
+
+/**
+ * The blocking-gate predicate for a product-fidelity verdict: true only when
+ * the check actually completed AND found no drift on any dimension.
+ * Deliberately distinct from `hasFidelityDrift` alone, which reports `false`
+ * (no drift) on an incomplete check — correct for `social-product-fidelity
+ * .server.ts`'s existing report-only callers, where nothing was blocking on
+ * the result anyway, but wrong for a gate that must fail closed on "could
+ * not tell" the same way the anatomy gate's own `pass` already does.
+ */
+export function productFidelityPasses(verdict: ProductFidelityVerdict): boolean {
+  return verdict.checkCompleted && !hasFidelityDrift(verdict)
 }
 
 /**

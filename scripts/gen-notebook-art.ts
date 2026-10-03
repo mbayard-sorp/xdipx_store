@@ -83,6 +83,7 @@ import { resolve, basename } from 'node:path'
 // import app/lib this way rather than via the alias.
 import { HERO_TARGET, resizeToExactCover } from '../app/lib/hero-image-resize'
 import type { VisionVerdict } from '../app/lib/social-vision-gate.server'
+import type { ProductFidelityVerdict } from '../app/lib/social-product-fidelity.server'
 // Ticket #10483 extracted the buffer-based anatomy/imagery-ceiling gate into
 // a server module (app/lib/vision-gate-buffer.server.ts) so
 // app/lib/homepage-media.server.ts could reuse it too, without a server file
@@ -95,8 +96,12 @@ import {
   visionDepsForEnv as heroVisionDeps,
   gateImageBuffer as gateHeroBuffer,
   runVisionGatePreflight,
+  // Ticket #13119: the hero cast-plus-product composite path's own
+  // product-fidelity sibling to the anatomy gate above.
+  gateProductFidelityBuffer,
+  productFidelityPasses,
 } from '../app/lib/vision-gate-buffer.server'
-export { sniffImageMediaType, remoteVisionCallVision, heroVisionDeps, gateHeroBuffer, runVisionGatePreflight }
+export { sniffImageMediaType, remoteVisionCallVision, heroVisionDeps, gateHeroBuffer, runVisionGatePreflight, gateProductFidelityBuffer, productFidelityPasses }
 
 // ─── Anatomy vision gate for the hero surface (ticket #8691) ─────────────────
 //
@@ -115,6 +120,27 @@ export function splitByVerdict(
   buffers.forEach((buf, i) => {
     const verdict = verdicts[i]
     if (verdict?.pass) passing.push(buf)
+    else if (verdict) failing.push(verdict)
+  })
+  return { passing, failing }
+}
+
+/**
+ * Ticket #13119: same shape as `splitByVerdict` above, for the product-
+ * fidelity check instead of the anatomy check. Kept as its own function
+ * rather than generalizing `splitByVerdict` because `ProductFidelityVerdict`
+ * carries no `pass` field — `productFidelityPasses` is its equivalent
+ * decision function.
+ */
+export function splitByFidelity(
+  buffers: Buffer[],
+  verdicts: ProductFidelityVerdict[],
+): { passing: Buffer[]; failing: ProductFidelityVerdict[] } {
+  const passing: Buffer[] = []
+  const failing: ProductFidelityVerdict[] = []
+  buffers.forEach((buf, i) => {
+    const verdict = verdicts[i]
+    if (verdict && productFidelityPasses(verdict)) passing.push(buf)
     else if (verdict) failing.push(verdict)
   })
   return { passing, failing }
@@ -343,7 +369,24 @@ async function generateHeroComposite(slug: string, castSlug: string, opts: {
     if (!passing.length) {
       throw new Error(`vision gate rejected every ${rung} candidate: ${failing.map(f => f.notes).join(' | ') || 'no notes'}`)
     }
-    return { rung, buffers: passing, provider: 'fal', model: res.costKey }
+
+    // Product-fidelity check (ticket #13119, incidents run 1182/1202): the
+    // anatomy gate above never compared the rendered product against the
+    // reference it was actually given, so a candidate could pass clean while
+    // depicting a different product (a rabbit-style twin-arm vibrator
+    // rendered from a C-shaped couples-ring reference). Only meaningful when
+    // this rung actually had a product reference to composite against; the
+    // secondary-scale rung still carries one, the single-figure fallback
+    // below never does.
+    if (!productImageUrl) return { rung, buffers: passing, provider: 'fal', model: res.costKey }
+    const fidelityVerdicts = await Promise.all(passing.map(buf => gateProductFidelityBuffer(buf, productImageUrl)))
+    const fidelitySplit = splitByFidelity(passing, fidelityVerdicts)
+    if (!fidelitySplit.passing.length) {
+      throw new Error(
+        `product-fidelity check rejected every ${rung} candidate: ${fidelitySplit.failing.map(f => f.notes).join(' | ') || 'no notes'}`,
+      )
+    }
+    return { rung, buffers: fidelitySplit.passing, provider: 'fal', model: res.costKey }
   }
 
   // Rung 4 — simpler single-figure, no product composite. Falls back to the
@@ -536,6 +579,29 @@ async function upload(surface: Surface, slug: string | undefined, filePath: stri
         console.error(`notes: ${heroVerdict.notes}`)
       }
       process.exit(1)
+    }
+
+    // Product-fidelity check (ticket #13119): the final, unconditional check
+    // before upload, independent of which path produced the file, mirroring
+    // the anatomy check immediately above. Only applies when the post
+    // actually embeds a product — resolveHeroProductHandle/
+    // resolveProductPhotoUrl are the same lookups generateHeroComposite uses
+    // at generation time; a post with no embedded product (a plain
+    // single-figure hero) has no reference to compare against and is not
+    // checked, matching that function's own `productImageUrl ?? null`.
+    const uploadProductHandle = await resolveHeroProductHandle(slug!)
+    const uploadProductImageUrl = uploadProductHandle ? await resolveProductPhotoUrl(uploadProductHandle) : null
+    if (uploadProductImageUrl) {
+      const fidelityVerdict = await gateProductFidelityBuffer(buffer, uploadProductImageUrl)
+      if (!productFidelityPasses(fidelityVerdict)) {
+        if (!fidelityVerdict.checkCompleted) {
+          console.error(`[gen-notebook-art] UPLOAD REFUSED: the product-fidelity check did not evaluate this candidate, so the upload is blocked rather than shipped unchecked.`)
+        } else {
+          console.error(`[gen-notebook-art] BLOCKED: this candidate failed the product-fidelity check against the embedded product's reference image and will not be uploaded.`)
+        }
+        console.error(`verdict: ${JSON.stringify(fidelityVerdict)}`)
+        process.exit(1)
+      }
     }
   }
 
