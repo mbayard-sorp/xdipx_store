@@ -94,6 +94,24 @@ import { stripUrlQuery } from './social-asset-library.server'
  * message names the failing check to the drafter, so a merged check would send
  * a re-brief for the wrong thing. Named for the organ, not the region: the
  * licensed frame shows the region.
+ *
+ * `nippleOccluded` made sex-aware (ticket #13165, owner all-hands
+ * 2026-10-02, verbatim: "Only men are allowed to show their nipples"). Meta's
+ * own adult-nudity standard restricts only female nipples and separately bans
+ * "stimulation of visible human nipples" for anyone, so the old sex-blind
+ * wording ("no nipple... visible") was stricter than the policy it exists to
+ * satisfy: shirtless male cast frames (assets 707-710, 741 — real
+ * social_media_assets rows) failed on nipples in 5 of 6 tests with nothing
+ * else wrong. The key is UNCHANGED (`nippleOccluded`, not split or renamed),
+ * so every already-stored verdict stays readable; only the prompt's judgment
+ * criteria shifted. The check still fails three ways: a visible/outlined
+ * FEMALE nipple (unchanged, sheer/wet fabric included), a body whose sex
+ * reads ambiguous in the crop (fails closed as female — ambiguity must never
+ * resolve to the more permissive reading), and a product touching, pressed
+ * against, or aimed at ANY nipple regardless of sex (new: a bare male chest
+ * is licensed, a product used against it is not, since that is exactly the
+ * "stimulation" Meta's policy bans irrespective of sex). A visible male
+ * nipple with no product near it now passes.
  */
 export type VisionCheckName =
   | 'limbCount'
@@ -341,7 +359,7 @@ export const VISION_SYSTEM_PROMPT = `You are a strict content-safety QA reviewer
 2. handAnatomy: every visible hand has five fingers, normally proportioned and articulated, with no fused, missing, or detached digits. Do not just judge this at a glance: for EACH visible hand, actually count the fingers one by one, including any digit that appears separated from the rest of the hand or trailing behind an object the hand is holding. Fail handAnatomy if any hand's count is not exactly five, or if any digit reads as detached from the hand it belongs to, even if the rest of that hand looks normal.
 3. faceBodyIntegrity: faces and bodies are coherent, not warped, duplicated, or melted together. For any back-view frame (the camera facing the person's back), look specifically at the top of the gluteal cleft/sacrum area and at the navel: fail faceBodyIntegrity if hair, a dense patch, or a crease in that area reads as pubic hair or a vulva-like shape (a back-view body has no genitalia there; that reading is a rendering defect, not real anatomy), or if a navel is visible on a back-view frame (anatomically impossible; it means two views have merged onto one figure).
 4. extraOrMergedLimbs: no extra, duplicated, or merged limbs anywhere in the frame (including partially visible limbs at the edge of frame).
-5. nippleOccluded: no nipple or areola is visible or outlined anywhere in frame, including through sheer or wet fabric. Fail if any nipple or areola is visible or outlined.
+5. nippleOccluded: a visible or outlined FEMALE nipple or areola fails, including when seen through sheer or wet fabric. A visible or outlined MALE nipple or areola is explicitly PERMITTED and passes on its own — judge bare male chest skin the same way you judge any other bare male skin in the frame, not as exposure. Independent of sex: ANY product depicted touching, pressed against, or aimed/pointed directly at a nipple, male or female, still FAILS this check; describe which nipple and the contact in your notes. If the apparent sex of the body in this crop is genuinely ambiguous, judge it as FEMALE and fail on a visible nipple — ambiguity must fail closed, never resolve to the more permissive reading.
 6. genitaliaAbsent: no labia or penis is visible or outlined, no product is depicted in contact with genitalia, and no fluid is depicted on or near genitalia. Fail if any of these is present.
 7. anusNotVisible: no anus is visible or outlined anywhere in frame. Bare buttocks, the visible line of the gluteal cleft, and a product laid along, across or beside the cleft are all PERMITTED and must pass this check: a bare rear is not a failure, and the crease between the buttocks is not a failure. Fail ONLY when the anus itself is depicted, or when its shape is discernibly outlined, including when the buttocks are parted or spread by a pose, by a hand, or by a product, when a product's insertable portion is shown entering or seated in the body, or when it reads through sheer or wet fabric. Judge the anus, not the cleft. If you are uncertain whether a shadow in the cleft is the anus or a shadow, fail.
 8. adultUnambiguous: the depicted person, if any, is unambiguously an adult. Judge this on ambiguity, not on apparent intent, and judge it explicitly even on a faceless body crop where the usual facial age markers are absent. Fail (do not pass) if there is any genuine uncertainty about adulthood.

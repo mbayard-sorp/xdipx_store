@@ -427,6 +427,38 @@ describe('anusNotVisible prompt calibration', () => {
   })
 })
 
+// Ticket #13165, owner all-hands 2026-10-02 ("Only men are allowed to show
+// their nipples"). The check is model-interpreted prose, not deterministic
+// code, so — same idiom as the anusNotVisible block above — its calibration
+// is asserted directly against the prompt text. Reproduces the real failure
+// the ticket named: shirtless male cast renders (social_media_assets 707-710,
+// 741) failed nippleOccluded 5 of 6 times under the old sex-blind wording.
+describe('nippleOccluded prompt calibration (ticket #13165)', () => {
+  it('still names and fails a visible female nipple, sheer/wet fabric included (unchanged)', () => {
+    expect(VISION_SYSTEM_PROMPT).toContain('a visible or outlined FEMALE nipple or areola fails')
+    expect(VISION_SYSTEM_PROMPT).toContain('including when seen through sheer or wet fabric')
+  })
+
+  it('explicitly permits and passes a visible male nipple on its own', () => {
+    expect(VISION_SYSTEM_PROMPT).toContain('A visible or outlined MALE nipple or areola is explicitly PERMITTED and passes on its own')
+    expect(VISION_SYSTEM_PROMPT).toContain('not as exposure')
+  })
+
+  it('still fails a product touching or aimed at any nipple regardless of sex', () => {
+    expect(VISION_SYSTEM_PROMPT).toContain('ANY product depicted touching, pressed against, or aimed/pointed directly at a nipple, male or female, still FAILS')
+  })
+
+  it('fails closed on ambiguous sex rather than resolving to the permissive reading', () => {
+    expect(VISION_SYSTEM_PROMPT).toContain('judge it as FEMALE and fail on a visible nipple')
+    expect(VISION_SYSTEM_PROMPT).toContain('ambiguity must fail closed')
+  })
+
+  it('keeps the key name unchanged so a stored verdict from before this ticket stays readable', () => {
+    expect(VISION_CHECK_NAMES).toContain('nippleOccluded')
+    expect(VISION_CHECK_NAMES).not.toContain('femaleNippleOccluded')
+  })
+})
+
 // Ticket #11487, regression case asset 675 (ROMP 2.0 render): the model
 // returned legibleText: "" on a frame that actually had garbled, illegible
 // pseudo-text molded beneath the product's button, because the old wording
