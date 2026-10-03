@@ -21,7 +21,13 @@ function ptToHtml(value: unknown): string | undefined {
   return undefined
 }
 
-const STOREFRONT_ENDPOINT   = `https://${process.env['SHOPIFY_STORE_DOMAIN']}/api/2024-10/graphql.json`
+// Ticket #13156: 2024-10 was already being silently served as a newer,
+// about-to-retire version with a deprecation warning (measured 2026-10-02;
+// see the ticket). Bumped the Storefront pin to 2026-01 after validating
+// every Storefront operation in this file against the live schema. The
+// Admin endpoints below are a separate, larger validation pass tracked as
+// its own follow-up ticket.
+const STOREFRONT_ENDPOINT   = `https://${process.env['SHOPIFY_STORE_DOMAIN']}/api/2026-01/graphql.json`
 const ADMIN_ENDPOINT        = `https://${process.env['SHOPIFY_STORE_DOMAIN']}/admin/api/2024-10`
 const ADMIN_GQL_ENDPOINT    = `https://${process.env['SHOPIFY_STORE_DOMAIN']}/admin/api/2024-10/graphql.json`
 
