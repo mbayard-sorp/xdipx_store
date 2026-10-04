@@ -98,3 +98,7 @@ export const ArchiveIcon = (p: P) => (
 export const CommentIcon = (p: P) => (
   <Svg {...p}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></Svg>
 )
+/** Same path as AdminNav's PricingIcon. Used by the Ad Studio Spend tab. */
+export const DollarIcon = (p: P) => (
+  <Svg {...p}><line x1="12" y1="1" x2="12" y2="23" /><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></Svg>
+)

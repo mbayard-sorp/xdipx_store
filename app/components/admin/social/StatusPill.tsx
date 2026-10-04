@@ -10,7 +10,7 @@ export type StudioStatus =
   | 'draft' | 'pending' | 'needs_changes' | 'approved' | 'scheduled' | 'publishing'
   | 'published' | 'failed' | 'rejected' | 'deleted'
 
-const STYLES: Record<StudioStatus, { cls: string; word: string; Icon: (p: { size?: number }) => React.JSX.Element }> = {
+export const STUDIO_STATUS_STYLES: Record<StudioStatus, { cls: string; word: string; Icon: (p: { size?: number }) => React.JSX.Element }> = {
   draft:         { cls: 'border-line text-ink-3 bg-paper',                     word: 'Draft',        Icon: PenIcon },
   pending:       { cls: 'border-plum/20 bg-plum-soft text-plum-2',             word: 'Pending',      Icon: ClockIcon },
   needs_changes: { cls: 'border-amber-300 bg-amber-50 text-amber-800',         word: 'Changes',      Icon: AlertIcon },
@@ -24,7 +24,7 @@ const STYLES: Record<StudioStatus, { cls: string; word: string; Icon: (p: { size
 }
 
 export function StatusPill({ status, className = '' }: { status: StudioStatus; className?: string }) {
-  const s = STYLES[status] ?? STYLES.draft
+  const s = STUDIO_STATUS_STYLES[status] ?? STUDIO_STATUS_STYLES.draft
   const Icon = s.Icon
   return (
     <span className={`inline-flex items-center gap-1 h-6 px-2 rounded-full border text-[11px] font-semibold leading-none whitespace-nowrap ${s.cls} ${className}`}>
