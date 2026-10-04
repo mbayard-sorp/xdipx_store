@@ -1,0 +1,14 @@
+{
+  "_type": "adLaneProductSubset",
+  "lane": "meta",
+  "entries": [
+    { "_key": "e01", "_type": "adLaneProductEntry", "productHandle": "wild-rose-the-classic-suction-vibrator-red", "displayTitle": "Wild Rose, the classic", "positionZeroOk": false },
+    { "_key": "e02", "_type": "adLaneProductEntry", "productHandle": "romp-lipstick-pleasure-air-stimulator", "displayTitle": "ROMP Lipstick", "positionZeroOk": false },
+    { "_key": "e03", "_type": "adLaneProductEntry", "productHandle": "dame-zee-bullet-vibrator-periwinkle", "displayTitle": "Dame Zee", "positionZeroOk": true },
+    { "_key": "e04", "_type": "adLaneProductEntry", "productHandle": "naturals-h2o-intimate-lubricant-8-5-oz", "displayTitle": "Naturals H2O, 8.5 oz", "positionZeroOk": true },
+    { "_key": "e05", "_type": "adLaneProductEntry", "productHandle": "lelo-water-based-personal-moisturizer-75-ml-2-5-oz", "displayTitle": "LELO Water-Based Personal Moisturizer, 75 ml", "positionZeroOk": false },
+    { "_key": "e06", "_type": "adLaneProductEntry", "productHandle": "lelo-beads-plus-kegel-balls-set", "displayTitle": "LELO BEADS Plus", "positionZeroOk": false },
+    { "_key": "e07", "_type": "adLaneProductEntry", "productHandle": "sportsheets-sex-mischief-steele-balls-stainless-steel", "displayTitle": "Steele Balls, stainless", "positionZeroOk": true },
+    { "_key": "e08", "_type": "adLaneProductEntry", "productHandle": "womanizer-liberty-2-purple", "displayTitle": "Womanizer Liberty 2", "positionZeroOk": true }
+  ]
+}

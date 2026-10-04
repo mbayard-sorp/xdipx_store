@@ -1,0 +1,12 @@
+{
+  "_type": "adBridgePage",
+  "slug": { "_type": "slug", "current": "second-spring" },
+  "headline": "Comfort for a *second* spring.",
+  "claim": "LELO Water-Based Personal Moisturizer, a water-based formula for anyone whose body now asks for a little more comfort.",
+  "buttonLabel": "Show me",
+  "productHandle": "lelo-water-based-personal-moisturizer-75-ml-2-5-oz",
+  "utmCampaign": "meta-second-spring",
+  "lane": "meta",
+  "live": false,
+  "healthFraming": true
+}

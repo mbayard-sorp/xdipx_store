@@ -41,6 +41,19 @@ export function trackFbViewContent(params: FbContentParams, eventId: string): vo
 }
 
 /**
+ * Fire a plain PageView. The storefront shell never fires one itself (the
+ * pixel bootstrap in root.tsx only inits and queues), so the paid-lane bridge
+ * page, whose whole job is to feed the pixel a landing view, calls this once
+ * on mount. The bootstrap boots consent-revoked, so the queued event sends only
+ * after the visitor grants consent, same as every other pixel event.
+ */
+export function trackFbPageView(): void {
+  if (typeof window === 'undefined') return
+  if (typeof window.fbq !== 'function') return
+  window.fbq('track', 'PageView')
+}
+
+/**
  * Fire an AddToCart browser pixel event.
  * The eventId must match the one generated server-side so Meta deduplicates
  * the browser + CAPI pair into a single conversion.
