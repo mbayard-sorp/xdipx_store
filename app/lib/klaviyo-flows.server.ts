@@ -295,7 +295,7 @@ export async function createFlow(payload: Record<string, unknown>): Promise<{ id
 export const MANUAL_FLOW_STEPS: Record<FlowSlug, string[]> = {
   'browse-abandonment': [
     'Klaviyo > Flows > Create flow > Build your own.',
-    'Name it "xdipx Browse Abandonment". Trigger: Metric > Viewed Product. The metric does not exist until something sends the first Viewed Product event (see docs/store-team/klaviyo-flows.md, "Browse abandonment has no trigger yet").',
+    'Name it "xdipx Browse Abandonment". Trigger: Metric > Viewed Product. The metric does not exist until something sends the first Viewed Product event (see docs/store-team/klaviyo-flows.md, "Browse abandonment: wired, waiting on its first event").',
     'Flow filters: add "Placed Order zero times since starting this flow".',
     'Add Time delay: 4 hours.',
     'Add Email. Name "xdipx Browse Abandonment browse-4h". Subject and preview from variant 1 in docs/store-team/klaviyo-flows.md. Sender hello@xdipx.com, label xdipx.',
