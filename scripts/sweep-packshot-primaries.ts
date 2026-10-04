@@ -86,7 +86,7 @@ interface ProductNode {
   title: string
   vendor?: string | null
   media: { nodes: MediaNode[] }
-  metafields: ({ namespace: string; key: string; value: string } | null)[]
+  nalpacSkuMetafield: { namespace: string; key: string; value: string } | null
 }
 
 interface ZeroMediaEntry {
@@ -156,7 +156,7 @@ async function* iterateProducts(): AsyncGenerator<ProductNode> {
                 ... on MediaImage { image { url width height altText } }
               }
             }
-            metafields(identifiers: [{ namespace: "xdipx", key: "nalpac_sku" }]) {
+            nalpacSkuMetafield: metafield(namespace: "xdipx", key: "nalpac_sku") {
               namespace key value
             }
           }
@@ -236,7 +236,7 @@ async function main(): Promise<number> {
       zeroMediaProducts.push({
         handle: product.handle,
         title: product.title,
-        nalpacSku: parseMetafield(product.metafields, 'nalpac_sku') || null,
+        nalpacSku: parseMetafield([product.nalpacSkuMetafield], 'nalpac_sku') || null,
       })
     }
     if (images.length < 2) continue
