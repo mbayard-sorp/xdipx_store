@@ -163,7 +163,7 @@ owner as always.
 | 3 | PR-E | Export registry: Google Editor CSV, Meta paused draft, banner zip; `ads_spend_enabled` gate; owner authorizes Meta connector here | Each hearted creative has a downloadable or stored export; nothing uploads with the valve off |
 | 3 | PR-F | Klaviyo flows (API-created where possible, otherwise documented clicks), templates, bodyscape header selection. **In review: [#1502](https://github.com/mbayard-sorp/xdipx_store/pull/1502), ticket #13383.** Cart and post-purchase flows created as drafts; browse abandonment waits on a Viewed Product event nothing sends yet | Test profile receives the browse abandonment email with the right product |
 | 4 | PR-G | Metrics import (CSV, MCP insights, Shopify attribution), `ad_spend` backfill, Live tab | Shop Campaigns history visible per day; `daily_profit_summary.ad_spend` non-zero on spend days |
-| 4 | PR-H | Rules R1 to R8, `ad_rule_events`, recommendations UI, R7 auto-pause, Spend tab, owner digest section | Seeded metrics fire R1 and R5 visibly; owner can one-tap pause |
+| 4 | PR-H (in review, #1507) | Rules R1 to R8, `ad_rule_events`, recommendations UI, R7 auto-pause, Spend tab, owner digest section | Seeded metrics fire R1 and R5 visibly; owner can one-tap pause |
 | 5 | docs | Playbook, lane rules, owner runbook for flipping `ads_spend_enabled` and going live platform by platform | Simulation exit criteria met |
 
 Design pass before PR-A and PR-C: `homepage-designer` loads ui-ux-pro-max and the taste pack
