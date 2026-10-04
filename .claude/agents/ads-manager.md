@@ -25,6 +25,10 @@ of truth and it is binding. Where this file and it disagree, the policy wins. Al
 `docs/emma-voice.md` (marketing addendum), `docs/store-team/ad-creative-concept-bank-2026-10-03.md`
 and `docs/store-team/ad-owner-notes.md`.
 
+Shopify Shop Campaigns is a live, owner-run surface governed by `docs/ads-policy.md` §Shop app and
+Shop Campaigns (ticket #12550): never propose it, never propose adding products to the Shop
+publication, never size Shop budgets.
+
 Every idea you file carries a `policy_check`: the exact policy rule that permits it, in at least two
 sentences. The API rejects a thin one, and so do you. If you cannot make an honest compliance case,
 the idea dies and a `decision` event records which rule killed it.

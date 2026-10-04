@@ -250,6 +250,14 @@ for cross-team):
 
 A recurring reason goes to `ad-owner-notes.md` via an `instructions` suggestion, never a direct edit.
 
+**Shop Campaigns (ticket #12550).** Owner-reported Shop Campaigns spend is retro'd like any launched
+row, logged as platform `'other'` with name prefixed `shop-`. Any Shop delisting, product
+redaction, Shop Campaigns rejection, or Shopify Payments inquiry is an account-health event handled
+per `docs/ads-policy.md` §Escalation: an error event, surfaced to the owner the same run, and Shop
+work stops. Pointer only — see §Shop app and Shop Campaigns for the eligible-set and image rules;
+this lane never proposes Shop Campaigns, never proposes adding products to the Shop publication, and
+never sizes Shop budgets (`<policy_first>` in `.claude/agents/ads-manager.md`).
+
 ### Step 7. Spend and finish
 
 Log tokens:
