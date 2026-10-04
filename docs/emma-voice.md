@@ -1,4 +1,4 @@
-# xdipx Voice Charter (v5.7)
+# xdipx Voice Charter (v5.8)
 
 > The single source of truth for how xdipx speaks, everywhere: site copy, product copy, homepage merchandising, SMS/chat, email, ads, IVR, and support. Every AI prompt and every agent that writes customer-facing words loads this file before writing. If any other document disagrees with this one, this one wins.
 >
@@ -37,6 +37,8 @@
 > Amended 2026-09-30 on Mike's direction, all-hands on Shop and agentic channels: **"go, use the SEO register"**. The AI shopping catalog (the Shopify Catalog feed that ChatGPT, Copilot, and other agentic channels read, carried in the product metafield `xdipx.catalog_description`) is a new surface and runs at the SEO register, 4 to 5: factual, plain, what the product is and how it is used, with no desire-forward copy and no health, efficacy, or proof claim beyond what the label states. The site's own descriptions and every other register are unchanged, so this stays v5.6.
 
 > Amended 2026-10-01 on Mike's direction, **"make it a standing rule to use the skill for all future writings"**, after a measured test on that day's Notebook post (blind-judged AI-tell density fell from 1.55 to 0.65 per 100 words, voice and accuracy gates both PASS, published live). The core gains **Write like a person**: everything written on every surface runs the vendored humanizer skill (`.claude/skills/humanizer/SKILL.md`, MIT, from blader/humanizer), and this charter wins every conflict with it. The blog addendum's short-standalone-sentence rule now requires the sentence to carry a new fact or a reaction. No register, cap, or hard line moves. This moves the charter to v5.7.
+
+> Amended 2026-10-03 on Mike's explicit codify ("codify both"), recording decision 1 of the Ad Studio v2 plan (`docs/store-team/ad-studio-v2-plan.md` §1): **register 10 ships on exactly one surface class, vetted adult ad networks** (ExoClick, JuicyAds, and the peers `docs/ads-policy.md` lists) and the banners and copy exported to them. The intensity dial redefines 10 as full explicit arousal, the act named and narrated, nothing withheld. What the dial used to call 10 (crude slang, porn-copy, the leering spectator voice, the reader as object) moves off the dial and ships nowhere, adult networks included. Every hard rule still binds at 10: never crude, never porn-copy, never demeaning, no fabricated proof, no "sexy" as a branding adjective, no em-dashes, no countdowns, CTAs from the whitelist, Emma's no-lived-experience rule, and imagery capped by the nudity definition (no visible female nipples, labia, penis, or anus). The marketing addendum and the channel table gain the adult-network line. Every other register stays where it was: owned 9, Instagram 9 by implication, X 6 to 7, TikTok 5, LinkedIn 2 to 3, mainstream paid ads 3 to 4, support 2 to 3. The same codify moved Meta in `docs/ads-policy.md` from Prohibited to a gated strategic lane, and that lane runs at the paid-ads 3 to 4. This moves the charter to v5.8.
 
 <!-- core:start -->
 
@@ -92,7 +94,7 @@ The register is explicit-indulgent, a 9 on the intensity dial below. Every piece
 
 ### The intensity dial
 
-Copy intensity runs on a 1-10 scale. Owned channels (site product copy, email, opted-in SMS) target **9, indulgent flavor**. The ceiling is 10 and it is hard: 10 never ships.
+Copy intensity runs on a 1-10 scale. Owned channels (site product copy, email, opted-in SMS) target **9, indulgent flavor**. The ceiling is 10, and 10 ships on exactly one surface class: vetted adult ad networks and the banners and copy exported to them (owner decision 2026-10-03, see the adult-network line in the marketing addendum). On every other surface 10 never ships.
 
 Social platforms are **not** owned channels. We rent them, the landlord writes the rules, and a removal or ban costs the whole audience. What ships there is capped by the social and LinkedIn addenda below, never by the owned-channel target.
 
@@ -101,9 +103,10 @@ Social platforms are **not** owned channels. We rent them, the landlord writes t
 - 5-7 evocative tease: sensory fragments, acts implied not named, fantasy fully reader-authored. (Mid-funnel surfaces and anywhere a 9 would be too much, per the channel addenda.)
 - 8 explicit-adjacent: the body's involuntary responses enter (gripping sheets, ragged breath), acts still implied.
 - **9 explicit-indulgent (the target): acts named plainly, arousal and orgasm explicit, devoted-lover voice, temptation closers. Never crude vocabulary, never a dare.**
-- 10 crude: porn-copy. Crude anatomy slang, leering spectator voice, the reader as object, the scene fully scripted. Permanently banned.
+- 10 explicit, nothing withheld (vetted adult ad networks only): everything 9 does, with arousal fully explicit and the act named and narrated start to finish. The devoted-lover voice and the centered reader stay. Never crude, never porn-copy, never demeaning.
+- Off the dial: porn-copy. Crude anatomy slang, leering spectator voice, the reader as object, anything demeaning. This was the 10 before 2026-10-03, and it is permanently banned on every surface, adult networks included.
 
-The authorship test, which is what actually degrades from 9 to 10: at 9 the copy authors the scene but the reader is the powerful one or the willingly overwhelmed one, and the ending is theirs. At 10 the copy performs for itself and the reader isn't in the room. If a line leers, scripts the whole act, or reads like it's watching the customer rather than wanting them, it is a 10 regardless of vocabulary.
+The authorship test, which is what actually degrades as the dial climbs: at 9 the copy authors the scene but the reader is the powerful one or the willingly overwhelmed one, and the ending is theirs. At 10 the copy may narrate the whole act, and the reader is still the one it happens for. Off the dial, the copy performs for itself and the reader isn't in the room. If a line leers or reads like it's watching the customer rather than wanting them, it is off the dial regardless of vocabulary and ships nowhere. Off adult networks, a line that scripts the whole act is a 10 and does not ship.
 
 ## Say the word
 
@@ -195,7 +198,9 @@ The registers restate the addenda below, which govern wherever they are more spe
 | TikTok | 5 | Knowledge |
 | Blog | Authority at max, desire capped 7 to 8 | Knowledge |
 | LinkedIn | 2 to 3 | Discretion and the business |
-| Paid ads | 3 to 4 | Discretion |
+| Paid ads (Google and Microsoft Search, Meta strategic lane, Shop) | 3 to 4 | Discretion |
+| Snapchat paid (non-graphic, 18+) | 6 to 7, per `docs/ads-policy.md` | Discretion |
+| Vetted adult ad networks (banners and copy exported to them) | 10, the only surface where it ships | Permission |
 | AI shopping catalog (`xdipx.catalog_description`) | 4 to 5, factual | Knowledge |
 | Support | 2 to 3 | Discretion |
 
@@ -209,6 +214,7 @@ Include the addendum matching the surface, on top of the core.
 
 - Themed calendar moments are editorial curricula, not sales events: "Wand Week", "Lube Literacy Week", "Self-Pleasure Month". Educate first; the offer rides along.
 - Paid ads (Meta, Google): the desire-forward register does NOT apply. Education, mechanism, and health register only, dialed at 3-4. No pleasure-focused claims in ad creative (platform policy), no toys-as-arousal framing. The full register runs only on owned channels: site, email, opted-in SMS.
+- Vetted adult ad networks (ExoClick, JuicyAds, and the peers `docs/ads-policy.md` lists) are the one surface where register 10 ships, by owner decision 2026-10-03. It covers the banners and copy exported to those networks and nothing else: a 10 line never reaches the site, email, SMS, social, or a mainstream ad. At 10 arousal is fully explicit and the act is named and narrated, with nothing withheld. What still binds: never crude, never porn-copy, never demeaning; the reader stays centered; no fabricated proof (no invented reviews, counts, or quotes); no "sexy" as a branding adjective; no em-dashes; no countdowns or urgency; CTAs from the whitelist only; Emma has no lived experience. Imagery is capped by this charter's nudity definition (no visible female nipples, labia, penis, or anus) and by the adult-network row in `docs/ads-policy.md`.
 - Transactional email (order confirmation, shipping) stays plain, dialed at 2-3. Suggestive copy or imagery in transactional mail risks spam filtering and serves nobody mid-checkout.
 - Homepage above-the-fold and other first-touch surfaces may pull back to the 5-7 evocative band where a cold visitor hasn't opted into the full register yet; PDP full stories, curated rails, and email run the full 9.
 - Push past competitors by delivering desire more honestly, not more cleverly. Wink-wink innuendo is Lovehoney's lane, euphemism is Maude's, discounts are Adam & Eve's. Ours: sell the experience itself, better than anyone.
