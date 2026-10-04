@@ -200,6 +200,22 @@ independently (a hardcoded `width=480` tile in a 208px box, deck panels inheriti
   is wrong. Worked example: PR #478 cut 12 tiles from 480w to 320w and a video poster from ~89KB to
   ~10KB.
 
+**Loaders ship only what the component reads (engineering floor, ticket #13148).** A loader or
+precomputed payload that feeds a card, rail, or drawer projects to a narrow view-model type
+(`Pick<>` of the fields the component renders), never a full Shopify product, full Sanity document,
+base64 LQIP, author object, or description it does not display. Data needed only behind an
+interaction (cart drawer, modal, second page) loads on that interaction via a resource route plus
+`useFetcher`, not in the layout loader that runs on every page. Reason: on 2026-10-02 the homepage
+shipped ~140 KB of inline `loaderData`, including 19 KB of full upsell products on every storefront
+page that only render when the cart opens.
+
+**No slower path for the owner (engineering floor, ticket #13148).** An admin or owner session must
+not get a slower homepage/PDP data path than an anonymous visitor by default. Freshness for editors
+is an explicit opt-in (`?fresh=1`), never a side effect of being logged in. Reason: on 2026-10-02 the
+owner's 7-day admin cookie made every homepage load skip the precompute blob and the edge cache
+(measured 2.3-4.6 s loader vs 170 ms anonymous), so every perf fix optimized a path the owner never
+saw, and he kept reporting the site as slow.
+
 ## 6b. Instagram content mix (the ratio the voice charter points at)
 
 The social addendum in `docs/emma-voice.md` says "the content mix in the mission brief governs the
