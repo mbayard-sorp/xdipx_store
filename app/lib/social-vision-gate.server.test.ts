@@ -25,7 +25,7 @@ import {
 // they all inject a fake `callVision`) is exercised directly here with the
 // SDK mocked, to prove the forced-tool-call wiring itself, not just the
 // injected-seam retry logic above it.
-const h = vi.hoisted(() => ({ mockCreate: vi.fn() }))
+const h = vi.hoisted(() => ({ mockCreate: vi.fn(), captureException: vi.fn() }))
 vi.mock('@anthropic-ai/sdk', () => ({
   default: class MockAnthropic {
     messages = { create: h.mockCreate }
@@ -35,7 +35,7 @@ vi.mock('./token-log.server', () => ({ logMessageUsage: vi.fn() }))
 // Avoids pulling in the real @sentry/node (and its @opentelemetry/api
 // dependency) for every test in this file, same idiom as
 // category-healthcheck.server.test.ts.
-vi.mock('./sentry.server', () => ({ Sentry: { captureException: vi.fn() } }))
+vi.mock('./sentry.server', () => ({ Sentry: { captureException: h.captureException } }))
 
 const CLEAN_RESPONSE = {
   pass: true,
@@ -1287,5 +1287,82 @@ describe('defaultDeps.callVision — forced tool call (ticket #13176)', () => {
     const retryCallArgs = h.mockCreate.mock.calls[1]?.[0] as { tools?: unknown; tool_choice?: unknown }
     expect(retryCallArgs.tools).toBeUndefined()
     expect(retryCallArgs.tool_choice).toBeUndefined()
+  })
+
+  // Ticket #13362: a forced tool call can return a tool_use block that is
+  // itself a truncated partial input (stop_reason:'max_tokens') on a frame
+  // whose verdict needed more than the old 400-token budget (two hands plus
+  // legible packaging). Before this ticket, getOneVerdict's retry only ever
+  // ran on a thrown VisionParseError, and a truncated-but-present tool_use
+  // block never threw — it went straight to isValidVerdictShape and failed
+  // closed with no retry at all. This asserts the retry now runs instead.
+  it('retries the strict free-text leg when the forced tool call is truncated at max_tokens', async () => {
+    h.mockCreate.mockReset()
+    h.mockCreate
+      // Forced-tool attempt: only `pass` and `checks` made it out before the
+      // token budget ran out — the exact shape reported live against run
+      // 1227's two-hands product hero.
+      .mockResolvedValueOnce({
+        content: [{ type: 'tool_use', id: 'toolu_1', name: VISION_VERDICT_TOOL_NAME, input: { pass: true, checks: CLEAN_RESPONSE.checks } }],
+        stop_reason: 'max_tokens',
+        usage: { input_tokens: 10, output_tokens: 1024 },
+      })
+      // Strict retry: full, untruncated free-text JSON.
+      .mockResolvedValueOnce({
+        content: [{ type: 'text', text: JSON.stringify(CLEAN_RESPONSE) }],
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 10, output_tokens: 5 },
+      })
+      // Exposure-confirmation second read (ticket #11468): clean tool_use.
+      .mockResolvedValue({
+        content: [{ type: 'tool_use', id: 'toolu_2', name: VISION_VERDICT_TOOL_NAME, input: CLEAN_RESPONSE }],
+        stop_reason: 'tool_use',
+        usage: { input_tokens: 10, output_tokens: 5 },
+      })
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const verdict = await runVisionGateOnImage({ data: 'ZmFrZQ==', mediaType: 'image/jpeg' })
+
+    expect(verdict.checkCompleted).toBe(true)
+    expect(verdict.pass).toBe(true)
+    expect(h.mockCreate).toHaveBeenCalledTimes(3)
+    const firstCallArgs = h.mockCreate.mock.calls[0]?.[0] as { max_tokens: number }
+    expect(firstCallArgs.max_tokens).toBeGreaterThanOrEqual(1024)
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('retrying once with a stricter prompt'),
+      expect.objectContaining({ message: expect.stringContaining('stop_reason=max_tokens') }),
+    )
+    errorSpy.mockRestore()
+  })
+
+  // The second half of the same DONE WHEN: when the strict retry is ALSO
+  // truncated, the failure must still reach Sentry, and the report must
+  // name the stop reason rather than reading as an ordinary malformed-JSON
+  // parse error.
+  it('reaches Sentry naming the stop reason when the strict retry is also truncated', async () => {
+    h.mockCreate.mockReset()
+    h.captureException.mockReset()
+    h.mockCreate
+      // Forced-tool attempt: truncated, as above.
+      .mockResolvedValueOnce({
+        content: [{ type: 'tool_use', id: 'toolu_1', name: VISION_VERDICT_TOOL_NAME, input: { pass: true, checks: CLEAN_RESPONSE.checks } }],
+        stop_reason: 'max_tokens',
+        usage: { input_tokens: 10, output_tokens: 1024 },
+      })
+      // Strict free-text retry: also cut off before the closing brace.
+      .mockResolvedValueOnce({
+        content: [{ type: 'text', text: JSON.stringify(CLEAN_RESPONSE).slice(0, 40) }],
+        stop_reason: 'max_tokens',
+        usage: { input_tokens: 10, output_tokens: 1024 },
+      })
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const verdict = await runVisionGateOnImage({ data: 'ZmFrZQ==', mediaType: 'image/jpeg' })
+
+    expect(verdict.checkCompleted).toBe(false)
+    expect(h.captureException).toHaveBeenCalledTimes(1)
+    const captured = h.captureException.mock.calls[0]?.[0] as Error
+    expect(captured.message).toContain('stop_reason=max_tokens')
+    vi.restoreAllMocks()
   })
 })

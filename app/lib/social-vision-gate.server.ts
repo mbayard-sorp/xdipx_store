@@ -451,7 +451,15 @@ const defaultDeps: Required<VisionGateDeps> = {
     const strict = opts?.strict === true
     const msg = await client.messages.create({
       model: SONNET,
-      max_tokens: 400,
+      // Ticket #13362 (was 400). The nine-field verdict
+      // leaves too little headroom on a frame with hands or legible text —
+      // five live reads of the 2026-10-02 what-if-a-partner-feels-replaced
+      // hero used 360-400 of the old 400-token budget, and a frame needing
+      // more (two hands plus packaging text) hits stop_reason:'max_tokens'
+      // mid-field. Applies to both legs: the strict free-text retry shares
+      // this same call site, so it gets the same headroom with no separate
+      // branch needed.
+      max_tokens: 1024,
       system: strict
         ? `${VISION_SYSTEM_PROMPT}\n\nReply with the JSON object only. No prose, no explanation, no markdown fence: the first character of your reply must be "{" and the last must be "}".`
         : VISION_SYSTEM_PROMPT,
@@ -493,7 +501,25 @@ const defaultDeps: Required<VisionGateDeps> = {
       const toolBlock = msg.content.find(
         (block): block is Anthropic.Messages.ToolUseBlock => block.type === 'tool_use' && block.name === VISION_VERDICT_TOOL_NAME,
       )
-      if (toolBlock) return toolBlock.input
+      if (toolBlock) {
+        // Ticket #13362: a tool_use block can exist and still be a
+        // truncated partial input when the model ran out of output tokens
+        // mid-field (`stop_reason:'max_tokens'`) — the SDK does not refuse
+        // this, it just hands back whatever was emitted before the cutoff.
+        // Treating that as a usable verdict is how a two-hands-plus-text
+        // frame reached `isValidVerdictShape` with only `pass`/`checks`
+        // filled in and failed closed with no retry (the retry below only
+        // ever ran on a thrown VisionParseError). Throwing here instead
+        // routes it through the exact same strict-retry path a prose reply
+        // already takes.
+        if (msg.stop_reason === 'max_tokens') {
+          throw new VisionParseError(
+            `vision gate: ${VISION_VERDICT_TOOL_NAME} tool_use input truncated (stop_reason=max_tokens)`,
+            JSON.stringify(toolBlock.input),
+          )
+        }
+        return toolBlock.input
+      }
       // Forced tool_choice should make this unreachable, but fail into the
       // same VisionParseError path (and thus the strict retry) rather than a
       // bare throw if the model ever refuses the tool anyway.
@@ -506,6 +532,18 @@ const defaultDeps: Required<VisionGateDeps> = {
 
     const block = msg.content[0]
     if (block?.type !== 'text') throw new Error('vision gate: unexpected response block type')
+    // Ticket #13362: same truncation as the forced-tool leg above, checked
+    // first so a truncated free-text reply reports "truncated" rather than
+    // whatever JSON.parse happens to say (truncated JSON sometimes still
+    // parses, e.g. if the cut lands right after a closing brace that a
+    // string value swallowed, which would otherwise ship a partial verdict
+    // the shape check cannot catch).
+    if (msg.stop_reason === 'max_tokens') {
+      throw new VisionParseError(
+        'vision gate: strict retry response truncated (stop_reason=max_tokens)',
+        block.text,
+      )
+    }
     // Model sometimes wraps JSON in a fence despite instructions; strip it.
     const cleaned = block.text.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim()
     try {
