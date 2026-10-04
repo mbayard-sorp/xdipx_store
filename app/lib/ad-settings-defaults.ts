@@ -8,7 +8,11 @@ export const ADS_SETTING_KEYS = {
   mediaMonthlyCapCents: 'ads_media_monthly_cap_cents',
   mediaDailyCapCents: 'ads_media_daily_cap_cents',
   grossMarginPct: 'ads_gross_margin_pct',
+  /** Owner's go for leaving simulation (plan section 2 exit criteria). Read-only chip in the sheet. */
+  simulationExitOk: 'ads_simulation_exit_ok',
 } as const
+
+export const ADS_SIMULATION_EXIT_OK_DEFAULT = false
 
 /** Spend valve. OFF until the owner flips it from the valve surface (Phase 5 runbook). */
 export const ADS_SPEND_ENABLED_DEFAULT = false
@@ -38,8 +42,13 @@ export const ADS_RULE_DEFAULTS = {
   ads_rule_r5_min_purchases: 3,
   ads_rule_r5_budget_up_pct: 20,
   ads_rule_r5_cooldown_hours: 72,
-  // R6 brake: ROAS below break-even in both 3d and 7d windows, budget down P percent
+  // R6 brake: ROAS below break-even in both 3d and 7d windows, budget down P percent.
+  // The next two are additions the research table does not carry: a brake needs at least
+  // N x break-even CPA of 7d spend behind it (below that the window is noise), and fires at
+  // most once per H hours so a quiet week cannot brake the same ad three times.
   ads_rule_r6_budget_down_pct: 30,
+  ads_rule_r6_min_spend_be_multiple: 2,
+  ads_rule_r6_cooldown_hours: 72,
   // R7 spend guard: CPM above N x its 7-day median (the daily cap is ads_media_daily_cap_cents)
   ads_rule_r7_cpm_multiple: 2,
   // R8 fatigue: frequency above N and CTR down at least P percent versus the first 3 days
@@ -49,5 +58,5 @@ export const ADS_RULE_DEFAULTS = {
 
 export type AdsRuleKey = keyof typeof ADS_RULE_DEFAULTS
 
-/** Gross margin used for break-even CPA and ROAS, in percent (research E.2: about 45). Read-only until PR-H. */
+/** Gross margin used for break-even CPA and ROAS, in percent (research E.2: about 45). */
 export const ADS_GROSS_MARGIN_PCT_DEFAULT = 45

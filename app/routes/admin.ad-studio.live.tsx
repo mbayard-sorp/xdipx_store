@@ -6,8 +6,9 @@
  * source in the URL the loader picks a real one: live when creative rows exist,
  * else Shop history when an import exists, else live (the empty state).
  *
- * Actions (live-action, live-undo) only record a decision in ad_rule_events in
- * this PR. PR-H wires the rules engine and the real platform calls.
+ * Actions (live-action, live-undo): a tap on a real creative goes through
+ * applyRuleAction (paused_at, pause_reason, budget_multiplier, the event row,
+ * the platform seam). A tap on a sample row only records the decision.
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from 'react-router'
 import { Link, isRouteErrorResponse, useLoaderData, useNavigation, useRevalidator, useRouteError, useSearchParams } from 'react-router'
@@ -16,6 +17,7 @@ import {
   AdMetricsError, isLiveActionKind, liveFacets, liveFeed, liveSourceCounts, recordLiveAction, undoLiveAction,
   type LiveSource,
 } from '~/lib/ad-metrics.server'
+import { applyRuleAction } from '~/lib/ad-rules.server'
 import { FilterBar } from '~/components/admin/ads/FilterBar'
 import { InstrumentBand, sourceChipText } from '~/components/admin/ads/InstrumentBand'
 import { LiveRowCard } from '~/components/admin/ads/LiveRowCard'
@@ -58,14 +60,18 @@ export async function action({ request }: ActionFunctionArgs) {
     if (intent === 'live-action') {
       const kind = String(form.get('kind') ?? '')
       if (!isLiveActionKind(kind)) return { ok: false as const, intent, error: 'Unknown action.' }
+      const key = String(form.get('key') ?? '')
+      if (!key.startsWith('sample:') && !(Number.isInteger(Number(key)) && Number(key) > 0)) {
+        return { ok: false as const, intent, error: 'Unknown creative.' }
+      }
+      const ruleId = String(form.get('ruleId') ?? '') || null
       const resolves = Number(form.get('resolvesEventId'))
-      const result = await recordLiveAction({
-        key: String(form.get('key') ?? ''),
-        kind,
-        ruleId: String(form.get('ruleId') ?? '') || null,
-        resolvesEventId: Number.isInteger(resolves) && resolves > 0 ? resolves : null,
-        appliedBy,
-      })
+      const result = key.startsWith('sample:')
+        ? await recordLiveAction({
+            key, kind, ruleId, appliedBy,
+            resolvesEventId: Number.isInteger(resolves) && resolves > 0 ? resolves : null,
+          })
+        : await applyRuleAction(Number(key), kind, appliedBy, { ruleId })
       return { ok: true as const, intent, eventId: result.eventId, message: result.message, kind }
     }
     if (intent === 'live-undo') {

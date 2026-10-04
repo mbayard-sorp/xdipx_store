@@ -1,9 +1,9 @@
 /**
  * Pause or Resume, Scale (or Brake), Refresh (wires 8.1, 10.4, 10.5).
  *
- * In this PR an action only records a decision: one ad_rule_events row with the
- * action and applied_by, no platform call (PR-H wires the real calls behind the
- * same verbs). Every tap shows its pending verb with the other two buttons
+ * A tap on a real creative changes its paused_at, pause_reason or budget_multiplier,
+ * writes the ad_rule_events row with applied_by, and (valve on only) calls the
+ * platform seam. Sample rows only record the decision. Every tap shows its pending verb with the other two buttons
  * disabled, flips the row pill optimistically, reverts on error with the error
  * line under the buttons, and on success raises the Undo toast for 6 seconds.
  */

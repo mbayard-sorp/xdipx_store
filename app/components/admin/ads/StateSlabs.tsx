@@ -110,3 +110,25 @@ export function CreativeCardSkeleton({ square = false }: { square?: boolean }) {
     </div>
   )
 }
+
+export function CapSkeleton() {
+  return (
+    <div aria-hidden="true" className="rounded-2xl border border-line bg-paper p-4 lg:p-5 animate-pulse motion-reduce:animate-none">
+      <div className={`${block} h-3 w-32`} />
+      <div className={`${block} mt-3 h-8 w-24`} />
+      <div className={`${block} mt-4 h-1 w-full`} />
+      <div className={`${block} mt-3 h-3 w-40`} />
+    </div>
+  )
+}
+
+export function BandSkeleton() {
+  return (
+    <div aria-hidden="true" className="rounded-2xl border border-line bg-paper p-4 lg:p-5 animate-pulse motion-reduce:animate-none">
+      <div className={`${block} h-3 w-28`} />
+      <div className={`${block} mt-2 h-4 w-44`} />
+      <div className={`${block} mt-4 h-3 w-28`} />
+      <div className={`${block} mt-2 h-4 w-44`} />
+    </div>
+  )
+}

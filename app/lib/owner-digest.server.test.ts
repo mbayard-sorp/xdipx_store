@@ -71,6 +71,7 @@ import {
   renderTicketLoopSection,
   renderTicketsSection,
   renderAdCampaignQueueSection,
+  renderAdStudioSection,
   gatherParkedVideoRenders,
   gatherParkedVideoFlagged,
   digestFingerprint,
@@ -78,6 +79,7 @@ import {
   QUEUE_FINGERPRINT_KEY,
   runOwnerDigest,
   type AdCampaignQueueRow,
+  type AdStudioFacts,
   type EscalationFacts,
   type HomepageNowFacts,
   type NeedsMikeFacts,
@@ -1133,5 +1135,79 @@ describe('gatherParkedVideoFlagged (#11150)', () => {
     executeMock.mockReset()
     executeMock.mockRejectedValue(new Error('db down'))
     await expect(gatherParkedVideoFlagged()).resolves.toBeNull()
+  })
+})
+
+describe('renderAdStudioSection', () => {
+  const quiet: AdStudioFacts = {
+    ideasAwaiting: 0, creativesAwaiting: 0, rulesYesterday: [], r7Events: [],
+    spendTodayCents: 0, dailyCapCents: 2000, spendEnabled: false,
+  }
+
+  it('says plainly when nothing waits and no rule fired, and that simulation moves no money', () => {
+    const html = renderAdStudioSection(quiet)
+    expect(html).toContain('Nothing is waiting for a rating.')
+    expect(html).toContain('No rule fired yesterday.')
+    expect(html).toContain('Ad spend today is $0.00 against a $20.00 daily cap.')
+    expect(html).toContain('Simulation is on, so no ad money moves through Ad Studio.')
+  })
+
+  it('counts what awaits a rating and links the studio', () => {
+    const html = renderAdStudioSection({ ...quiet, ideasAwaiting: 3, creativesAwaiting: 1 })
+    expect(html).toContain('3 ideas and 1 creative are waiting for your rating.')
+    expect(html).toContain('https://xdipx.com/admin/ad-studio')
+    expect(renderAdStudioSection({ ...quiet, ideasAwaiting: 1 })).toContain('1 idea is waiting for your rating.')
+  })
+
+  it("lists yesterday's rules with their actions and how many wait for a tap", () => {
+    const html = renderAdStudioSection({
+      ...quiet,
+      rulesYesterday: [
+        { ruleId: 'R1', action: 'pause', creativeId: 12, sentence: 'x', applied: false },
+        { ruleId: 'R5', action: 'scale', creativeId: 14, sentence: 'y', applied: true },
+        { ruleId: 'R5', action: 'none', creativeId: 15, sentence: 'held', applied: false },
+      ],
+    })
+    expect(html).toContain('Rules fired yesterday: R1 on #12, pause; R5 on #14, scale up (applied); R5 on #15, held.')
+    expect(html).toContain('1 is waiting for your tap on the Live tab.')
+  })
+
+  it('names an R7 event as something the rule did on its own', () => {
+    const html = renderAdStudioSection({
+      ...quiet,
+      r7Events: [{ sentence: "R7 paused all: today's spend $23.40 passed the $20.00 daily cap", pausedCreatives: 4 }],
+      spendTodayCents: 2340,
+    })
+    expect(html).toContain('R7 paused 4 live ads on its own.')
+    expect(html).toContain('spend $23.40 passed the $20.00 daily cap')
+    expect(html).toContain('Ad spend today is $23.40 against a $20.00 daily cap.')
+  })
+
+  it('uses no em dashes', () => {
+    const html = renderAdStudioSection({
+      ...quiet, ideasAwaiting: 2, spendEnabled: true,
+      rulesYesterday: [{ ruleId: 'R2', action: 'pause', creativeId: 3, sentence: 's', applied: false }],
+      r7Events: [{ sentence: 'R7 paused all: x', pausedCreatives: 1 }],
+    })
+    expect(html).not.toContain('\u2014')
+    expect(html).not.toContain('Simulation is on')
+  })
+})
+
+describe('runOwnerDigest Ad Studio section', () => {
+  it('always carries an Ad Studio heading, even when the numbers cannot be read', async () => {
+    executeMock.mockReset()
+    executeMock.mockResolvedValue({ rows: [] })
+    reconcileMock.mockReset(); loopHealthMock.mockReset()
+    reconcileMock.mockResolvedValue({ checked: 0, updated: [], skipped: true })
+    loopHealthMock.mockResolvedValue(null)
+    const { sendOwnerEmail } = await import('~/lib/owner-alerts.server')
+    const send = sendOwnerEmail as unknown as { mockClear: () => void; mock: { calls: unknown[][] } }
+    send.mockClear()
+
+    await runOwnerDigest({ force: true })
+
+    const html = String(send.mock.calls[0]?.[1] ?? '')
+    expect(html).toContain('>Ad Studio</h3>')
   })
 })

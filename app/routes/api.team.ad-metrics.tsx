@@ -3,9 +3,13 @@
  *
  * { op: 'daily' }
  *   Attribute Shopify orders for yesterday and today to creatives by
- *   utm_content, then roll yesterday and today up into
- *   daily_profit_summary.ad_spend. The ads routine's Pass 2 calls this.
- *   -> { today, yesterday, attribution, rollup, importMeta }
+ *   utm_content, roll yesterday and today up into
+ *   daily_profit_summary.ad_spend, then run rules R1 to R8 (PR-H): one
+ *   ad_rule_events recommendation per firing, and R7 applied on its own. The
+ *   ads routine's Pass 2 calls this.
+ *   -> { today, yesterday, attribution, rollup, importMeta, rules }
+ *   `rules` is the run summary, or { ok: false, error } when the rules pass
+ *   failed (the metrics half still landed; read the error, do not retry blind).
  *   Meta insights are not pulled here: the Meta connector is wired in PR-E, so
  *   `importMeta` reads "not_configured".
  *
@@ -27,6 +31,7 @@ import { apiError } from '~/lib/api-error.server'
 import {
   AdMetricsError, backfillAdSpend, creativeSummaries, importGoogleAdsCsv, importShopCampaignsCsv, runDailyMetrics,
 } from '~/lib/ad-metrics.server'
+import { runRulesDaily } from '~/lib/ad-rules.server'
 
 const MAX_FILE_BYTES = 8 * 1024 * 1024
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/
@@ -62,7 +67,14 @@ export async function action({ request }: ActionFunctionArgs) {
     const op = b['op']
 
     if (op === 'daily') {
-      return Response.json(await runDailyMetrics())
+      const daily = await runDailyMetrics()
+      // The rules read what the rollup just wrote. A rules failure must not hide
+      // the metrics result, but it must not be silent either.
+      const rules = await runRulesDaily().catch(err => {
+        console.error('[team-ad-metrics] runRulesDaily failed', err)
+        return { ok: false as const, error: err instanceof Error ? err.message : 'rules pass failed' }
+      })
+      return Response.json({ ...daily, rules })
     }
 
     if (op === 'summary') {

@@ -750,7 +750,9 @@ export function rowFromWindow(
   paused: boolean,
   firedToday: boolean,
 ): LiveRow {
-  const recommendation: Recommendation = paused ? 'paused' : firing ? firing.recommendation : 'healthy'
+  // A paused row whose firing is a revive (R4) keeps that recommendation: Resume is the action.
+  const revive = firing?.recommendation === 'revive'
+  const recommendation: Recommendation = revive ? 'revive' : paused ? 'paused' : firing ? firing.recommendation : 'healthy'
   return {
     ...base,
     lookbackDays,
@@ -762,8 +764,8 @@ export function rowFromWindow(
     netRevenueCents: w.netRevenueCents,
     netRoas: netRoas(w.netRevenueCents, w.spendCents),
     recommendation,
-    firing: paused ? null : firing,
-    hint: paused ? 'Paused. Spend stopped; Resume puts it back in the rotation.' : firing ? firing.sentence : deriveHint({ ...w, lookbackDays }, be),
+    firing: paused && !revive ? null : firing,
+    hint: revive && firing ? firing.sentence : paused ? 'Paused. Spend stopped; Resume puts it back in the rotation.' : firing ? firing.sentence : deriveHint({ ...w, lookbackDays }, be),
     paused,
     firedToday,
     sample: base.sample,
@@ -790,12 +792,19 @@ export function buildSampleFeed(opts: {
   /** Sample keys whose recommendation the owner already acted on (scale, brake, refresh). */
   resolvedKeys?: ReadonlySet<string>
   end?: string
+  /**
+   * Which rules fired on one sample creative. The Live loader passes the real
+   * rules engine (ad-rules-core); the default is the small PR-G stand-in, kept
+   * so the pure feed stays testable without the engine.
+   */
+  firingsFor?: (c: SampleCreative) => RuleFiring[]
 }): LiveFeed {
   const end = opts.end ?? SAMPLE_END_DAY
   const { creatives } = sampleDataset(end)
   const rows = creatives.map(c => {
     const paused = opts.pausedKeys?.has(c.key) ? true : opts.resumedKeys?.has(c.key) ? false : !!c.paused
-    const firing = opts.resolvedKeys?.has(c.key) ? null : (sampleFirings({ ...c, paused: false }, opts.breakEven, end)[0] ?? null)
+    const found = (opts.firingsFor ?? (x => sampleFirings({ ...x, paused: false }, opts.breakEven, end)))(c)
+    const firing = opts.resolvedKeys?.has(c.key) ? null : (found[0] ?? null)
     const w = sumWindow(c.days, end, opts.lookbackDays)
     return rowFromWindow({
       key: `sample:${c.key}`, creativeId: null, label: c.label, slogan: c.slogan, thumbUrl: null,

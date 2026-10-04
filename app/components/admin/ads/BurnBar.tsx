@@ -10,6 +10,7 @@
 import { useRevalidator } from 'react-router'
 import { RefreshIcon } from '~/components/admin/social/icons'
 import { SimulationBadge } from './SimulationBadge'
+import type { SimulationExit } from '~/lib/ad-spend-core'
 
 export interface BurnBarData {
   ok: boolean
@@ -23,7 +24,7 @@ function dollars(cents: number): string {
   return `$${(cents / 100).toFixed(2)}`
 }
 
-export function BurnBar({ burn }: { burn: BurnBarData }) {
+export function BurnBar({ burn, exit }: { burn: BurnBarData; exit?: SimulationExit | null | undefined }) {
   const revalidator = useRevalidator()
   const known = burn.ok && burn.spendCents != null
   const cap = Math.max(1, burn.dailyCapCents)
@@ -36,21 +37,28 @@ export function BurnBar({ burn }: { burn: BurnBarData }) {
       ? 'rounded-full border border-amber-300 bg-amber-50 px-2 text-amber-800'
       : 'text-ink'
 
+  // Phone restack (wires 3.1). At 343px of content the label, the figure with its
+  // cap, the track, the orders and the badge cannot share one row once the figure
+  // grows ("cap reached", four digits). The track drops to a 3px line along the
+  // bottom edge of the bar, the "Today" label becomes screen-reader text, and the
+  // words that only repeat the pill's colour move behind md. What is left on the
+  // row (figure, orders, badge) is under 310px with room to spare, and the row
+  // clips instead of painting under the badge if it ever does not fit.
   return (
     <div className="sticky top-[52px] md:top-0 z-20 -mx-4 -mt-4 md:-mx-8 md:-mt-8 px-4 md:px-8 h-12 flex items-center gap-3 border-b border-line bg-paper/95 backdrop-blur">
       <span className="hidden md:block font-display text-xl text-ink shrink-0 pr-2">Ad Studio</span>
 
-      <div className="flex min-w-0 flex-1 items-center gap-3">
-        <div className="shrink-0 font-mono text-[11px] uppercase tracking-wide text-ink-3">Today</div>
+      <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden md:gap-3">
+        <div className="sr-only md:not-sr-only shrink-0 font-mono text-[11px] uppercase tracking-wide text-ink-3">Today</div>
         {known ? (
-          <span className={`shrink-0 font-mono text-sm font-semibold tabular-nums ${figure}`}>
+          <span className={`shrink-0 whitespace-nowrap font-mono text-sm font-semibold tabular-nums ${figure}`}>
             {dollars(burn.spendCents ?? 0)}
             <span className="text-ink-4 font-normal"> / {dollars(burn.dailyCapCents)}</span>
-            {level === 'over' && <span className="ml-1 font-normal">cap reached</span>}
+            {level === 'over' && <span className="sr-only font-normal md:not-sr-only md:ml-1"> cap reached</span>}
           </span>
         ) : (
           <span className="flex shrink-0 items-center gap-1">
-            <span className="font-mono text-xs text-amber-800">spend unknown</span>
+            <span className="whitespace-nowrap font-mono text-xs text-amber-800">spend unknown</span>
             <button
               type="button"
               onClick={() => revalidator.revalidate()}
@@ -63,7 +71,7 @@ export function BurnBar({ burn }: { burn: BurnBarData }) {
         )}
 
         <div
-          className="h-1 min-w-6 flex-1 max-w-64 overflow-hidden rounded-full bg-paper-3"
+          className="absolute inset-x-0 bottom-0 h-[3px] overflow-hidden bg-paper-3 md:static md:h-1 md:min-w-6 md:flex-1 md:max-w-64 md:rounded-full"
           role="progressbar"
           aria-label="Spend against today's cap"
           aria-valuemin={0}
@@ -76,8 +84,13 @@ export function BurnBar({ burn }: { burn: BurnBarData }) {
           />
         </div>
 
-        <span className="shrink-0 font-mono text-xs tabular-nums text-ink-3">
-          {burn.ordersToday == null ? 'orders unknown' : (
+        <span className="ml-auto shrink-0 whitespace-nowrap font-mono text-xs tabular-nums text-ink-3 md:ml-0">
+          {burn.ordersToday == null ? (
+            <>
+              <span aria-hidden="true" className="md:hidden">? ord</span>
+              <span className="sr-only md:not-sr-only">orders unknown</span>
+            </>
+          ) : (
             <>
               {burn.ordersToday}<span className="md:hidden"> ord</span><span className="hidden md:inline"> {burn.ordersToday === 1 ? 'order' : 'orders'}</span>
             </>
@@ -85,7 +98,7 @@ export function BurnBar({ burn }: { burn: BurnBarData }) {
         </span>
       </div>
 
-      <SimulationBadge spendEnabled={burn.spendEnabled} />
+      <SimulationBadge spendEnabled={burn.spendEnabled} exit={exit} />
     </div>
   )
 }

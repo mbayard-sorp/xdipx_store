@@ -578,6 +578,125 @@ async function gatherAdCampaignQueue(): Promise<AdCampaignQueueRow[]> {
   }
 }
 
+/* ── Section: Ad Studio ────────────────────────────────────────────────────── */
+
+export interface AdStudioRuleRow {
+  ruleId: string
+  action: string
+  creativeId: number | null
+  sentence: string
+  applied: boolean
+}
+
+export interface AdStudioFacts {
+  ideasAwaiting: number
+  creativesAwaiting: number
+  /** Rules that fired yesterday (UTC), cleared and undone rows already dropped. */
+  rulesYesterday: AdStudioRuleRow[]
+  /** R7 events from the last 24 hours. R7 acts on its own, so these were not taps. */
+  r7Events: Array<{ sentence: string; pausedCreatives: number }>
+  spendTodayCents: number
+  dailyCapCents: number
+  spendEnabled: boolean
+}
+
+const AD_ACTION_WORD: Record<string, string> = {
+  pause: 'pause', scale: 'scale up', brake: 'brake', refresh: 'refresh', revive: 'revive', none: 'held',
+}
+
+function dollarsText(cents: number): string {
+  return `$${(cents / 100).toFixed(2)}`
+}
+
+/**
+ * The daily Ad Studio lines: what waits for a rating, what the rules did, any
+ * R7 spend guard event, and today's spend against the cap. Plain sentences,
+ * one per fact, so the email reads like a note and not a dashboard.
+ */
+export function renderAdStudioSection(f: AdStudioFacts): string {
+  const studio = `<a href="https://xdipx.com/admin/ad-studio" style="color:#c2410c;">/admin/ad-studio</a>`
+  const lines: string[] = []
+
+  const waiting: string[] = []
+  if (f.ideasAwaiting > 0) waiting.push(`${f.ideasAwaiting} idea${f.ideasAwaiting === 1 ? '' : 's'}`)
+  if (f.creativesAwaiting > 0) waiting.push(`${f.creativesAwaiting} creative${f.creativesAwaiting === 1 ? '' : 's'}`)
+  lines.push(waiting.length > 0
+    ? `<span style="color:${WARN};">${waiting.join(' and ')} ${f.ideasAwaiting + f.creativesAwaiting === 1 ? 'is' : 'are'} waiting for your rating.</span> Ratings shape tomorrow's batch: ${studio}.`
+    : `Nothing is waiting for a rating.`)
+
+  if (f.rulesYesterday.length === 0) {
+    lines.push('No rule fired yesterday.')
+  } else {
+    const shown = f.rulesYesterday.slice(0, 6).map(r => {
+      const where = r.creativeId != null ? ` on #${r.creativeId}` : ''
+      return `${esc(r.ruleId)}${where}, ${esc(AD_ACTION_WORD[r.action] ?? r.action)}${r.applied ? ' (applied)' : ''}`
+    })
+    const more = f.rulesYesterday.length > 6 ? `, and ${f.rulesYesterday.length - 6} more` : ''
+    const waitingOnYou = f.rulesYesterday.filter(r => !r.applied && r.action !== 'none').length
+    lines.push(`Rules fired yesterday: ${shown.join('; ')}${more}.${waitingOnYou > 0 ? ` ${waitingOnYou} ${waitingOnYou === 1 ? 'is' : 'are'} waiting for your tap on the Live tab.` : ''}`)
+  }
+
+  for (const r of f.r7Events) {
+    lines.push(`<span style="color:${BAD};"><strong>R7 paused ${r.pausedCreatives} live ${r.pausedCreatives === 1 ? 'ad' : 'ads'} on its own.</strong></span> ${esc(r.sentence.replace(/^R7 paused all: /, ''))}. Resume them from the Live tab once you have looked.`)
+  }
+
+  const pct = f.dailyCapCents > 0 ? Math.round((f.spendTodayCents / f.dailyCapCents) * 100) : 0
+  const spendColor = f.spendTodayCents > f.dailyCapCents ? BAD : pct >= 80 ? WARN : MUTED
+  lines.push(`<span style="color:${spendColor};">Ad spend today is ${dollarsText(f.spendTodayCents)} against a ${dollarsText(f.dailyCapCents)} daily cap.</span>${f.spendEnabled ? '' : ' Simulation is on, so no ad money moves through Ad Studio.'}`)
+
+  return `<ul style="margin:0;padding-left:18px;">${lines.map(l => `<li style="margin-bottom:3px;">${l}</li>`).join('')}</ul>`
+}
+
+async function gatherAdStudio(): Promise<AdStudioFacts | null> {
+  try {
+    const [ideasMod, settingsMod] = await Promise.all([import('~/lib/ad-ideas.server'), import('~/lib/ad-settings.server')])
+    const [ideasAwaiting, creativesAwaiting, dailyCapCents, spendEnabled] = await Promise.all([
+      ideasMod.countToRate().catch(() => 0),
+      ideasMod.countCreativesToRate().catch(() => 0),
+      settingsMod.getAdsMediaDailyCapCents(),
+      settingsMod.getAdsSpendEnabled(),
+    ])
+    const rulesRes = await db.execute(sql`
+      SELECT id, rule_id, action, creative_id, detail->>'sentence' AS sentence, applied_at IS NOT NULL AS applied
+        FROM ad_rule_events
+       WHERE fired_at >= date_trunc('day', now() AT TIME ZONE 'UTC') - interval '1 day'
+         AND fired_at <  date_trunc('day', now() AT TIME ZONE 'UTC')
+         AND rule_id ~ '^R[1-8]$' AND rule_id <> 'R7' AND action <> 'undo'
+         AND coalesce(detail->>'cleared', 'false') <> 'true'
+         AND NOT EXISTS (SELECT 1 FROM ad_rule_events u WHERE u.action = 'undo' AND u.detail->>'undoes' = ad_rule_events.id::text)
+       ORDER BY id ASC LIMIT 30`)
+    const r7Res = await db.execute(sql`
+      SELECT detail->>'sentence' AS sentence,
+             coalesce(jsonb_array_length(detail->'pausedKeys'), 0)::int AS paused
+        FROM ad_rule_events
+       WHERE rule_id = 'R7' AND fired_at >= now() - interval '24 hours' AND action <> 'undo'
+         AND NOT EXISTS (SELECT 1 FROM ad_rule_events u WHERE u.action = 'undo' AND u.detail->>'undoes' = ad_rule_events.id::text)
+       ORDER BY id DESC LIMIT 3`)
+    const spendRes = await db.execute(sql`
+      SELECT coalesce(sum(spend_cents), 0)::int AS spend FROM ad_creative_daily_metrics WHERE day = (now() AT TIME ZONE 'UTC')::date`)
+    return {
+      ideasAwaiting, creativesAwaiting,
+      rulesYesterday: (rulesRes.rows ?? []).map(r => {
+        const row = r as Record<string, unknown>
+        return {
+          ruleId: String(row['rule_id'] ?? ''), action: String(row['action'] ?? ''),
+          creativeId: row['creative_id'] == null ? null : Number(row['creative_id']),
+          sentence: String(row['sentence'] ?? ''), applied: row['applied'] === true,
+        }
+      }),
+      r7Events: (r7Res.rows ?? []).map(r => {
+        const row = r as Record<string, unknown>
+        return { sentence: String(row['sentence'] ?? ''), pausedCreatives: Number(row['paused'] ?? 0) }
+      }),
+      spendTodayCents: Number(((spendRes.rows ?? [])[0] as Record<string, unknown> | undefined)?.['spend'] ?? 0),
+      dailyCapCents, spendEnabled,
+    }
+  } catch (err) {
+    console.warn('[owner-digest] ad studio section unavailable:', String(err).slice(0, 200))
+    return null
+  }
+}
+
 /* ── Section 7: Ops watchdogs ──────────────────────────────────────────────── */
 
 export interface OpsWatchFacts {
@@ -1676,7 +1795,7 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
     return null
   })
 
-  const [shipped, homepageNow, ticketMetrics, escalations, ownerQueue, opsWatch, reconciliation, loopHealth, staleOwnerRows, adCampaignQueue, parkedVideoFrames, parkedVideoRenders, parkedVideoFlagged, acquisition] =
+  const [shipped, homepageNow, ticketMetrics, escalations, ownerQueue, opsWatch, reconciliation, loopHealth, staleOwnerRows, adCampaignQueue, parkedVideoFrames, parkedVideoRenders, parkedVideoFlagged, acquisition, adStudio] =
     await Promise.all([
       gatherShipped(),
       gatherHomepageNow(),
@@ -1716,6 +1835,7 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
       gatherParkedVideoRenders(),
       gatherParkedVideoFlagged(),
       gatherAcquisitionSummary(),
+      gatherAdStudio(),
     ])
   const needsOwner = escalations.protectedPrs.length + escalations.exhausted.length
   // One note-aware source for blocked rows, shared by the Needs Mike list and
@@ -1874,6 +1994,7 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
       ${section('Homepage now', renderHomepageNowSection(homepageNow))}
       ${section(`Needs a decision from you${ownerQueue.totalCount > 0 ? ` (${ownerQueue.totalCount})` : ''}`, renderOwnerQueueSection(ownerQueue))}
       ${section(`Ad campaigns awaiting launch${adCampaignQueue.length > 0 ? ` (${adCampaignQueue.length})` : ''}`, renderAdCampaignQueueSection(adCampaignQueue))}
+      ${section('Ad Studio', adStudio ? renderAdStudioSection(adStudio) : `<p style="margin:0;color:${MUTED};">Ad Studio numbers could not be read this run.</p>`)}
       ${section('Orders and profit (last 8 days)', `<table style="border-collapse:collapse;">${profitRows || '<tr><td>no rows</td></tr>'}</table>${reconLine}`)}
       ${section('Acquisition (trailing 30 days)', renderAcquisitionSection(acquisition))}
       ${section('Ops watch', renderOpsWatchSection(opsWatch))}

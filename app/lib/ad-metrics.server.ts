@@ -24,11 +24,12 @@ import { db } from '~/lib/db.server'
 import {
   adCampaigns, adCreativeDailyMetrics, adCreatives, adRuleEvents, dailyProfitSummary, mediaAssets, orderAttribution,
 } from '../../db/schema'
-import { getAdsGrossMarginPct } from '~/lib/ad-settings.server'
+import { getAdsGrossMarginPct, getAdsMediaDailyCapCents, getAdsRuleThresholds } from '~/lib/ad-settings.server'
+import { evaluateSampleCreative } from '~/lib/ad-rules-core'
 import {
   buildCreativeIndex, buildSampleFeed, computeBreakEven, ctrPct, extractOrderUtmContent, netRevenueCents, netRoas,
   parseMetricsCsv, planImport, resolveCreativeId, rowFromWindow, sortRows, needsAction, formatMoney, formatRoas,
-  DEFAULT_AOV_CENTS, RULE_RECOMMENDATION,
+  DEFAULT_AOV_CENTS, RULE_RECOMMENDATION, RECOMMENDATION_RANK,
   type BreakEven, type CreativeIndex, type ImportPlan, type LiveBand, type LiveFeed, type LiveRow, type LiveSource,
   type MetricsSource, type ParsedMetricRow, type ParsedMetricsFile, type Recommendation, type RuleFiring,
   type ShopHistoryDay, type UtmContentSource, type WindowTotals, type LiveActionKind,
@@ -571,7 +572,7 @@ export function replayPaused(events: Array<Pick<EventRow, 'id' | 'ruleId' | 'act
     const d = (e.detail ?? {}) as { sample?: boolean; key?: string }
     const key = d.sample && d.key ? d.key : e.creativeId != null ? String(e.creativeId) : null
     if (key == null) continue
-    if (e.action !== 'pause' && e.action !== 'resume') { resolved.add(key); continue }
+    if (e.action !== 'pause' && e.action !== 'resume' && e.action !== 'revive') { resolved.add(key); continue }
     state.set(key, e.action === 'pause')
   }
   const paused = new Set<string>()
@@ -645,7 +646,11 @@ export async function liveFeed(f: LiveFilters = {}): Promise<LiveFeed> {
   if (source === 'sample') {
     const events = await loadEvents(now).catch(() => [] as EventRow[])
     const { paused, resumed, resolved } = replayPaused(events.filter(e => (e.detail as { sample?: boolean } | null)?.sample))
-    const feed = buildSampleFeed({ lookbackDays, breakEven, pausedKeys: paused, resumedKeys: resumed, resolvedKeys: resolved })
+    const [thresholds, dailyCapCents] = await Promise.all([getAdsRuleThresholds(), getAdsMediaDailyCapCents()])
+    const feed = buildSampleFeed({
+      lookbackDays, breakEven, pausedKeys: paused, resumedKeys: resumed, resolvedKeys: resolved,
+      firingsFor: c => evaluateSampleCreative(c, { thresholds, breakEven, dailyCapCents }),
+    })
     return applyFilters(feed, f)
   }
 
@@ -681,10 +686,16 @@ export async function liveFeed(f: LiveFilters = {}): Promise<LiveFeed> {
     byCreative.set(m.creativeId, arr)
   }
   const { paused, resumed } = replayPaused(events.filter(e => !(e.detail as { sample?: boolean } | null)?.sample))
+  // One pending recommendation per creative: the highest-ranked action wins (a pause
+  // outranks a brake outranks a scale), the later row wins a tie. Rows the engine cleared
+  // because the rule stopped firing are not recommendations any more.
   const pending = new Map<number, EventRow>()
+  const rankOf = (e: EventRow) => RECOMMENDATION_RANK[RULE_RECOMMENDATION[e.ruleId] ?? 'healthy']
   for (const e of events) {
     if (e.creativeId == null || e.appliedAt != null || e.ruleId === 'MAN' || e.action === 'undo') continue
-    pending.set(e.creativeId, e) // later id wins
+    if ((e.detail as { cleared?: boolean } | null)?.cleared) continue
+    const cur = pending.get(e.creativeId)
+    if (!cur || rankOf(e) <= rankOf(cur)) pending.set(e.creativeId, e)
   }
 
   const rows: LiveRow[] = []
@@ -759,7 +770,7 @@ export function liveFacets(feed: LiveFeed): { lanes: string[]; platforms: string
 // Live actions (simulation: write ad_rule_events only, no platform call)
 // ---------------------------------------------------------------------------
 
-const ACTION_VERB: Record<LiveActionKind, string> = { pause: 'pause', resume: 'resume', scale: 'scale_up', brake: 'scale_down', refresh: 'refresh' }
+const ACTION_VERB: Record<LiveActionKind, string> = { pause: 'pause', resume: 'resume', scale: 'scale', brake: 'brake', refresh: 'refresh' }
 
 export interface LiveActionInput {
   /** A creative id as a string, or `sample:S1` for the sample dataset. */
@@ -779,30 +790,27 @@ export function isLiveActionKind(v: unknown): v is LiveActionKind {
 }
 
 /**
- * Pause, Resume, Scale, Brake and Refresh in this PR only record the decision:
- * one ad_rule_events row with action and applied_by, no platform call. PR-H
- * wires the rules engine and the real platform calls behind these same verbs.
+ * The sample dataset has no creative rows, so a tap on a sample row only records
+ * the decision (an ad_rule_events row with `sample: true` and the sample key).
+ * Taps on real creatives go through applyRuleAction in ad-rules.server.ts, which
+ * also changes paused_at, pause_reason or budget_multiplier.
  */
 export async function recordLiveAction(input: LiveActionInput): Promise<LiveActionResult> {
-  const sample = input.key.startsWith('sample:')
-  const creativeId = sample ? null : Number(input.key)
-  if (!sample && !(Number.isInteger(creativeId) && (creativeId as number) > 0)) throw new AdMetricsError('Unknown creative.', 'bad_request')
+  if (!input.key.startsWith('sample:')) throw new AdMetricsError('Real creatives go through applyRuleAction.', 'bad_request')
   const ruleId = (input.ruleId && /^R[1-8]$/.test(input.ruleId) ? input.ruleId : 'MAN')
   const now = new Date()
   const detail = {
     simulation: true,
-    ...(sample ? { sample: true, key: input.key.slice('sample:'.length) } : {}),
+    sample: true,
+    key: input.key.slice('sample:'.length),
     ...(input.resolvesEventId ? { resolves: input.resolvesEventId } : {}),
   }
   const [row] = await db
     .insert(adRuleEvents)
-    .values({ ruleId, creativeId, action: ACTION_VERB[input.kind], detail, appliedBy: input.appliedBy, appliedAt: now })
+    .values({ ruleId, creativeId: null, action: ACTION_VERB[input.kind], detail, appliedBy: input.appliedBy, appliedAt: now })
     .returning({ id: adRuleEvents.id })
   if (!row) throw new AdMetricsError('Could not record the action.', 'write_failed')
-  if (input.resolvesEventId && !sample) {
-    await db.update(adRuleEvents).set({ appliedBy: input.appliedBy, appliedAt: now }).where(and(eq(adRuleEvents.id, input.resolvesEventId), isNull(adRuleEvents.appliedAt)))
-  }
-  const noun = sample ? input.key.slice('sample:'.length) : `#${input.key}`
+  const noun = input.key.slice('sample:'.length)
   const messages: Record<LiveActionKind, string> = {
     pause: `Paused ${noun} in simulation. Nothing was live.`,
     resume: `Resumed ${noun} in simulation. Nothing was live.`,
@@ -810,10 +818,27 @@ export async function recordLiveAction(input: LiveActionInput): Promise<LiveActi
     brake: `Braked ${noun} budget 30% in simulation.`,
     refresh: `Refresh queued for ${noun} on the next render pass.`,
   }
-  return { eventId: row.id, simulated: true, message: messages[input.kind], sample }
+  return { eventId: row.id, simulated: true, message: messages[input.kind], sample: true }
 }
 
-/** Undo writes an `undo` row that names the action it reverses, and re-opens the recommendation it resolved. */
+interface BeforeState { pausedAt: string | null; pauseReason: string | null; budgetMultiplier?: number }
+
+async function restoreCreative(creativeId: number, b: BeforeState): Promise<void> {
+  const patch: Partial<typeof adCreatives.$inferInsert> = {
+    pausedAt: b.pausedAt ? new Date(b.pausedAt) : null,
+    pauseReason: b.pauseReason ?? null,
+    updatedAt: new Date(),
+  }
+  if (typeof b.budgetMultiplier === 'number') patch.budgetMultiplier = String(b.budgetMultiplier)
+  await db.update(adCreatives).set(patch).where(eq(adCreatives.id, creativeId))
+}
+
+/**
+ * Undo writes an `undo` row that names the action it reverses, puts back the
+ * creative's paused_at, pause_reason and budget_multiplier from the snapshot the
+ * action stored, and re-opens the recommendation rows it resolved. An R7 row
+ * puts back every creative it paused.
+ */
 export async function undoLiveAction(eventId: number, appliedBy: string): Promise<{ eventId: number }> {
   const [orig] = await db.select().from(adRuleEvents).where(eq(adRuleEvents.id, eventId))
   if (!orig || orig.action === 'undo') throw new AdMetricsError('Nothing to undo.', 'bad_request')
@@ -822,13 +847,21 @@ export async function undoLiveAction(eventId: number, appliedBy: string): Promis
     .from(adRuleEvents)
     .where(and(eq(adRuleEvents.action, 'undo'), sql`${adRuleEvents.detail}->>'undoes' = ${String(eventId)}`))
   if (already) return { eventId: already.id }
-  const detail = { simulation: true, undoes: eventId, ...(((orig.detail ?? {}) as { sample?: boolean; key?: string }).sample ? { sample: true, key: (orig.detail as { key?: string }).key } : {}) }
+  const od = (orig.detail ?? {}) as {
+    sample?: boolean; key?: string; resolves?: number | number[]; before?: BeforeState
+    beforeAll?: Array<BeforeState & { creativeId: number }>
+  }
+  const detail = { simulation: true, undoes: eventId, ...(od.sample ? { sample: true, key: od.key } : {}) }
   const [row] = await db
     .insert(adRuleEvents)
     .values({ ruleId: orig.ruleId, creativeId: orig.creativeId, action: 'undo', detail, appliedBy, appliedAt: new Date() })
     .returning({ id: adRuleEvents.id })
-  const resolves = (orig.detail as { resolves?: number } | null)?.resolves
-  if (resolves) await db.update(adRuleEvents).set({ appliedBy: null, appliedAt: null }).where(eq(adRuleEvents.id, resolves))
+  if (orig.creativeId != null && od.before) await restoreCreative(orig.creativeId, od.before)
+  for (const b of od.beforeAll ?? []) await restoreCreative(b.creativeId, b)
+  const resolves = od.resolves == null ? [] : Array.isArray(od.resolves) ? od.resolves : [od.resolves]
+  if (resolves.length) {
+    await db.update(adRuleEvents).set({ appliedBy: null, appliedAt: null }).where(inArray(adRuleEvents.id, resolves))
+  }
   return { eventId: row!.id }
 }
 
