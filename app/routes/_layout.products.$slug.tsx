@@ -35,6 +35,9 @@ import { customerAPI } from '~/lib/customer-api.server'
 import { getCartIdFromCookie } from '~/lib/cart.server'
 import { fireCapiEvent } from '~/lib/meta-capi.server'
 import { isCapiEligible } from '~/lib/capi-eligibility.server'
+import { getMarketingConsent } from '~/lib/consent.server'
+import { trackViewedProduct } from '~/lib/klaviyo.server'
+import { flowEventProps } from '~/lib/klaviyo-flows.server'
 import { getCart } from '~/lib/shopify.server'
 import { getEmmaAside, type EmmaAsideResult } from '~/lib/emma-aside.server'
 import { isCrawlerRequest, qualifiesForPaidAside } from '~/lib/crawler-ua.server'
@@ -192,13 +195,36 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // Resolve current customer (for sticky vote state + gating). Failures here
   // are non-fatal — PDP still renders for anonymous users.
   let customerGid: string | null = null
+  let customerEmail: string | null = null
   if (customerToken) {
     try {
       const profile = await customerAPI(customerToken).getProfile()
       customerGid = profile?.id ?? null
+      customerEmail = profile?.email ?? null
     } catch { /* treat as anonymous */ }
   }
   const isLoggedIn = !!customerGid
+
+  // Klaviyo Viewed Product (browse-abandonment trigger, ticket #13384; see
+  // docs/store-team/klaviyo-flows.md "Browse abandonment has no trigger
+  // yet"). Fire-and-forget, never blocks the render, same shape as the
+  // ViewContent CAPI send below: identified + consented + not a
+  // bot/crawler/prefetch (isCapiEligible already excludes all three, which
+  // matters here as much as it does for CAPI — a hover-prefetched PDP must
+  // not mint a Viewed Product any more than it mints a conversion event).
+  // Reuses the customer-profile lookup above rather than a second one: the
+  // doc's "a profile lookup on every PDP view is a performance decision"
+  // concern does not apply because that lookup already happens on every PDP
+  // view for the sticky-vote-state customerGid, logged-in or not.
+  const emailForViewedProductEvent = customerEmail
+  if (emailForViewedProductEvent && getMarketingConsent(request) && isCapiEligible(request)) {
+    void (async () => {
+      try {
+        const flowProps = await flowEventProps(slug)
+        await trackViewedProduct(emailForViewedProductEvent, flowProps ? { ...flowProps } : {})
+      } catch { /* analytics never breaks the PDP */ }
+    })()
+  }
 
   const hasDial = !!(deal.productTypeDial && (deal.sensationDialV2?.items?.length || (deal.sensationDial && Object.keys(deal.sensationDial).length > 0)))
   const hasPairing = !!(deal.pairingWhy && Object.keys(deal.pairingWhy).length > 0 && deal.accessoryProductIds.length > 0)

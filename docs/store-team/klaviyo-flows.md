@@ -13,7 +13,7 @@ Verified against the live account on 2026-10-03 (the account had zero flows and 
 | 5 templates, `xdipx <flow> <key>` | Created | Saved templates, HTML plus text. Editable in Klaviyo |
 | `xdipx Cart Abandonment` flow (`TvzW5L`) | **Draft** | Trigger Added to Cart, 1h then 24h, filter: zero Placed Order in the last 30 days |
 | `xdipx Post-Purchase` flow (`XCPvmX`) | **Draft** | Trigger Placed Order, day 3 then day 14 |
-| `xdipx Browse Abandonment` flow | **Not created** | The Viewed Product metric does not exist yet. See "Browse abandonment has no trigger yet" |
+| `xdipx Browse Abandonment` flow | **Not created** | The Viewed Product metric does not exist yet (wiring shipped, waiting on its first qualifying PDP view). See "Browse abandonment: wired, waiting on its first event" |
 
 The Create Flow API works on this account (revision 2026-07-15, `flows:write`). It cannot create a live
 flow: the endpoint rejects a `status` field and documents that every flow is created as a draft, and
@@ -34,18 +34,30 @@ no helper in the codebase changes a flow's status. Nothing can send until the ow
 5. Set each flow to Live, one at a time. Cart first.
 6. For browse abandonment, see the next section. Do not build it by hand yet.
 
-## Browse abandonment has no trigger yet
+## Browse abandonment: wired, waiting on its first event (ticket #13384)
 
-The plan said the client "already fires" Viewed Product. It does not. Nothing in `app/` or `server/` sends
-that event, the headless storefront does not load Klaviyo's onsite JS, and so the metric does not exist in
-the account. Klaviyo creates a metric only when its first event arrives, so the flow cannot be built, by
-API or by hand, until one does. `trackViewedProduct(email, props)` exists in `klaviyo.server.ts` and is
-deliberately not wired into the PDP loader: it needs a known profile email, so it only helps identified
-visitors, and a profile lookup on every PDP view is a performance decision the owner should make.
+The plan said the client "already fires" Viewed Product. As of this ticket it actually does, from the
+PDP loader (`app/routes/_layout.products.$slug.tsx`), but the metric still does not exist in Klaviyo yet
+because nobody has generated a qualifying page view since deploy — Klaviyo creates a metric only when its
+first event arrives, so the flow cannot be built, by API or by hand, until one does.
 
-Options, cheapest first:
-- Send Viewed Product from the PDP loader for signed-in, consented customers only (the same gate
-  `api.cart.tsx` uses). Small, identified visitors only.
+`trackViewedProduct(email, props)` (`klaviyo.server.ts`) fires fire-and-forget from the PDP loader, gated
+on exactly the conditions this section used to ask for: a known profile email (reusing the
+`customerAPI(customerToken).getProfile()` lookup the loader already runs for sticky vote state, logged in
+via either the Storefront or the Customer Account API — not a second lookup, so the "a profile lookup on
+every PDP view is a performance decision" concern above no longer applies, that lookup already happens),
+marketing consent (`getMarketingConsent`), and `isCapiEligible` — the same bot/crawler/prefetch exclusion
+the ViewContent CAPI send next to it uses, so a hover-prefetched or crawled PDP does not mint a Viewed
+Product any more than it mints a conversion event. Anonymous visitors send nothing. The onsite-JS option
+below (anonymous visitors who later identify) is still not built.
+
+Confirmed via `npx tsx scripts/klaviyo-flows-setup.ts --dry-run` (2026-10-04, post-wiring, pre-first-event):
+the metric still reads as not existing, which is the correct and expected state until a real signed-in,
+consented customer loads a PDP on production. **Next step once this ships:** after the first qualifying
+PDP view lands in production, re-run `npx tsx scripts/klaviyo-flows-setup.ts --dry-run` to confirm the
+`Viewed Product` metric now exists, then run it live (drop `--dry-run`) to create the browse flow draft.
+
+Remaining option:
 - Load Klaviyo's onsite JS on the storefront. Covers anonymous visitors who later identify, one script
   tag, a consent and performance review.
 
