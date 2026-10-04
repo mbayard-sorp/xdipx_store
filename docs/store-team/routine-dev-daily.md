@@ -474,6 +474,19 @@ git fetch origin main >/dev/null && git grep -n "<file/flag/symbol from the tick
    ticket #8989) but does not help verify unmerged local changes on this branch, since the remote
    route runs whatever is currently deployed, not the branch under test.
 
+3i. **A shared pre-condition helper added to fix a bug must be confirmed called from every
+   registry entry point, not just the one that triggered the fix.** (#13418) When a fix is a shared
+   `assert*`/`require*` helper wired into a multi-lane dispatch or registry (a switch, a handler map,
+   a set of sibling exporters), grep every other registered entry point for the same call before
+   closing the ticket; do not assume a fix in one branch propagates to its siblings. Evidence: the Ad
+   Studio v2 stack shipped the same gate-bypass shape twice independently — PR-C (ticket #13399,
+   bounced) had `exportView()` return a raw download for a `status:blocked` creative, and PR-E
+   (ticket #13405, verified) added `assertCreativesExportable()` and wired it into
+   `banner-zip.server.ts` but not into the two other registered exporters,
+   `meta-paused-draft.server.ts` and `google-editor-csv.server.ts`, the two highest brand-safety-risk
+   ones. A quick grep-count check (helper call count should equal registry entry count) catches this
+   before the PR opens.
+
 4. Verify locally, all three, and do not skip one because it "cannot be affected":
 
 ```bash
