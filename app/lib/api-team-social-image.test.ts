@@ -194,6 +194,39 @@ describe('generate', () => {
     expect(genMock).not.toHaveBeenCalled()
   })
 
+  // Ticket #13348: the money gate excludes the calling run from its own
+  // run_in_progress check only when it is given that run's id, so the route
+  // must forward whatever `runId` the caller sent, verbatim, as the gate's
+  // second argument — never silently drop it.
+  it('forwards runId to the money gate as its excludeRunId argument', async () => {
+    await post({ ...validGenerate, runId: 1226 })
+    expect(gateMock).toHaveBeenCalledWith('social', 1226)
+  })
+
+  it('calls the money gate with no excludeRunId when the caller sends none', async () => {
+    await post(validGenerate)
+    expect(gateMock).toHaveBeenCalledWith('social', undefined)
+  })
+
+  // The exact failure mode behind ticket #13348: a direct caller (the
+  // scheduled cloud sandbox hitting this route without node_modules) that
+  // forgets `runId` cannot exclude itself, so the gate names the calling run
+  // as its own blocker. This never fixes the omission — the caller still has
+  // to send `runId` — it only makes the regression loud instead of silent.
+  it('flags the self-block regression when gated run_in_progress with no runId given', async () => {
+    gateMock.mockResolvedValue({ ok: false, reason: 'run_in_progress', blockingRun: { id: 1226, runType: 'social', idleMinutes: 9 } })
+    const res = await post(validGenerate)
+    expect(res.status).toBe(403)
+    expect(captureMessageMock).toHaveBeenCalledWith(expect.stringContaining('#13348'), 'warning')
+  })
+
+  it('does not flag the regression when run_in_progress is a genuine sibling run', async () => {
+    gateMock.mockResolvedValue({ ok: false, reason: 'run_in_progress', blockingRun: { id: 999, runType: 'social', idleMinutes: 2 } })
+    const res = await post({ ...validGenerate, runId: 1226 })
+    expect(res.status).toBe(403)
+    expect(captureMessageMock).not.toHaveBeenCalled()
+  })
+
   // Ticket #10501: a caller could hit this route directly and route around
   // scripts/gen-social-image.ts's own requirement, so the route must refuse
   // on its own — before the money gate, so a refusal never reaches spend.

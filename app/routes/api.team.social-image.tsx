@@ -148,6 +148,26 @@ export async function action({ request }: ActionFunctionArgs) {
     // this closes the hole a direct team-token call would otherwise open.
     const gateResult = await gate('social', runId)
     if (!gateResult.ok) {
+      // Ticket #13348: a direct caller that forgets `runId` in the body
+      // cannot exclude its own run from the gate's `run_in_progress` check,
+      // so the calling run's own row comes back as the blocker — a self-block
+      // that silently zeroes a fully-budgeted run's ability to generate (run
+      // 1226, 2026-10-03: GET /api/team/gate?excludeRun=1226 read ok:true for
+      // the same run at the same moment this route's internal call 403'd).
+      // `gate()` already excludes correctly whenever `runId` is given (see
+      // routine-social-daily.md's direct-call template), so this is a loud
+      // signal for exactly the caller-omission regression, not a fix in
+      // itself.
+      if (gateResult.reason === 'run_in_progress' && runId == null) {
+        const summary = '[social-image] gated run_in_progress with no runId in the request body; ' +
+          'the calling run cannot exclude itself from the money gate (see ticket #13348)'
+        console.error(summary)
+        try {
+          Sentry.captureMessage(summary, 'warning')
+        } catch (err) {
+          console.error('[social-image] Sentry.captureMessage failed (non-fatal):', err)
+        }
+      }
       return Response.json({ error: 'gated', reason: gateResult.reason, gate: gateResult }, { status: 403 })
     }
     // Ticket #5429 fix 4: a positive social image cap no longer flips
