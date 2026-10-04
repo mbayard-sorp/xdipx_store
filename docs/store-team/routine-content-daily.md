@@ -24,6 +24,36 @@ curl -s -X POST "$BASE_URL/api/team/run" \
   -d '{"op":"start","team":"content","runType":"content"}'   # → $RUN_ID
 ```
 
+## Step 0b: Recovery firing (ticket #13392)
+
+The routine fires once a day at 15:00 UTC; nothing re-runs it the same day, so a held post is
+otherwise a lost day (the only fix before this was a session doing a manual recovery run, as
+happened for `can-you-share-sex-toys-safely` on 2026-10-03). A second, later firing exists purely to
+catch up a day its morning run held. When your invocation prompt says it is the recovery firing,
+take this path instead of the normal Step 1-7 flow:
+
+1. Start the run as in Step 0, then check whether a `blogPost` is already `status:'published'` with
+   `publishedAt` inside today (UTC). If one exists, finish the run `status:'skipped'` with
+   `summary:'recovery: today already live'` and stop — **never publish a second post on a day that
+   already has one.**
+2. Otherwise, if a `blogPost` draft from today exists (Step 3's `resume-draft` branch locates it the
+   same way a normal run would), resume it: attach or repair the hero, re-gate only the prose that
+   changed since it was held under the existing resume and Step 5 repair rules, then publish through
+   Step 6.
+3. Otherwise (no live post and no draft — the morning run never ran or died before drafting), run
+   the normal routine for today's slot from Step 1.
+4. Finish and retro as any other run (Step 7).
+
+This section does not change Step 1 or Step 6's own rules (see the hero preflight and
+zero-post-day rules above); it only says when to take the resume path outside the normal 15:00 UTC
+firing.
+
+**Scheduling.** No agent can create the trigger itself. `docs/store-team/routine-schedule.md` carries
+a row for this firing with the trigger id marked `NEEDS-TRIGGER-ID` until an interactive session
+creates it with `RemoteTrigger`, suggested time 22:00 UTC (after the 20:00 UTC dev run can have
+shipped a same-day fix, with enough of the UTC day left to finish a resume; `content_team_max_runs`
+is 8, so the extra run fits).
+
 ## Step 1: Gate
 
 ```bash
@@ -71,6 +101,16 @@ before Step 2 begins, post one `phase:"gate"` step event carrying the gate paylo
 (`enabled`, `remainingCents`, `runsToday`/`maxRunsPerDay`, `valves.autopublish`,
 `contentSlot.weekday`/`expectedCategory`) plus the concurrency-reconciliation result above. One curl,
 negligible cost, and it converts a silent dead row into "gate passed at T, died during doctrine load."
+
+**Hero-dependency preflight (ticket #13395).** Right after the gate passes, before any drafting,
+run `npx tsx scripts/gen-notebook-art.ts --preflight --run-id $RUN_ID` and post its JSON result as a
+`step` event. This exists so a broken hero dependency (anatomy or fidelity check) is caught before a
+run spends 45 minutes drafting into a dead end (ticket #12371, extended by #13333). When the
+preflight fails: a `no-credit` reason goes on the owner blocker list (`POST /api/team/blocker`,
+`category:"credential"`, with a verify probe); a `no-credential` or `unknown` reason is filed on the
+bus as `kind:"code"`, `priority:1`, naming the failing dependency. Either way, file the blocker or
+code row **before** drafting, then draft and dual-gate the post anyway so a recovery or next-day run
+can publish it once the dependency is fixed.
 
 ## Step 2: Load doctrine + context (data only)
 
@@ -882,7 +922,9 @@ ticket #2456's DONE WHEN).
 Only when Step 5 ended in PASS from BOTH gates, a `heroImage` is attached (Step 4; mandatory on
 every published post), **and** Step 1's `valves.autopublish` is `true`:
 
-1. Patch the doc: `status` → `'published'` (keep `publishedAt` as set in Step 4), **then
+1. Patch the doc: `status` → `'published'` and `publishedAt` → the actual go-live time (now, at
+   publish, not whatever Step 4 set) for a fresh post and a resumed one alike (ticket #13394: a held
+   draft published on a later day must carry that day's date, not the drafting day's), **then
    `publish_documents` on the blogPost id** — the patch alone leaves the post in `drafts.<id>` and it
    never goes live.
 2. Flush the blog caches:
@@ -951,11 +993,17 @@ curl -s -X POST "$BASE_URL/api/team/suggestion" \
 
 **Valve off, or no hero image could be produced, with both gates PASS** → leave the post as a Sanity
 draft, post an event saying exactly that, re-queue the brief if one was claimed
-(`seoContentBrief` → `'queued'`, `podcastReviewBrief` → `'pending'`), and finish the run as
-succeeded. Draft-only is a valid, honest outcome, not a failure; publishing a post with no hero
-image is not. This post is finished work waiting on an administrative gate, not a content defect, so
-`'queued'` correctly tells tomorrow's run "pick this back up" (Step 3's `resume-draft` branch will
-find and resume it either way, since it is still an unpublished draft at that slug).
+(`seoContentBrief` → `'queued'`, `podcastReviewBrief` → `'pending'`). **Finish status depends on the
+valve (ticket #13394).** With `valves.autopublish` `true`, a run that ends with no post live today
+finishes `status:'failed'` with `error:'zero-post-day:notebook:<reason>'`, where `<reason>` is one of
+`hero`, `gate-block`, `gate-refused`, or `other` — mirroring social's zero-post-day rule
+(`routine-social-daily.md` Step 1b), because a held post with autopublish on is a missed day, not a
+clean outcome, and the owner digest only counts failed runs. With the valve off, a held draft still
+finishes `succeeded`: there was never a live post to miss. Either way, the held draft, the
+resume-pointer row, and the brief re-queue rules above are unchanged. This post is finished work
+waiting on an administrative gate, not a content defect, so `'queued'` correctly tells tomorrow's run
+"pick this back up" (Step 3's `resume-draft` branch will find and resume it either way, since it is
+still an unpublished draft at that slug).
 
 **No brief was claimed (backlog-sourced topic).** The re-queue above assumes a `seoContentBrief` or
 `podcastReviewBrief` exists to flip back to `'queued'`/`'pending'`; a topic pulled straight from the
@@ -966,6 +1014,13 @@ runs). When you hold a post for this reason and no brief was claimed for it, fil
 `process` suggestion naming the slug and the single missing element (e.g. "needs a section 0-H human
 hero, prose already PASSED both gates") so Step 6b's next run reads it and can resume publishing
 without re-drafting or re-gating the prose.
+
+**A hold caused by the environment is never `process` (ticket #13395).** A hold caused by a missing
+credential, an empty balance, or a script that refuses to run is filed as `kind:"code"`, `priority:1`,
+or as an owner blocker, per the Step 1 preflight rule above, never as `process`: `process` has no
+executor for an environment defect and a row filed that way just ages at `approved` (this is exactly
+what happened to #13309). The `process` row described in the paragraph above, which points a future
+run at a held slug so it can resume without re-drafting, is a different thing and stays as written.
 
 **A gate BLOCK is different: do not re-queue it to `'queued'` (ticket #94).** First confirm you are
 even entitled to be here: since 2026-09-04 a post reaches this paragraph only after Step 5 item 4's
@@ -1102,13 +1157,26 @@ curl -s -X POST "$BASE_URL/api/team/suggestion" \
 Blog-surface component/layout ideas → suggestion with `targetTeam:'homepage'` (code is always a
 reviewed PR, never this routine's). Log spend
 (`POST /api/homepage-team/spend {"kind":"tokens","source":"agent-sdk","feature":"content-blog",...}`),
-then finish:
+then finish. A post live today, or a held draft with the autopublish valve off, finishes succeeded;
+per Step 6's zero-post-day rule, a held draft with the valve on finishes failed instead:
 
 ```bash
 curl -s -X POST "$BASE_URL/api/team/run" \
   -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
   -d '{"op":"update","id":'$RUN_ID',"update":{"finished":true,"status":"succeeded","summary":"<slug + gate verdict + published|draft + retro note>"}}'
 ```
+
+```bash
+curl -s -X POST "$BASE_URL/api/team/run" \
+  -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
+  -d '{"op":"update","id":'$RUN_ID',"update":{"finished":true,"status":"failed","error":"zero-post-day:notebook:<hero|gate-block|gate-refused|other>","summary":"<slug + gate verdict + held reason + retro note>"}}'
+```
+
+**Publish-reliability KPI (ticket #13394).** Count a day as a hit by whether a post actually went
+live that day (a published post with today's `publishedAt`, or a run that finished with no
+zero-post-day error), never by `publishedAt` alone: a resumed post now carries its real go-live date
+(Step 6 item 1), so publishedAt and "went live" agree again, but the KPI should read run outcomes
+first since that is what a reader experienced.
 
 ## Appendix: Enablement runbook
 
