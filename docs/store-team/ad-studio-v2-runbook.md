@@ -32,19 +32,18 @@ stack, let them land in this order and the diffs collapse cleanly: #1500, then #
 GitHub shows a conflict on a later PR after an earlier one merges, R-SHEP rebases it; nothing in the
 stack needs a hand merge.
 
-## 3. After #1501 merges: create the two daily triggers
+## 3. Daily triggers (created 2026-10-04)
 
 Both are RemoteTrigger cloud routines on the Max subscription, team `ads`, gated by
-`ads_team_enabled` (on) and `ads_team_max_runs` (2). Create them from an interactive session, then
-write the ids into `docs/store-team/routine-schedule.md` rows 27 and 28.
+`ads_team_enabled` (on) and `ads_team_max_runs` (2), Sanity read-only as their only connector.
 
-- Pass 1, ideas: cron `30 14 * * *` UTC. Prompt points at `docs/store-team/routine-ads-daily.md`
-  Pass 1 and runs as `ads-manager`. No connectors.
-- Pass 2, render: cron `30 20 * * *` UTC. Same playbook, Pass 2. No connectors.
+- Pass 1, ideas: `trig_01Y1sZNUGXwBGcEV4s1fTM4H`, cron `30 14 * * *` UTC, runs
+  `docs/store-team/routine-ads-daily.md` Pass 1 as `ads-manager`.
+- Pass 2, render and rules: `trig_01V5uuqg4V96CgK3UFUMfyTX`, cron `30 20 * * *` UTC, Pass 2, with
+  the paid-media-buyer step once its addendum merges.
 
-Follow the `create` then `update` pattern from the connector-permissions memory: a new trigger
-inherits every connector with empty permissions, so the update must set `mcp_connections` to the
-Sanity read set only, or to nothing the playbook needs.
+Until PR #1503 deploys the ideas endpoint, Pass 1 records `ideas_api_not_live` and finishes failed
+on purpose, so the gap is visible in the run table rather than silent.
 
 ## 4. Simulation mode
 
@@ -64,18 +63,27 @@ Sanity read set only, or to nothing the playbook needs.
 
 Each step is yours. None is automatic.
 
-1. DNS: add `curious.xdipx.com` to the xdipx Vercel project and the CNAME (blocker #394). The
-   bridge route is host-gated, so the domain is what makes it live. Then publish the two
+1. DNS: done 2026-10-04. `curious.xdipx.com` CNAMEs to Vercel with a valid certificate. Until
+   PR #1504 deploys, the host serves the main store at `/` and 404s on bridge slugs; after it
+   deploys, `/` 404s on this host and published bridge slugs render. Then publish the two
    `adBridgePage` drafts and the `adLaneProductSubset.meta` draft in Sanity. The `plain-box` page
    still needs a photograph of a closed plain box; its fallback shows the product, which fails M2.
 2. Google Ads Editor: export one existing campaign first and compare headers to our CSV, then import
    the paused campaign. Same for Microsoft Ads Editor after the Adult Advertising Program approval.
    Flip paused to enabled in the Editor yourself.
-3. Meta: authorize the Meta Ads connector in claude.ai connector settings. Set `META_ADS_ACCESS_TOKEN`,
-   `META_AD_ACCOUNT_ID` and `META_PAGE_ID` in Vercel if you want the server-side push; otherwise an
-   interactive session pushes the stored payloads through the connector. Every object is created
-   PAUSED. You flip them live in Ads Manager, one ad at a time, 25+ targeting, bridge destination
-   only.
+3. Meta: the connector was authorized 2026-10-04 and verified read-only. Ad account "XDIPX Digital"
+   920738511029316 (business xdipx.com 966322319440094) is active with a payment method and zero
+   campaigns. Pixel dataset 1619122322498289 "hello_xdipx_1" is active, fired from browser and server
+   on 2026-10-03, data-use setting `advertising_and_analytics` (unrestricted, so purchase
+   optimization is available). The Facebook Page is "xdipx.com", page id 1181080778417899, owned by the business
+   with ad-creation permission (verified 2026-10-04; the ad account's promoted-pages list fills only
+   after a first ad). Set `META_PAGE_ID=1181080778417899`. No Instagram account is linked to the ad
+   account for advertising yet, so ads run under the Page identity until @hello_xdipx is connected
+   to the Page in Business settings (blocker filed). Never use the recommended catalog 1551461513373481; it is the raw
+   Shopify feed and fails gate M5. Set `META_ADS_ACCESS_TOKEN`, `META_AD_ACCOUNT_ID=920738511029316`
+   and `META_PAGE_ID` in Vercel if you want the server-side push; otherwise an interactive session
+   pushes the stored payloads through the connector. Every object is created PAUSED. You flip them
+   live in Ads Manager, one ad at a time, 25+ targeting, bridge destination only.
 4. Klaviyo: set the cart abandonment and post-purchase flows live (blocker #393). Browse abandonment
    appears after ticket 13384 ships the Viewed Product event.
 5. Adult networks and sponsors: hand the banner zip and its `copy.txt` to ExoClick, JuicyAds, or the
