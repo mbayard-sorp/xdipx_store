@@ -1,3 +1,8 @@
+> **RETIRED 2026-10-03.** Replaced by the two daily passes in `docs/store-team/routine-ads-daily.md`
+> (Ad Studio v2, `docs/store-team/ad-studio-v2-plan.md` §5). Do not follow this playbook. The weekly
+> trigger `trig_013PfuKac4rkjPTHuUwXWzRn` is disabled by the owner after the daily triggers exist; the
+> file stays for history only.
+
 # Routine — Ads Proposals (ads-manager)
 
 The playbook for the scheduled weekly ads routine. Entry agent: `ads-manager`. **PROPOSE-ONLY**:
