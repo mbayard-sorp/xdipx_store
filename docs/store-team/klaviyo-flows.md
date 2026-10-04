@@ -11,8 +11,8 @@ Verified against the live account on 2026-10-03 (the account had zero flows and 
 | Object | State | Notes |
 |---|---|---|
 | 5 templates, `xdipx <flow> <key>` | Created | Saved templates, HTML plus text. Editable in Klaviyo |
-| `xdipx Cart Abandonment` flow | **Draft** | Trigger Added to Cart, 1h then 24h, filter: zero Placed Order in the last 30 days |
-| `xdipx Post-Purchase` flow | **Draft** | Trigger Placed Order, day 3 then day 14 |
+| `xdipx Cart Abandonment` flow (`TvzW5L`) | **Draft** | Trigger Added to Cart, 1h then 24h, filter: zero Placed Order in the last 30 days |
+| `xdipx Post-Purchase` flow (`XCPvmX`) | **Draft** | Trigger Placed Order, day 3 then day 14 |
 | `xdipx Browse Abandonment` flow | **Not created** | The Viewed Product metric does not exist yet. See "Browse abandonment has no trigger yet" |
 
 The Create Flow API works on this account (revision 2026-07-15, `flows:write`). It cannot create a live
@@ -25,7 +25,7 @@ no helper in the codebase changes a flow's status. Nothing can send until the ow
 2. Check each email's preview with a test profile (Preview and test > Select profile, then pick an
    event with ProductName and HeaderImageURL). Until the code in this PR is deployed, Added to Cart and
    Placed Order events do not carry those properties, so the preview shows the name default ("your pick")
-   and the coral-soft block with no photo. After deploy, add one real item to a cart while signed in with
+   and no image plate. After deploy, add one real item to a cart while signed in with
    marketing consent and the next event carries them.
 3. Review the flow filter and the delays. The filter is "zero Placed Order in the last 30 days", the API's
    form of "has not ordered since" (Klaviyo's UI option "since starting this flow" is not exposed by the
@@ -69,7 +69,7 @@ The templates read these event properties, attached by `flowEventProps(handle)` 
 | `ProductURL` | `https://xdipx.com/products/<handle>`, no query string | `https://xdipx.com/` |
 | `ProductHandle` | Shopify handle | none |
 | `ProductType` | Inferred from title and tags by `inferProductType` (air-pulsation, wand, vibrator, lube, wear), picks the act paragraph. The Storefront Product type does not carry the `product_type_dial` metafield | generic paragraph |
-| `HeaderImageURL` | Header art, see below | coral-soft block with the product name |
+| `HeaderImageURL` | Header art, see below. Shopify CDN URLs arrive pre-cropped to a 1200px square (`emailHeaderImageUrl`) | no image plate; the email opens on the masthead and the product name |
 | `HeaderKind` | `onskin`, `packshot` or `none` | none |
 
 A lookup failure sends the event unchanged. An email never fails to render for a missing key.
@@ -84,9 +84,8 @@ A lookup failure sends the event unchanged. An email never fails to render for a
    the nudity definition (visible female nipples, labia, penis, anus), so owned email inherits the
    `instagram-campaigns.md` §3.2a ceiling with the §3.2c on-skin treatment, exactly as the charter
    says it should.
-2. The product's position-0 Shopify image (already card-art-gated, so a blocked packshot never appears),
-   sitting on coral-soft.
-3. Nothing: the template renders a coral-soft block with the product name.
+2. The product's position-0 Shopify image (already card-art-gated, so a blocked packshot never appears).
+3. Nothing: the template drops the image plate and opens on the masthead and the product name.
 
 **Later source.** When the ads creative library (Ad Studio v2 PR-C, `ad_creatives` with a rated-up
 verdict, lane `owned`, concept 2.2 Body Map and 2.5 The Morning After) exists, it becomes the preferred
@@ -117,7 +116,45 @@ Register 9 on an owned channel (`docs/emma-voice.md`, owner 2026-09-20). Rules t
   (charter marketing addendum) and are not touched here.
 
 The act paragraph is chosen by `ProductType`. Five are written (air pulsation, wand, vibrator, lube, wear) plus a default for everything else, so an unrecognized product still gets honest copy.
-wear) plus a default.
+
+## Design
+
+Redesigned 2026-10-03 after the owner rejected the first drafts. One editorial system renders all five
+emails (`renderFlowEmail` in `app/lib/klaviyo-flow-templates.ts`), built to `docs/design-doctrine.md`:
+
+- **Order, top to bottom:** text wordmark masthead (`xdipx` in Newsreader, ink, no logo image: the
+  Sanity logo is the retired orange gradient), a square product image plate full-bleed in the 600px
+  column, the product name large in Newsreader, the headline as a Newsreader dek with exactly one italic
+  plum word (`emphasis` on each spec), the lead in DM Sans 17/27 at a 60ch measure, the act paragraph as
+  an italic Newsreader pull-quote on a line-3 rule, the closer, one centred coral button, the discreet
+  line in 14px ink-3, a hairline, and the footer (hello@xdipx.com, the account address tag, unsubscribe
+  and preferences tags).
+- **Colour:** paper ground everywhere, ink type ramp, plum only on the emphasis word, coral only on the
+  button. No gradients, icons or emoji. Nothing is centred except the button.
+- **Image plate:** fixed 600x600 with `width`/`height` attributes and a paper-2 cell behind it, so a slow
+  or blocked image never shifts the layout and alt text sits on a quiet plate. `flowEventProps` asks the
+  Shopify CDN for a 1200px centre crop, so every product gets the same plate whatever its source aspect.
+- **Fonts:** Newsreader and DM Sans load by `@import` for clients that honour it (Apple Mail, iOS Mail).
+  Klaviyo strips `<link>` tags from code templates, so do not switch back to one. Fallbacks are Georgia
+  and Arial; Outlook for Windows is forced onto them by an `mso` style block.
+- **Button:** bulletproof. A VML roundrect for Outlook for Windows, and for everyone else a padded link
+  whose cell carries coral as `bgcolor`, `background-color` and a one-colour `linear-gradient` image fill.
+  The last one is there because Gmail's dark mode repaints background colours but leaves background images
+  alone, so the button stays coral instead of turning muddy.
+- **Dark mode:** `color-scheme: light dark` is declared, every cell has `bgcolor` plus inline
+  `background-color`, and a `prefers-color-scheme` block (with Outlook.com `[data-ogsc]`/`[data-ogsb]`
+  twins) switches to an ink ground, light type and a lifted plum. The coral button does not change.
+- **Preheader:** Klaviyo injects the message's preview text, so the template carries only a hidden
+  zero-width filler run after it. That keeps the masthead from trailing into the inbox snippet, and the
+  A/B preview variants keep working.
+- **Weight:** about 13KB per template, far under Gmail's 102KB clip. Table layout, inline styles, no
+  flex, grid, position or float. `klaviyo-flow-templates.test.ts` asserts the coral button markup, the one
+  emphasis word, the dark-mode declaration and the unsubscribe tag.
+
+Copy changes in the redesign: the product name is now its own title above the headline, so the headlines
+and leads stopped repeating it ("Said plainly.", "Right where you left it.", "Your first evening with
+it.", "Two weeks in. Here is what pairs with it."). "Is waiting" was retired as a house tic. Subjects
+and previews are unchanged.
 
 ## Subject and preview variants
 
@@ -153,7 +190,11 @@ npx tsx scripts/klaviyo-flows-setup.ts --update-templates # also overwrite exist
 ```
 
 Idempotent by name. A flow copies its template when created, so editing a template later does not change
-an existing flow's email: edit the email in Klaviyo, or delete the draft flow and rerun. Create Flow is
+an existing flow's email. The API cannot edit that copy either (verified 2026-10-03 on revision 2026-07-15:
+PATCH on a flow message's template id returns 404, and Update Flow accepts only `status`). To ship a template
+change: `--update-templates`, then delete the draft flows (`DELETE /api/flows/{id}`, drafts only) and rerun
+the script, which recreates them with the same trigger, filter and delays. Edit the email in Klaviyo instead
+once a flow is live. Create Flow is
 throttled to 1 request a second and 100 a day, which the script respects.
 
 ## Agents

@@ -124,4 +124,31 @@ describe('klaviyo flow templates', () => {
     expect(r.html).toContain('role="presentation"')
     expect(r.html).toContain("Newsreader, Georgia, 'Times New Roman', serif")
   })
+
+  it('renders the one coral button bulletproof, plus the unsubscribe tag', () => {
+    for (const e of FLOW_EMAILS) {
+      const r = renderFlowEmail(e)
+      // Coral appears only as the button: the cell, the VML fallback and the link.
+      expect(r.html).toContain('bgcolor="#C2350F"')
+      expect(r.html).toContain('fillcolor="#C2350F"')
+      expect(r.html).toContain('background-image:linear-gradient(#C2350F,#C2350F)')
+      expect(r.html).toMatch(/<v:roundrect [^>]*href="[^"]*utm_content=/)
+      const coralUses = r.html.match(/#C2350F/gi)?.length ?? 0
+      const buttonBlock = r.html.slice(r.html.indexOf('class="x-btn"') - 200, r.html.indexOf('</a><!--<![endif]-->'))
+      expect(buttonBlock.match(/#C2350F/gi)?.length ?? 0).toBe(coralUses)
+      expect(r.html).toContain("{% unsubscribe 'Unsubscribe' %}")
+    }
+  })
+
+  it('sets exactly one plum emphasis word in the headline and is dark-mode aware', () => {
+    for (const e of FLOW_EMAILS) {
+      expect(e.headline).toContain(e.emphasis)
+      const r = renderFlowEmail(e)
+      expect(r.html.match(/<em class="x-plum"/g)).toHaveLength(1)
+      expect(r.html).toContain('<meta name="color-scheme" content="light dark">')
+      expect(r.html).toContain('prefers-color-scheme: dark')
+      expect(Buffer.byteLength(r.html)).toBeLessThan(102 * 1024)
+      expect(r.html).not.toMatch(/display\s*:\s*(flex|grid)|position\s*:/i)
+    }
+  })
 })
