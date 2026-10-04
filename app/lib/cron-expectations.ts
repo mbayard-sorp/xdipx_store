@@ -580,6 +580,20 @@ export const CRON_EXPECTATIONS: readonly CronExpectation[] = [
     notes: 'Notebook render check.',
   },
   {
+    route: '/cron/notebook-zero-day',
+    plane: 'vercel',
+    schedule: '40 23 * * *',
+    periodMinutes: DAILY,
+    graceMinutes: 120,
+    recorded: false,
+    moneyRelevant: false,
+    ownerTeam: 'content',
+    notes:
+      'Ticket #13393. Day-close alarm: with both content valves on, zero published posts today files a P1 '
+      + "code ticket (notebook-zero-day) naming today's held draft and hold reason. Report-only, same shape "
+      + 'as /cron/social-publish day-close zero-day check.',
+  },
+  {
     route: '/cron/gsc-snapshot',
     plane: 'vercel',
     schedule: '0 6 * * 1',

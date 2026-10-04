@@ -95,6 +95,10 @@
       "schedule": "41 7 * * *"
     },
     {
+      "path": "/cron/notebook-zero-day",
+      "schedule": "40 23 * * *"
+    },
+    {
       "path": "/cron/warm",
       "schedule": "*/15 * * * *"
     },

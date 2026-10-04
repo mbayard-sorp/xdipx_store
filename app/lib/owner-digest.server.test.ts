@@ -425,7 +425,37 @@ describe('renderOpsWatchSection', () => {
     agentRetired: [],
     tokenWriteFailures: 0,
     purchaseCapiWriteFailures: 0,
+    notebookYesterday: { slug: 'does-app-controlled-feel-different' },
   }
+
+  it('reports the live Notebook slug', () => {
+    const html = renderOpsWatchSection(base)
+    expect(html).toContain('Notebook yesterday')
+    expect(html).toContain('does-app-controlled-feel-different')
+    expect(html).not.toContain('missed')
+  })
+
+  it('reports a missed Notebook day with its hold reason', () => {
+    const html = renderOpsWatchSection({
+      ...base,
+      notebookYesterday: { missed: true, holdReason: 'hero' },
+    })
+    expect(html).toContain('Notebook yesterday: missed')
+    expect(html).toContain('Hold reason: hero')
+  })
+
+  it('reports a missed Notebook day with no hold reason on record', () => {
+    const html = renderOpsWatchSection({
+      ...base,
+      notebookYesterday: { missed: true, holdReason: null },
+    })
+    expect(html).toContain('No hold reason on record')
+  })
+
+  it('reports the Notebook lookup as unknown, not as a false pass, on failure', () => {
+    const html = renderOpsWatchSection({ ...base, notebookYesterday: null })
+    expect(html).toContain('could not read')
+  })
 
   it('warns that a social backlog stops the team drafting', () => {
     const html = renderOpsWatchSection({
