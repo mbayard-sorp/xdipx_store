@@ -39,6 +39,8 @@ direction (Emma charter + policy creative rules), landing URL with UTMs
 (`utm_source=<platform>&utm_medium=paid&utm_campaign=<name>`), planned daily/total budget within
 `ads_team_daily_cents`, break-even ROAS, and the mandatory `policyCheck`.
 
+Meta is a gated strategic lane since 2026-10-03, no longer prohibited outright: a Meta proposal must pass every gate in `docs/ads-policy.md` §Meta strategic lane (M1 to M7).
+
 ```bash
 curl -s -X POST "$BASE_URL/api/team/ad-campaign" \
   -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
