@@ -1790,8 +1790,21 @@ curl -s -X POST "$BASE_URL/api/team/social-image" \
        "cropScale":"<macro | close | medium, ALWAYS sent>",
        "bodyZone":"<named zone from the vocabulary>",
        "contactMode":"<named mode from the vocabulary>",
+       "runId":'"$RUN_ID"',
        "caller":"social-media-manager"}'
 ```
+
+**Always send `runId`, every direct call, no exception (ticket #13348).** The route's own money
+gate (`gate('social', runId)` inside `api.team.social-image.tsx`) excludes the calling run from its
+own `run_in_progress` check only when `runId` is given — exactly like the Step 0 gate re-check above
+(`excludeRun=$RUN_ID`). Omitting it here is not a no-op: the route's internal gate call then sees the
+run that is itself making the call as a blocking sibling run and 403s before any generation, even
+though `GET /api/team/gate?excludeRun=$RUN_ID` for the same run returns `ok:true`. Verified live in
+run 1226 (2026-10-03): an otherwise-fully-budgeted run (1893 of 2000 cents, 45 of 50 images) got
+`{"error":"gated","reason":"run_in_progress","blockingRun":{"id":1226,...}}` back on its own `cast`
+call, naming itself as the blocker, which silently zeroed that run's ability to generate any fresh
+image. This template carried no `runId` field until this ticket; every other direct-call template in
+this file must carry it too.
 
 **All four axis keys go on every product generation, and `cropScale` is the one that matters most.**
 This template used to carry none of them and asked for "wardrobe" in the prompt, which is how rows
