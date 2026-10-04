@@ -17,6 +17,10 @@ import { getCreativeFacets, listCreatives, type ListCreativesFilters } from '~/l
 import { CREATIVE_PAGE, CREATIVE_PAGE_MAX, CREATIVE_VIEWS, type CreativeListItem, type CreativeView } from '~/lib/ad-creative-types'
 import { countCreativesToRate } from '~/lib/ad-ideas.server'
 import { renderCreative } from '~/lib/ad-render.server'
+import { getAdsSpendEnabled } from '~/lib/ad-settings.server'
+import { ExportRefusal } from '~/lib/ad-export/common'
+import { MetaPushError } from '~/lib/ad-export/meta-payload'
+import { buildExport, getMetaPayload, pushCreativeToMeta } from '~/lib/ad-export/service.server'
 import { getAdFormat } from '~/lib/ad-formats'
 import { isFeedbackFilter } from '~/lib/ad-creative-feedback-reasons'
 import { Reveal } from '~/components/motion/Reveal'
@@ -51,10 +55,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(CREATIVE_PAGE_MAX, Math.trunc(limitRaw)) : CREATIVE_PAGE
 
   const filters: ListCreativesFilters = { view, blocked, lane, concept, product, rating, format, ideaId, limit }
-  const [page, facets, toRate] = await Promise.all([listCreatives(filters), getCreativeFacets(), countCreativesToRate().catch(() => 0)])
+  const [page, facets, toRate, spendEnabled] = await Promise.all([
+    listCreatives(filters), getCreativeFacets(), countCreativesToRate().catch(() => 0), getAdsSpendEnabled().catch(() => false),
+  ])
   return {
     view, blocked, group, filters: { lane, concept, product, rating, format, ideaId },
-    items: page.items, hasMore: page.nextCursor != null, limit, facets, toRate,
+    items: page.items, hasMore: page.nextCursor != null, limit, facets, toRate, spendEnabled,
   }
 }
 
@@ -74,6 +80,38 @@ export async function action({ request }: ActionFunctionArgs) {
     if (out.status === 'skipped' && out.skipped !== 'already_rendered') return { ok: false as const, error: `Not rendered: ${out.skipped}` }
     return { ok: true as const, status: out.status }
   }
+  if (intent === 'build-export') {
+    const admin = await getAdminUser(request)
+    const id = Number(form.get('creativeId'))
+    if (!Number.isInteger(id) || id <= 0) return { ok: false as const, error: 'Bad creative id' }
+    try {
+      const out = await buildExport({ creativeIds: [id] }, admin?.email || 'owner')
+      return { ok: true as const, summary: out.summary.lines, warnings: out.summary.warnings, filename: out.filename }
+    } catch (err) {
+      if (err instanceof ExportRefusal) return { ok: false as const, errorCode: err.code, error: err.issues.slice(0, 4).join(' ') }
+      return { ok: false as const, error: err instanceof Error ? err.message : 'The export failed.' }
+    }
+  }
+  if (intent === 'view-payload') {
+    const id = Number(form.get('creativeId'))
+    if (!Number.isInteger(id) || id <= 0) return { ok: false as const, error: 'Bad creative id' }
+    const found = await getMetaPayload(id)
+    if (!found) return { ok: false as const, error: 'No stored Meta payload on this creative. Build it first.' }
+    return { ok: true as const, ...found }
+  }
+  if (intent === 'push-meta-draft') {
+    // The only caller of push. The valve is checked inside, before anything else is read or sent.
+    const admin = await getAdminUser(request)
+    const id = Number(form.get('creativeId'))
+    if (!Number.isInteger(id) || id <= 0) return { ok: false as const, error: 'Bad creative id' }
+    try {
+      const res = await pushCreativeToMeta(id, admin?.email || 'owner')
+      return { ok: true as const, externalAdId: res.externalAdId }
+    } catch (err) {
+      if (err instanceof MetaPushError) return { ok: false as const, errorCode: err.code, error: err.message }
+      return { ok: false as const, error: err instanceof Error ? err.message : 'The push failed.' }
+    }
+  }
   return { ok: false as const, error: 'Unknown intent' }
 }
 
@@ -84,7 +122,7 @@ function ideaHeading(items: CreativeListItem[]): string {
 }
 
 export default function CreativesTab() {
-  const { view, blocked, group, filters, items, hasMore, limit, facets, toRate } = useLoaderData<typeof loader>()
+  const { view, blocked, group, filters, items, hasMore, limit, facets, toRate, spendEnabled } = useLoaderData<typeof loader>()
   const [, setParams] = useSearchParams()
   const navigation = useNavigation()
   const reduce = useReducedMotion()
@@ -216,6 +254,7 @@ export default function CreativesTab() {
                   item={item}
                   action={ACTION_PATH}
                   priority={i === 0 ? 'high' : i === 1 ? 'eager' : 'lazy'}
+                  spendEnabled={spendEnabled}
                   onRatingSheetChange={onSheet}
                 />
               )

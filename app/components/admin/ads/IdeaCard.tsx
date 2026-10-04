@@ -11,6 +11,8 @@ import { FEEDBACK_REASONS, NOTE_MAX } from '~/lib/ad-idea-feedback-reasons'
 import type { IdeaListItem } from '~/lib/ad-idea-types'
 import { AdStatusPill, adStatusOfIdea } from './AdStatusPill'
 import { LaneBadge } from './LaneBadge'
+import { TEXT_EXPORT_LANES } from '~/lib/ad-export/types'
+import { ExportIdeaButton } from './ExportIdeaButton'
 import { RenderNowButton } from './RenderNowButton'
 
 /** Client-safe view of an idea, the serialisable shape the loader sends. */
@@ -51,7 +53,7 @@ export function IdeaCard({
   onRatingSheetChange,
 }: {
   idea: IdeaCardData
-  /** Admin route that handles intent=feedback. */
+  /** Admin route that handles intent=feedback, render-now and export-idea. */
   action: string
   nextPassLabel: string
   onRatingSheetChange?: (ideaId: number, open: boolean) => void
@@ -189,6 +191,9 @@ export function IdeaCard({
             <p className="mt-2 text-xs text-ink-3 lg:text-right">Queued for the next render pass, {nextPassLabel}.</p>
             <RenderNowButton ideaId={idea.id} action={action} />
           </>
+        )}
+        {(idea.status === 'hearted' || idea.status === 'rendered') && TEXT_EXPORT_LANES.includes(idea.lane) && (
+          <ExportIdeaButton ideaId={idea.id} action={action} lane={idea.lane} />
         )}
         {idea.status === 'rendered' && (
           <Link

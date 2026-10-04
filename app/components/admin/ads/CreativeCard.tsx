@@ -29,17 +29,20 @@ export function CreativeCard({
   item,
   action,
   priority,
+  spendEnabled = false,
   onRatingSheetChange,
 }: {
   item: CreativeListItem
-  /** Admin route that handles intent=feedback and intent=render-creative. */
+  /** Admin route that handles intent=feedback, render-creative and the export intents. */
   action: string
   priority: ImgPriority
+  /** ads_spend_enabled, so the Meta push control can render when (and only when) it is on. */
+  spendEnabled?: boolean
   onRatingSheetChange?: (id: number, open: boolean) => void
 }) {
   const pill = pillStatus(item)
   const product = item.products[0]
-  const filename = `xdipx-creative-${item.id}-${item.format.replace(':', 'x')}.png`
+  const filename = `xdipx-export-${item.id}`
   return (
     <article aria-label={item.slogan ?? `Creative ${item.id}`} className="overflow-hidden rounded-2xl border border-line bg-paper md:hover:border-line-2">
       <CreativeMedia item={item} priority={priority} />
@@ -61,7 +64,7 @@ export function CreativeCard({
         )}
         {item.renderNote && item.status !== 'blocked' && <p className="mt-1 break-words text-xs text-ink-3">{item.renderNote}</p>}
         <GateChips gates={item.gates} queuedNote={item.status === 'rendering' ? 'Rendering. Gates run when it finishes.' : null} />
-        <ExportState state={item.export} creativeId={item.id} action={action} filename={filename} />
+        <ExportState state={item.export} creativeId={item.id} action={action} filename={filename} spendEnabled={spendEnabled} />
       </div>
       <div className="flex items-center justify-between gap-2 border-t border-line px-4 py-2">
         <p className="font-mono text-[11px] text-ink-4">
