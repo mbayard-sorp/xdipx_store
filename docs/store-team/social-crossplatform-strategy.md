@@ -23,6 +23,7 @@ not just Instagram. A campaign is one story told at two temperatures:
 | Register | 9 by implication since 2026-08-22 (emma-voice.md social addendum), Emma off the clock, vocabulary fence intact | 6-7, desire-adjacent, still never crude |
 | Role in the funnel | Attention and trust. The publication people follow | Conversion and conversation. The channel that drives clicks |
 | Product links | Never in caption. post → profile → `/social` → site | PDP links with channel UTMs, encouraged |
+| Editorial links (`/notebook/<slug>`, `/new`) | As plain text, once, own line (owner direction 2026-10-03: every Notebook post is echoed with its link and a summary; every new-products batch gets a New-in carousel). Not clickable, so the bio link and `/social` carry them too | With channel UTMs, the point of the echo post |
 | Sale attempts | Never (Meta Restricted Goods) | Allowed: price, discount framing, promo codes, within MAP rules |
 | Maker @-tags | Featured Brand of the Week cadence, verified handles only | Most latitude; direct @mentions and quote-posts welcome |
 
