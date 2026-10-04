@@ -75,9 +75,11 @@ Each step is yours. None is automatic.
    920738511029316 (business xdipx.com 966322319440094) is active with a payment method and zero
    campaigns. Pixel dataset 1619122322498289 "hello_xdipx_1" is active, fired from browser and server
    on 2026-10-03, data-use setting `advertising_and_analytics` (unrestricted, so purchase
-   optimization is available). No Facebook Page is linked to the ad account, and every ad needs one:
-   link the xdipx Page (the one @hello_xdipx hangs off) in Business settings, then set
-   `META_PAGE_ID` (blocker filed). Never use the recommended catalog 1551461513373481; it is the raw
+   optimization is available). The Facebook Page is "xdipx.com", page id 1181080778417899, owned by the business
+   with ad-creation permission (verified 2026-10-04; the ad account's promoted-pages list fills only
+   after a first ad). Set `META_PAGE_ID=1181080778417899`. No Instagram account is linked to the ad
+   account for advertising yet, so ads run under the Page identity until @hello_xdipx is connected
+   to the Page in Business settings (blocker filed). Never use the recommended catalog 1551461513373481; it is the raw
    Shopify feed and fails gate M5. Set `META_ADS_ACCESS_TOKEN`, `META_AD_ACCOUNT_ID=920738511029316`
    and `META_PAGE_ID` in Vercel if you want the server-side push; otherwise an interactive session
    pushes the stored payloads through the connector. Every object is created PAUSED. You flip them
