@@ -64,8 +64,9 @@ Sanity read set only, or to nothing the playbook needs.
 
 Each step is yours. None is automatic.
 
-1. DNS: add `curious.xdipx.com` to the xdipx Vercel project and the CNAME (blocker #394). The
-   bridge route is host-gated, so the domain is what makes it live. Then publish the two
+1. DNS: done 2026-10-04. `curious.xdipx.com` CNAMEs to Vercel with a valid certificate. Until
+   PR #1504 deploys, the host serves the main store at `/` and 404s on bridge slugs; after it
+   deploys, `/` 404s on this host and published bridge slugs render. Then publish the two
    `adBridgePage` drafts and the `adLaneProductSubset.meta` draft in Sanity. The `plain-box` page
    still needs a photograph of a closed plain box; its fallback shows the product, which fails M2.
 2. Google Ads Editor: export one existing campaign first and compare headers to our CSV, then import
