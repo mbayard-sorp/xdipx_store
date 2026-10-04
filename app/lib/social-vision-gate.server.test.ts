@@ -445,6 +445,32 @@ describe('anusNotVisible prompt calibration', () => {
   })
 })
 
+// Ticket #13501. social_media_assets 925/928/933/934 all shipped with extra
+// hands/arms (owner-rated ai-artifact, "Extra hands and arms"), and the
+// pre-publish gate missed the same defect on asset 934's plain look. The
+// post-376 re-gate caught the identical composition class only once a
+// reviewer was explicitly told to trace each arm shoulder-to-hand, so the
+// fix is making that trace the standing instruction on every call, not an
+// opt-in a caller has to remember to request. Asserted directly against the
+// prompt text, same idiom as the calibration blocks above: this check is
+// model-interpreted prose, not deterministic code, so the wording is what
+// decides the real behaviour.
+describe('limb-tracing anatomy calibration (ticket #13501)', () => {
+  it('requires tracing every visible arm from shoulder to terminus, by default, on both limbCount and extraOrMergedLimbs', () => {
+    expect(VISION_SYSTEM_PROMPT).toContain('trace it one at a time from its shoulder')
+    expect(VISION_SYSTEM_PROMPT).toContain('by default on every image, not only when asked to look harder')
+    expect(VISION_SYSTEM_PROMPT).toContain('a hand that overlaps or reads as fused into a forearm it does not belong to')
+    expect(VISION_SYSTEM_PROMPT).toContain('ticket #13501')
+    expect(VISION_SYSTEM_PROMPT).toContain('not a second independent glance')
+  })
+
+  it('does not gate the shoulder-to-hand trace behind any opt-in phrasing', () => {
+    expect(VISION_SYSTEM_PROMPT).not.toContain('only trace')
+    expect(VISION_SYSTEM_PROMPT).not.toContain('if asked')
+    expect(VISION_SYSTEM_PROMPT).not.toContain('when requested')
+  })
+})
+
 // Ticket #13165, owner all-hands 2026-10-02 ("Only men are allowed to show
 // their nipples"). The check is model-interpreted prose, not deterministic
 // code, so — same idiom as the anusNotVisible block above — its calibration
