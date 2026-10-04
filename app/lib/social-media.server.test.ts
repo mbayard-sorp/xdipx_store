@@ -12,7 +12,9 @@ vi.mock('./social-studio.server', () => ({ addAssetTags: mockAddAssetTags }))
 
 import {
   buildSocialAssetFilename,
+  buildSocialCardFilename,
   isGeneratedSocialAsset,
+  isRenderedCardAsset,
   allMediaAreGeneratedSocialAssets,
   socialAssetAspect,
   socialAssetMatchesAspect,
@@ -97,6 +99,40 @@ describe('allMediaAreGeneratedSocialAssets', () => {
     expect(allMediaAreGeneratedSocialAssets([])).toBe(false)
     expect(allMediaAreGeneratedSocialAssets(null)).toBe(false)
     expect(allMediaAreGeneratedSocialAssets(undefined)).toBe(false)
+  })
+})
+
+// Ticket #13368: the New-in carousel's packshot card and the typographic
+// plate render through a different filename convention (`social-card-*`),
+// so `isGeneratedSocialAsset`'s plain `social-` prefix still recognises them
+// (provenance), and `isRenderedCardAsset` additionally recognises the
+// `card-` segment (the publish gate's legible-text carve-out).
+describe('buildSocialCardFilename / isRenderedCardAsset', () => {
+  it('builds a social-card-* name that passes isGeneratedSocialAsset and isRenderedCardAsset', () => {
+    const name = buildSocialCardFilename({ handle: 'womanizer-next-sage', slideIndex: 2 })
+    expect(name).toMatch(/^social-card-womanizer-next-sage-\d{8}-2-[0-9a-f]{6}\.jpg$/)
+    expect(isGeneratedSocialAsset(`${CDN}/${name}`)).toBe(true)
+    expect(isRenderedCardAsset(`${CDN}/${name}`)).toBe(true)
+  })
+
+  it('falls back to "plate" when no handle is given (the plate op)', () => {
+    const name = buildSocialCardFilename({ slideIndex: 6 })
+    expect(name).toMatch(/^social-card-plate-\d{8}-6-[0-9a-f]{6}\.jpg$/)
+    expect(isRenderedCardAsset(`${CDN}/${name}`)).toBe(true)
+  })
+
+  it('never collides on repeat calls for the same slide', () => {
+    const a = buildSocialCardFilename({ handle: 'pom', slideIndex: 1 })
+    const b = buildSocialCardFilename({ handle: 'pom', slideIndex: 1 })
+    expect(a).not.toBe(b)
+  })
+
+  it('isRenderedCardAsset refuses an ordinary generated asset and a bare packshot', () => {
+    expect(isRenderedCardAsset(`${CDN}/social-pom-cast-warm-20260812.jpg`)).toBe(false)
+    expect(isRenderedCardAsset(`${CDN}/77292A.jpg`)).toBe(false)
+    expect(isRenderedCardAsset('')).toBe(false)
+    // Matches on the basename, not anywhere in the path, same contract as isGeneratedSocialAsset.
+    expect(isRenderedCardAsset('https://cdn.example.com/social-card-stuff/plain.jpg')).toBe(false)
   })
 })
 

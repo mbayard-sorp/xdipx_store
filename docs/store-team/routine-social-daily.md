@@ -920,11 +920,17 @@ It is a linked post (~$0.20) and takes one X slot.
 - Every slide clears the publish gate like any other (provenance `every`, vision verdict per
   slide, no baked-in text outside the rendered card type).
 
-**Until the card renderer is callable from the cloud (ticket #13368), a run that cannot render
-cards still owes the batch a post: ship the hook frame as a single Instagram still with the New-in
-caption, ship the X companion with that frame and the `/new` link, and report
-`new-in carousel: unmet (card renderer, #13368)`. Bare packshot URLs are not library members and
-the draft op refuses them, so they are never a substitute for the cards.**
+**The card renderer is callable from the cloud (ticket #13368).** `POST /api/team/social-image`
+takes `op:'packshot-card'` (`{handle, kicker, line, slideIndex, slideCount, tone?}`, one call per
+product slide in item 2 above, fetching the product's own default Shopify image so the card
+cannot drift from the real SKU) and `op:'plate'` (`{line, kicker?, slideIndex, slideCount, tone?}`,
+the typographic hook fallback in item 1 and the save close in item 3, no image). Both render a
+1080x1350 brand card (satori + resvg, real rendered type, never baked into generated pixels),
+rehost it to Shopify Files under a `social-card-` filename, and record their own vision-gate
+verdict on the way, same ingest contract as any other generated asset. Call it once per slide the
+batch needs; no local Chromium, no `scripts/generate-slate-carousel-slides.ts`. Bare packshot URLs
+are still not library members and the draft op still refuses them, so a card call that fails is
+reported and retried next run, never silently swapped for a raw packshot URL.
 
 ## Step 3 — Draft (reworks included)
 

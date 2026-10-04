@@ -13,6 +13,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const gateMock = vi.hoisted(() => vi.fn())
 const genMock = vi.hoisted(() => vi.fn())
 const castMock = vi.hoisted(() => vi.fn())
+const renderCardMock = vi.hoisted(() => vi.fn())
 const logImageCostMock = vi.hoisted(() => vi.fn())
 const rosterMock = vi.hoisted(() => vi.fn())
 const productByHandleMock = vi.hoisted(() => vi.fn())
@@ -74,6 +75,14 @@ vi.mock('~/lib/shopify.server', async () => {
     resolveAndPersistBareProductReference: resolveAndPersistBareRefMock,
   }
 })
+// Ticket #13368: the renderer lives in its own module so the route's dynamic
+// `await import('~/lib/social-card.server')` never pulls og-card.server.ts's
+// `?inline` font imports into social-media.server.ts's reachable graph (see
+// that file's own header comment). Mocked here the same way genMock/castMock
+// stand in for the other two ops.
+vi.mock('~/lib/social-card.server', () => ({
+  renderAndUploadSocialCard: renderCardMock,
+}))
 
 import { action } from '~/routes/api.team.social-image'
 
@@ -145,6 +154,12 @@ beforeEach(() => {
     filenames: ['social-we-vibe-chorus-cast-daylight-20260818-1.jpg'],
     costs: [{ costKey: 'fal/flux-2-edit', count: 1 }],
     requestIds: ['req-1'],
+  })
+  renderCardMock.mockResolvedValue({
+    url: 'https://cdn.shopify.com/files/social-card-womanizer-next-sage-20261004-2-ab12cd.jpg',
+    filename: 'social-card-womanizer-next-sage-20261004-2-ab12cd.jpg',
+    assetId: 777,
+    visionVerdict: { pass: true, checkCompleted: true },
   })
 })
 
@@ -684,5 +699,106 @@ describe('method + op guards', () => {
     expect(res.status).toBe(400)
     expect(genMock).not.toHaveBeenCalled()
     expect(castMock).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * Ticket #13368: the New-in carousel's packshot card and the typographic
+ * save-close plate. Neither op shares the generate/cast field validation
+ * (no prompt/mood/date, no scene axes), and neither bills an AI image
+ * generation, so these are their own describe block rather than extending
+ * the `generate`/`cast` ones above.
+ */
+describe('packshot-card / plate (ticket #13368)', () => {
+  const validCard = {
+    op: 'packshot-card',
+    handle: 'womanizer-next-sage',
+    kicker: 'stroker',
+    line: 'built around the thing that actually closes the gap.',
+    slideIndex: 2,
+    slideCount: 5,
+    tone: 'coral',
+  }
+
+  it('resolves the product default image and passes it through to the renderer', async () => {
+    productByHandleMock.mockResolvedValue({ images: [{ url: 'https://cdn/womanizer-next-sage.jpg' }] })
+    const res = await post(validCard)
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({
+      url: 'https://cdn.shopify.com/files/social-card-womanizer-next-sage-20261004-2-ab12cd.jpg',
+      assetId: 777,
+    })
+    expect(renderCardMock).toHaveBeenCalledWith(expect.objectContaining({
+      op: 'packshot-card',
+      handle: 'womanizer-next-sage',
+      imageUrl: 'https://cdn/womanizer-next-sage.jpg',
+      kicker: 'stroker',
+      line: 'built around the thing that actually closes the gap.',
+      slideIndex: 2,
+      slideCount: 5,
+      tone: 'coral',
+    }))
+  })
+
+  it('rejects packshot-card with no handle', async () => {
+    const res = await post({ ...validCard, handle: undefined })
+    expect(res.status).toBe(400)
+    expect(renderCardMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects packshot-card when the handle resolves to no product image', async () => {
+    productByHandleMock.mockResolvedValue({ images: [] })
+    const res = await post(validCard)
+    expect(res.status).toBe(400)
+    expect(renderCardMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects a missing line', async () => {
+    const res = await post({ ...validCard, line: undefined })
+    expect(res.status).toBe(400)
+    expect(renderCardMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects a non-positive slideIndex', async () => {
+    const res = await post({ ...validCard, slideIndex: 0 })
+    expect(res.status).toBe(400)
+    expect(renderCardMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects an unknown tone', async () => {
+    const res = await post({ ...validCard, tone: 'orange' })
+    expect(res.status).toBe(400)
+    expect(renderCardMock).not.toHaveBeenCalled()
+  })
+
+  it('does not require prompt, mood, or date', async () => {
+    productByHandleMock.mockResolvedValue({ images: [{ url: 'https://cdn/x.jpg' }] })
+    const res = await post({
+      op: 'packshot-card', handle: 'x', line: 'a line', slideIndex: 1, slideCount: 1,
+    })
+    expect(res.status).toBe(200)
+  })
+
+  it('runs the plate op with no handle and no product image lookup', async () => {
+    const res = await post({ op: 'plate', line: 'save this.', slideIndex: 6, slideCount: 6, tone: 'plum' })
+    expect(res.status).toBe(200)
+    expect(productByHandleMock).not.toHaveBeenCalled()
+    expect(renderCardMock).toHaveBeenCalledWith(expect.objectContaining({
+      op: 'plate', line: 'save this.', slideIndex: 6, slideCount: 6, tone: 'plum',
+    }))
+    expect(renderCardMock).toHaveBeenCalledWith(expect.not.objectContaining({ imageUrl: expect.anything() }))
+  })
+
+  it('returns 403 with the gate payload when the money gate says no', async () => {
+    gateMock.mockResolvedValue({ ok: false, reason: 'over_budget' })
+    const res = await post({ op: 'plate', line: 'x', slideIndex: 1, slideCount: 1 })
+    expect(res.status).toBe(403)
+    expect(await res.json()).toMatchObject({ error: 'gated', reason: 'over_budget' })
+    expect(renderCardMock).not.toHaveBeenCalled()
+  })
+
+  it('forwards runId to the money gate as its excludeRunId argument', async () => {
+    await post({ op: 'plate', line: 'x', slideIndex: 1, slideCount: 1, runId: 1226 })
+    expect(gateMock).toHaveBeenCalledWith('social', 1226)
   })
 })

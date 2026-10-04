@@ -247,6 +247,52 @@ export function allMediaAreGeneratedSocialAssets(urls: readonly string[] | null 
   return urls.every(isGeneratedSocialAsset)
 }
 
+/** Filename prefix for a rendered brand card (packshot-card / plate op, ticket #13368). */
+const RENDERED_CARD_PREFIX = 'social-card-'
+
+/**
+ * Build the filename for a rendered brand card: `social-card-{handle-or-plate}-{yyyymmdd}-{slideIndex}-{rand}.jpg`.
+ * The `social-` prefix satisfies `isGeneratedSocialAsset`'s provenance check
+ * the same way every other generated asset does; the `card-` segment right
+ * after it is what `isRenderedCardAsset` below reads. A random suffix, not a
+ * mood/date composite key like `buildSocialAssetFilename` uses, because this
+ * op carries no `mood` input to disambiguate repeat calls for the same
+ * product on the same day.
+ */
+export function buildSocialCardFilename(opts: { handle?: string; slideIndex: number }): string {
+  const handle = slugFragment(opts.handle ?? 'plate', 'plate')
+  const day = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+  const rand = Math.random().toString(16).slice(2, 8)
+  return `${RENDERED_CARD_PREFIX}${handle}-${day}-${opts.slideIndex}-${rand}.jpg`
+}
+
+/**
+ * Is this media url a rendered brand card (ticket #13368)? These carry real
+ * typography by design: the kicker, line, wordmark and slide counter are
+ * rendered type (`renderSocialCard`, `app/lib/og-card.server.ts`), never
+ * baked into generated pixels. `social-publish-gate.server.ts`'s
+ * legible-text policy (`classifyLegibleText`) exists to judge an AI image
+ * model's own hallucinated or baked-in caption/watermark text on a
+ * PHOTOGRAPHIC generation -- a per-SKU policy call that module's own header
+ * comment says the vision gate deliberately declines to make itself. A
+ * rendered card has no such call to make: the text is copy the drafter
+ * supplied and the renderer laid out verbatim, licensed outright by
+ * `docs/store-team/instagram-campaigns.md` §3.3 ("No baked-in text on any
+ * slide. Every word is rendered typography over a clean plate"). This
+ * predicate is what the publish gate checks before running that
+ * classification at all; it does NOT skip the vision gate's anatomy/exposure
+ * checks (limb count, hand anatomy, nipples occluded, genitalia absent,
+ * anus not visible, adult unambiguous) -- a rendered card still needs a
+ * recorded verdict on those like any other generated asset, it is only the
+ * legible-text classification that stands aside.
+ */
+export function isRenderedCardAsset(url: string): boolean {
+  if (!url) return false
+  const path = url.split(/[?#]/)[0] ?? ''
+  const basename = (path.split('/').pop() ?? '').toLowerCase()
+  return basename.startsWith(RENDERED_CARD_PREFIX)
+}
+
 /**
  * Generate a cast-in-hand composite: an approved cast member holding and
  * showing the REAL product (owner ruling 2026-08-12).
@@ -1012,3 +1058,20 @@ export async function generateAndUploadSocialImage(
     visionAttempts: outcome.attempts,
   }
 }
+
+// `renderAndUploadSocialCard` (the packshot-card/plate op, ticket #13368)
+// deliberately lives in `app/lib/social-card.server.ts`, NOT here, even
+// though every other "render/generate + rehost + ingest + vision-gate"
+// helper is in this file. This file is reachable from `server/cron.ts`'s
+// esbuild-bundled graph (social-publish-job.server.ts -> social-publish-
+// gate.server.ts -> here), which is bundled by plain esbuild
+// (`scripts/build-vercel.mjs`, a protected path) with no loader for the
+// `?inline` TTF imports `app/lib/og-card.server.ts` needs for its satori
+// fonts -- Vite's dev/SSR build understands `?inline`, raw esbuild does not.
+// Pulling an `await import('./og-card.server')` edge in here broke that
+// bundle. `social-card.server.ts` is imported only by the route
+// (`api.team.social-image.tsx`), which compiles into the React Router server
+// build that the esbuild pass keeps external, so it never reaches that
+// bundle at all. `buildSocialCardFilename`/`isRenderedCardAsset` above stay
+// here because `social-publish-gate.server.ts` needs them and they carry no
+// such asset dependency.
