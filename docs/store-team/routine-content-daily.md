@@ -913,8 +913,17 @@ curl -s -X POST "$BASE_URL/api/team/suggestion" \
   -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
   -d '{"op":"create","team":"content","targetTeam":"social","kind":"campaign","category":"other","priority":2,
        "dedupeKey":"notebook-promo:<slug>",
-       "suggestion":"NOTEBOOK POST LIVE, ready for an Instagram draft. TITLE / URL / CATEGORY / the two or three teachable claims that cleared the accuracy gate / embedded product handles with their verified stock state / IG-ELIGIBILITY: <eligible | generic-angle: the transferable topic that can be named | route-to-X>"}'
+       "suggestion":"NOTEBOOK POST LIVE, owed one Instagram post and one X post, each with the link. TITLE / URL / CATEGORY / SUMMARY: two sentences a reader could repeat about what the post covers / the two or three teachable claims that cleared the accuracy gate / embedded product handles with their verified stock state / HERO: <image URL> / IG-ELIGIBILITY: <eligible | generic-angle: the transferable topic that can be named | route-to-X>"}'
 ```
+
+   **Owner direction 2026-10-03, verbatim:** *"every new notebook post needs a corresponding post
+   to Instagram and X. The link to the post should be in each post with a summary of what was
+   posted."* The row is how social learns the post exists, so it has to carry what the echo
+   needs: the URL exactly as published, a SUMMARY social can lift without re-reading the piece,
+   and the hero image URL. The API stores the key as `notebook-promo-<slug>` (colons become
+   dashes); write it with the colon as shown, and know that social matches on the dash form.
+   Social's definition of done now counts the echo (`routine-social-daily.md` Step 1b), so a
+   missing or thin row shows up as a short day on their side, not a quiet skip.
 
    The claims are the point. The social drafter cannot re-verify anything and must not invent
    substance, and a post that already cleared both gates is the cheapest citable teaching material

@@ -78,6 +78,19 @@ neither has shipped in weeks even though the publisher builds both (`instagram.s
   so this obligation is reported, not filled: the summary names the Reel's post id for the week, or
   names the exact block (today: owner blocker #57, the Writers Room pitches no new batch while the
   last one sits undecided on `/admin/video-studio/scripts`). An unmet Reel week is never silent.
+- **Notebook echo obligation (owner direction 2026-10-03).** The owner: *"every new notebook post
+  needs a corresponding post to Instagram and X. The link to the post should be in each post with a
+  summary of what was posted."* Every `notebook-promo-<slug>` row (Step 2 item 9) is answered by
+  one Instagram post and one X post, each carrying the article's URL and a summary of what it
+  teaches, drafted in the first run that sees the row and live by the end of the following day. A
+  promo row older than one day with no echo on either platform makes the day **short**, exactly as
+  the carousel debt does. The quota pays the echo before anything else.
+- **New-in carousel obligation (owner direction 2026-10-03).** The owner: *"when new products go
+  live in /new on the site, we do a carousel of the products that are now on the site."* Every day
+  the enrich chain files a `new-products-enrich-<day>` row (Step 2 item 10) with at least two
+  Instagram-eligible products, the lane ships one New-in carousel on Instagram and its X companion,
+  built to Step 2.9a. A batch day with no New-in carousel is **short**. A day the chain published
+  nothing owes nothing, and the summary says so.
 
 **Run status is derived from that count, not from effort.**
 
@@ -324,50 +337,73 @@ is on the record with a ticket the team can act on tomorrow.
 8. LinkedIn only (when `social_freq_linkedin` > 0): pending research briefs (Sanity GROQ)
    `*[_type=="researchBrief" && status=="pending" && targetPlatform=="linkedin"]` — the weekly
    adult-business-researcher fills this queue (`docs/store-team/routine-research-weekly.md`).
-9. **Notebook promos, read here and not at Step 7b.** `POST /api/team/suggestion
+9. **Notebook promos: one Instagram post and one X post per article, each with the link (owner
+   direction 2026-10-03).** `POST /api/team/suggestion
    {"op":"list","targetTeam":"social","status":"approved","orderBy":"age"}`, and pull every row
-   whose `dedupeKey` starts `notebook-promo:`. The content routine files one per published post
-   (`routine-content-daily.md` Step 6 item 4). **These have to be read at context load, not in the
-   Step 7b mail pass**, because 7b runs after drafting: a promo read there is a promo drafted
-   tomorrow at the earliest, which is how the first one sat untouched. Each row carries the title,
-   live URL, category, the accuracy-gate-cleared claims, the embedded product handles, and an
-   IG-eligibility verdict. Treat it as a first-class candidate for today's quota, not as overflow.
+   whose `dedupeKey` starts `notebook-promo-` (the API canonicalizes `:` to `-` on write, so the
+   stored key is `notebook-promo-<slug>`; a literal match on `notebook-promo:` finds nothing, which
+   is one reason three October promos sat unanswered). The content routine files one per published
+   post (`routine-content-daily.md` Step 6 item 4) and the Sanity publish webhook backstops it.
+   **Read them at context load, not in the Step 7b mail pass**, because 7b runs after drafting.
+   Each row carries the title, live URL, category, a two-sentence summary, the accuracy-gate-cleared
+   claims, the embedded product handles, the hero image URL, and an IG-eligibility verdict.
 
-   Three things that turn a promo into a removable post, so they are stated rather than inferred:
+   The owner's words, verbatim: *"every new notebook post needs a corresponding post to Instagram
+   and X. The link to the post should be in each post with a summary of what was posted."* So a
+   promo row is a standing order with two deliverables, and the Step 1b Notebook echo obligation
+   counts them:
 
-   - **Never put the Notebook URL in the caption.** Step 4c already forbids a PDP link, and the same
-     reasoning binds here: caption URLs are not clickable on Instagram anyway, and a post whose
-     purpose reads as driving traffic is the commerce signal Meta's Restricted Goods standard
-     removes. The compliant form is to **teach the article's substance** with at most one plain
-     in-sentence pointer, and link-in-bio at most once a day, never as a closing line.
+   - **The Instagram echo.** An education post on the article's substance: lead with the one
+     thing the reader learns (from the row's cleared claims, never invented), then a two or three
+     sentence summary of what the article covers, then the article URL on its own line, plain
+     (`https://xdipx.com/notebook/<slug>`), then the engagement close. The URL is text on
+     Instagram, not a link, so the caption also says the piece is the first thing behind the bio
+     link, and the `/social` landing page carries the latest Notebook posts for that reason. This
+     reverses the earlier "never put the Notebook URL in the caption" rule for Notebook URLs
+     only: a `/notebook/` URL is editorial, the Step 4b sale gate still matches only
+     `/products/` links, and the owner asked for the link. A PDP link in the same caption is still
+     a BLOCK. A single still or a carousel both satisfy it; when the rolling-14 carousel count
+     reads 0, build it as the carousel (§3.3 arc, the article's claims as the substance slides).
+   - **The X echo.** Register 6-7, the summary in one or two sentences, the article URL with
+     channel UTMs (`?utm_source=x&utm_medium=social&utm_campaign=notebook`), and a 16:9 cast or
+     library frame per Step 5 (text plus link is unpublishable). The link makes it a ~$0.20 post
+     against `x_publish_max_spend_usd_month` and takes one of the day's X slots; the echo
+     outranks a product companion for that slot, because the owner asked for it by name.
+   - **Imagery is reuse-first.** The row's hero image is the article's own picture, but it lives on
+     Sanity's CDN and fails the Step 5 provenance test until it is a library asset; until a rehost
+     op exists, use a library frame on the article's subject (`social-asset-query` `op:'search'`)
+     and generate only when the library has nothing. Atlas is licensed for it.
+   - **Respect the eligibility verdict, with one adjustment.** `eligible`: both echoes as above.
+     `generic-angle`: the Instagram caption teaches the transferable topic and may still carry the
+     URL when the slug itself is clean; when the slug names a category Instagram cannot run (a
+     dildo or anatomically realistic subject), the Instagram echo carries no URL and points at the
+     bio link instead, and the summary says which rule bit. The X echo is unchanged in every case.
+     `route-to-X`: the X echo ships; the Instagram echo is a product-free, category-free teaching
+     post with the bio-link pointer, or, when even that cannot be said, the summary names the row
+     and the reason and the obligation reads `ig: unmet (ineligible subject)`.
    - **The engagement close still replaces any CTA.** Promoting an article licenses nothing the
-     charter bans.
-   - **Respect the eligibility verdict.** On a `generic-angle` row the source article's product
-     category may not appear in the caption, on-slide text, alt text, or a hashtag. The trap is
-     specific and it has already fired once: the natural way to point at a source article is to say
-     what it is about, and that sentence is exactly where the banned word enters.
+     charter bans: no "read now", no urgency, no price.
 
-   Notebook promos are usually education, so they preferentially fill the pure-education,
-   no-product-in-frame slice of the mission brief's §6b mix, and they suit a carousel. Mark the row
-   `applied` when you draft from it. A row still unused after 14 days is stale news; mark it
-   `dismissed` in the queue-hygiene sweep and say so. Zero rows is a normal result.
-
-   Honest note so nobody reads the softer output as ignoring direction: the owner asked for
-   promotion, and the compliant version of promotion on this platform is teaching.
+   Mark the row `applied` only when both echoes are at least `draft` with a gate PASS; record
+   the two post ids in the row's close note. A row that is 14 days old and still unanswered gets
+   named in the summary and drafted that run; dismissing it as stale is no longer an option.
 
 10. **Product news, read here and not at Step 7b (owner audit 2026-09-01).** From the same
    suggestion list as item 9, pull every approved row whose `dedupeKey` starts
-   `new-products:enrich:` (the enrich chain's daily batch of newly published products),
-   `new-product:` (out-of-chain activations), or `restock-digest:` (the day's true
-   sold-out-to-in-stock crossings). All three file `kind:'process'` with `targetTeam:'social'`
+   `new-products-enrich-` (the enrich chain's daily batch of newly published products),
+   `new-product-` (out-of-chain activations), or `restock-digest-` (the day's true
+   sold-out-to-in-stock crossings); the stored keys use dashes, never colons (see item 9). All three file `kind:'process'` with `targetTeam:'social'`
    since PR #1007; before that fix they were invisible to this query, which is how 465 products
    went live in 30 days with zero social coverage. The same timing rule as item 9 applies: read
    at context load so today's slate can use them, because a row first seen at Step 7b is a post
    drafted tomorrow at the earliest. These rows are the source for slot D (what's new) and for
    product-pegged picks in slots C and E. Curation decides which new product, never whether: Step 2.9 sets a
    floor of 3 new-arrival posts in every 7 Instagram product posts and the ranking that picks
-   them (owner direction 2026-10-01). Close consumed rows `applied` per Step 7b's bookkeeping; age out
-   product-launch rows older than 14 days there as before.
+   them (owner direction 2026-10-01). **The day's `new-products-enrich-<day>` row is also the
+   source of the New-in carousel (Step 2.9a, owner direction 2026-10-03):** a batch of two or more
+   Instagram-eligible products owes one carousel showing them, on top of the single-product floor.
+   Close consumed rows `applied` per Step 7b's bookkeeping; age out product-launch rows older than
+   14 days there as before.
 
 11. **Trend briefs, read here (owner audit 2026-09-01).** From the same list, approved
    `kind:'strategy'` rows filed by `social-trend-scout` (format trends, sound verdicts, competitor
@@ -832,6 +868,63 @@ stays `approved` past the run that read it. Thirty-eight of them sat unread from
 platform: distinct products over product posts, the top product's share, new-arrival posts over
 product posts, and the product types featured. Distinct over product posts below 0.8 on Instagram,
 or a new-arrival share below 3 in 7, is a finding the next run corrects before anything else.
+
+## Step 2.9a: The New-in carousel (owner direction 2026-10-03)
+
+The owner: *"when new products go live in /new on the site, we do a carousel of the products that
+are now on the site."* Step 2.9 ranks new arrivals into single posts; this step shows the batch.
+Both run.
+
+**Trigger.** Today's `new-products-enrich-<day>` row (Step 2 item 10) lists two or more products
+marked Instagram-eligible and in stock. The product team's `social-new-picks-<day>` row, when
+present, is the ranking; otherwise rank by the Step 2.9 item 4 order. No row, or a row with fewer
+than two eligible products, owes nothing today and the Step 8 line says `new-in carousel: n/a (no
+batch)`.
+
+**Shape, 4 to 7 slides.**
+
+1. **Hook, the grid tile.** A cast or on-skin frame with one of the batch products forward (the
+   standing §3.2c order holds for this slide), or, when the library has nothing fit and the day's
+   image allowance is spent, a typographic plate on the coral-soft ground reading as a "new this
+   week" beat in Emma's words, never the phrase "new arrivals" as a headline tic. Library first,
+   Atlas when the library has nothing (owner: *"If you need to generate images using Atlas that is
+   also fine"*).
+2. **One slide per product, 2 to 5 products.** The real Shopify packshot on a brand card (the
+   `packshot` card already licensed in `instagram-campaigns.md` §3.4: kicker = product type, one
+   line of what the reader will feel or own, XDIPX, slide counter). Cards are rendered type over
+   the real image, so provenance passes as generated social art and the product cannot drift. No
+   price on any slide.
+3. **Save close.** The keepable line plus the engagement question, and the pointer that all of
+   them are at xdipx.com/new, as plain text (link in bio reaches it).
+
+**Caption.** A two-line summary of what came in (product types, not a list of names), one sentence
+on who each is for at most, the `/new` pointer as plain text, the engagement close. No price, no
+CTA, no PDP link (Step 4c). Hashtags per the Instagram rules.
+
+**X companion, mandatory.** The first four slides (the hook and three cards) as the tweet's media,
+a one-sentence summary, and the link `https://xdipx.com/new?utm_source=x&utm_medium=social&utm_campaign=new-in`.
+It is a linked post (~$0.20) and takes one X slot.
+
+**Rules this format carries, stated so nobody infers them the other way:**
+
+- It fills slot D (what's new). It does not buy a new slot and it does not displace the Notebook
+  echo when both are owed; the day's quota pays the Notebook echo first, then this.
+- It is exempt from §3.3's "never two days running" cadence, because batches land most days;
+  cap one New-in carousel per day. It counts toward the rolling-14 carousel obligation, so a
+  New-in day also pays the format debt.
+- Only slide 1 needs the on-skin treatment. Product cards are the sanctioned non-skin slide.
+- The row records the hook product as `shopifyProductId` and every batch handle in `subject`
+  (`new-in: <handle>, <handle>, ...`) so Step 2.9's cooldown sees all of them.
+- Instagram-ineligible products never appear on a card, in the caption, in alt text, or in a
+  hashtag, even when they were the day's biggest launch. The X companion may name them.
+- Every slide clears the publish gate like any other (provenance `every`, vision verdict per
+  slide, no baked-in text outside the rendered card type).
+
+**Until the card renderer is callable from the cloud (ticket #13368), a run that cannot render
+cards still owes the batch a post: ship the hook frame as a single Instagram still with the New-in
+caption, ship the X companion with that frame and the `/new` link, and report
+`new-in carousel: unmet (card renderer, #13368)`. Bare packshot URLs are not library members and
+the draft op refuses them, so they are never a substitute for the cards.**
 
 ## Step 3 — Draft (reworks included)
 
@@ -1354,6 +1447,13 @@ per-platform, and on Instagram it is a hard line the Step 4b sale gate already e
 | Instagram | **Never.** Caption URLs are not clickable on IG, and a PDP link is the clearest "attempting to sell" signal under Meta Restricted Goods. | post → profile → link in bio → site. The bio-link landing page at `xdipx.com/social`, plus comment replies (an answered "where do I get this?" is not a sale attempt; the support-drafted reply carries the direct PDP link). |
 | X | Allowed and encouraged, per the existing X lane. **Also requires media** — see Step 5; a text-plus-link X draft is not a lighter-weight option, it is unpublishable. | direct PDP link with channel UTMs. |
 | LinkedIn | Site links fine, PDP links avoided, per the LinkedIn addendum. | site/editorial links only. |
+
+**Editorial links are the exception (owner direction 2026-10-03).** A `/notebook/<slug>` URL and
+the `/new` URL may appear in an Instagram caption as plain text, once, on their own line; they are
+not product links, the sale gate does not match them, and the owner asked for the article link in
+every echo. PDP links stay banned on Instagram. On X both carry channel UTMs and are the point of
+the post. The `/social` landing page carries the latest Notebook posts and a `/new` pointer so the
+bio link resolves to both.
 
 **`/social` sync is a daily-routine duty.** The bio-link landing page's product modules must be kept
 in sync with the last ~7 days of Instagram product posts, so the one clickable path from IG always
@@ -2606,5 +2706,8 @@ row id its theme was drawn from.
 
 Also carries, on its own lines and every run, the two format obligations from Step 1b:
 `carousel: met (post <id>, rolling-14 count <n>)` or `carousel: unmet (<reason>)`, and
-`reel: met (post <id>)` or `reel: unmet (<the block, by name>)`. A run summary without both lines
-has not reported the run.
+`reel: met (post <id>)` or `reel: unmet (<the block, by name>)`, plus the two owner-direction lines
+of 2026-10-03: `notebook echo: <slug> ig:<post id|unmet reason> x:<post id|unmet reason>` for every
+promo row seen (or `notebook echo: none owed`), and `new-in carousel: met (post <id>, <n> products)`,
+`new-in carousel: unmet (<reason>)`, or `new-in carousel: n/a (no batch)`. A run summary without all
+four lines has not reported the run.

@@ -992,7 +992,13 @@ hook, question, substance, save close: the education and the save are the load-b
 in-a-life and cast beats are the ones worth losing when a subject is tight. Never cut the substance
 slide to hit the floor, because a carousel with nothing learned in it is the shape that gets scrolled.
 
-**Up to 5 carousels a week, never two days running** (raised from three on 2026-08-16 to serve the
+**The New-in carousel is a second carousel type** (owner direction 2026-10-03, routine Step 2.9a):
+hook slide, one packshot card per newly live product (2 to 5), save close pointing at `/new`. It is
+not on the §3.3 educational arc, it runs on any day the enrich chain published a batch, and it is
+exempt from the cadence rule below (cap one a day). It still counts toward the rolling-14 carousel
+obligation.
+
+**Up to 5 campaign carousels a week, never two days running** (raised from three on 2026-08-16 to serve the
 advice lane in §4a). The reason for the old cap has not gone away: more carousels cost more, halve
 completion, and turn the save-close template from a signature into a tic. Rotate the save-close
 plate every campaign, and if saves or completion fall, drop back to three and say so in the run
@@ -1413,7 +1419,7 @@ A through D.
 | **A** | **Resource.** The advice post, and the reason a non-buyer follows us. | Field Notes, Ask Emma, Inspo Carousel, WTF Is… | **Yes when the advice is about a category we sell** (§3.9); no only when the subject has no product in it |
 | **B** | **Campaign.** The active campaign's next beat, on its pillar and format rotation. | any campaign format | Usually |
 | **C** | **Today's Pick.** One in-stock product presented by a cast member (§4b). | Today's Pick | Yes |
-| **D** | **What's new.** A Notebook promo when one is queued, else a new arrival ranked per routine Step 2.9, else Brand Crush, This Week at xdipx, or Trend React. | those five | Yes for a new arrival; no otherwise |
+| **D** | **What's new.** Owed first, in this order (owner direction 2026-10-03): the Notebook echo for any queued promo (an Instagram post carrying the article's summary and its URL as plain text, routine Step 2 item 9), then the New-in carousel for a day the enrich chain published two or more eligible products (routine Step 2.9a), then a new arrival ranked per routine Step 2.9, else Brand Crush, This Week at xdipx, or Trend React. | those, plus New-in carousel | Yes for a new arrival or New-in carousel; no otherwise |
 | **E** | **Carousel.** Scheduled Mon and Wed per §5a, and on any day the rolling-14 carousel count reads 0 (owner direction 2026-09-25, ticket #11492: reach comes from saves, and a single still earns almost none). | Inspo Carousel, Field Notes, WTF Is… | Either |
 | **R** | **Reel**, at least one a week per §5a. Produced by the video lane, never by the social run: an owner-approved render fans out as a `video_reel` row and is the day's Instagram post (routine Step 2.8). The social run reports the week's Reel by post id, or names the block. | product-talk clip | Yes |
 
@@ -1478,7 +1484,9 @@ that enforcement is built to catch. A percentage is the clearest sell signal ava
 - **In the post:** why this specific product is worth owning. Mechanism, material, build, who it
   suits. Value as *quality*, which the charter's ownership register already licenses.
 - **On the profile:** the bio link, at most once a day, as a plain sentence and never as a closing
-  line.
+  line. Editorial URLs are the exception (owner direction 2026-10-03): a Notebook echo carries its
+  `/notebook/<slug>` URL and a New-in carousel carries `xdipx.com/new`, each as plain text on its
+  own line. They are not product links and the sale gate does not match them.
 - **On `xdipx.com/social`:** the day's pick, with its real price. Keeping that landing page in sync
   is already a daily duty in `routine-social-daily.md` Step 4c, and it is now the load-bearing half
   of this lane rather than housekeeping.
