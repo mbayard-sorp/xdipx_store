@@ -156,8 +156,8 @@ owner as always.
 | Phase | PR | Scope | Done when |
 |---|---|---|---|
 | 0 | none | Verify auto-approve off, pin Meta MCP read-only on 7 triggers, size `ads_team_daily_cents`, owner codify of register 10 and the Meta lane in the two docs | Rows read back, docs merged |
-| 1 | PR-A | Migration 114, `ad_ideas`, feedback tables, creative columns, settings keys, `ad-ideas.server.ts`, team endpoints, Ideas tab, nav | Owner can rate a seeded idea on a phone; routine can read ratings back |
-| 1 | PR-B (in review, #1501) | `routine-ads-daily.md`, `ads-manager.md` rewrite, RemoteTrigger, cron expectations, concept bank wired as the idea source, Overheard at the Counter added | Two consecutive daily runs file ideas with policy checks |
+| 1 | PR-A (in review, #1503) | Migration 114, `ad_ideas`, feedback tables, creative columns, settings keys, `ad-ideas.server.ts`, team endpoints, Ideas tab, nav | Owner can rate a seeded idea on a phone; routine can read ratings back |
+| 1 | PR-B (merged, #1501) | `routine-ads-daily.md`, `ads-manager.md` rewrite, RemoteTrigger, cron expectations, concept bank wired as the idea source, Overheard at the Counter added | Two consecutive daily runs file ideas with policy checks |
 | 2 | PR-C | `ad-render.server.ts`, layout layer templates, format matrix, gate chain, Creatives tab with rating and filters | Hearted idea produces gated creatives in all its lane's sizes within one run |
 | 2 | PR-D | Bridge page route and Sanity doc type, PDP health block, curated Meta subset with display titles, packshot sweep on position 0 | `curious.xdipx.com/<slug>` renders the same page to every visitor with pixel and UTM |
 | 3 | PR-E | Export registry: Google Editor CSV, Meta paused draft, banner zip; `ads_spend_enabled` gate; owner authorizes Meta connector here | Each hearted creative has a downloadable or stored export; nothing uploads with the valve off |
