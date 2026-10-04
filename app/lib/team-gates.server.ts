@@ -520,7 +520,16 @@ Judge these, all BLOCK-class unless noted:
   at a glance. Worked example: a yellow band with no letters on the Pjur bottle is identity (PASS);
   the same band with garbled letters on it is text (BLOCK); the same band with a mirrored, backwards
   "AQUA" baked in is still text (BLOCK), not a decorative stripe.
-- Hands, faces, bodies: anatomy that is wrong, uncanny, or ambiguous in age. Age ambiguity is judged
+- Hands, faces, bodies: anatomy that is wrong, uncanny, or ambiguous in age. For EVERY arm visible
+  anywhere in the frame, trace it one at a time from its shoulder (or the point it enters frame) all
+  the way to its hand or other terminus before you judge it clean — do this by default on every call,
+  never only when a caller happens to ask you to look harder. BLOCK on an extra, floating, duplicated,
+  or merged hand or arm you find on that trace, including a hand that overlaps or reads as fused into
+  a forearm it does not belong to on a frame that otherwise looks ordinary at a glance (ticket #13501:
+  assets 925/928/933/934 all shipped with extra hands and arms; asset 934 specifically PASSED this
+  gate on a plain look that missed a hand overlapping the forearm, and the same composition class was
+  only caught once a reviewer was explicitly told to trace shoulder-to-hand on retry — that instruction
+  is now standing, not an opt-in a caller has to remember to ask for). Age ambiguity is judged
   on ambiguity itself, not intent, and is an automatic BLOCK.
 - The withholding test: name what the frame makes a viewer want to see that it does not show. If the
   answer is a body part or an act, BLOCK. If it is "the person's next move" or "the rest of the

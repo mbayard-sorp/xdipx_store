@@ -211,6 +211,29 @@ describe('publish-gate feeling-first register anchors (ticket #8212)', () => {
   })
 })
 
+describe('publish-gate limb-tracing anatomy calibration (ticket #13501)', () => {
+  it('requires tracing every visible arm from shoulder to terminus, by default, not only when asked to look harder', async () => {
+    const { PUBLISH_GATE_SYSTEM } = await import('./team-gates.server')
+    expect(PUBLISH_GATE_SYSTEM).toContain('trace it one at a time from its shoulder')
+    expect(PUBLISH_GATE_SYSTEM).toContain('do this by default on every call,\n  never only when a caller happens to ask you to look harder')
+    expect(PUBLISH_GATE_SYSTEM).toContain('a hand that overlaps or reads as fused into')
+    expect(PUBLISH_GATE_SYSTEM).toContain('ticket #13501')
+  })
+
+  it('names the post 379/post 376 incident so a reader can trace the calibration to its evidence', async () => {
+    const { PUBLISH_GATE_SYSTEM } = await import('./team-gates.server')
+    expect(PUBLISH_GATE_SYSTEM).toContain('925/928/933/934')
+    expect(PUBLISH_GATE_SYSTEM).toContain('is now standing, not an opt-in')
+  })
+
+  it('does not gate the shoulder-to-hand trace behind any opt-in phrasing', async () => {
+    const { PUBLISH_GATE_SYSTEM } = await import('./team-gates.server')
+    expect(PUBLISH_GATE_SYSTEM).not.toContain('only trace')
+    expect(PUBLISH_GATE_SYSTEM).not.toContain('if asked')
+    expect(PUBLISH_GATE_SYSTEM).not.toContain('when requested')
+  })
+})
+
 describe('verdictConsistencyCheck (ticket #8060)', () => {
   it('flags a BLOCK verdict against an all-pass findings array (the row 207 incident)', () => {
     const out = verdictConsistencyCheck(
