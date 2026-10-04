@@ -2421,6 +2421,31 @@ no-repeat-within-5). Route: `composeSceneFrame()` via `gen-notebook-art.ts --cas
 - **Checker note:** `check-hero-embed-match.ts` needs EVERY distinctive token of the title
   ("adjustable", "chorus", "cosmic") in alt + prompt; the alt must carry the full title text.
 
+## Notebook §0-P keeper — content run 1239, "What Makes a Vibrator Body-Safe?"
+
+`cast: none` + We-Vibe Touch X (`we-vibe-touch-x-rechargeable-silicone-lay-on-vibrator-massager-crave-coral`),
+`wellness-basics`, sincere staging (no archetype E). Ref `76329.jpg`. Route: `gen-notebook-art.ts --feature
+content-blog --run-id 1239`, Atlas `seedream-4.5-edit`, 4:3. Concept: surface and join under raking window light.
+- **Binding gotcha (cost this run two rounds):** the upload-time product-fidelity gate compares the hero to the
+  post's FIRST `blogProductEmbed`, not to whatever you ref-imaged. A Touch X hero on a post whose first embed was
+  the Starlet 3 was blocked. Check `resolveHeroProductHandle` order before generating; reorder the embeds or
+  shoot the first embed.
+- **Checker gotcha:** `check-hero-embed-match.ts` also scans `imagePrompt`; the word "shell" in the prompt matched
+  the-9-s-b-shell-bullet-vibe. Keep brand-ambiguous nouns ("shell") out of prompt AND alt. Alt must carry "touch"
+  and "crave" and no mechanism/spec claim.
+- **Brand-mark gate:** baked embossed wordmark that garbles is a `brandMark: drift` fail. Prompting "no wordmark /
+  underside facing camera" did not work (model ignores it, and a wordless frame fails "buttons/logo missing").
+  What worked: "the small embossed wordmark and the round plus and minus buttons copied exactly as they appear
+  on the reference", plus "No other text".
+- **Rejects:** pale-blush ground rounds with garbled mark (r4 c1-c3, r5, r6); saturated coral wall + orange bounce
+  glow (r1 c2); dark corner (r2 c1); "We-Vich X" garble (r7 c4).
+- **Keeper (r7 c2):** pale blush corner, white paper, product large lower-right, neutral shadow, plus/minus buttons
+  and wordmark legible. Prompt: "Bright warm editorial photograph on a pure white paper background, soft
+  directional window daylight ... The We-Vibe Touch X from the reference photo reproduced exactly ... and the
+  small embossed wordmark and the round plus and minus buttons copied exactly as they appear on the reference ...
+  A macro material-study of surface and seam. No other text, no extra words, ... no orange glow, no colored light
+  bounce under the product, no saturated coral wall ..." Asset `image-28f4c48dc5d7078c8cc615c9fa947a976fd0bedd-2304x1728-jpg`.
+
 ---
 
 *Seeded 2026-07-17 from the doctrine §4 directives and the mission-brief §2 image rules.
