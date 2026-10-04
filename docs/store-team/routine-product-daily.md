@@ -124,9 +124,13 @@ since the last run: never posted on social first, then a product type absent fro
 product posts, then stock depth, then margin. Exclude what Instagram cannot run (dildos,
 anatomically realistic products) and anything with inventory of 3 or less. File one row:
 `kind:'process'`, `team:'product'`, `targetTeam:'social'`, `dedupeKey:'social-new-picks:<YYYY-MM-DD>'`,
-the top 3 to 5 with handle, vendor, product type, a text-free bare-product image URL, and one line
-on why each earns a post. On a day nothing was published, file nothing. The social routine reads it
-at its Step 2.9.
+**and `dedupeScope:'daily'`** (without it the API strips the date and every day's row collapses onto
+one key; row #13082 landed as bare `social-new-picks` for exactly that reason), the top 3 to 6 with
+handle, vendor, product type, a text-free bare-product image URL, and one line on why each earns a
+post. On a day nothing was published, file nothing. The social routine reads it at its Step 2.9 for
+single posts and at its Step 2.9a as the ranking for the day's New-in carousel (owner direction
+2026-10-03: *"when new products go live in /new on the site, we do a carousel of the products that
+are now on the site"*), so the order you file is the order the slides run.
 
 ## Step 4b: Inbound suggestions (read your own mail)
 
