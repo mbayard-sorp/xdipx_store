@@ -71,7 +71,7 @@ Runs after Step 5 on the Sunday Pass 2 only, so Monday's 12:00 UTC strategy run 
    payload.
 3. File it as returned:
    ```bash
-   bash scripts/team-api.sh POST suggestion '{"op":"create","team":"ads","targetTeam":"strategy","kind":"campaign","category":"other","cxRisk":"low","suggestion":"<memo>"}'
+   bash scripts/team-api.sh POST team/suggestion '{"op":"create","team":"ads","targetTeam":"strategy","kind":"campaign","category":"other","cxRisk":"low","suggestion":"<memo>"}'
    ```
 4. Post a `step` event `summary:"buyer memo filed #<id>"`, `phase:"buyer"`.
 
