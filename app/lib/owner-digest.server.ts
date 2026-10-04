@@ -35,6 +35,7 @@ import {
   type RoutineLivenessFlag,
   type TicketLoopHealth,
 } from '~/lib/ticket-janitor.server'
+import { githubRequest, isGithubConfigured, listOpenPullRequests } from '~/lib/github.server'
 import { kvDel, kvGet, kvSet, kvSetNX } from '~/lib/kv.server'
 import { computeOwnerQueue, type MoneyBlock, type OwnerQueueEntry } from '~/lib/owner-queue.server'
 import type { SeoDailyResult } from '~/lib/seo-daily.server'
@@ -576,6 +577,76 @@ async function gatherAdCampaignQueue(): Promise<AdCampaignQueueRow[]> {
     console.warn('[owner-digest] ad-campaign queue unavailable:', String(err).slice(0, 200))
     return []
   }
+}
+
+/* ── Section: PR queue ─────────────────────────────────────────────────────── */
+
+const AGENT_BRANCH_LANES_FOR_DIGEST = ['ticket/', 'agents/', 'claude/', 'phase1/', 'tonight/', 'fix/', 'pm/', 'revert/pr-'] as const
+const PR_STUCK_HOURS = 24
+
+export interface PrQueueSummary {
+  /** Open PR count per lane, e.g. { 'ticket/': 3, agents/: 1, other: 0 }. */
+  openByLane: Record<string, number>
+  openTotal: number
+  mergedYesterday: number
+  /** Open PRs whose last update is older than PR_STUCK_HOURS. */
+  stuck: Array<{ number: number; title: string; htmlUrl: string; hoursStale: number }>
+}
+
+/**
+ * Five-line owner-digest summary of /admin/pr-queue (owner all-hands
+ * 2026-10-04). Deliberately cheap next to the admin page itself: no
+ * per-PR CI/files/ticket join here, just the open-PR list (one call) plus
+ * one closed-PR page (one call), so a digest that already makes a dozen
+ * best-effort calls does not grow materially slower for this one.
+ */
+export async function gatherPrQueueSummary(): Promise<PrQueueSummary | null> {
+  if (!isGithubConfigured()) return null
+  try {
+    const openRes = await listOpenPullRequests()
+    if (!openRes.ok) return null
+
+    const openByLane: Record<string, number> = {}
+    const now = Date.now()
+    const stuck: PrQueueSummary['stuck'] = []
+    for (const pr of openRes.data) {
+      const lane = AGENT_BRANCH_LANES_FOR_DIGEST.find(p => pr.headRef.startsWith(p)) ?? 'other'
+      openByLane[lane] = (openByLane[lane] ?? 0) + 1
+      const hoursStale = (now - new Date(pr.updatedAt).getTime()) / 3_600_000
+      if (hoursStale > PR_STUCK_HOURS) {
+        stuck.push({ number: pr.number, title: pr.title, htmlUrl: pr.htmlUrl, hoursStale: Math.round(hoursStale) })
+      }
+    }
+
+    const closedRes = await githubRequest<Array<{ merged_at: string | null }>>(
+      '/repos/{owner}/{repo}/pulls?state=closed&per_page=50&sort=updated&direction=desc',
+    )
+    const yesterday = new Date(now - 24 * 3_600_000).toISOString().slice(0, 10)
+    const mergedYesterday = closedRes.ok
+      ? closedRes.data.filter(p => p.merged_at?.slice(0, 10) === yesterday).length
+      : 0
+
+    return { openByLane, openTotal: openRes.data.length, mergedYesterday, stuck }
+  } catch (err) {
+    console.warn('[owner-digest] PR queue summary unavailable:', String(err).slice(0, 200))
+    return null
+  }
+}
+
+export function renderPrQueueSection(s: PrQueueSummary | null): string {
+  if (!s) return `<p style="margin:0;color:${MUTED};">PR queue could not be read this run.</p>`
+  const laneLine = Object.entries(s.openByLane)
+    .sort((a, b) => b[1] - a[1])
+    .map(([lane, n]) => `${esc(lane)}: ${n}`)
+    .join(' &middot; ') || 'none'
+  const stuckLine = s.stuck.length === 0
+    ? `<span style="color:${GOOD};">none over ${PR_STUCK_HOURS}h</span>`
+    : s.stuck
+        .map(p => `<a href="${esc(p.htmlUrl)}" style="color:${WARN};">#${p.number}</a> (${p.hoursStale}h)`)
+        .join(', ')
+  return `<p style="margin:0 0 2px;">Open: <strong>${s.openTotal}</strong> &middot; ${laneLine}</p>
+    <p style="margin:0 0 2px;">Merged yesterday: <strong>${s.mergedYesterday}</strong></p>
+    <p style="margin:0;">Stuck over ${PR_STUCK_HOURS}h: ${stuckLine}</p>`
 }
 
 /* ── Section: Ad Studio ────────────────────────────────────────────────────── */
@@ -1795,7 +1866,7 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
     return null
   })
 
-  const [shipped, homepageNow, ticketMetrics, escalations, ownerQueue, opsWatch, reconciliation, loopHealth, staleOwnerRows, adCampaignQueue, parkedVideoFrames, parkedVideoRenders, parkedVideoFlagged, acquisition, adStudio] =
+  const [shipped, homepageNow, ticketMetrics, escalations, ownerQueue, opsWatch, reconciliation, loopHealth, staleOwnerRows, adCampaignQueue, parkedVideoFrames, parkedVideoRenders, parkedVideoFlagged, acquisition, adStudio, prQueue] =
     await Promise.all([
       gatherShipped(),
       gatherHomepageNow(),
@@ -1836,6 +1907,7 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
       gatherParkedVideoFlagged(),
       gatherAcquisitionSummary(),
       gatherAdStudio(),
+      gatherPrQueueSummary(),
     ])
   const needsOwner = escalations.protectedPrs.length + escalations.exhausted.length
   // One note-aware source for blocked rows, shared by the Needs Mike list and
@@ -1995,6 +2067,7 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
       ${section(`Needs a decision from you${ownerQueue.totalCount > 0 ? ` (${ownerQueue.totalCount})` : ''}`, renderOwnerQueueSection(ownerQueue))}
       ${section(`Ad campaigns awaiting launch${adCampaignQueue.length > 0 ? ` (${adCampaignQueue.length})` : ''}`, renderAdCampaignQueueSection(adCampaignQueue))}
       ${section('Ad Studio', adStudio ? renderAdStudioSection(adStudio) : `<p style="margin:0;color:${MUTED};">Ad Studio numbers could not be read this run.</p>`)}
+      ${section('PR queue', renderPrQueueSection(prQueue))}
       ${section('Orders and profit (last 8 days)', `<table style="border-collapse:collapse;">${profitRows || '<tr><td>no rows</td></tr>'}</table>${reconLine}`)}
       ${section('Acquisition (trailing 30 days)', renderAcquisitionSection(acquisition))}
       ${section('Ops watch', renderOpsWatchSection(opsWatch))}

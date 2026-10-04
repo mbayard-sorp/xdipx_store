@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PgDialect } from 'drizzle-orm/pg-core'
 
 // Several gatherers (countStaleUndecidedOwnerAsks, etc.) run raw SQL, so we mock
@@ -54,6 +54,17 @@ vi.mock('~/lib/seo-daily.server', () => ({
 vi.mock('~/lib/homepage-payload.server', () => ({
   readHomepagePayloadB: vi.fn(async () => null),
 }))
+// Defaults to "not configured" so every existing runOwnerDigest test keeps
+// taking gatherPrQueueSummary's no-network early return; the PR-queue tests
+// below override isGithubConfigured per-test to exercise the real aggregation.
+const githubConfiguredMock = vi.hoisted(() => vi.fn(() => false))
+const listOpenPullRequestsMock = vi.hoisted(() => vi.fn())
+const githubRequestMock = vi.hoisted(() => vi.fn())
+vi.mock('~/lib/github.server', () => ({
+  isGithubConfigured: githubConfiguredMock,
+  listOpenPullRequests: listOpenPullRequestsMock,
+  githubRequest: githubRequestMock,
+}))
 
 import {
   MAX_TICKET_ATTEMPTS,
@@ -72,6 +83,9 @@ import {
   renderTicketsSection,
   renderAdCampaignQueueSection,
   renderAdStudioSection,
+  gatherPrQueueSummary,
+  renderPrQueueSection,
+  type PrQueueSummary,
   gatherParkedVideoRenders,
   gatherParkedVideoFlagged,
   digestFingerprint,
@@ -965,6 +979,97 @@ describe('renderAdCampaignQueueSection', () => {
     const html = renderAdCampaignQueueSection([{ ...row, name: '<script>x</script>' }])
     expect(html).not.toContain('<script>')
     expect(html).toContain('&lt;script&gt;')
+  })
+})
+
+describe('renderPrQueueSection', () => {
+  it('reports unreadable plainly when the gather failed', () => {
+    const html = renderPrQueueSection(null)
+    expect(html).toContain('could not be read')
+  })
+
+  it('renders lane counts, merged-yesterday count, and a healthy stuck line', () => {
+    const summary: PrQueueSummary = {
+      openByLane: { 'ticket/': 3, 'agents/': 1 },
+      openTotal: 4,
+      mergedYesterday: 2,
+      stuck: [],
+    }
+    const html = renderPrQueueSection(summary)
+    expect(html).toContain('Open: <strong>4</strong>')
+    expect(html).toContain('ticket/: 3')
+    expect(html).toContain('agents/: 1')
+    expect(html).toContain('Merged yesterday: <strong>2</strong>')
+    expect(html).toContain('none over 24h')
+  })
+
+  it('lists each stuck PR with its age and a link', () => {
+    const summary: PrQueueSummary = {
+      openByLane: { other: 1 },
+      openTotal: 1,
+      mergedYesterday: 0,
+      stuck: [{ number: 1510, title: 'stuck one', htmlUrl: 'https://github.com/mbayard-sorp/xdipx_store/pull/1510', hoursStale: 36 }],
+    }
+    const html = renderPrQueueSection(summary)
+    expect(html).toContain('#1510')
+    expect(html).toContain('(36h)')
+    expect(html).toContain('https://github.com/mbayard-sorp/xdipx_store/pull/1510')
+  })
+})
+
+describe('gatherPrQueueSummary', () => {
+  afterEach(() => {
+    githubConfiguredMock.mockReturnValue(false)
+    listOpenPullRequestsMock.mockReset()
+    githubRequestMock.mockReset()
+  })
+
+  it('returns null without calling GitHub when it is not configured', async () => {
+    githubConfiguredMock.mockReturnValue(false)
+    const result = await gatherPrQueueSummary()
+    expect(result).toBeNull()
+    expect(listOpenPullRequestsMock).not.toHaveBeenCalled()
+  })
+
+  it('groups open PRs by branch lane, flags PRs stale over 24h, and counts yesterday’s merges', async () => {
+    githubConfiguredMock.mockReturnValue(true)
+    const now = Date.now()
+    const freshIso = new Date(now - 1 * 3_600_000).toISOString()
+    const staleIso = new Date(now - 30 * 3_600_000).toISOString()
+    listOpenPullRequestsMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: [
+        { number: 1, title: 'fresh ticket PR', headRef: 'ticket/13369', updatedAt: freshIso, htmlUrl: 'https://x/1' },
+        { number: 2, title: 'stale agents PR', headRef: 'agents/suggestion-1', updatedAt: staleIso, htmlUrl: 'https://x/2' },
+        { number: 3, title: 'odd lane', headRef: 'some-random-branch', updatedAt: freshIso, htmlUrl: 'https://x/3' },
+      ],
+    })
+    const yesterday = new Date(now - 24 * 3_600_000).toISOString().slice(0, 10)
+    githubRequestMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: [
+        { merged_at: `${yesterday}T12:00:00Z` },
+        { merged_at: `${yesterday}T13:00:00Z` },
+        { merged_at: null },
+      ],
+    })
+
+    const result = await gatherPrQueueSummary()
+    expect(result).toEqual({
+      openByLane: { 'ticket/': 1, 'agents/': 1, other: 1 },
+      openTotal: 3,
+      mergedYesterday: 2,
+      stuck: [{ number: 2, title: 'stale agents PR', htmlUrl: 'https://x/2', hoursStale: 30 }],
+    })
+  })
+
+  it('degrades to null when GitHub is configured but the open-PR read fails', async () => {
+    githubConfiguredMock.mockReturnValue(true)
+    listOpenPullRequestsMock.mockResolvedValue({ ok: false, status: 500, data: null, error: 'boom', skipped: false })
+    const result = await gatherPrQueueSummary()
+    expect(result).toBeNull()
   })
 })
 
