@@ -9,10 +9,12 @@ import { describe, expect, it, vi } from 'vitest'
 // connection or reach GitHub, so importing the module under test is inert.
 vi.mock('~/lib/db.server', () => ({ db: {} }))
 vi.mock('~/lib/github.server', () => ({ getPullRequest: vi.fn() }))
-vi.mock('~/lib/release-engine.server', () => ({ prNumberFromRef: vi.fn() }))
+vi.mock('~/lib/release-engine.server', () => ({ prNumberFromRef: vi.fn(), confirmOutOfBandMerge: vi.fn() }))
 vi.mock('~/lib/team.server', () => ({ transitionSuggestion: vi.fn() }))
 
 import {
+  buildOutOfBandApplyLinks,
+  buildOutOfBandApplyNote,
   classifyTicketPrMatches,
   isMergedOutOfBand,
   referencesTicketId,
@@ -130,5 +132,41 @@ describe('classifyTicketPrMatches', () => {
       432,
     )
     expect(result).toEqual({ kind: 'match', prNumber: 417 })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// ticket #13441: the `applied` note/links for a confirmed (deployed + smoke
+// clean) out-of-band merge. Pure, so the merge-sha-in-the-note requirement is
+// directly testable without GitHub, Vercel, or the DB.
+// ---------------------------------------------------------------------------
+
+describe('buildOutOfBandApplyNote', () => {
+  it('includes the merge sha (short form) and the smoke evidence', () => {
+    const note = buildOutOfBandApplyNote(1430, 'abcdef0123456789abcdef0123456789abcdef01', 'smoke passed: home, discover')
+    expect(note).toContain('abcdef012345')
+    expect(note).toContain('#1430')
+    expect(note).toContain('smoke passed: home, discover')
+  })
+
+  it('falls back to an explicit placeholder rather than omitting the field when no sha is known', () => {
+    const note = buildOutOfBandApplyNote(1430, undefined, 'smoke passed')
+    expect(note).toContain('unknown sha')
+    expect(note).not.toContain('undefined')
+  })
+})
+
+describe('buildOutOfBandApplyLinks', () => {
+  it('writes both a merged pr link and a commit link carrying the full sha', () => {
+    const links = buildOutOfBandApplyLinks('https://github.com/o/r/pull/1430', 'abcdef0123456789abcdef0123456789abcdef01')
+    expect(links).toEqual([
+      { kind: 'pr', ref: 'https://github.com/o/r/pull/1430', state: 'merged' },
+      { kind: 'commit', ref: 'abcdef0123456789abcdef0123456789abcdef01', state: 'merged' },
+    ])
+  })
+
+  it('omits the commit link rather than writing a bad ref when no sha is known', () => {
+    const links = buildOutOfBandApplyLinks('https://github.com/o/r/pull/1430', undefined)
+    expect(links).toEqual([{ kind: 'pr', ref: 'https://github.com/o/r/pull/1430', state: 'merged' }])
   })
 })

@@ -658,7 +658,13 @@ absent is a merge GitHub refuses, and the carve-out used to spend all three `MAX
 refusals before escalating a PR whose only real problem was a missing trigger.
 
 **R-WATCH** (routine 22) is the belt-and-braces backstop for the same class, plus the two the engine
-still does not cover: a stranded draft on a machine lane, and an open PR with no ticket.
+still does not cover: a stranded draft on a machine lane, and an open PR with no ticket. Since ticket
+#13441 it also flags (never writes) a `verified` ticket whose linked PR GitHub reports merged more
+than 3 hours ago — a backstop for the release engine's own hourly out-of-band sweep
+(`confirmOutOfBandMerge` in `app/lib/release-engine.server.ts`), which is the thing that actually
+writes `applied`, with the same deploy-plus-smoke confirmation the engine demands of a merge it
+performs itself. See the routine-schedule.md row 22 for the exact wording; there is no dedicated code
+module backing R-WATCH, so this is a prose addition to its remit, not a code check.
 
 ADR-008 step 4 added `fix/` and `pm/` to that list on 2026-08-04, which fixes the two known
 instances. It does not fix the class. The next prefix somebody invents will be silent in exactly the

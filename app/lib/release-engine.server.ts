@@ -1406,6 +1406,109 @@ export async function promoteDeployment(deploymentId: string): Promise<PromoteRe
 }
 
 // ---------------------------------------------------------------------------
+// Out-of-band merge confirmation (ticket #13441)
+// ---------------------------------------------------------------------------
+
+export interface OutOfBandMergeConfirmation {
+  /** GitHub's own `merged` flag for this PR, read fresh. Not reused from any
+   *  cached `PullRequestSummary`: that type carries no merge-commit sha,
+   *  which this confirmation needs and a PR's head sha cannot stand in for
+   *  (see `mergeSha`). */
+  merged: boolean
+  /**
+   * The commit that actually landed on `main`. Present only when `merged`.
+   * Deliberately NOT the PR's head sha: a squash merge -- what
+   * `squashMergePullRequest` always performs, and what GitHub's own merge
+   * button defaults to -- mints a brand new commit the head sha never
+   * pointed at.
+   */
+  mergeSha?: string
+  /**
+   * True once a production deployment carrying this merge has gone READY:
+   * either the deployment for `mergeSha` itself, or, for a merge old enough
+   * that its own build has rolled off Vercel's most-recent-20 list, a later
+   * deployment that superseded it (`findSupersedingDeployment`, the same
+   * fallback `handleMissingDeploymentRecord` already relies on for the
+   * engine's own merges).
+   */
+  deployed: boolean
+  /**
+   * Present only once `deployed` is true: the result of running the same
+   * post-deploy smoke (`runReleaseSmoke`) the engine's own merge-and-track
+   * path requires before it will write `applied`. An owner-merged PR earns
+   * the identical confidence bar; it no longer skips this the way the
+   * out-of-band sweep used to.
+   *
+   * Deliberately the single-shot `runReleaseSmoke`, not
+   * `settleDeployment`'s `runReleaseSmokeWithRetry`: that wrapper buys one
+   * 20s in-process retry so a transient Storefront blip does not trigger an
+   * unnecessary rollback of an engine-performed merge. This path has nothing
+   * to roll back and no circuit breaker to protect -- a failed smoke here
+   * just leaves the ticket at `verified` for the next hourly sweep, which is
+   * already a much longer, cheaper retry window than 20 more seconds in one
+   * invocation would buy.
+   */
+  smoke?: SmokeResult
+}
+
+/**
+ * Confirm, with the same rigor the engine's merge-and-track path already
+ * applies to a merge it performs itself, that a PR merged OUTSIDE the engine
+ * -- almost always the owner merging a protected-path PR by hand, since that
+ * is the one class this engine never merges itself -- is actually live in
+ * production.
+ *
+ * ticket #13441: before this existed, the out-of-band sweep
+ * (`ticket-out-of-band-sweep.server.ts`) read a bare `merged: true` from
+ * GitHub as sufficient proof and wrote `applied` immediately. That is a
+ * materially lower bar than the one the engine holds its OWN merges to,
+ * which must clear a READY production deployment and a clean
+ * `runReleaseSmoke` first (see `settleDeployment`). 18 rows sat stranded at
+ * `verified` for days to weeks before the owner retired them by hand, and
+ * closing that gap by simply trusting `merged: true` faster would have
+ * traded "never applies" for "applies before production actually serves the
+ * change" -- a worse failure mode. This closes the real gap -- detection,
+ * not authority -- without changing who may write `applied` (`system` only,
+ * same `team.server.ts` map entry) or weakening what counts as proof.
+ *
+ * Read-only: never mutates a ticket, a label, or anything on GitHub. The sole
+ * caller is the out-of-band sweep's `applyCandidateIfMerged`, which decides
+ * whether to call `transitionSuggestion` once this comes back with
+ * `deployed: true` and `smoke.ok: true`. The decision stays in that
+ * non-protected file, by the same design note at its own header: keeping
+ * cadence and matching rules tunable through the normal PR lane. What moves
+ * into this protected file is only the confirmation machinery that already
+ * lives and is tested here.
+ */
+export async function confirmOutOfBandMerge(prNumber: number): Promise<OutOfBandMergeConfirmation> {
+  const raw = await githubRequest<{
+    merged?: boolean
+    merge_commit_sha?: string | null
+    merged_at?: string | null
+  }>(`/repos/{owner}/{repo}/pulls/${prNumber}`, { context: 'release-engine' })
+
+  if (!raw.ok || raw.data.merged !== true || !raw.data.merge_commit_sha) {
+    return { merged: false, deployed: false }
+  }
+  const mergeSha = raw.data.merge_commit_sha
+  const mergedAtMs = raw.data.merged_at ? Date.parse(raw.data.merged_at) : NaN
+
+  const list = await listProductionDeployments(20)
+  const exact = list.find((d) => d.sha && d.sha.toLowerCase() === mergeSha.toLowerCase()) ?? null
+  const deployment =
+    exact && exact.readyState === 'READY'
+      ? exact
+      : findSupersedingDeployment(list, Number.isFinite(mergedAtMs) ? mergedAtMs : 0, mergeSha)
+
+  if (!deployment || deployment.readyState !== 'READY') {
+    return { merged: true, mergeSha, deployed: false }
+  }
+
+  const smoke = await runReleaseSmoke()
+  return { merged: true, mergeSha, deployed: true, smoke }
+}
+
+// ---------------------------------------------------------------------------
 // Startup self-check
 // ---------------------------------------------------------------------------
 

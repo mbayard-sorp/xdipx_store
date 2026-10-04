@@ -53,13 +53,24 @@
  * the query, the cap, and the transition here means the cadence and matching
  * rules can be tuned through the normal reviewed-PR lane instead of needing an
  * owner-merged change every time.
+ *
+ * A fourth stranding mode has nothing to do with discovery: the candidate was
+ * found and its PR genuinely is merged, but writing `applied` on that fact
+ * alone was a lower bar than the engine holds its own merges to (ticket
+ * #13441). `applyCandidateIfMerged` now calls `confirmOutOfBandMerge` (in the
+ * engine file, which already owns the deployment-readiness and smoke
+ * machinery) and only transitions once that confirms a READY production
+ * deploy AND a clean `runReleaseSmoke` -- the same two gates
+ * `settleDeployment` requires before the engine's own merges reach `applied`.
+ * A merge that is not yet confirmed deployed, or that fails smoke, is left
+ * for the next hourly sweep rather than escalated from here.
  */
 
 import { and, desc, eq, inArray, isNotNull, lt, notExists, sql } from 'drizzle-orm'
 import { db } from './db.server'
 import { homepageTeamSuggestions, suggestionLinks } from '../../db/schema'
 import { getGithubConfig, getPullRequest, githubRequest, type PullRequestSummary } from './github.server'
-import { prNumberFromRef } from './release-engine.server'
+import { confirmOutOfBandMerge, prNumberFromRef } from './release-engine.server'
 import { transitionSuggestion } from './team.server'
 
 const LOG = '[out-of-band-sweep]'
@@ -315,10 +326,48 @@ async function markPrLinkMerged(ticketId: number, prRef: string): Promise<void> 
 }
 
 /**
+ * The `applied` note and link set for a ticket whose PR merged out of band and
+ * has now been confirmed deployed-and-smoke-clean (ticket #13441). Pure, so the
+ * exact text and the merge-sha link are unit-testable without GitHub or the DB.
+ */
+export function buildOutOfBandApplyNote(
+  prNumber: number,
+  mergeSha: string | undefined,
+  smokeEvidence: string,
+): string {
+  const shaFragment = mergeSha ? mergeSha.slice(0, 12) : 'unknown sha'
+  return (
+    `merged out-of-band as ${shaFragment} (PR #${prNumber} was already merged when the engine `
+    + `reconciled it). ${smokeEvidence}`
+  )
+}
+
+/** Links written alongside the out-of-band `applied` note: a '{commit}' link so the
+ *  digest and the ticket's own history carry the same sha the note names. */
+export function buildOutOfBandApplyLinks(
+  prUrl: string,
+  mergeSha: string | undefined,
+): Array<{ kind: string; ref: string; state: string }> {
+  return [
+    { kind: 'pr', ref: prUrl, state: 'merged' },
+    ...(mergeSha ? [{ kind: 'commit', ref: mergeSha, state: 'merged' }] : []),
+  ]
+}
+
+/**
  * Confirm a candidate's PR is merged and, if so, transition the ticket to
  * `applied`. Shared by the linked and link-less paths so both run the identical
  * GitHub merged check and transition. Never throws: a 409 means the ticket
  * already moved and is ignored; anything else is collected.
+ *
+ * ticket #13441: `merged: true` alone used to be sufficient here, a lower bar
+ * than the engine demands of its own merges. `confirmOutOfBandMerge` (in the
+ * protected engine file, where the deployment-readiness and smoke machinery
+ * it reuses already lives) now also requires a READY production deployment
+ * and a clean `runReleaseSmoke` before this writes `applied`. A merge that is
+ * not yet confirmed deployed, or that fails smoke, is left for the next sweep
+ * rather than escalated from here: R-WATCH is the backstop that flags a
+ * `verified` ticket whose PR has been merged for too long.
  */
 async function applyCandidateIfMerged(c: Candidate, result: SweepResult): Promise<void> {
   try {
@@ -329,15 +378,33 @@ async function applyCandidateIfMerged(c: Candidate, result: SweepResult): Promis
     }
     if (!isMergedOutOfBand(pr.data)) return
 
+    const confirmation = await confirmOutOfBandMerge(c.prNumber)
+    if (!confirmation.deployed) {
+      console.log(
+        `${LOG} PR #${c.prNumber} merged but not yet confirmed deployed, ticket #${c.ticketId} waits for the next sweep`,
+      )
+      return
+    }
+    if (!confirmation.smoke || !confirmation.smoke.ok) {
+      console.log(
+        `${LOG} PR #${c.prNumber} deployed but post-deploy smoke has not passed, ticket #${c.ticketId} waits: `
+        + `${confirmation.smoke?.evidence ?? 'smoke did not run'}`,
+      )
+      return
+    }
+
     await transitionSuggestion(c.ticketId, 'applied', 'system', {
-      note: `merged out-of-band (PR #${c.prNumber} was already merged when the engine reconciled it)`,
-      links: [{ kind: 'pr', ref: pr.data.htmlUrl, state: 'merged' }],
+      note: buildOutOfBandApplyNote(c.prNumber, confirmation.mergeSha, confirmation.smoke.evidence),
+      links: buildOutOfBandApplyLinks(pr.data.htmlUrl, confirmation.mergeSha),
     })
     // Only linked candidates have an existing link row to reconcile; the
     // transition above records the link for a link-less candidate.
     if (c.prRef) await markPrLinkMerged(c.ticketId, c.prRef)
     result.applied.push(c.ticketId)
-    console.log(`${LOG} ticket #${c.ticketId} applied: PR #${c.prNumber} merged out of band`)
+    console.log(
+      `${LOG} ticket #${c.ticketId} applied: PR #${c.prNumber} merged out of band as `
+      + `${(confirmation.mergeSha ?? 'unknown sha').slice(0, 12)}`,
+    )
   } catch (err) {
     // A 409 here is normal and not worth alarming on: it means the ticket
     // moved (the engine got there first, or the owner dismissed it).
