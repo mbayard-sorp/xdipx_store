@@ -52,7 +52,7 @@
  * `runDeterministicPublishChecks` below.
  */
 
-import { allMediaAreGeneratedSocialAssets, isGeneratedSocialAsset } from './social-media.server'
+import { allMediaAreGeneratedSocialAssets, isGeneratedSocialAsset, isRenderedCardAsset } from './social-media.server'
 import { X_CAPTION_MAX, T_CO_LENGTH, weightedTweetLength } from './social-publish/x-limits'
 import { VISION_CHECK_NAMES, type VisionCheckName, type VisionVerdict } from './social-vision-gate.server'
 
@@ -973,7 +973,14 @@ export async function runDeterministicPublishChecks(
       })
     }
     // Legible text is a report field on the verdict; the policy call is here.
-    const textClass = classifyLegibleText(verdict.legibleText)
+    // Ticket #13368: a rendered brand card (`social-card-*`, packshot-card/
+    // plate op) is skipped on purpose -- its kicker/line/wordmark/counter are
+    // real rendered type the drafter supplied, not an AI model's own baked-in
+    // text, so there is no per-SKU "is this junk or a brand mark" call to
+    // make (see `isRenderedCardAsset`'s own doc comment). The anatomy/exposure
+    // checks just above still ran and still gate; only this classification
+    // stands aside.
+    const textClass = isRenderedCardAsset(u) ? 'none' : classifyLegibleText(verdict.legibleText)
     if (textClass === 'packaging' || textClass === 'caption-or-watermark' || textClass === 'unclassified') {
       const why = textClass === 'packaging'
         ? 'reads as packaging junk (barcode, label, carton or ingredient text)'

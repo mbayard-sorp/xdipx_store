@@ -1402,3 +1402,75 @@ describe('legible text baked into the image', () => {
     })
   })
 })
+
+// Ticket #13368: the New-in carousel's packshot card and the typographic
+// plate render real copy on purpose (`renderSocialCard`,
+// `app/lib/og-card.server.ts`), under a `social-card-*` filename. The text
+// this classifier exists to catch is an AI image model's own hallucinated or
+// baked-in caption/watermark text, not a drafter's own line rendered
+// verbatim, so a `social-card-*` media url skips the legible-text
+// classification entirely -- the anatomy/exposure vision-gate checks above it
+// still ran and still gate.
+describe('rendered brand card carve-out (ticket #13368)', () => {
+  const isLibraryMember = async () => true
+  const CARD_MEDIA = [`${CDN}/social-card-womanizer-next-sage-20261004-2-ab12cd.jpg`]
+
+  it('does not block a card whose rendered line/kicker would otherwise classify as unclassified', async () => {
+    const verdict: VisionVerdict = {
+      ...PASSING_VERDICT,
+      // A full sentence of real rendered copy -- exactly the shape
+      // classifyLegibleText would otherwise bucket as 'unclassified' (more
+      // than 5 words, carries punctuation) and block.
+      legibleText: 'built around the thing that actually closes the gap. XDIPX 2 / 5',
+    }
+    const r = await runRaw(
+      { caption: CLEAN, mediaUrls: CARD_MEDIA, postCreatedAt: null },
+      { getVisionVerdict: async () => verdict, isLibraryMember },
+    )
+    expect(checks(r)).not.toContain('vision-legible-text')
+    expect(r.blocked).toBe(false)
+  })
+
+  it('does not block a card whose rendered text reads as a caption/watermark pattern', async () => {
+    // "SHOP NOW" is exactly what the one-off carousel's save-close slide
+    // template renders on purpose, and is also one of the CAPTION_TEXT_PATTERNS
+    // this carve-out exists to let a rendered card ship with regardless.
+    const verdict: VisionVerdict = { ...PASSING_VERDICT, legibleText: 'XDIPX, shop now' }
+    const r = await runRaw(
+      { caption: CLEAN, mediaUrls: CARD_MEDIA, postCreatedAt: null },
+      { getVisionVerdict: async () => verdict, isLibraryMember },
+    )
+    expect(checks(r)).not.toContain('vision-legible-text')
+    expect(r.blocked).toBe(false)
+  })
+
+  it('still runs and still gates the anatomy/exposure vision-gate checks on a card', async () => {
+    const failingVerdict: VisionVerdict = {
+      ...PASSING_VERDICT,
+      pass: false,
+      checks: { ...PASSING_VERDICT.checks!, genitaliaAbsent: 'fail' },
+      notes: 'nudity: genitalia visible',
+      legibleText: 'a rendered line with real words in it, long enough to misclassify',
+    }
+    const r = await runRaw(
+      { caption: CLEAN, mediaUrls: CARD_MEDIA, postCreatedAt: null },
+      { getVisionVerdict: async () => failingVerdict, isLibraryMember },
+    )
+    expect(checks(r)).toContain('vision-verdict')
+    expect(checks(r)).not.toContain('vision-legible-text')
+    expect(r.blocked).toBe(true)
+  })
+
+  it('an ordinary generated asset (not a card) is unaffected and still classifies normally', async () => {
+    const verdict: VisionVerdict = {
+      ...PASSING_VERDICT,
+      legibleText: 'a soft evening, whatever you want it to be, in your hands',
+    }
+    const r = await runRaw(
+      { caption: CLEAN, mediaUrls: GOOD_MEDIA, postCreatedAt: null },
+      { getVisionVerdict: async () => verdict, isLibraryMember },
+    )
+    expect(checks(r)).toContain('vision-legible-text')
+    expect(r.blocked).toBe(true)
+  })
+})

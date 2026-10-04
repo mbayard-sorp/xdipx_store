@@ -21,6 +21,21 @@
  *          fetch failure, a crop-to-zone refusal, or a vision-gate rejection.
  *          HTTP status stays 200 (spend already happened; `costs` still needs
  *          to reach the caller), so check the body, not just the status (#11463)
+ *   { op: 'packshot-card', handle, kicker?, line, slideIndex, slideCount, tone?,
+ *     caller?, runId? }
+ *       -> { url, assetId, filename, visionVerdict } (ticket #13368). A
+ *          rendered brand card (satori + resvg, `renderSocialCard` in
+ *          `app/lib/og-card.server.ts`) showing the product's default
+ *          Shopify image on a flat v3 tone ground, built for the New-in
+ *          carousel (routine-social-daily.md Step 2.9a) so the cloud social
+ *          routine can build it without headless Chromium. No AI model call,
+ *          so no `social-images` spend row; the vision gate still runs and
+ *          records a verdict like any other generated asset.
+ *   { op: 'plate', line, kicker?, slideIndex, slideCount, tone?, handle?,
+ *     caller?, runId? }
+ *       -> { url, assetId, filename, visionVerdict }. The typographic
+ *          save-close slide: same renderer as packshot-card, no product
+ *          image.
  *
  * THE SCENE AXES, on both ops (tickets #10479/#10480): bodyZone, contactMode,
  * cropScale and sceneLocation, each optional, each validated against the
@@ -70,6 +85,7 @@ import { Sentry } from '~/lib/sentry.server'
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 const ONLY_VALUES = ['atlas', 'fal', 'imagen'] as const
+const CARD_TONE_VALUES = ['coral', 'plum', 'paper'] as const
 
 function str(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined
@@ -93,6 +109,78 @@ function imageSizeVal(v: unknown): string | { width: number; height: number } | 
   return undefined
 }
 
+/**
+ * packshot-card / plate (ticket #13368, routine-social-daily.md Step 2.9a):
+ * validates the card-specific fields, resolves the product's default image
+ * for packshot-card, and defers the render + rehost + ingest + vision-gate
+ * work to `renderAndUploadSocialCard` (`app/lib/social-card.server.ts`).
+ * Not routed through the shared generate/cast validation in `action` below:
+ * this renderer takes no `prompt`/`mood`/`date` and bills no AI image
+ * generation.
+ */
+async function handleSocialCardOp(op: 'packshot-card' | 'plate', b: Record<string, unknown>): Promise<Response> {
+  const line = str(b['line'])
+  if (!line) return new Response('Bad Request: line required', { status: 400 })
+  const slideIndex = num(b['slideIndex'])
+  if (!slideIndex || slideIndex < 1) return new Response('Bad Request: slideIndex must be a positive number', { status: 400 })
+  const slideCount = num(b['slideCount'])
+  if (!slideCount || slideCount < 1) return new Response('Bad Request: slideCount must be a positive number', { status: 400 })
+  const kicker = str(b['kicker'])
+  const toneRaw = str(b['tone'])
+  if (toneRaw && !(CARD_TONE_VALUES as readonly string[]).includes(toneRaw)) {
+    return new Response(`Bad Request: tone must be one of ${CARD_TONE_VALUES.join('|')}`, { status: 400 })
+  }
+  const tone = toneRaw as 'coral' | 'plum' | 'paper' | undefined
+  const handle = str(b['handle'])
+  if (op === 'packshot-card' && !handle) {
+    return new Response('Bad Request: handle required for packshot-card', { status: 400 })
+  }
+  const caller = str(b['caller']) ?? 'social-media-manager'
+  const runId = num(b['runId'])
+
+  // Money gate, defense-in-depth (see the call site's own comment above):
+  // this op bills no AI image generation, but the vision gate it still runs
+  // below calls the Anthropic API, so a direct team-token caller looping
+  // this route is not free. `over_image_cap` does not apply here (nothing in
+  // this path logs to the `social-images` feature that cap counts), so only
+  // the generic refusal reasons (disabled, over_budget, over_run_cap,
+  // run_in_progress) matter; `gateResult.ok` already covers all of them.
+  const gateResult = await gate('social', runId)
+  if (!gateResult.ok) {
+    return Response.json({ error: 'gated', reason: gateResult.reason, gate: gateResult }, { status: 403 })
+  }
+
+  let imageUrl: string | undefined
+  if (op === 'packshot-card') {
+    const { getProductByHandle } = await import('~/lib/shopify.server')
+    const product = await getProductByHandle(handle!)
+    imageUrl = product?.images?.[0]?.url
+    if (!imageUrl) {
+      return new Response(`Bad Request: no product image found for handle "${handle}"`, { status: 400 })
+    }
+  }
+
+  const { renderAndUploadSocialCard } = await import('~/lib/social-card.server')
+  const result = await renderAndUploadSocialCard({
+    op,
+    ...(handle ? { handle } : {}),
+    ...(imageUrl ? { imageUrl } : {}),
+    ...(kicker ? { kicker } : {}),
+    line,
+    slideIndex,
+    slideCount,
+    ...(tone ? { tone } : {}),
+    caller,
+  })
+
+  return Response.json({
+    url: result.url,
+    assetId: result.assetId,
+    filename: result.filename,
+    visionVerdict: result.visionVerdict,
+  })
+}
+
 export async function action({ request }: ActionFunctionArgs) {
   assertTeamAuth(request)
   if (request.method !== 'POST') return new Response('Method Not Allowed', { status: 405 })
@@ -100,6 +188,20 @@ export async function action({ request }: ActionFunctionArgs) {
 
   try {
     const op = b['op']
+
+    // Ticket #13368: the New-in carousel's packshot card and the typographic
+    // save-close plate. Deliberately NOT routed through the shared
+    // generate/cast validation below: this renderer takes no `prompt`,
+    // `mood`, or `date`, and nothing it does is a billed AI generation, so
+    // the scene-axes/image-cap machinery below (built for that spend) does
+    // not apply. The money gate still runs (see below) as defense-in-depth
+    // against a direct team-token caller looping this route, matching the
+    // file header's own reasoning for why the gate lives here rather than
+    // only in the CLI.
+    if (op === 'packshot-card' || op === 'plate') {
+      return await handleSocialCardOp(op, b)
+    }
+
     if (op !== 'generate' && op !== 'cast') return new Response('Bad Request', { status: 400 })
 
     // Shared required fields.
