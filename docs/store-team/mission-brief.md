@@ -28,19 +28,20 @@ and every touchpoint must be comfortable to receive, open, and share.
   not in an ad, not in a social draft. MAP<MSRP uses MAP as the floor.
 - **Ad-platform policy is survival.** `docs/ads-policy.md` binds the ads team and the creative rules
   bind organic social too. One careless campaign can kill the ad account.
-- **PAID ACQUISITION IS HELD (owner direction, 2026-08-15): "fix the AOV and CVR first, hold the
-  ads."** No team proposes, plans, or launches paid spend on any platform while this stands. This is
-  not a policy hold and not a lack of a plan; `docs/store-team/google-ads-launch-plan.md` is complete
-  and carries the full reasoning and the unhold criteria. It is an **economics** hold: as of
-  2026-09-30 there are 6 real customer orders (#1003-#1008, 2026-08-20 to 2026-09-30), AOV $50.69, so
-  the AOV half of the unhold criterion is met and the 10-order half is not (6 of 10). The hold stands.
-  At the ~$33 basket the catalog previously produced, break-even on paid needs a ~12%
-  conversion rate, which nobody achieves at any budget.
-  **The hold lifts when AOV >= $45 over 10+ real orders AND the measurement chain is trustworthy**
-  (tickets #3441 and #3422 shipped, plus a checkout step pixel). Until then, acquisition effort goes
-  to owned and earned channels (SEO, AEO, email, outreach, organic social), which is where it was
-  already strongest. `ads-manager` may still run its retro and research, and should record the hold
-  rather than writing proposals against it.
+- **PAID ACQUISITION RUNS IN SIMULATION (owner decision, 2026-10-03).** The economics hold of
+  2026-08-15 ("fix the AOV and CVR first, hold the ads") is replaced by the Ad Studio v2 simulation
+  posture (`docs/store-team/ad-studio-v2-plan.md`). Teams may propose, plan, and prepare paid
+  creative and campaigns across the lanes in `docs/ads-policy.md`. Nothing spends while
+  `ads_spend_enabled` is false. The owner flips it, and only after the simulation exit criteria in
+  `ad-studio-v2-plan.md` §2 are met. The old unhold economics, AOV >= $45 over 10+ real orders and
+  a trustworthy measurement chain (tickets #3441 and #3422 shipped, plus a checkout step pixel), are
+  now the first checkpoint `paid-media-buyer` reports against every week. They no longer gate
+  building. As of 2026-09-30 there were 6 real customer orders (#1003-#1008, 2026-08-20 to
+  2026-09-30), AOV $50.69, so the AOV half is met and the order count is not (6 of 10). At the ~$33
+  basket the catalog previously produced, break-even on paid needed a ~12% conversion rate, which is
+  why spend stays dark until the owner's go. Owned and earned channels stay first in the channel
+  priority in `docs/ads-policy.md`. The "HELD" wording in the §3 ads row predates this decision;
+  read that row through this entry.
 - **Do not quote a site-wide CVR as if it were measured.** Of 311 sessions in 90 days, ~91 are a
   single crawler on `search.google.com`, ~14 are `vercel.com` deploy previews, and much of Direct is
   the owner. Genuinely cold humans number **30 to 40**. At user level, PDP to add-to-cart is 25% and
