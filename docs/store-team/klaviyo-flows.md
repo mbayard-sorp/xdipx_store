@@ -1,0 +1,164 @@
+# Klaviyo flows: browse abandonment, cart abandonment, post-purchase
+
+Built 2026-10-03 as PR-F of the Ad Studio v2 plan (`ad-studio-v2-plan.md` §4 Owned lane, §5 Klaviyo,
+owner decision 7). Owned channel, register 9. Code: `app/lib/klaviyo-flows.server.ts`,
+`app/lib/klaviyo-flow-templates.ts`, `scripts/klaviyo-flows-setup.ts`.
+
+## What exists in Klaviyo right now
+
+Verified against the live account on 2026-10-03 (the account had zero flows and zero templates before).
+
+| Object | State | Notes |
+|---|---|---|
+| 5 templates, `xdipx <flow> <key>` | Created | Saved templates, HTML plus text. Editable in Klaviyo |
+| `xdipx Cart Abandonment` flow | **Draft** | Trigger Added to Cart, 1h then 24h, filter: zero Placed Order in the last 30 days |
+| `xdipx Post-Purchase` flow | **Draft** | Trigger Placed Order, day 3 then day 14 |
+| `xdipx Browse Abandonment` flow | **Not created** | The Viewed Product metric does not exist yet. See "Browse abandonment has no trigger yet" |
+
+The Create Flow API works on this account (revision 2026-07-15, `flows:write`). It cannot create a live
+flow: the endpoint rejects a `status` field and documents that every flow is created as a draft, and
+no helper in the codebase changes a flow's status. Nothing can send until the owner sets a flow live.
+
+## Owner steps (the blocker is `klaviyo:flows-go-live`)
+
+1. Klaviyo > Flows. Open `xdipx Cart Abandonment` and `xdipx Post-Purchase`.
+2. Check each email's preview with a test profile (Preview and test > Select profile, then pick an
+   event with ProductName and HeaderImageURL). Until the code in this PR is deployed, Added to Cart and
+   Placed Order events do not carry those properties, so the preview shows the name default ("your pick")
+   and the coral-soft block with no photo. After deploy, add one real item to a cart while signed in with
+   marketing consent and the next event carries them.
+3. Review the flow filter and the delays. The filter is "zero Placed Order in the last 30 days", the API's
+   form of "has not ordered since" (Klaviyo's UI option "since starting this flow" is not exposed by the
+   API). It is equivalent for these delays.
+4. Smart Sending is on (16 hours). Leave it on: it is the frequency guard behind the 2-sends-a-week rule.
+5. Set each flow to Live, one at a time. Cart first.
+6. For browse abandonment, see the next section. Do not build it by hand yet.
+
+## Browse abandonment has no trigger yet
+
+The plan said the client "already fires" Viewed Product. It does not. Nothing in `app/` or `server/` sends
+that event, the headless storefront does not load Klaviyo's onsite JS, and so the metric does not exist in
+the account. Klaviyo creates a metric only when its first event arrives, so the flow cannot be built, by
+API or by hand, until one does. `trackViewedProduct(email, props)` exists in `klaviyo.server.ts` and is
+deliberately not wired into the PDP loader: it needs a known profile email, so it only helps identified
+visitors, and a profile lookup on every PDP view is a performance decision the owner should make.
+
+Options, cheapest first:
+- Send Viewed Product from the PDP loader for signed-in, consented customers only (the same gate
+  `api.cart.tsx` uses). Small, identified visitors only.
+- Load Klaviyo's onsite JS on the storefront. Covers anonymous visitors who later identify, one script
+  tag, a consent and performance review.
+
+Once the first Viewed Product event lands, run `npx tsx scripts/klaviyo-flows-setup.ts`. It creates
+the browse flow as a draft (4h delay, not-ordered filter, template `xdipx browse-abandonment browse-4h`).
+The manual clicks are in `MANUAL_FLOW_STEPS` and printed by the script.
+
+Also worth knowing: the account has a Klaviyo metric named "Checkout Started" from another source, and our
+own "Started Checkout" has never fired (only the SMS cart-link path sends it). The cart flow therefore
+triggers on Added to Cart, the one cart event this app sends.
+
+## Event contract
+
+The templates read these event properties, attached by `flowEventProps(handle)` in
+`klaviyo-flows.server.ts` and wired into Added to Cart (`api.cart.tsx`), Started Checkout
+(`sms-v2/email-delivery.server.ts`) and Placed Order (`server/webhooks.ts`, first line item).
+
+| Key | Meaning | Template default |
+|---|---|---|
+| `ProductName` | Shopify title | "your pick" |
+| `ProductURL` | `https://xdipx.com/products/<handle>`, no query string | `https://xdipx.com/` |
+| `ProductHandle` | Shopify handle | none |
+| `ProductType` | Inferred from title and tags by `inferProductType` (air-pulsation, wand, vibrator, lube, wear), picks the act paragraph. The Storefront Product type does not carry the `product_type_dial` metafield | generic paragraph |
+| `HeaderImageURL` | Header art, see below | coral-soft block with the product name |
+| `HeaderKind` | `onskin`, `packshot` or `none` | none |
+
+A lookup failure sends the event unchanged. An email never fails to render for a missing key.
+
+## Header art
+
+`pickHeaderAsset(productHandle)` returns, in order:
+
+1. A rated-up (`verdict up`) frame of that exact handle from the social asset library, archetype `cast`
+   then `macro` (the on-skin and bodyscape archetypes), whose vision verdict did not fail and that is not
+   product-identity blocked. Wider aspects win over tall ones. These frames already passed the vision gate and
+   the nudity definition (visible female nipples, labia, penis, anus), so owned email inherits the
+   `instagram-campaigns.md` §3.2a ceiling with the §3.2c on-skin treatment, exactly as the charter
+   says it should.
+2. The product's position-0 Shopify image (already card-art-gated, so a blocked packshot never appears),
+   sitting on coral-soft.
+3. Nothing: the template renders a coral-soft block with the product name.
+
+**Later source.** When the ads creative library (Ad Studio v2 PR-C, `ad_creatives` with a rated-up
+verdict, lane `owned`, concept 2.2 Body Map and 2.5 The Morning After) exists, it becomes the preferred
+source. The swap is one lookup ahead of the social-library lookup inside `pickHeaderAsset`; no caller changes.
+
+**How the daily ads routine refreshes headers.** Header art is resolved when the event fires, not when the
+template is saved, so a new rated-up asset is used on the next event with no template edit. The daily ads
+routine's only job here is to keep the pool deep: render and gate on-skin and bodyscape creatives for the
+products people actually view, add to cart and buy, and let the owner's hearts promote them. A product with
+no rated-up frame falls back to its packshot, and the routine can list those products as "needs a header" in
+its digest.
+
+## Copy and voice
+
+Register 9 on an owned channel (`docs/emma-voice.md`, owner 2026-09-20). Rules these emails follow:
+
+- Acts named plainly, sensation in the body, a temptation closer. No dares, no mind-reading, no hedging
+  ("if", "might", "maybe"), no mechanism or spec talk, no "sexy" as an adjective.
+- Emma is an AI with no lived experience. No email says she tried, tested or owns anything, and none
+  speaks as Emma at all: the voice is the shop's.
+- No price in the copy (prices move daily), no countdown or urgency, no discount, no review quotes or
+  counts (there are none to show).
+- One CTA, from the whitelist: "Show me" (browse), "I'll take it ♥" (both cart emails), "Take a peek →"
+  (post-purchase day 3), "Find your fit →" (day 14). The link is the PDP.
+- The discreet-shipping or XDIPX line appears once per email. The statement always reads XDIPX.
+- No em-dashes. The humanizer pass ran on every string.
+- Post-purchase emails are marketing, not order confirmation. Order and shipping mail stay plain at 2-3
+  (charter marketing addendum) and are not touched here.
+
+The act paragraph is chosen by `ProductType`. Five are written (air pulsation, wand, vibrator, lube, wear) plus a default for everything else, so an unrecognized product still gets honest copy.
+wear) plus a default.
+
+## Subject and preview variants
+
+Variant 1 is in the flow. Variants 2 and 3 are the A/B candidates (Klaviyo flow email > A/B test).
+`{{ event.ProductName }}` is the product title with a default.
+
+| Email | Subjects (1, 2, 3) | Previews (1, 2, 3) |
+|---|---|---|
+| browse-4h | `<name>: the long version` / `A closer look at <name>` / `The part of <name> the photos leave out` | Slow, warm, and all yours. / What it feels like, said plainly. / Come back to it whenever you like. |
+| cart-1h | `<name> is in your cart` / `Your cart, with <name> in it` / `Back to <name>` | Exactly where you left it. / One tap from here. / The rest of the evening is yours. |
+| cart-24h | `<name> and the first night with it` / `No wrong answers, <name> included` / `<name> is saved in your cart` | Beginner-safe by default. / Thirty days, and no wrong answers. / Take it at your pace. |
+| post-3d | `Your first evening with <name>` / `<name>, out of the box` / `Settling in with <name>` | Take your time with the first one. / No schedule, no wrong answers. / It rewards patience. |
+| post-14d | `What pairs with <name>` / `Round two with <name>` / `The thing that makes <name> better` | Two weeks in, here is what goes with it. / A good thing, improved. / Find your fit. |
+
+## UTM scheme
+
+Every link: `?utm_source=klaviyo&utm_medium=email&utm_campaign=<flow>&utm_content=<step>`.
+
+| Flow (`utm_campaign`) | Steps (`utm_content`) |
+|---|---|
+| `browse-abandonment` | `viewed-4h` |
+| `cart-abandonment` | `cart-1h`, `cart-24h` |
+| `post-purchase` | `post-3d`, `post-14d` |
+
+Shopify order attribution by these values is the source of truth (GA4 purchases arrive Unassigned).
+
+## Operating the setup script
+
+```bash
+npx tsx scripts/klaviyo-flows-setup.ts --dry-run          # print the plan, create nothing
+npx tsx scripts/klaviyo-flows-setup.ts                    # create what is missing, as drafts
+npx tsx scripts/klaviyo-flows-setup.ts --update-templates # also overwrite existing template HTML
+```
+
+Idempotent by name. A flow copies its template when created, so editing a template later does not change
+an existing flow's email: edit the email in Klaviyo, or delete the draft flow and rerun. Create Flow is
+throttled to 1 request a second and 100 a day, which the script respects.
+
+## Agents
+
+The email-marketing-manager may propose copy refreshes for these flows as `campaign` suggestions
+(subject variants, act paragraphs, a new header-art rule). It still sends nothing and has no flow or
+template write access: a refresh lands as a suggestion, the owner approves, and the setup script's
+`--update-templates` plus a flow rebuild applies it.

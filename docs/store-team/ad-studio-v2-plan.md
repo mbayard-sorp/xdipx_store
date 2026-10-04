@@ -144,7 +144,7 @@ brand tokens unchanged**
 - `ads-manager.md` rewritten as the daily ideas agent; the weekly routine retired. `cron-expectations`
   entries added for both passes.
 - Klaviyo: browse and cart abandonment flows created in Klaviyo off the Viewed Product, Added to
-  Cart and Started Checkout events the client already fires, templates in Emma voice at 9 with
+  Cart and Started Checkout events (correction 2026-10-03: the client fires Added to Cart only, Viewed Product is never sent and Started Checkout only from the SMS path), templates in Emma voice at 9 with
   product-specific bodyscape headers from the creative library.
 
 ## 6. Phases and PRs
@@ -161,7 +161,7 @@ owner as always.
 | 2 | PR-C | `ad-render.server.ts`, layout layer templates, format matrix, gate chain, Creatives tab with rating and filters | Hearted idea produces gated creatives in all its lane's sizes within one run |
 | 2 | PR-D | Bridge page route and Sanity doc type, PDP health block, curated Meta subset with display titles, packshot sweep on position 0 | `curious.xdipx.com/<slug>` renders the same page to every visitor with pixel and UTM |
 | 3 | PR-E | Export registry: Google Editor CSV, Meta paused draft, banner zip; `ads_spend_enabled` gate; owner authorizes Meta connector here | Each hearted creative has a downloadable or stored export; nothing uploads with the valve off |
-| 3 | PR-F | Klaviyo flows (API-created where possible, otherwise documented clicks), templates, bodyscape header selection | Test profile receives the browse abandonment email with the right product |
+| 3 | PR-F | Klaviyo flows (API-created where possible, otherwise documented clicks), templates, bodyscape header selection. **In review: [#1502](https://github.com/mbayard-sorp/xdipx_store/pull/1502), ticket #13383.** Cart and post-purchase flows created as drafts; browse abandonment waits on a Viewed Product event nothing sends yet | Test profile receives the browse abandonment email with the right product |
 | 4 | PR-G | Metrics import (CSV, MCP insights, Shopify attribution), `ad_spend` backfill, Live tab | Shop Campaigns history visible per day; `daily_profit_summary.ad_spend` non-zero on spend days |
 | 4 | PR-H | Rules R1 to R8, `ad_rule_events`, recommendations UI, R7 auto-pause, Spend tab, owner digest section | Seeded metrics fire R1 and R5 visibly; owner can one-tap pause |
 | 5 | docs | Playbook, lane rules, owner runbook for flipping `ads_spend_enabled` and going live platform by platform | Simulation exit criteria met |
