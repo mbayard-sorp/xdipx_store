@@ -318,10 +318,16 @@ describe('replayPaused', () => {
     expect(both.resumed.has('5')).toBe(true)
   })
 
+  it('treats an applied revive like a resume', () => {
+    const r = replayPaused([ev(1, 'pause'), ev(2, 'revive', { ruleId: 'R4' })])
+    expect(r.paused.has('5')).toBe(false)
+    expect(r.resumed.has('5')).toBe(true)
+  })
+
   it('keys sample rows by their sample key and tracks resolved recommendations', () => {
     const r = replayPaused([
       ev(1, 'pause', { creativeId: null, detail: { sample: true, key: 'S1' } }),
-      ev(2, 'scale_up', { creativeId: null, detail: { sample: true, key: 'S3' } }),
+      ev(2, 'scale', { creativeId: null, detail: { sample: true, key: 'S3' } }),
     ])
     expect(r.paused.has('S1')).toBe(true)
     expect(r.resolved.has('S3')).toBe(true)

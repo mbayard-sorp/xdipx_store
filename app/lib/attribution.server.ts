@@ -23,14 +23,17 @@ export function captureUTM(request: Request): { utm: UTMData | null; refCode: st
   const cookies = parseCookie(request.headers.get('Cookie') ?? '')
   const setCookies: string[] = []
 
-  // UTM capture — only write if params present in URL
+  // UTM capture — only write if params present in URL. utm_content counts on its
+  // own: Ad Studio puts the creative id there, and a landing that carried only
+  // utm_content used to be dropped, which left the order with no creative to
+  // credit (the attribution resolver reads it from the cart attribute).
   const source   = url.searchParams.get('utm_source')
   const medium   = url.searchParams.get('utm_medium')
   const campaign = url.searchParams.get('utm_campaign')
   const content  = url.searchParams.get('utm_content')
 
   let utm: UTMData | null = null
-  if (source ?? medium ?? campaign) {
+  if (source || medium || campaign || content) {
     utm = { source, medium, campaign, content, capturedAt: new Date().toISOString() }
     setCookies.push(serializeCookie(UTM_COOKIE, JSON.stringify(utm), {
       httpOnly: false, // accessible for GA4 client-side

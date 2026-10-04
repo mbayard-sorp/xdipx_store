@@ -3,19 +3,33 @@
  *
  * Design rule: the ads_spend_enabled valve is never a toggle inside Ad Studio.
  * Flipping real money on should not sit one thumb away from a rating button.
- * This control only reads it.
+ * This control only reads it. The four exit lines (plan section 2) show real
+ * numbers; a line whose read failed says "unknown" instead of a made-up zero.
  */
 import { useState } from 'react'
+import { EXIT_TARGETS, type SimulationExit } from '~/lib/ad-spend-core'
 
-const CRITERIA: Array<{ label: string; target: string }> = [
-  { label: 'Routine streak', target: '10 straight days' },
-  { label: 'Hearted creatives', target: '30 across 3 lanes' },
-  { label: 'Bridge page live', target: 'yes' },
-  { label: 'Owner says go', target: 'yes' },
-]
+function Track({ value, target }: { value: number | null; target: number }) {
+  const ratio = value == null ? 0 : Math.min(1, value / target)
+  return (
+    <span className="ml-2 inline-block h-1 w-14 overflow-hidden rounded-full bg-paper-3 align-middle" aria-hidden="true">
+      <span className="block h-full w-full origin-left bg-ink-2" style={{ transform: `scaleX(${ratio})` }} />
+    </span>
+  )
+}
 
-export function SimulationBadge({ spendEnabled }: { spendEnabled: boolean }) {
+function Line({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <dt className="text-ink-3 uppercase tracking-wide text-[11px]">{label}</dt>
+      <dd className="text-ink tabular-nums text-right">{children}</dd>
+    </div>
+  )
+}
+
+export function SimulationBadge({ spendEnabled, exit }: { spendEnabled: boolean; exit?: SimulationExit | null | undefined }) {
   const [open, setOpen] = useState(false)
+  const t = EXIT_TARGETS
   return (
     <div className="relative shrink-0">
       <button
@@ -52,14 +66,21 @@ export function SimulationBadge({ spendEnabled }: { spendEnabled: boolean }) {
                 : 'Ideas and creatives run daily. Exports are built and stored. Nothing uploads and no money moves.'}
             </p>
             <dl className="mt-3 space-y-1.5 font-mono text-xs">
-              {CRITERIA.map(c => (
-                <div key={c.label} className="flex items-baseline justify-between gap-3">
-                  <dt className="text-ink-3 uppercase tracking-wide text-[11px]">{c.label}</dt>
-                  <dd className="text-ink tabular-nums text-right">
-                    {c.target} <span className="text-ink-4">(not tracked yet)</span>
-                  </dd>
-                </div>
-              ))}
+              <Line label="Routine streak">
+                {exit?.streakDays == null ? 'unknown' : <>{exit.streakDays} / {t.streakDays} days<Track value={exit.streakDays} target={t.streakDays} /></>}
+              </Line>
+              <Line label="Hearted creatives">
+                {exit?.heartedCreatives == null ? 'unknown' : <>{exit.heartedCreatives} / {t.heartedCreatives}<Track value={exit.heartedCreatives} target={t.heartedCreatives} /></>}
+              </Line>
+              <Line label="Lanes with hearts">
+                {exit?.lanesWithHearts == null ? 'unknown' : <>{exit.lanesWithHearts} / {t.lanesWithHearts}<Track value={exit.lanesWithHearts} target={t.lanesWithHearts} /></>}
+              </Line>
+              <Line label="Bridge page live">
+                {exit?.bridgeLive == null ? 'unknown' : exit.bridgeLive ? 'yes' : 'no'}
+              </Line>
+              <Line label="Owner says go">
+                {exit?.ownerSaysGo ? 'yes' : 'not yet'}
+              </Line>
             </dl>
             <p className="mt-3 text-xs text-ink-3">
               The spend valve is flipped from the owner valve surface, per the Phase 5 runbook. It is not on this screen.

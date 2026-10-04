@@ -7,6 +7,7 @@ import { getCustomerToken } from '~/lib/customer-session.server'
 import { getPinnedAccessoryIds } from '~/lib/kv.server'
 import { deriveEmmaCartContext } from '~/lib/emma-cart.server'
 import { applyAttributionAttrs } from '~/lib/attribution-cart.server'
+import { getStoredUTM } from '~/lib/attribution.server'
 import { fireCapiEvent } from '~/lib/meta-capi.server'
 import { getMarketingConsent } from '~/lib/consent.server'
 import { trackAddedToCart } from '~/lib/klaviyo.server'
@@ -195,6 +196,12 @@ export async function action({ request }: ActionFunctionArgs) {
       }
     }
   }
+
+  // A shopper who landed from an ad with a cart already open never hits an
+  // add-to-cart path, so their cart would reach checkout without the creative id.
+  // Touching the cart re-stamps it, but only when the cookie carries a
+  // utm_content: ordinary carts pay no extra Shopify call.
+  if (getStoredUTM(request)?.content) await applyAttributionAttrs(cartId, request)
 
   return { ok: true }
 }

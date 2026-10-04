@@ -1,8 +1,8 @@
 /**
- * Ad Studio v2 settings (plan section 5). READ ONLY in PR-A: every key has a
- * code default, so nothing is seeded and a missing pipeline_settings row reads
- * as the default. Writing these (cap edit, rule recipes) arrives in PR-H
- * through setPipelineSettingAudited.
+ * Ad Studio v2 settings (plan section 5). Every key has a code default, so
+ * nothing is seeded and a missing pipeline_settings row reads as the default.
+ * Writes (cap edit, rule recipes on the Spend tab) go through
+ * setPipelineSettingAudited with actor 'owner' (see ad-spend.server.ts).
  *
  * All keys are <= varchar(50) (pipeline_settings.key constraint).
  * Rule defaults come from docs/audits/ad-platform-research-2026-10-03.md
@@ -13,11 +13,11 @@ import { getPipelineSetting } from '~/lib/feed-processor.server'
 
 export {
   ADS_SETTING_KEYS, ADS_SPEND_ENABLED_DEFAULT, ADS_MEDIA_MONTHLY_CAP_CENTS_DEFAULT,
-  ADS_MEDIA_DAILY_CAP_CENTS_DEFAULT, ADS_GROSS_MARGIN_PCT_DEFAULT, ADS_RULE_DEFAULTS, type AdsRuleKey,
+  ADS_MEDIA_DAILY_CAP_CENTS_DEFAULT, ADS_GROSS_MARGIN_PCT_DEFAULT, ADS_RULE_DEFAULTS, ADS_SIMULATION_EXIT_OK_DEFAULT, type AdsRuleKey,
 } from '~/lib/ad-settings-defaults'
 import {
   ADS_SETTING_KEYS, ADS_SPEND_ENABLED_DEFAULT, ADS_MEDIA_MONTHLY_CAP_CENTS_DEFAULT,
-  ADS_MEDIA_DAILY_CAP_CENTS_DEFAULT, ADS_GROSS_MARGIN_PCT_DEFAULT, ADS_RULE_DEFAULTS, type AdsRuleKey,
+  ADS_MEDIA_DAILY_CAP_CENTS_DEFAULT, ADS_GROSS_MARGIN_PCT_DEFAULT, ADS_RULE_DEFAULTS, ADS_SIMULATION_EXIT_OK_DEFAULT, type AdsRuleKey,
 } from '~/lib/ad-settings-defaults'
 
 function parseBool(raw: string | null, fallback: boolean): boolean {
@@ -68,4 +68,9 @@ export async function getAdsRuleThresholds(): Promise<Record<AdsRuleKey, number>
 export async function getAdsGrossMarginPct(): Promise<number> {
   const v = parseNum(await getPipelineSetting(ADS_SETTING_KEYS.grossMarginPct), ADS_GROSS_MARGIN_PCT_DEFAULT)
   return v >= 1 && v <= 100 ? v : ADS_GROSS_MARGIN_PCT_DEFAULT
+}
+
+/** The owner's go for leaving simulation. Default false; flipped from the owner valve surface, never in Ad Studio. */
+export async function getAdsSimulationExitOk(): Promise<boolean> {
+  return parseBool(await getPipelineSetting(ADS_SETTING_KEYS.simulationExitOk), ADS_SIMULATION_EXIT_OK_DEFAULT)
 }

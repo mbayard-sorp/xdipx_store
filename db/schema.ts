@@ -2219,6 +2219,8 @@ export const adCreatives = pgTable('ad_creatives', {
   // Migration 115 (Ad Studio v2 PR-C): the five gate verdicts and the render ledger.
   gatesJson:       jsonb('gates_json').$type<Record<string, unknown> | null>(),
   renderJson:      jsonb('render_json').$type<Record<string, unknown> | null>(),
+  // Migration 116 (PR-H): running product of Scale and Brake taps, 1 = untouched.
+  budgetMultiplier: decimal('budget_multiplier', { precision: 6, scale: 3 }).notNull().default('1'),
 }, t => ({
   campaignIdx: index('idx_ad_creatives_campaign').on(t.adCampaignId, t.status),
   ideaIdx: index('idx_ad_creatives_idea').on(t.ideaId),

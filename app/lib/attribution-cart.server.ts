@@ -53,7 +53,11 @@ export function attributionCartAttrs(request: Request): CartAttr[] {
   if (utm?.source)   attrs.push({ key: '_utm_source',   value: utm.source })
   if (utm?.medium)   attrs.push({ key: '_utm_medium',   value: utm.medium })
   if (utm?.campaign) attrs.push({ key: '_utm_campaign', value: utm.campaign })
-  if (utm?.content)  attrs.push({ key: '_utm_content',  value: utm.content })
+  // utm_content is the Ad Studio creative id. Order attribution reads this exact
+  // key first (ad-metrics-core extractOrderUtmContent), so it is trimmed and
+  // bounded rather than skipped when a platform macro adds whitespace.
+  const utmContent = utm?.content?.trim().slice(0, 255)
+  if (utmContent)    attrs.push({ key: '_utm_content',  value: utmContent })
   if (refCode) attrs.push({ key: '_ref_code', value: refCode })
   return attrs
 }
