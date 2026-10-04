@@ -24,6 +24,8 @@ export function FilterBar({
   onSelect,
   archived,
   onArchived,
+  toggles,
+  chips,
   onClearAll,
 }: {
   segments: SegmentOption[]
@@ -33,6 +35,10 @@ export function FilterBar({
   onSelect: (key: string, value: string | null) => void
   archived?: boolean
   onArchived?: (on: boolean) => void
+  /** Extra on/off chips beside the selects (Creatives: Group by idea, Blocked). */
+  toggles?: Array<{ key: string; label: string; on: boolean; onToggle: (on: boolean) => void }>
+  /** Extra removable active chips (Creatives: the idea filter). */
+  chips?: Array<{ key: string; label: string; onClear: () => void }>
   onClearAll?: () => void
 }) {
   const active = selects.filter(s => s.value)
@@ -57,7 +63,7 @@ export function FilterBar({
 
       <div className="flex items-center gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden -mx-4 px-4 md:mx-0 md:px-0 pb-1">
         {selects.map(sel => sel.options.length > 0 && (
-          <label key={sel.key} className="shrink-0 inline-flex items-center text-xs text-ink-3">
+          <label key={sel.key} className="relative shrink-0 inline-flex items-center text-xs text-ink-3">
             <span className="sr-only">{sel.label}</span>
             <select
               value={sel.value ?? ''}
@@ -79,9 +85,20 @@ export function FilterBar({
             <ArchiveIcon size={10} /> Archived
           </button>
         )}
+        {toggles?.map(t => (
+          <button
+            key={t.key}
+            type="button"
+            onClick={() => t.onToggle(!t.on)}
+            aria-pressed={t.on}
+            className={`shrink-0 inline-flex items-center gap-1 min-h-11 md:min-h-9 px-3 rounded-full border text-xs font-mono touch-manipulation ${t.on ? 'border-coral bg-coral-soft text-ink' : 'border-line bg-paper text-ink-3 hover:border-ink-4'}`}
+          >
+            {t.label}
+          </button>
+        ))}
       </div>
 
-      {active.length > 0 && (
+      {(active.length > 0 || (chips?.length ?? 0) > 0) && (
         <div className="flex flex-wrap items-center gap-2">
           {active.map(sel => (
             <button
@@ -91,6 +108,16 @@ export function FilterBar({
               className="inline-flex items-center gap-1 min-h-11 md:min-h-9 px-3 rounded-full bg-ink text-white text-xs font-mono touch-manipulation"
             >
               {sel.label.toLowerCase()}: {sel.labels?.[sel.value ?? ''] ?? sel.value} <CloseIcon size={10} />
+            </button>
+          ))}
+          {chips?.map(c => (
+            <button
+              key={c.key}
+              type="button"
+              onClick={c.onClear}
+              className="inline-flex items-center gap-1 min-h-11 md:min-h-9 px-3 rounded-full bg-ink text-white text-xs font-mono touch-manipulation"
+            >
+              {c.label} <CloseIcon size={10} />
             </button>
           ))}
           {onClearAll && (

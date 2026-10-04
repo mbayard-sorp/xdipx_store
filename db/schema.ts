@@ -1836,6 +1836,8 @@ export const mediaAssets = pgTable('media_assets', {
   // Provider request id (Atlas/fal/Wavespeed) of the call that produced this
   // asset, migration 105 (ticket #11552). Null for derived assets (ffmpeg).
   providerRequestId: varchar('provider_request_id', { length: 64 }),
+  // Migration 115: idea id, concept, prompt, request id and format for ad creatives and plates.
+  provenance:      jsonb('provenance').$type<Record<string, unknown> | null>(),
   createdAt:       timestamp('created_at').notNull().defaultNow(),
 }, t => ({
   jobIdx: index('idx_media_assets_job').on(t.videoJobId),
@@ -2214,9 +2216,13 @@ export const adCreatives = pgTable('ad_creatives', {
   launchedAt:      timestamp('launched_at', { withTimezone: true }),
   pausedAt:        timestamp('paused_at', { withTimezone: true }),
   pauseReason:     text('pause_reason'),
+  // Migration 115 (Ad Studio v2 PR-C): the five gate verdicts and the render ledger.
+  gatesJson:       jsonb('gates_json').$type<Record<string, unknown> | null>(),
+  renderJson:      jsonb('render_json').$type<Record<string, unknown> | null>(),
 }, t => ({
   campaignIdx: index('idx_ad_creatives_campaign').on(t.adCampaignId, t.status),
   ideaIdx: index('idx_ad_creatives_idea').on(t.ideaId),
+  statusIdx: index('idx_ad_creatives_status').on(t.status, t.createdAt),
 }))
 
 /**

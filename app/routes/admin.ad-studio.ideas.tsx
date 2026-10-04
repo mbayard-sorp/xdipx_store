@@ -18,6 +18,7 @@ import {
 } from '~/lib/ad-ideas.server'
 import type { IdeaListItem } from '~/lib/ad-idea-types'
 import { nextRenderPassLabel } from '~/lib/ad-passes'
+import { renderIdeaNow } from '~/lib/ad-render.server'
 import { Reveal } from '~/components/motion/Reveal'
 import { IdeaCard } from '~/components/admin/ads/IdeaCard'
 import { FilterBar } from '~/components/admin/ads/FilterBar'
@@ -74,6 +75,27 @@ export async function action({ request }: ActionFunctionArgs) {
   if (intent === 'feedback' || intent === 'clear-feedback') {
     const admin = await getAdminUser(request)
     return handleAdFeedbackIntent('idea', form, admin?.email || 'owner')
+  }
+  if (intent === 'render-now') {
+    const admin = await getAdminUser(request)
+    const ideaId = Number(form.get('ideaId'))
+    if (!Number.isInteger(ideaId) || ideaId <= 0) return { ok: false as const, error: 'Bad idea id' }
+    const res = await renderIdeaNow(ideaId, admin?.email || 'owner', { budgetMs: 200_000 })
+    const skipped = [
+      ...res.enqueue.skipped.map(s => `${s.format ? `${s.format}: ` : ''}${s.reason.replace(/_/g, ' ')}`),
+      ...res.outcomes.filter(o => o.status === 'skipped' && o.skipped !== 'already_rendered').map(o => `#${o.creativeId}: ${o.skipped}`),
+    ]
+    const failedRows = res.outcomes.filter(o => o.status === 'failed')
+    if (res.outcomes.length === 0 && skipped.length > 0) return { ok: false as const, error: `Nothing rendered. ${skipped.join('; ')}` }
+    return {
+      ok: true as const,
+      ideaId,
+      rendered: res.outcomes.filter(o => o.status === 'draft' && o.skipped !== 'already_rendered').length,
+      blocked: res.outcomes.filter(o => o.status === 'blocked').length,
+      failed: failedRows.length,
+      deferred: res.deferred.length,
+      skipped: [...skipped, ...failedRows.map(o => `#${o.creativeId}: ${o.error ?? 'failed'}`)],
+    }
   }
   return { ok: false as const, error: 'Unknown intent' }
 }

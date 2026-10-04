@@ -5,7 +5,7 @@
 import { STUDIO_STATUS_STYLES, type StudioStatus } from '~/components/admin/social/StatusPill'
 
 export type AdStatus =
-  | 'proposed' | 'queued' | 'rendering' | 'rendered' | 'exported' | 'live' | 'rejected' | 'failed' | 'archived'
+  | 'proposed' | 'queued' | 'rendering' | 'rendered' | 'exported' | 'live' | 'rejected' | 'failed' | 'blocked' | 'archived'
 
 const MAP: Record<AdStatus, { base: StudioStatus; word: string }> = {
   proposed:  { base: 'draft',      word: 'Proposed' },
@@ -16,6 +16,7 @@ const MAP: Record<AdStatus, { base: StudioStatus; word: string }> = {
   live:      { base: 'published',  word: 'Live' },
   rejected:  { base: 'rejected',   word: 'Rejected' },
   failed:    { base: 'failed',     word: 'Failed' },
+  blocked:   { base: 'failed',     word: 'Blocked' },
   archived:  { base: 'deleted',    word: 'Archived' },
 }
 

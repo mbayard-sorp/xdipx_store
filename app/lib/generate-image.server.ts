@@ -117,6 +117,8 @@ export interface GenerateImageResult {
   provider: 'atlas' | 'fal' | 'imagen' | 'none'
   /** Cost key / model used (e.g. 'atlas/seedream-4.5-edit', 'fal/flux-dev', 'imagen', 'none'). */
   model: string
+  /** Provider request id (Atlas or fal) when the provider returned one. */
+  requestId?: string
 }
 
 const EMPTY: GenerateImageResult = { buffers: [], provider: 'none', model: 'none' }
@@ -172,7 +174,7 @@ export async function generateImage(opts: GenerateImageOpts): Promise<GenerateIm
       })
       if (buffers.length) {
         if (logCost) void logImageCost({ ...logBase, model: costKey, count: buffers.length, ...(requestId ? { requestId } : {}) })
-        return { buffers, provider: 'atlas', model: costKey }
+        return { buffers, provider: 'atlas', model: costKey, ...(requestId ? { requestId } : {}) }
       }
     } catch (err) {
       console.warn('[generate-image] Atlas Cloud failed, falling back to fal:', err)
@@ -200,7 +202,7 @@ export async function generateImage(opts: GenerateImageOpts): Promise<GenerateIm
         // With count > 1 this single fal request returns N images under one
         // request_id, so the id identifies this batch of images, not one of them.
         if (logCost) void logImageCost({ ...logBase, model: costKey, count: buffers.length, ...(requestId ? { requestId } : {}) })
-        return { buffers, provider: 'fal', model: costKey }
+        return { buffers, provider: 'fal', model: costKey, ...(requestId ? { requestId } : {}) }
       }
     } catch (err) {
       console.warn('[generate-image] fal.ai failed, falling back to Imagen:', err)
