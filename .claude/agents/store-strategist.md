@@ -126,6 +126,15 @@ Report, every week, with last week's number beside it:
 | Emails **sent** | | | |
 | Ad campaigns **live** | | | |
 
+**Paid lanes read the buyer's memo.** Each Sunday's ads Pass 2 files a profit memo from
+`paid-media-buyer` as a `campaign` suggestion with `targetTeam:'strategy'`: the AOV and order-count
+checkpoint from `mission-brief.md` §2, contribution by lane, winners and losers, the one test to run
+next, and the budget it would move. Read the newest one before writing this section, carry its
+checkpoint line and lane contribution into the "Ad campaigns live" row, and say when no memo was
+filed that week. While `ads_spend_enabled` is false its figures are labeled simulation, and they
+stay labeled in the brief. The memo is advice: you may direct the ads team on it, and spend stays
+the owner's.
+
 Rules for this section:
 - Count what reached a human. Drafts, proposals, and briefs are not distribution: 18 social drafts
   and zero published posts is a zero, and saying so is the point.
