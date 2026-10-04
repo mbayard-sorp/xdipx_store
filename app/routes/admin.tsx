@@ -56,7 +56,7 @@ export default function AdminLayout() {
           open={navOpen}
           onClose={() => setNavOpen(false)}
         />
-        <div className="flex-1 min-w-0 p-4 md:p-8 overflow-auto">
+        <div className="flex-1 min-w-0 p-4 md:p-8 overflow-x-clip">
           <Outlet />
         </div>
       </div>

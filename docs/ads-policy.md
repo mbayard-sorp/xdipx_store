@@ -13,7 +13,8 @@ Policies drift. Last verified **2026-07** against the platform sources listed at
 the Google sections (platform matrix row, §Google network eligibility, §Merchant Center), which were
 re-verified **2026-08-08**, §Meta Shops, which was added **2026-08-15** from the store's own
 live channel state, and §Shop app and Shop Campaigns, added **2026-09-30** from Shopify's help
-center and the store's live Shop publication. If a proposal hinges on a policy detail, re-verify against the live
+center and the store's live Shop publication, and §Meta strategic lane, added **2026-10-03** on
+owner decision from `docs/audits/meta-ads-category-teardown-2026-10-03.md`. If a proposal hinges on a policy detail, re-verify against the live
 policy page that run and cite it in the `policyCheck`.
 
 ---
@@ -22,21 +23,38 @@ policy page that run and cite it in the `policyCheck`.
 
 | Platform | Paid ads for pleasure products (sex toys) | What IS possible | Risk |
 |---|---|---|---|
-| **Meta** (FB/IG) | **Prohibited.** "Adult sexual arousal products or services" are banned outright — erotic products explicitly listed. | Narrow carve-out: sexual/reproductive **health & wellness** products (contraception, family planning) targeted 18+, focused on health and medical efficacy, **never on sexual pleasure**. For xdipx that covers at most lubricants/wellness-adjacent SKUs with strictly clinical framing — and the pleasure catalog can never ride along. Pixel/CAPI conversion tracking for organic/other traffic is fine and already wired. | **High.** Enforcement is aggressive; a rejected-ad pattern or a policy-violating landing page can ban the account. Never "wellness-wash" a pleasure product — reviewers follow the landing page. |
+| **Meta** (FB/IG) | **Written policy: prohibited.** Meta's Health and Wellness standard bars ads that promote "sexual arousal products that focus on sexual pleasure or enhancement", sex toys listed first. **xdipx posture: strategic lane** (owner decision 2026-10-03), run only under the hard gates in §Meta strategic lane. | Ads built to the written health line: object-first creative, register 3-4 copy about what the product is, who it is for, and the offer, sent to the bridge host or a health-framed PDP. The health and wellness carve-out (lube, menopause, 18+) stays the safest subset inside the lane. Pixel/CAPI conversion tracking for organic and other traffic is fine and already wired. | **High.** A new, small account gets the strict enforcement and none of the tolerance aged accounts see (teardown §4b). Enforcement can reach the whole Meta business, which also holds the pixel, CAPI, and the Shops catalog. Reviewers follow the landing page. A rejection pattern pauses the lane (§Meta strategic lane, M7). |
 | **TikTok** | **Prohibited.** Sexual products/services banned, including devices for sexual pleasure or performance. | Nothing paid. Do not propose TikTok, ever. | Ban risk plus brand-safety blowback. |
 | **X** | **Prohibited in ads.** Despite X's permissive *organic* adult-content policy, its advertising and shopping policies ban adult/sexual merchandise globally. | Organic posting (labeled appropriately per X's adult-content rules) — which is the social team's lane, not paid. | Ads get rejected; repeat attempts risk the ad account. |
-| **Google Ads** | **Restricted, not prohibited. The only mainstream paid channel.** Sex toys are "moderately restricted" sexual merchandise: ads serve only in limited scenarios (user search intent, 18+, local law, SafeSearch), never to minors. **Eligible on the Search Network only. Prohibited on the Display Network and the Google Ad Manager Network.** No certification or allowlist application exists for this category; serving limits apply automatically. | Search text ads on category and brand intent ("where to buy X"). Shopping is a **separate** surface with its own policy and review queue, see §Merchant Center. Non-explicit creative and landing experience. Expect "Limited" serving status as the *normal* state, not an error. | **Medium.** Compliant-but-limited is sustainable; explicit creative or policy-evasion attempts escalate to account action. |
+| **Google Ads** | **Restricted, not prohibited. The primary mainstream paid channel.** Sex toys are "moderately restricted" sexual merchandise: ads serve only in limited scenarios (user search intent, 18+, local law, SafeSearch), never to minors. **Eligible on the Search Network only. Prohibited on the Display Network and the Google Ad Manager Network.** No certification or allowlist application exists for this category; serving limits apply automatically. | Search text ads on category and brand intent ("where to buy X"). Shopping is a **separate** surface with its own policy and review queue, see §Merchant Center. Non-explicit creative and landing experience. Text only, copy at register 3-4, up to 4-5 for factual product text. Expect "Limited" serving status as the *normal* state, not an error. | **Medium.** Compliant-but-limited is sustainable; explicit creative or policy-evasion attempts escalate to account action. |
 | **Reddit** | Effectively prohibited for adult products in its ads program. | Organic community participation where subreddit rules allow (unpaid, social team's judgment). | Low spend exposure since there's no viable paid path. |
-| **Adult ad networks** (e.g. category-specialist networks) | **Allowed — it's their business.** | Display/native on adult and adjacent inventory. Vet each network's traffic quality and brand-safety before proposing; model conservative conversion rates. | Quality/fraud risk, not policy risk. Attribution via UTMs is mandatory. |
+| **Pinterest** | **Prohibited.** Sex toys, body-part-shaped products, and sexual enhancement products are banned in ads. | Nothing paid. Do not propose Pinterest ads. | n/a |
+| **Microsoft Advertising** (Bing search) | **Allowed through the Adult Advertising Program**, approved advertisers only, in US, CA, UK, AU, NZ, IE, FR, DE, TW. Approved adult keywords include "sex toys". Realistic sex toys are prohibited in creatives. | Search text ads with the same discipline as Google Search: text only, copy at register 3-4, up to 4-5 for factual product text. The account must be accepted into the program (participation form) before any proposal. | **Medium**, the same shape as Google: compliant-but-limited is sustainable. |
+| **Snapchat** | **Restricted, not prohibited.** Snap's ad policy gives "vibrator ads that do not use graphic language or imagery" as its example of allowed restricted content, age-gated 18+. | Snap Ads targeted 18+ with non-graphic object and typographic creative, copy at register 6-7: allusion is fine, graphic language is not. No nudity under the charter definition, and Snap also bars exposed nipples, bare buttocks, and partially obscured nudity. | **Medium.** The most permissive mainstream social platform for the category, run as a test lane. |
+| **Adult ad networks** (ExoClick, JuicyAds, TrafficJunky, and vetted peers) | **Allowed. It's their business.** | Display/native on adult and adjacent inventory. Vet each network's traffic quality and brand-safety before proposing; model conservative conversion rates. Copy runs at **register 10**, the one surface where the voice charter lets it ship (`docs/emma-voice.md`, intensity dial and marketing addendum, codified 2026-10-03). The imagery ceiling is the charter's nudity definition: no visible female nipples, labia, penis, or anus. | Quality/fraud risk, not policy risk. Attribution via UTMs is mandatory: every banner URL carries `utm_source=<network>`, `utm_medium`, `utm_campaign`, and `utm_content=<creative id>`, and a banner without them is not exported. |
 | **Owned + earned channels** | No gatekeeper. | Email/SMS to consented lists (the email team), SEO/AEO (already invested), affiliates and creator/newsletter sponsorships (disclosure required, creator's platform rules apply), the referral program once built. | Lowest risk, best margins — the default recommendation when paid math is thin. |
 | **Shopify Shop** (Shop app, Shop Campaigns) | **Approved for this catalog by Shop's own review** (owner report 2026-09-30): every product is approved except one held for missing images. Shop's written prohibited list names "Mature and adult content or services", so the review verdict, not the list, is the operative fact. Shopify, not xdipx, buys third-party placements (Meta, Google, X, Snap, Pinterest), several of which ban the category outright. See §Shop app and Shop Campaigns. | The approved catalog, with product-as-object imagery at media position 0, paid-register titles, and third-party placements off. Owner-run in Shopify admin. | **Medium.** Shop has approved the catalog, so the channel itself is sound today. The residual risk is a later policy change or re-review, and because the store runs on Shopify Payments, a Shopify-side action reaches checkout, not just an ad channel. |
 | **Etsy** | Not an ad platform for this store; the question is whether xdipx's catalog can list there at all. **The Nalpac-fulfilled physical toy catalog cannot, in any form.** See §Etsy for the two independent policy blockers. | A narrow, digital-only, design-original lane (adult party games, printables, digital art), disconnected from the Nalpac catalog and from Shopify inventory. Manual, owner-run; not an automated channel. | **High if physical toys are listed** (policy-prohibited item type, twice over). **Low** for the digital-only lane if kept to original designs with proper mature-content tagging. |
 
 **Channel priority for proposals:** (1) owned/earned, (2) Google restricted-serving Search,
 (3) vetted adult networks and newsletter/creator sponsorships, (4) Google Shopping via Merchant
-Center once §Merchant Center is satisfied, (5) Meta only for genuinely health-framed SKUs that pass
-the carve-out honestly. Never TikTok; never X paid. Shop Campaigns sits outside this ladder: it is
+Center once §Merchant Center is satisfied, (5) Snapchat 18+ non-graphic, and Meta only through
+§Meta strategic lane with every gate passed. Microsoft Advertising sits with Google Search at (2)
+once the Adult Advertising Program accepts the account. Never TikTok; never X, Reddit, or Pinterest
+paid. Shop Campaigns sits outside this ladder: it is
 an owner-run surface under §Shop app and Shop Campaigns, and `ads-manager` never proposes widening it.
+
+**Copy register by paid surface** (owner decision 2026-10-03; `docs/emma-voice.md` governs the
+registers themselves):
+
+| Surface | Register | Format limit |
+|---|---|---|
+| Meta strategic lane | 3-4 | Object-first creative, gates M1 to M7 |
+| Google Search | 3-4, up to 4-5 for factual product text | Text only |
+| Microsoft Advertising (Adult Advertising Program) | 3-4, up to 4-5 for factual product text | Text only |
+| Snapchat | 6-7 | Non-graphic, 18+ |
+| Vetted adult ad networks | 10 | Nudity definition is the imagery ceiling; UTMs mandatory |
+| Google Display, PMax, Demand Gen, YouTube; TikTok, X, Reddit, Pinterest paid | None. Prohibited | Never proposed |
 
 ## Google network eligibility (the rule that kills campaign types)
 
@@ -80,6 +98,67 @@ attribute requirements, and its own review queue with its own latency. Verified 
 Shopping is a **phase two** lane, never a week-one launch dependency: it stacks three review queues
 (account, domain claim, adult-merchandise review) behind a feed that must already be exact. Search
 launches on the Ads account alone. Submit the feed in parallel; do not block on it.
+
+## Meta strategic lane (owner decision 2026-10-03)
+
+Mike's "codify both" on 2026-10-03 moved Meta from Prohibited to a strategic lane for the pleasure
+catalog (`docs/store-team/ad-studio-v2-plan.md` §1 decision 2, §3). Meta's written policy did not
+change: it still bars ads that focus on sexual pleasure. The lane is built to that written line,
+using the ranked rules and rejection causes in `docs/audits/meta-ads-category-teardown-2026-10-03.md`
+§5a and §5c, because a new, small ad account gets strict enforcement. Each gate is a yes/no check.
+A Meta ad, draft, or proposal that fails any one of them is not created, and the `policyCheck` or
+the kill event names the gate it failed.
+
+**M1. Destination.**
+- The final URL is on the bridge host `curious.xdipx.com`, or is a PDP that renders the health and
+  body-literacy block (mechanism, body-safe materials, who it is for, a "not a medical device"
+  disclaimer) to every visitor.
+- Never the homepage, a collection page, or any other xdipx.com page.
+- Every visitor and every reviewer gets the same page. No cloaking: no user-agent, referrer, IP, or
+  geo switching.
+- The URL in the ad is the final URL and returns 200 with no redirect. No redirect chains, no link
+  shorteners.
+
+**M2. Creative.**
+- Object-first: the product on a coral-soft, plum-soft, or paper ground (design doctrine §4), or
+  held in a hand over fabric.
+- Never in use, never on or against bare skin.
+- No recognizably phallic or clinical silhouette in frame. A realistic dildo, a standard wand, or a
+  rabbit fails; pick SKUs whose shape reads as an object.
+- No nudity and no visible nipple of any sex (§Creative rules, paid line).
+
+**M3. Copy.**
+- Register 3-4 per `docs/emma-voice.md`: what the product is, who it is for, and the offer (discreet
+  box, XDIPX on the statement, the guarantee).
+- Never the words "sex toy", never an act name, never a pleasure-outcome or orgasm claim ("best
+  O's", "get off", and their family).
+- A social-proof number appears only when our own data sources it, and the `policyCheck` cites the
+  source. Never borrowed, rounded up, or invented.
+
+**M4. Account and audience.**
+- One advertiser page: xdipx. No second page, no category sub-page.
+- Age targeting hard-set to 25+. Never an open Advantage+ audience, never below 25.
+- Every ad is created as a PAUSED draft. Only the owner flips an ad live; no agent and no automation
+  activates a Meta ad.
+
+**M5. Catalog.**
+- Only the curated Meta product subset, with renamed display titles (no category words such as
+  "clitoral vibrator") and position-0 object packshots.
+- Never the raw Shopify feed, never Advantage+ catalog or Advantage+ shopping campaigns, never
+  dynamic product ads over the full catalog. The Facebook & Instagram channel catalog in §Meta Shops
+  is the raw feed and never backs an ad.
+
+**M6. Never.** Persona pages, fake bylines, advertorials with invented authors or "verified
+purchase" journalists, rotating domains or pages, link shorteners, countdowns or "final minutes"
+urgency, orgasm claims (teardown §5b).
+
+**M7. Account health and the pause rule.** The ad account shares a Meta business with the pixel,
+the Conversions API feed (`meta-capi.server.ts`), and the Facebook & Instagram Shops catalog. Meta
+enforces circumvention and repeat violations at the business level, so a banned ad account can take
+the conversion signal and the Shops surface down with it. Per §Escalation, one rejected ad stops new
+Meta proposals until the owner has read it and decided. A rejection pattern (a second rejection
+citing the same policy, or any account-level restriction) pauses the whole lane, and only the owner
+reopens it.
 
 ## Organic social
 
@@ -352,6 +431,10 @@ Sources: [Etsy Prohibited Items Policy](https://www.etsy.com/legal/policy/prohib
   `docs/store-team/instagram-campaigns.md` §3.2a with the on-skin treatment in §3.2c (which
   licenses product against bare skin and implied use); this line was corrected 2026-09-01 to match §Organic social above, which was corrected
   first.
+- **Adult ad networks** are the one exception to the paid-only additions above (owner decision
+  2026-10-03). Their imagery ceiling is the nudity definition alone: no visible female nipples,
+  labia, penis, or anus. Copy there runs at register 10 per `docs/emma-voice.md`. Every other paid
+  surface keeps the paid line, and the Meta lane adds M2 on top.
 - Education/wellness framing; product-as-object photography (the store's bright editorial style is
   an asset here). Never porn-adjacent aesthetics.
 - Copy follows `docs/emma-voice.md` on top of platform rules: suggestive about what a product does,
@@ -390,8 +473,26 @@ killed. "It'll probably slip through review" is never a compliance case.
 - Material policy changes spotted during a run → file a suggestion to update this document
   (kind `instructions`, target `ads`), citing the source.
 
+## Changelog
+
+- **2026-10-03**, owner decision ("codify both"), from `docs/store-team/ad-studio-v2-plan.md` §1
+  decisions 1 and 2. Meta moves from Prohibited to a strategic lane for the pleasure catalog, gated
+  by §Meta strategic lane (M1 to M7, drawn from the teardown's §5a and §5c); the matrix row still
+  records Meta's written policy as prohibiting the category. Adult ad networks run copy at register
+  10, the one surface where the voice charter (v5.8) lets it ship, with the nudity definition as
+  the imagery ceiling and UTMs mandatory; §Creative rules gains the matching exception. Microsoft
+  Advertising (Adult Advertising Program), Snapchat (non-graphic, 18+, register 6-7), and Pinterest
+  (prohibited) join the matrix, sourced from `docs/audits/ad-platform-research-2026-10-03.md`, and
+  a copy-register table now lists every paid surface. Google Search stays text only at 3-4 (4-5
+  for factual product text). Google Display, PMax and YouTube, and TikTok, X, Reddit and Pinterest
+  paid, stay prohibited. The channel priority list is updated to match.
+
 ## Sources (last verification, 2026-07)
 
+- Meta (re-read 2026-10-03): [Health and Wellness ad standard](https://transparency.meta.com/policies/ad-standards/restricted-goods-services/health-wellness), which the adult-products URL below now redirects to
+- Microsoft (read 2026-10-03): [Adult content policies](https://advertise.bingads.microsoft.com/zh-tw/resources/policies/tw-en/adult-content-policies-en), [Adult Advertising Program participation form](https://about.ads.microsoft.com/en/forms/policies/adult-advertising-program-participation-form)
+- Snap (read 2026-10-03): [Snap Ad Policies](https://snap.com/ad-policies?lang=en-US)
+- Pinterest (read 2026-10-03, secondary source): [Pinterest advertising guidelines via ConductAtlas](https://conductatlas.com/platform/pinterest-ads/pinterest-advertising-guidelines/provision/CA-P-066064/prohibition-on-advertising-sex-toys-and-adult-products/)
 - Meta: [Adult products or services ad standard](https://transparency.meta.com/policies/ad-standards/content-specific-restrictions/adult-products-or-services), [Health & wellness policy](https://www.facebook.com/business/help/2489235377779939)
 - TikTok: [Adult content ad policy](https://ads.tiktok.com/help/article/tiktok-ads-policy-adult-content)
 - X: [Adult or sexual products and services ads policy](https://business.twitter.com/en/help/ads-policies/ads-content-policies/adult-or-sexual-products-and-services), [Shopping policies](https://help.x.com/en/rules-and-policies/shopping-policies)
