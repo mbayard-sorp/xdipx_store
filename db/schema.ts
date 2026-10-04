@@ -2200,8 +2200,122 @@ export const adCreatives = pgTable('ad_creatives', {
   policyCheck:  text('policy_check').notNull(),
   createdAt:    timestamp('created_at').notNull().defaultNow(),
   updatedAt:    timestamp('updated_at').notNull().defaultNow(),
+  // Migration 114 (Ad Studio v2): all nullable, so every pre-v2 row stays valid.
+  ideaId:          integer('idea_id').references((): AnyPgColumn => adIdeas.id, { onDelete: 'set null' }),
+  lane:            varchar('lane', { length: 24 }),
+  registerTier:    varchar('register_tier', { length: 8 }),
+  slogan:          text('slogan'),
+  layoutTemplate:  varchar('layout_template', { length: 64 }),
+  plateAssetId:    integer('plate_asset_id'),
+  width:           integer('width'),
+  height:          integer('height'),
+  exportPayload:   jsonb('export_payload'),
+  externalAdId:    varchar('external_ad_id', { length: 64 }),
+  launchedAt:      timestamp('launched_at', { withTimezone: true }),
+  pausedAt:        timestamp('paused_at', { withTimezone: true }),
+  pauseReason:     text('pause_reason'),
 }, t => ({
   campaignIdx: index('idx_ad_creatives_campaign').on(t.adCampaignId, t.status),
+  ideaIdx: index('idx_ad_creatives_idea').on(t.ideaId),
+}))
+
+/**
+ * Ad Studio v2 ideas (migration 114). One row per concept the ads routine
+ * proposes. policy_check is required, same contract as ad_campaigns. Status:
+ * proposed | hearted | rejected | rendered | archived. hearted and rejected are
+ * set ONLY by the owner rating (admin route action); agents may set rendered
+ * or archived through POST /api/team/ad-ideas.
+ */
+export const adIdeas = pgTable('ad_ideas', {
+  id:             serial('id').primaryKey(),
+  runId:          integer('run_id'),
+  conceptSlug:    varchar('concept_slug', { length: 64 }).notNull(),
+  lane:           varchar('lane', { length: 24 }).notNull(),
+  registerTier:   varchar('register_tier', { length: 8 }).notNull(),
+  title:          varchar('title', { length: 160 }).notNull(),
+  oneLiner:       text('one_liner'),
+  products:       jsonb('products').$type<AdIdeaProduct[]>().notNull().default([]),
+  headlines:      jsonb('headlines').$type<string[]>().notNull().default([]),
+  body:           jsonb('body').$type<string[]>().notNull().default([]),
+  audience:       jsonb('audience').$type<Record<string, unknown> | null>(),
+  destinationUrl: text('destination_url'),
+  breakEvenJson:  jsonb('break_even_json').$type<Record<string, unknown> | null>(),
+  policyCheck:    text('policy_check').notNull(),
+  status:         varchar('status', { length: 16 }).notNull().default('proposed'),
+  createdAt:      timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt:      timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => ({
+  statusIdx: index('idx_ad_ideas_status').on(t.status, t.createdAt),
+  laneIdx: index('idx_ad_ideas_lane').on(t.lane, t.status),
+}))
+
+export interface AdIdeaProduct { handle: string; title?: string }
+
+/**
+ * Owner feedback on ad ideas and ad creatives (migration 114). Same shape and
+ * the same OWNER-WRITE-ONLY rule as social_asset_feedback: one live verdict per
+ * subject, written only from admin route actions behind requireAdmin, read by
+ * the ads routine through the read-only POST /api/team/ad-feedback.
+ */
+export const adIdeaFeedback = pgTable('ad_idea_feedback', {
+  id:        serial('id').primaryKey(),
+  ideaId:    integer('idea_id').notNull().references(() => adIdeas.id, { onDelete: 'cascade' }),
+  verdict:   varchar('verdict', { length: 4 }).notNull(),
+  reasons:   jsonb('reasons').$type<string[]>().notNull().default([]),
+  note:      text('note'),
+  ratedBy:   varchar('rated_by', { length: 64 }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }),
+}, t => ({
+  ideaUq: uniqueIndex('idx_ad_idea_feedback_idea').on(t.ideaId),
+}))
+
+export const adCreativeFeedback = pgTable('ad_creative_feedback', {
+  id:         serial('id').primaryKey(),
+  creativeId: integer('creative_id').notNull().references(() => adCreatives.id, { onDelete: 'cascade' }),
+  verdict:    varchar('verdict', { length: 4 }).notNull(),
+  reasons:    jsonb('reasons').$type<string[]>().notNull().default([]),
+  note:       text('note'),
+  ratedBy:    varchar('rated_by', { length: 64 }).notNull(),
+  createdAt:  timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt:  timestamp('updated_at', { withTimezone: true }),
+}, t => ({
+  creativeUq: uniqueIndex('idx_ad_creative_feedback_creative').on(t.creativeId),
+}))
+
+/**
+ * Daily spend and outcome ledger (migration 114), written by the metrics import
+ * in a later PR. creative_id is nullable so an account-level day still lands.
+ */
+export const adCreativeDailyMetrics = pgTable('ad_creative_daily_metrics', {
+  id:              serial('id').primaryKey(),
+  creativeId:      integer('creative_id').references(() => adCreatives.id, { onDelete: 'cascade' }),
+  day:             date('day').notNull(),
+  platform:        varchar('platform', { length: 20 }).notNull(),
+  spendCents:      integer('spend_cents').notNull().default(0),
+  impressions:     integer('impressions').notNull().default(0),
+  clicks:          integer('clicks').notNull().default(0),
+  orders:          integer('orders').notNull().default(0),
+  netRevenueCents: integer('net_revenue_cents').notNull().default(0),
+  source:          varchar('source', { length: 12 }).notNull().default('csv'), // csv|mcp|shopify
+  createdAt:       timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => ({
+  dayIdx: index('idx_ad_metrics_day').on(t.day),
+  creativeDayUq: uniqueIndex('idx_ad_metrics_creative_day').on(t.creativeId, t.day, t.platform),
+}))
+
+/** Rule firings R1..R8 (migration 114). Written by the rules engine in a later PR. */
+export const adRuleEvents = pgTable('ad_rule_events', {
+  id:         serial('id').primaryKey(),
+  ruleId:     varchar('rule_id', { length: 4 }).notNull(),
+  creativeId: integer('creative_id').references(() => adCreatives.id, { onDelete: 'cascade' }),
+  firedAt:    timestamp('fired_at', { withTimezone: true }).notNull().defaultNow(),
+  action:     varchar('action', { length: 24 }).notNull(),
+  detail:     jsonb('detail'),
+  appliedBy:  varchar('applied_by', { length: 64 }),
+  appliedAt:  timestamp('applied_at', { withTimezone: true }),
+}, t => ({
+  creativeIdx: index('idx_ad_rule_events_creative').on(t.creativeId, t.firedAt),
 }))
 
 /**
