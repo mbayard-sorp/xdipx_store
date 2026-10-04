@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildFlowPayload, flowEventProps, inferProductType, pickHeaderAsset, emailsForFlow, FLOW_NAMES } from './klaviyo-flows.server'
+import { buildFlowPayload, emailHeaderImageUrl, flowEventProps, inferProductType, pickHeaderAsset, emailsForFlow, FLOW_NAMES } from './klaviyo-flows.server'
 import { FLOW_EMAILS } from './klaviyo-flow-templates'
 
 const ids = Object.fromEntries(FLOW_EMAILS.map(e => [e.key, `tpl-${e.key}`]))
@@ -137,5 +137,19 @@ describe('inferProductType', () => {
     expect(inferProductType('Sliquid Naturals H2O Lubricant')).toBe('lube')
     expect(inferProductType('Dame Zee Bullet Vibrator')).toBe('vibrator')
     expect(inferProductType('Mystery Object')).toBeUndefined()
+  })
+})
+
+describe('emailHeaderImageUrl', () => {
+  it('crops a Shopify CDN header to a 2x square and keeps its version param', () => {
+    const out = new URL(emailHeaderImageUrl('https://cdn.shopify.com/s/files/1/x/files/a.jpg?v=123'))
+    expect(out.searchParams.get('v')).toBe('123')
+    expect(out.searchParams.get('width')).toBe('1200')
+    expect(out.searchParams.get('height')).toBe('1200')
+    expect(out.searchParams.get('crop')).toBe('center')
+  })
+  it('leaves other hosts and junk alone', () => {
+    expect(emailHeaderImageUrl('https://cdn/pack.jpg')).toBe('https://cdn/pack.jpg')
+    expect(emailHeaderImageUrl('not a url')).toBe('not a url')
   })
 })

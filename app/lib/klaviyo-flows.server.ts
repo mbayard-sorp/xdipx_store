@@ -19,6 +19,7 @@
  */
 
 import {
+  EMAIL_HEADER_PX,
   FLOW_EMAILS,
   FLOW_EVENT_PROPERTY_KEYS,
   flowTemplateName,
@@ -421,6 +422,29 @@ export async function pickHeaderAsset(productHandle: string, deps: HeaderDeps = 
   return packshot ? { url: packshot, kind: 'packshot' } : { url: null, kind: 'none' }
 }
 
+/**
+ * The header URL the email actually loads. Every header source today (social
+ * library frames rehosted to Shopify Files, and position-0 packshots) is on the
+ * Shopify CDN, which crops on request. Asking it for a square at 2x the plate
+ * (EMAIL_HEADER_PX) means the email's image plate is the same height for every
+ * product and sharp on retina screens, whatever aspect the source frame was.
+ * A URL on any other host is returned unchanged. Pure, so it is unit-tested.
+ */
+export function emailHeaderImageUrl(url: string): string {
+  let u: URL
+  try {
+    u = new URL(url)
+  } catch {
+    return url
+  }
+  if (u.hostname !== 'cdn.shopify.com' && !u.hostname.endsWith('.myshopify.com')) return url
+  const size = String(EMAIL_HEADER_PX * 2)
+  u.searchParams.set('width', size)
+  u.searchParams.set('height', size)
+  u.searchParams.set('crop', 'center')
+  return u.toString()
+}
+
 // ─── Event properties ─────────────────────────────────────────────────────
 
 export interface FlowEventProps {
@@ -478,7 +502,7 @@ export async function flowEventProps(
     } as FlowEventProps
     const type = inferProductType(product.title, product.tags ?? [])
     if (type) props.ProductType = type
-    if (header.url) props.HeaderImageURL = header.url
+    if (header.url) props.HeaderImageURL = emailHeaderImageUrl(header.url)
     return props
   } catch (err) {
     console.error('[klaviyo-flows] flowEventProps failed:', err instanceof Error ? err.message : err)
