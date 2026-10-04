@@ -8,6 +8,7 @@ import { db } from '~/lib/db.server'
 import { adCreativeFeedback, adCreatives, adIdeas, mediaAssets } from '../../db/schema'
 import { isGatesJson } from '~/lib/ad-render-rules'
 import { isPlaceholderUrl } from '~/lib/ad-render.server'
+import { exporterForLane } from '~/lib/ad-export/types'
 import { CREATIVE_PAGE, CREATIVE_PAGE_MAX, type CreativeListItem, type CreativeView, type ExportStateView } from '~/lib/ad-creative-types'
 import type { FeedbackFilter } from '~/lib/ad-creative-feedback-reasons'
 
@@ -59,18 +60,37 @@ function exportView(
   renderState: string | null,
   renderError: string | null,
 ): ExportStateView {
-  if (row.status === 'failed') return { kind: 'failed', message: renderError ?? 'The render failed.' }
-  if (row.status === 'rendering') return { kind: 'building' }
+  const exporter = exporterForLane(row.lane)
+  if (!exporter) return { kind: 'none' }
+  if (row.status === 'failed') return { kind: 'failed', message: renderError ?? 'The render failed.', exporter, retry: 'render' }
+  if (row.status === 'rendering') return { kind: 'building', exporter }
   const payload = row.exportPayload as Record<string, unknown> | null
   const exportErr = payload && typeof payload['exportError'] === 'string' ? (payload['exportError'] as string) : null
-  if (exportErr) return { kind: 'failed', message: exportErr }
-  if (payload && payload['exporting'] === true) return { kind: 'building' }
-  if (renderState === 'queued' || !assetUrl) {
-    // Text-only Search rows have no stored file and no exporter yet.
-    return { kind: row.format === 'text' ? 'none' : 'not-built' }
+  if (exportErr) return { kind: 'failed', message: exportErr, exporter, retry: 'export' }
+  if (payload && payload['exporting'] === true) return { kind: 'building', exporter }
+  if (row.externalAdId) {
+    return { kind: 'in-platform', exporter, externalId: row.externalAdId, externalUrl: adsManagerUrl(row.externalAdId) }
   }
-  if (rated === 'up') return { kind: 'ready', downloadUrl: assetUrl }
-  return { kind: 'not-built' }
+  const file = payload && typeof payload['export'] === 'object' ? (payload['export'] as Record<string, unknown>) : null
+  if (payload && payload['status'] === 'ready' && file) {
+    return {
+      kind: 'ready',
+      exporter,
+      downloadUrl: typeof file['url'] === 'string' ? (file['url'] as string) : null,
+      filename: typeof file['filename'] === 'string' ? (file['filename'] as string) : null,
+      hasPayload: exporter === 'meta-paused-draft' && typeof payload['meta'] === 'object' && payload['meta'] !== null,
+    }
+  }
+  const finished = row.format === 'text' ? row.status === 'draft' : row.status === 'draft' && !!assetUrl && renderState !== 'queued'
+  return { kind: 'not-built', exporter, canBuild: rated === 'up' && finished }
+}
+
+/** Ads Manager deep link. The ad account comes from env, which never reaches the client except through this URL. */
+function adsManagerUrl(adId: string): string | null {
+  const raw = process.env['META_AD_ACCOUNT_ID']?.trim()
+  if (!raw) return null
+  const acct = raw.replace(/^act_/, '')
+  return `https://adsmanager.facebook.com/adsmanager/manage/ads?act=${encodeURIComponent(acct)}&selected_ad_ids=${encodeURIComponent(adId)}`
 }
 
 export async function listCreatives(f: ListCreativesFilters = {}): Promise<{ items: CreativeListItem[]; nextCursor: number | null }> {

@@ -32,10 +32,10 @@ const VOICE_RULES: readonly Rule[] = [
 ]
 
 /** Words that are never pleasure-outcome or act claims on a register 3-4 surface (Meta M3). */
-const PLEASURE_CLAIMS = /\b(orgasms?|o's|get off|climax(es)?|come hard|cumming|best sex|sex toys?)\b/i
+export const PLEASURE_CLAIMS = /\b(orgasms?|o's|get off|climax(es)?|come hard|cumming|best sex|sex toys?)\b/i
 
 /** Category words that never appear in a Meta slogan (M5: renamed display titles carry none). */
-const META_CATEGORY_WORDS = /\b(sex toys?|vibrators?|dildos?|clitoral|clit|g-?spot|orgasms?|masturbat\w*|arousal|erotic|sexual|pleasure|bullet|rabbit|wand)\b/i
+export const META_CATEGORY_WORDS = /\b(sex toys?|vibrators?|dildos?|clitoral|clit|g-?spot|orgasms?|masturbat\w*|arousal|erotic|sexual|pleasure|bullet|rabbit|wand)\b/i
 
 export interface VoiceInput {
   lane: string

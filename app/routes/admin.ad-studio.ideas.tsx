@@ -19,6 +19,8 @@ import {
 import type { IdeaListItem } from '~/lib/ad-idea-types'
 import { nextRenderPassLabel } from '~/lib/ad-passes'
 import { renderIdeaNow } from '~/lib/ad-render.server'
+import { ExportRefusal } from '~/lib/ad-export/common'
+import { buildExport } from '~/lib/ad-export/service.server'
 import { Reveal } from '~/components/motion/Reveal'
 import { IdeaCard } from '~/components/admin/ads/IdeaCard'
 import { FilterBar } from '~/components/admin/ads/FilterBar'
@@ -95,6 +97,18 @@ export async function action({ request }: ActionFunctionArgs) {
       failed: failedRows.length,
       deferred: res.deferred.length,
       skipped: [...skipped, ...failedRows.map(o => `#${o.creativeId}: ${o.error ?? 'failed'}`)],
+    }
+  }
+  if (intent === 'export-idea') {
+    const admin = await getAdminUser(request)
+    const ideaId = Number(form.get('ideaId'))
+    if (!Number.isInteger(ideaId) || ideaId <= 0) return { ok: false as const, error: 'Bad idea id' }
+    try {
+      const out = await buildExport({ ideaId }, admin?.email || 'owner')
+      return { ok: true as const, summary: out.summary.lines, warnings: out.summary.warnings, url: out.url, filename: out.filename }
+    } catch (err) {
+      if (err instanceof ExportRefusal) return { ok: false as const, errorCode: err.code, error: err.issues.slice(0, 4).join(' ') }
+      return { ok: false as const, error: err instanceof Error ? err.message : 'The export failed.' }
     }
   }
   return { ok: false as const, error: 'Unknown intent' }

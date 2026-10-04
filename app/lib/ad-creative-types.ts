@@ -4,13 +4,27 @@
 import type { FeedbackView } from '~/lib/ad-idea-types'
 import type { GatesJson } from '~/lib/ad-render-rules'
 
-export type ExportStateKind = 'none' | 'not-built' | 'building' | 'ready' | 'failed'
+export type ExportStateKind = 'none' | 'not-built' | 'building' | 'ready' | 'failed' | 'in-platform'
 
 export interface ExportStateView {
   kind: ExportStateKind
-  /** Stored PNG for the Download action when kind is ready. */
+  /** Stored export file (Search CSV, banner zip) for the Download action when kind is ready. Null for a Meta payload-only draft. */
   downloadUrl?: string | null
   message?: string | null
+  /** The exporter this lane uses, from the registry. */
+  exporter?: 'google-editor-csv' | 'meta-paused-draft' | 'banner-zip' | null
+  /** Filename of the stored export. */
+  filename?: string | null
+  /** A Meta paused draft payload is stored and can be viewed. */
+  hasPayload?: boolean
+  /** What Retry re-runs when kind is failed: the render or the export build. */
+  retry?: 'render' | 'export'
+  /** Hearted, finished and exportable: the Build action may render. */
+  canBuild?: boolean
+  /** Meta ad id once the paused draft exists in the platform. */
+  externalId?: string | null
+  /** Ads Manager deep link for that ad. */
+  externalUrl?: string | null
 }
 
 export interface CreativeListItem {
