@@ -735,6 +735,14 @@ export interface OpsWatchFacts {
    * meta_capi_outbox absent for ~2 days (#5061/#5092).
    */
   purchaseCapiWriteFailures: number
+  /**
+   * Yesterday's Notebook status (ticket #13393 DONE WHEN 3): the slug that
+   * went live, or a miss with its hold reason (one of hero, gate-block,
+   * gate-refused, other, or null when no run recorded one). `null` means the
+   * lookup itself failed (Sanity/DB unreachable this run), distinct from a
+   * genuine miss.
+   */
+  notebookYesterday: { slug: string } | { missed: true; holdReason: string | null } | null
 }
 
 /**
@@ -760,6 +768,18 @@ export function renderOpsWatchSection(f: OpsWatchFacts): string {
   if (awaitingRework.count > 0) {
     const old = awaitingRework.oldestDays ?? 0
     parts.push(`<p style="margin:0 0 4px;color:${MUTED};">${awaitingRework.count} draft${awaitingRework.count === 1 ? '' : 's'} with your feedback awaiting rework${old > 0 ? `, oldest ${old} day${old === 1 ? '' : 's'}` : ''} &middot; /admin/socials</p>`)
+  }
+
+  // Yesterday's Notebook line (ticket #13393): the slug that went live, or a
+  // miss with its hold reason. `null` is a lookup failure, reported as
+  // unknown rather than silently matching the healthy case.
+  if (f.notebookYesterday === null) {
+    parts.push(`<p style="margin:0 0 4px;color:${MUTED};">Notebook yesterday: could not read (Sanity/DB unavailable this run).</p>`)
+  } else if ('slug' in f.notebookYesterday) {
+    parts.push(`<p style="margin:0 0 4px;color:${GOOD};">Notebook yesterday: <strong>${esc(f.notebookYesterday.slug)}</strong> went live.</p>`)
+  } else {
+    const reason = f.notebookYesterday.holdReason
+    parts.push(`<p style="margin:0 0 4px;color:${BAD};"><strong>Notebook yesterday: missed.</strong>${reason ? ` Hold reason: ${esc(reason)}.` : ' No hold reason on record.'}</p>`)
   }
 
   parts.push(f.pricingBatchRows > 0
@@ -1349,6 +1369,19 @@ async function gatherOpsWatch(): Promise<OpsWatchFacts> {
     agentRetired: [],
     tokenWriteFailures: 0,
     purchaseCapiWriteFailures: 0,
+    notebookYesterday: null,
+  }
+
+  // Yesterday's Notebook status (ticket #13393): live slug, or a miss with
+  // its hold reason. Best-effort like every other line here.
+  try {
+    const { gatherNotebookYesterdayStatus } = await import('~/lib/notebook-zero-day.server')
+    const status = await gatherNotebookYesterdayStatus()
+    out.notebookYesterday = status.slug
+      ? { slug: status.slug }
+      : { missed: true, holdReason: status.holdReason }
+  } catch (err) {
+    console.warn('[owner-digest] notebook-yesterday status failed:', String(err).slice(0, 200))
   }
 
   // Social review backlog, split by which side owes the next move (#5415).

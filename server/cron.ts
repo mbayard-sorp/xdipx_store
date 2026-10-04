@@ -342,6 +342,28 @@ export function createCronRoutes() {
   })
 
   /**
+   * GET|POST /cron/notebook-zero-day
+   * Schedule: 23:40 UTC — after the content recovery firing (suggested 22:00
+   * UTC, see routine-content-daily.md Step 0b) has had time to finish. With
+   * content_team_enabled and content_team_autopublish both on, counts today's
+   * published blogPost rows; at zero it files a P1 code ticket (dedupeKey
+   * notebook-zero-day) naming any held draft from today and its hold reason,
+   * and posts an error event on the day's content run (ticket #13393). With
+   * either valve off it does nothing. Always 200: this never rolls anything
+   * back, it only files a ticket when one is owed.
+   */
+  cronRoute('/notebook-zero-day', async (_req, res) => {
+    try {
+      const { runNotebookZeroDayCheck } = await import('../app/lib/notebook-zero-day.server.js')
+      const report = await runNotebookZeroDayCheck()
+      res.json({ ok: true, ...report })
+    } catch (err) {
+      console.error('[cron:notebook-zero-day]', err)
+      res.status(500).json({ error: String(err) })
+    }
+  })
+
+  /**
    * POST /cron/profit-summary
    * Schedule: 12:05 AM — write daily profit summary to Neon
    */
