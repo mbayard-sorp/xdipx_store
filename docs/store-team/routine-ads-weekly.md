@@ -1,3 +1,8 @@
+> **RETIRED 2026-10-03.** Replaced by the two daily passes in `docs/store-team/routine-ads-daily.md`
+> (Ad Studio v2, `docs/store-team/ad-studio-v2-plan.md` §5). Do not follow this playbook. The weekly
+> trigger `trig_013PfuKac4rkjPTHuUwXWzRn` is disabled by the owner after the daily triggers exist; the
+> file stays for history only.
+
 # Routine — Ads Proposals (ads-manager)
 
 The playbook for the scheduled weekly ads routine. Entry agent: `ads-manager`. **PROPOSE-ONLY**:
@@ -38,6 +43,8 @@ serving, adult networks, and owned/earned are the viable lanes), objective, audi
 direction (Emma charter + policy creative rules), landing URL with UTMs
 (`utm_source=<platform>&utm_medium=paid&utm_campaign=<name>`), planned daily/total budget within
 `ads_team_daily_cents`, break-even ROAS, and the mandatory `policyCheck`.
+
+Meta is a gated strategic lane since 2026-10-03, no longer prohibited outright: a Meta proposal must pass every gate in `docs/ads-policy.md` §Meta strategic lane (M1 to M7).
 
 ```bash
 curl -s -X POST "$BASE_URL/api/team/ad-campaign" \
