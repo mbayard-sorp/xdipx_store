@@ -74,6 +74,11 @@ import collectionsHub     from '../schemas/collectionsHub.js'
 // Phase 6d — Manufacturer specs data layer (additive; does not touch existing schemas).
 import mfgProductSpecs    from '../schemas/mfgProductSpecs.js'
 
+// Ad Studio v2 PR-D — paid-lane bridge pages (curious.xdipx.com) and the curated
+// per-lane product subset (additive; no existing schema touched).
+import adBridgePage         from '../schemas/adBridgePage.js'
+import adLaneProductSubset  from '../schemas/adLaneProductSubset.js'
+
 // Comparison ("X vs Y") pages — BOFU answer surface at /compare/{slug} with
 // ItemList + FAQ schema and a .md twin (additive; existing schemas untouched).
 import comparison         from '../schemas/comparison.js'
@@ -223,6 +228,9 @@ export const schemaTypes = [
   collectionsHub,
   // Phase 6d — Manufacturer specs per product (additive; does not touch existing schemas).
   mfgProductSpecs,
+  // Ad Studio v2 PR-D — bridge pages + curated lane subset (additive).
+  adBridgePage,
+  adLaneProductSubset,
   // Comparison ("X vs Y") pages — /compare/{slug} answer surface (additive).
   comparison,
   // Block object types

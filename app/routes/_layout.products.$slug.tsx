@@ -12,7 +12,9 @@ import {
 } from '~/lib/shopify.server'
 import { normalizeProductHandles } from '~/lib/product-handles'
 import { resolveBreadcrumbs, type BreadcrumbCrumb } from '~/lib/breadcrumbs.server'
-import { getProductPageBlocks, getProductFaqs, getPdpTrustBar, getNotebookPostsForProduct, getNotebookPostsForProductType, getBlogPosts } from '~/lib/sanity.server'
+import { getProductPageBlocks, getProductFaqs, getPdpTrustBar, getNotebookPostsForProduct, getNotebookPostsForProductType, getBlogPosts, isPreviewRequest } from '~/lib/sanity.server'
+import { isInLane } from '~/lib/ad-lane-subset.server'
+import { HealthLiteracyBlock } from '~/components/store/HealthLiteracyBlock'
 import { getBundleByHandle, getBundleCompanionFor } from '~/lib/bundles.server'
 // Reviews: UI + aggregateRating JSON-LD flip together behind the
 // reviews_pdp_enabled valve. They must never be decoupled (Google's
@@ -100,7 +102,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // round-trip. The customer token (cookie read) rides along too. The bundle
   // lookup rides along here as well (cached() so this stays a cheap KV hit) —
   // its result is branched on after the batch resolves, below.
-  const [deal, pdpBlocks, fbtHandles, companionBundle, faqs, mainMenu, pdpTrustBar, customerToken, bundle, embedNotebookPosts] = await Promise.all([
+  const [deal, pdpBlocks, fbtHandles, companionBundle, faqs, mainMenu, pdpTrustBar, customerToken, bundle, embedNotebookPosts, inMetaLane] = await Promise.all([
     // A Storefront outage must never reach the `!deal` 404 below. Google reads
     // a 404 as "drop this URL"; a 503 with Retry-After reads as "come back",
     // which is the truth when Shopify simply did not answer in time.
@@ -123,6 +125,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     getCustomerToken(request),
     getBundleByHandle(slug),
     getNotebookPostsForProduct(slug, 3),
+    // Meta-lane subset (ads-policy M1/M5): these PDPs carry the health block.
+    // Sanity-backed and cached; any failure reads as "not in the lane".
+    isInLane(slug, 'meta', isPreviewRequest(request)).catch(() => false),
   ])
 
   // Bundle fast-path: if Sanity has a bundle doc for this handle, render the
@@ -153,6 +158,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       ] as BreadcrumbCrumb[],
       pdpTrustBar: null as TrustBarBlockType | null,
       notebookPosts: [] as BlogPostCard[],
+      inMetaLane: false,
     }
   }
 
@@ -467,6 +473,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       reviewSort,
       reviewFilter,
       notebookPosts,
+      inMetaLane,
     },
     { headers: { 'Set-Cookie': browseCookieHeader } },
   )
@@ -1296,6 +1303,11 @@ function ProductPage() {
           carouselProductMap={carouselProductMap}
         />
       ))}
+
+      {/* Health and body-literacy block for Meta-lane subset products
+          (ads-policy M1). Shown to every visitor, below the page content and
+          above reviews. Renders nothing when the product lacks the fields. */}
+      {loaderData.inMetaLane && <HealthLiteracyBlock deal={deal} />}
 
       {/* Customer reviews — renders only when the reviews_pdp_enabled valve is
           on AND at least one real approved review exists (same condition that

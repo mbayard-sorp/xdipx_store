@@ -121,6 +121,8 @@ export default defineConfig({
             S.divider(),
             S.documentTypeListItem('productPage').title('Products').icon(() => '🛍️'),
             S.documentTypeListItem('mfgProductSpecs').title('Manufacturer specs').icon(() => '🔧'),
+            S.documentTypeListItem('adBridgePage').title('Ad bridge pages').icon(() => '🌉'),
+            S.documentTypeListItem('adLaneProductSubset').title('Ad lane product subsets').icon(() => '🎯'),
             S.documentTypeListItem('page').title('Pages').icon(() => '📄'),
             S.documentTypeListItem('trustItem').title('Trust Items').icon(() => '✅'),
             S.listItem()

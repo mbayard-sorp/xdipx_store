@@ -11,6 +11,8 @@ import { createCronRoutes } from './cron.js'
 import { createWebhookRoutes } from './webhooks.js'
 import { createMcpRoutes } from './mcp-route.js'
 import { validateStartupEnv } from '../app/lib/env.server.js'
+import { bridgeHostSupportPath, bridgeSlugFromPath, isBridgeHost, requestHost } from '../app/lib/bridge-host.server.js'
+import { getAdBridgePage } from '../app/lib/ad-bridge.server.js'
 
 const isProduction = process.env['NODE_ENV'] === 'production'
 
@@ -96,6 +98,43 @@ app.use('/api/', (req, res, next) => {
     return
   }
   next()
+})
+
+// ─── Bridge host gate (Ad Studio v2 PR-D) ────────────────────────────────
+// curious.xdipx.com serves only paid-lane bridge pages (ads-policy M1: never
+// the homepage, a collection page, or any other xdipx.com page). Static assets
+// and Vite/dev modules were already answered above. Anything else that reaches
+// here on the bridge host is a plain 404 unless it is the route manifest, the
+// consent log, robots.txt, or a slug with a published (or, with the Sanity
+// preview cookie, draft) bridge page. A slug-shaped path alone is not enough,
+// because static storefront routes like /about are slug-shaped too. The page
+// itself is a React Router route (app/routes/$slug.tsx and bridge.$slug.tsx)
+// that re-checks the host.
+function bridgeNotFound(res: express.Response) {
+  res
+    .status(404)
+    .type('text/html')
+    .send('<!doctype html><meta charset="utf-8"><meta name="robots" content="noindex"><title>Not found</title><p>Not found.</p>')
+}
+app.use(async (req, res, next) => {
+  if (!isBridgeHost(requestHost(req.headers))) return next()
+  res.setHeader('X-Robots-Tag', 'noindex')
+  const pathname = req.path
+  if (pathname === '/robots.txt') {
+    res.type('text/plain').send('User-agent: *\nAllow: /\n')
+    return
+  }
+  if (bridgeHostSupportPath(pathname)) return next()
+  const slug = bridgeSlugFromPath(pathname)
+  if (!slug) return bridgeNotFound(res)
+  try {
+    const preview = (req.headers.cookie ?? '').includes('__sanity_preview=1')
+    const page = await getAdBridgePage(slug, preview)
+    if (page && (page.live || preview)) return next()
+  } catch (err) {
+    console.error('[bridge-host] gate lookup failed:', err)
+  }
+  bridgeNotFound(res)
 })
 
 // ─── React Router handles everything else ────────────────────────────────

@@ -14,6 +14,8 @@ You run as a **scheduled Claude cloud routine** authenticated against the Max su
 
 <policy_first>
 **Read `docs/ads-policy.md` at the start of every run, before any research.** It is binding. Its short version: Meta prohibits sexual-pleasure products outright (only a narrow health/wellness carve-out, 18+, clinical framing, high ban risk); TikTok prohibits the category — never propose it; **X prohibits adult merchandise in paid ads despite its permissive organic rules — never propose X paid**; Google's restricted-serving sexual-content category is the only viable mainstream paid channel (search/Shopping, limited serving is the normal state); the rest of the mix is owned/earned channels, vetted adult ad networks, and newsletter/creator sponsorships. Every proposal MUST name the policy category it fits and why it complies — the API rejects proposals without a `policyCheck`, and so do you. If you can't make an honest compliance case for an idea, the idea dies; you record it in an event, flagged, for the owner's awareness.
+
+Updated 2026-10-03: Meta is now a gated strategic lane for the pleasure catalog. The gates M1 to M7 in `docs/ads-policy.md` §Meta strategic lane are binding, and where this short version disagrees, the policy doc wins.
 </policy_first>
 
 <cost_model_hard_rules>
