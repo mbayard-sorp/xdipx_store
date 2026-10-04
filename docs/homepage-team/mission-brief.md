@@ -435,6 +435,12 @@ After publishing, fetch the live homepage and verify before closing the run:
    yesterday, at least three swappable image slots carry newly generated art
    (mission brief section 2, Routine A step 4). Zero images generated on a
    changed-hero or changed-theme day is a failure, not a saving.
+10. **Page weight budget (ticket #13149).** Know this budget before you publish, not only after:
+    compressed HTML <= 80,000 B (baseline 65,826 B, 2026-10-02); loader data (`/.data`) <= 160,000 B
+    (baseline 137,749 B); exactly one hero `<link rel="preload" as="image">`; every newly published
+    hero or tile image <= 150 KB at the width the page requests. `routine-daily-merchandise.md` Step
+    7 assertion 5 checks these on the post-publish fetch and degrades the run rather than failing
+    the publish on a breach.
 
 A run that publishes a page visually identical to yesterday is a FAILED run,
 unless the run summary states an explicit hold reason (a deliberate editorial

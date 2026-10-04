@@ -1004,6 +1004,24 @@ as either a pass or a failure.
 2. The **published hero product handle** appears in the returned HTML.
 3. **Every published rail title** appears in the returned HTML.
 4. **At least one published wayfinder tile headline** appears in the returned HTML.
+5. **Page weight budget (ticket #13149, owner all-hands 2026-10-02: "The homepage of our site
+   continues to experience long load times").** Lighthouse CI only measures code PRs; this team
+   changes the page every day through Sanity (hero image swaps, rail contents, sections, notebook
+   rail) and nothing else measures the weight of those content changes. Checked on the same fetch
+   as assertions 1-4, with the 2026-10-02 baseline stated so drift is visible:
+   - **Compressed HTML** — `curl -s -H 'Accept-Encoding: br' -o /dev/null -w '%{size_download}'
+     https://xdipx.com/` must be <= 80,000 B (baseline 65,826 B).
+   - **Loader data** — `curl -s https://xdipx.com/.data | wc -c` must be <= 160,000 B (baseline
+     137,749 B).
+   - **Hero preload count** — exactly ONE `<link rel="preload" as="image">` for the hero (baseline
+     had two, a defect being fixed separately; once fixed, two is a failure).
+   - **Hero/tile image weight** — every newly published hero or tile image, fetched at the width the
+     page requests, is <= 150 KB.
+
+   A breach of assertion 5 does **not** fail the publish (content stays live): mark the run
+   `degraded` and file ONE `kind:'code'` suggestion to team `homepage`, `category:'performance'`,
+   `dedupeKey:'perf-weight-budget-<YYYY-MM-DD>'`, naming the metric, the measured value, the
+   baseline, and the surface that grew.
 
 **If fallback content renders where team content was published (hardcoded mosaic tiles, algorithmic
 discovery rails, an imageless couples band), the run status is `failed`.** File a suggestion
