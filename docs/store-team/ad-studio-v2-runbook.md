@@ -71,11 +71,17 @@ Each step is yours. None is automatic.
 2. Google Ads Editor: export one existing campaign first and compare headers to our CSV, then import
    the paused campaign. Same for Microsoft Ads Editor after the Adult Advertising Program approval.
    Flip paused to enabled in the Editor yourself.
-3. Meta: authorize the Meta Ads connector in claude.ai connector settings. Set `META_ADS_ACCESS_TOKEN`,
-   `META_AD_ACCOUNT_ID` and `META_PAGE_ID` in Vercel if you want the server-side push; otherwise an
-   interactive session pushes the stored payloads through the connector. Every object is created
-   PAUSED. You flip them live in Ads Manager, one ad at a time, 25+ targeting, bridge destination
-   only.
+3. Meta: the connector was authorized 2026-10-04 and verified read-only. Ad account "XDIPX Digital"
+   920738511029316 (business xdipx.com 966322319440094) is active with a payment method and zero
+   campaigns. Pixel dataset 1619122322498289 "hello_xdipx_1" is active, fired from browser and server
+   on 2026-10-03, data-use setting `advertising_and_analytics` (unrestricted, so purchase
+   optimization is available). No Facebook Page is linked to the ad account, and every ad needs one:
+   link the xdipx Page (the one @hello_xdipx hangs off) in Business settings, then set
+   `META_PAGE_ID` (blocker filed). Never use the recommended catalog 1551461513373481; it is the raw
+   Shopify feed and fails gate M5. Set `META_ADS_ACCESS_TOKEN`, `META_AD_ACCOUNT_ID=920738511029316`
+   and `META_PAGE_ID` in Vercel if you want the server-side push; otherwise an interactive session
+   pushes the stored payloads through the connector. Every object is created PAUSED. You flip them
+   live in Ads Manager, one ad at a time, 25+ targeting, bridge destination only.
 4. Klaviyo: set the cart abandonment and post-purchase flows live (blocker #393). Browse abandonment
    appears after ticket 13384 ships the Viewed Product event.
 5. Adult networks and sponsors: hand the banner zip and its `copy.txt` to ExoClick, JuicyAds, or the
