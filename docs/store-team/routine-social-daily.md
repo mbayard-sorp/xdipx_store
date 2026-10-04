@@ -920,10 +920,11 @@ It is a linked post (~$0.20) and takes one X slot.
 - Every slide clears the publish gate like any other (provenance `every`, vision verdict per
   slide, no baked-in text outside the rendered card type).
 
-**Until the card renderer is callable from the cloud (code ticket filed 2026-10-03), the cards are
-built by the `packshot` path in `scripts/generate-slate-carousel-slides.ts`; when a run cannot
-render cards, it ships the hook plus the X companion with the four bare packshots and reports
-`new-in carousel: unmet (card renderer)`.**
+**Until the card renderer is callable from the cloud (ticket #13368), a run that cannot render
+cards still owes the batch a post: ship the hook frame as a single Instagram still with the New-in
+caption, ship the X companion with that frame and the `/new` link, and report
+`new-in carousel: unmet (card renderer, #13368)`. Bare packshot URLs are not library members and
+the draft op refuses them, so they are never a substitute for the cards.**
 
 ## Step 3 — Draft (reworks included)
 
