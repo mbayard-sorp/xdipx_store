@@ -1,0 +1,12 @@
+{
+  "_type": "adBridgePage",
+  "slug": { "_type": "slug", "current": "plain-box" },
+  "headline": "Billing reads *XDIPX*.",
+  "claim": "Dame Zee, shipped in a discreet box.",
+  "buttonLabel": "Take a peek",
+  "productHandle": "dame-zee-bullet-vibrator-periwinkle",
+  "utmCampaign": "meta-plain-box",
+  "lane": "meta",
+  "live": false,
+  "healthFraming": false
+}
