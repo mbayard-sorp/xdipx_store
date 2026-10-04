@@ -342,6 +342,9 @@ export interface GoogleBuildInput {
 
 export function buildSearchExport(input: GoogleBuildInput): ExportBuild {
   if (input.ideas.length === 0) throw new ExportRefusal('no_subjects', 'No ideas to export.')
+  // Search exports carry no image, so the creative gate runs in the registry
+  // (needAsset false) over the idea's text rows before this builder is called.
+  // Text policy is re-checked below on every headline, description and URL.
   const lanes = new Set(input.ideas.map(i => i.lane))
   if (lanes.size !== 1 || !lanes.has(input.lane)) throw new ExportRefusal('mixed_lanes', 'Export google and microsoft ideas separately.')
   const now = input.now ?? new Date()

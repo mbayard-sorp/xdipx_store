@@ -23,7 +23,7 @@
  */
 import { META_OBJECT_STATUS, MetaPushError, fitsMetaDescription, type MetaDraftPayload, type MetaDraftAd } from './meta-payload'
 import { ExportRefusal, withUtms, type ExportBuild, type ExportCreative, type ExportIdea } from './common'
-import { META_HEADLINE_MAX, metaIssues, type MetaCopy } from './policy'
+import { META_HEADLINE_MAX, assertCreativesExportable, metaIssues, type MetaCopy } from './policy'
 
 export * from './meta-payload'
 
@@ -80,6 +80,9 @@ export function metaCopyFor(idea: ExportIdea, c: ExportCreative): MetaCopy {
 export function buildMetaDraft(input: MetaBuildInput): ExportBuild {
   const { idea, creatives } = input
   if (idea.lane !== 'meta') throw new ExportRefusal('mixed_lanes', `Idea #${idea.id} is lane ${idea.lane}, not meta.`)
+  // The registry gates before dispatch, and this builder gates again so a
+  // direct call can never produce a payload for a blocked or unrendered row.
+  assertCreativesExportable(creatives, { needAsset: true })
   const now = input.now ?? new Date()
   const issues: string[] = []
   const warnings = new Set<string>()
