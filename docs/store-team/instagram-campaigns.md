@@ -378,8 +378,10 @@ a **rolling window over the most recent posts**, never as a per-campaign total:
   **Ceiling on-skin** = a bare contact zone in implied-nude territory: hip hollow, small of the
   back to the dimples, sternum with the breasts bare, stomach to the navel.
   **Mid on-skin** = a contact zone that reads clothed-adjacent even while bare: inner wrist,
-  forearm, nape with the hair lifted, behind the knee, the back of a shoulder. Real contact, real
-  charge, a frame a perfume campaign could run.
+  nape with the hair lifted, behind the knee, the back of a shoulder. Real contact, real
+  charge, a frame a perfume campaign could run. (`forearm` retired from this list per
+  `imagery-owner-notes.md` entry 3, owner 2026-10-02: forearm concept shots almost always don't
+  make sense.)
   **Educational** stays the quiet one. It is the only frame that may be.
 - **Cast:** at most 4 cast frames per rolling 14. The cap is on repetition of the same face, not on
   frames-per-day: no single cast member appears in more than 2 of any 5 consecutive cast frames,
