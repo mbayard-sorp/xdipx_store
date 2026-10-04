@@ -10,6 +10,7 @@ import { applyAttributionAttrs } from '~/lib/attribution-cart.server'
 import { fireCapiEvent } from '~/lib/meta-capi.server'
 import { getMarketingConsent } from '~/lib/consent.server'
 import { trackAddedToCart } from '~/lib/klaviyo.server'
+import { flowEventProps, handleFromProductId } from '~/lib/klaviyo-flows.server'
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const cartId = getCartIdFromCookie(request)
@@ -87,7 +88,11 @@ export async function action({ request }: ActionFunctionArgs) {
         if (token?.tokenType !== 'storefront') return
         const profile = await getCustomerProfile(token.token).catch(() => null)
         if (!profile?.email) return
-        await trackAddedToCart(profile.email, { variantId, price, quantity, cartId: cartIdForEvent })
+        // Flow-template props (product name, URL, header art) so the cart
+        // abandonment emails can open on the exact product. Null-safe.
+        const flowHandle = await handleFromProductId(productId).catch(() => null)
+        const flowProps = flowHandle ? await flowEventProps(flowHandle) : null
+        await trackAddedToCart(profile.email, { variantId, price, quantity, cartId: cartIdForEvent }, flowProps ? { ...flowProps } : {})
       } catch { /* analytics never breaks the cart */ }
     })()
     return Response.json({ ok: true, addToCartEventId }, { headers })

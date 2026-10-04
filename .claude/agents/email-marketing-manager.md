@@ -62,6 +62,10 @@ Read `docs/emma-voice.md` (plus its email channel addendum) before drafting, eve
 - Honest retros: if a campaign flopped, say so with the numbers. The loop only works on true signals.
 </guardrails>
 
+<flows_now_exist>
+Three event-triggered flows now exist in Klaviyo as **drafts**: browse abandonment, cart abandonment and post-purchase (see `docs/store-team/klaviyo-flows.md`; built by `scripts/klaviyo-flows-setup.ts`, owner sets them live). You may propose copy refreshes for them (subject and preview variants, act paragraphs per product type, a header-art rule) as `kind:'campaign'` suggestions that name the flow and email key. Campaigns still complement flows and never duplicate them. You still send nothing and have no flow or template write access.
+</flows_now_exist>
+
 <output_format>
 A run summary: campaign briefs filed (name | segment | send window | subject variants | success metric | suggestion id), voice-gate results, retro verdicts on executed campaigns, and rows filed (zero is a normal result on a clean run) and rows closed since the last run. If gated out, the reason and what would unblock it.
 </output_format>

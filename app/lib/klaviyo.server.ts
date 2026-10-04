@@ -126,35 +126,52 @@ interface LineItemInfo { productHandle?: string; productTitle?: string; variantI
  * swallow-and-log: analytics must never break a cart action or an order webhook.
  * Events need a profile identifier, so anonymous carts produce no event.
  */
-export async function trackAddedToCart(email: string, item: LineItemInfo & { cartId?: string }): Promise<void> {
+export async function trackAddedToCart(email: string, item: LineItemInfo & { cartId?: string }, extra: Record<string, unknown> = {}): Promise<void> {
   try {
-    await trackEvent(email, 'Added to Cart', { ...item })
+    // `extra` carries the flow-template properties (ProductName, HeaderImageURL, ...)
+    // from klaviyo-flows.server.ts flowEventProps().
+    await trackEvent(email, 'Added to Cart', { ...item, ...extra })
   } catch (err) {
     console.error('[klaviyo] trackAddedToCart failed:', err instanceof Error ? err.message : err)
   }
 }
 
-export async function trackStartedCheckout(email: string, params: { cartId: string; value: number; currency: string; items: LineItemInfo[]; uniqueId?: string }): Promise<void> {
+export async function trackStartedCheckout(email: string, params: { cartId: string; value: number; currency: string; items: LineItemInfo[]; uniqueId?: string; extra?: Record<string, unknown> }): Promise<void> {
   try {
     const opts = params.uniqueId ? { uniqueId: params.uniqueId } : {}
-    await trackEvent(email, 'Started Checkout', { cartId: params.cartId, value: params.value, currency: params.currency, items: params.items }, opts)
+    await trackEvent(email, 'Started Checkout', { cartId: params.cartId, value: params.value, currency: params.currency, items: params.items, ...(params.extra ?? {}) }, opts)
   } catch (err) {
     console.error('[klaviyo] trackStartedCheckout failed:', err instanceof Error ? err.message : err)
   }
 }
 
-export async function trackPlacedOrder(email: string, params: { orderId: string; orderNumber?: string | number; value: number; currency: string; items: LineItemInfo[]; attribution?: Record<string, string> }): Promise<void> {
+export async function trackPlacedOrder(email: string, params: { orderId: string; orderNumber?: string | number; value: number; currency: string; items: LineItemInfo[]; attribution?: Record<string, string>; extra?: Record<string, unknown> }): Promise<void> {
   try {
     await trackEvent(
       email,
       'Placed Order',
       // Optional attribution props (utm_source etc., extracted from the order's
       // note_attributes by the webhook) ride along on the event.
-      { orderId: params.orderId, orderNumber: params.orderNumber, value: params.value, currency: params.currency, items: params.items, ...(params.attribution ?? {}) },
+      { orderId: params.orderId, orderNumber: params.orderNumber, value: params.value, currency: params.currency, items: params.items, ...(params.attribution ?? {}), ...(params.extra ?? {}) },
       { uniqueId: `placed_order_${params.orderId}` },
     )
   } catch (err) {
     console.error('[klaviyo] trackPlacedOrder failed:', err instanceof Error ? err.message : err)
+  }
+}
+
+/**
+ * Browse-abandonment trigger. The headless storefront does not load Klaviyo's
+ * onsite JS, so no Viewed Product event exists until a caller sends this one.
+ * Needs a known profile email, same as the cart events. NOT wired into the PDP
+ * loader yet: see docs/store-team/klaviyo-flows.md, "Browse abandonment has no
+ * trigger yet".
+ */
+export async function trackViewedProduct(email: string, extra: Record<string, unknown>): Promise<void> {
+  try {
+    await trackEvent(email, 'Viewed Product', { ...extra })
+  } catch (err) {
+    console.error('[klaviyo] trackViewedProduct failed:', err instanceof Error ? err.message : err)
   }
 }
 

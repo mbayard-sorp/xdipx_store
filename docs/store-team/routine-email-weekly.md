@@ -107,3 +107,12 @@ numbers.
 
 Log tokens (`feature:'email-planning'`), then the final run update (briefs filed | segments | send
 windows | retro verdicts).
+
+## Flows now exist as drafts (2026-10-03)
+
+The browse abandonment, cart abandonment and post-purchase flows were built as Klaviyo drafts by Ad Studio
+v2 PR-F (`docs/store-team/klaviyo-flows.md`), with templates, subject variants and UTMs defined in
+`app/lib/klaviyo-flow-templates.ts`. Step 2 should read that doc so campaigns complement them. This routine
+may propose copy refreshes for a flow email (subjects, previews, the act paragraph for a product type) as
+`kind:'campaign'` suggestions naming the flow and email key; the owner approves and applies them. It still
+sends nothing, and the owner sets each flow live in Klaviyo.

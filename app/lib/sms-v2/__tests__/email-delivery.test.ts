@@ -19,6 +19,11 @@ vi.mock('~/lib/klaviyo.server', () => ({
   trackStartedCheckout: vi.fn(async () => {}),
 }))
 
+// The flow-template enrichment reads Shopify; keep it off the network here.
+vi.mock('~/lib/klaviyo-flows.server', () => ({
+  flowEventProps: vi.fn(async () => null),
+}))
+
 import { trackStartedCheckout } from '~/lib/klaviyo.server'
 import {
   extractEmail,
