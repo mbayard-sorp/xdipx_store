@@ -11,6 +11,7 @@ import { FEEDBACK_REASONS, NOTE_MAX } from '~/lib/ad-idea-feedback-reasons'
 import type { IdeaListItem } from '~/lib/ad-idea-types'
 import { AdStatusPill, adStatusOfIdea } from './AdStatusPill'
 import { LaneBadge } from './LaneBadge'
+import { RenderNowButton } from './RenderNowButton'
 
 /** Client-safe view of an idea, the serialisable shape the loader sends. */
 export type IdeaCardData = IdeaListItem
@@ -184,7 +185,10 @@ export function IdeaCard({
         </div>
 
         {idea.status === 'hearted' && (
-          <p className="mt-2 text-xs text-ink-3 lg:text-right">Queued for the next render pass, {nextPassLabel}.</p>
+          <>
+            <p className="mt-2 text-xs text-ink-3 lg:text-right">Queued for the next render pass, {nextPassLabel}.</p>
+            <RenderNowButton ideaId={idea.id} action={action} />
+          </>
         )}
         {idea.status === 'rendered' && (
           <Link

@@ -11,7 +11,7 @@
 import { and, asc, desc, eq, gte, inArray, isNull, lt, ne, sql, type SQL } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
 import {
-  adCreativeFeedback, adCreatives, adIdeaFeedback, adIdeas,
+  adCreativeFeedback, adCreatives, adIdeaFeedback, adIdeas, mediaAssets,
 } from '../../db/schema'
 import * as ideaReasons from '~/lib/ad-idea-feedback-reasons'
 import * as creativeReasons from '~/lib/ad-creative-feedback-reasons'
@@ -651,10 +651,17 @@ export async function getIdeaFeedbackFor(ids: number[]): Promise<Record<number, 
 
 /** v2 creatives (lane set) with no owner rating yet: the Creatives tab badge. */
 export async function countCreativesToRate(): Promise<number> {
+  // Rendered (a real image or a text row), not blocked, not yet rated.
   const [row] = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(adCreatives)
+    .innerJoin(mediaAssets, eq(mediaAssets.id, adCreatives.assetId))
     .leftJoin(adCreativeFeedback, eq(adCreativeFeedback.creativeId, adCreatives.id))
-    .where(and(sql`${adCreatives.lane} is not null`, isNull(adCreativeFeedback.id), ne(adCreatives.status, 'rejected')))
+    .where(and(
+      sql`${adCreatives.lane} is not null`,
+      eq(adCreatives.status, 'draft'),
+      sql`${mediaAssets.blobUrl} not like 'pending:%'`,
+      isNull(adCreativeFeedback.id),
+    ))
   return row?.n ?? 0
 }

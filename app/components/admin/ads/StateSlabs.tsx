@@ -96,3 +96,17 @@ export function LiveRowSkeleton() {
     </div>
   )
 }
+
+/** Final-box skeleton for a creative card: a 4:5 or square well plus text blocks. */
+export function CreativeCardSkeleton({ square = false }: { square?: boolean }) {
+  return (
+    <div aria-hidden="true" className="overflow-hidden rounded-2xl border border-line bg-paper animate-pulse motion-reduce:animate-none">
+      <div className={`bg-paper-3 w-full ${square ? 'aspect-square' : 'aspect-[4/5]'}`} />
+      <div className="space-y-2 px-4 py-3">
+        <div className={`${block} h-4 w-5/6`} />
+        <div className={`${block} h-3 w-2/5`} />
+        <div className={`${block} h-6 w-3/4 rounded-full`} />
+      </div>
+    </div>
+  )
+}
