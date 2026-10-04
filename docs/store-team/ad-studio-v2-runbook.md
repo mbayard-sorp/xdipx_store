@@ -32,19 +32,18 @@ stack, let them land in this order and the diffs collapse cleanly: #1500, then #
 GitHub shows a conflict on a later PR after an earlier one merges, R-SHEP rebases it; nothing in the
 stack needs a hand merge.
 
-## 3. After #1501 merges: create the two daily triggers
+## 3. Daily triggers (created 2026-10-04)
 
 Both are RemoteTrigger cloud routines on the Max subscription, team `ads`, gated by
-`ads_team_enabled` (on) and `ads_team_max_runs` (2). Create them from an interactive session, then
-write the ids into `docs/store-team/routine-schedule.md` rows 27 and 28.
+`ads_team_enabled` (on) and `ads_team_max_runs` (2), Sanity read-only as their only connector.
 
-- Pass 1, ideas: cron `30 14 * * *` UTC. Prompt points at `docs/store-team/routine-ads-daily.md`
-  Pass 1 and runs as `ads-manager`. No connectors.
-- Pass 2, render: cron `30 20 * * *` UTC. Same playbook, Pass 2. No connectors.
+- Pass 1, ideas: `trig_01Y1sZNUGXwBGcEV4s1fTM4H`, cron `30 14 * * *` UTC, runs
+  `docs/store-team/routine-ads-daily.md` Pass 1 as `ads-manager`.
+- Pass 2, render and rules: `trig_01V5uuqg4V96CgK3UFUMfyTX`, cron `30 20 * * *` UTC, Pass 2, with
+  the paid-media-buyer step once its addendum merges.
 
-Follow the `create` then `update` pattern from the connector-permissions memory: a new trigger
-inherits every connector with empty permissions, so the update must set `mcp_connections` to the
-Sanity read set only, or to nothing the playbook needs.
+Until PR #1503 deploys the ideas endpoint, Pass 1 records `ideas_api_not_live` and finishes failed
+on purpose, so the gap is visible in the run table rather than silent.
 
 ## 4. Simulation mode
 
