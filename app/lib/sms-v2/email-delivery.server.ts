@@ -23,6 +23,7 @@
  * accumulation, and the real production send with live cart data.
  */
 import { trackStartedCheckout } from '~/lib/klaviyo.server'
+import { flowEventProps } from '~/lib/klaviyo-flows.server'
 
 // ---------------------------------------------------------------------------
 // 1. Email parsing + validation
@@ -172,6 +173,14 @@ export async function sendCartLinkEmail(
     currency,
     items: input.items,
     ...(input.uniqueId ? { uniqueId: input.uniqueId } : {}),
+  }
+
+  // Flow-template props (product name, URL, header art) for the cart
+  // abandonment emails, from the first line item. Null-safe.
+  const firstHandle = input.items[0]?.productHandle
+  if (firstHandle) {
+    const flowProps = await flowEventProps(firstHandle)
+    if (flowProps) params.extra = { ...flowProps }
   }
 
   await trackStartedCheckout(input.email, params)

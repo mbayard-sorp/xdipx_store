@@ -430,7 +430,20 @@ async function handleOrderCreated(order: ShopifyOrder): Promise<void> {
         const prop = attrMap[attr.name]
         if (prop && attr.value) attribution[prop] = attr.value
       }
+      // Flow-template props for the post-purchase emails, from the first line
+      // item's product. Null-safe: a lookup miss sends the event unchanged.
+      let flowProps: Record<string, unknown> = {}
+      try {
+        const firstProductId = order.line_items?.[0]?.product_id
+        if (firstProductId) {
+          const { flowEventProps, handleFromProductId } = await import('../app/lib/klaviyo-flows.server.js')
+          const handle = await handleFromProductId(String(firstProductId))
+          const props = handle ? await flowEventProps(handle) : null
+          if (props) flowProps = { ...props }
+        }
+      } catch { /* enrichment never blocks the event */ }
       await trackPlacedOrder(placedOrderEmail, {
+        extra: flowProps,
         orderId:     String(order.id),
         orderNumber: order.order_number,
         value:       parseFloat(order.total_price) || 0,
