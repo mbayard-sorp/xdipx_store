@@ -2488,11 +2488,16 @@ export async function getProductsByTagPaged(
   tag: string,
   page = 1,
   limit = 20,
+  // Extra Storefront search clause ANDed onto the tag filter, e.g.
+  // `created_at:>='2026-09-27'` for a "this week" window. Folded into the
+  // cache handle so a filtered call never shares cursors with the plain
+  // tag:<tag> one.
+  extraQuery?: string,
 ): Promise<{ deals: VaultDeal[]; hasNextPage: boolean }> {
-  const query = `tag:${tag}`
+  const query = extraQuery ? `tag:${tag} AND ${extraQuery}` : `tag:${tag}`
   // Reuse the collection-cursor cache-key builder with a `tag:` prefixed
   // pseudo-handle so this never collides with a real collection's cursors.
-  const cacheHandle = `tag:${tag}`
+  const cacheHandle = extraQuery ? `tag:${tag}:${extraQuery}` : `tag:${tag}`
   const cacheSort = 'newest'
 
   let after: string | null = null
