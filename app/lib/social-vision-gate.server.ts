@@ -590,6 +590,21 @@ export const EXPOSURE_CHECK_NAMES: readonly VisionCheckName[] = ['nippleOccluded
  * back view can have none, or a navel appearing on a back-view frame at all
  * (anatomically impossible — two views merged onto one figure). Exported for
  * the calibration test suite, same idiom as `VISION_SYSTEM_PROMPT` (#10477).
+ *
+ * Ticket #13160: a bare mention of hair at the cleft/sacrum/lower back is its
+ * own defect, not only one qualified "pubic". Owner, verbatim
+ * (`instagram-campaigns.md` §3.2c): "the female bodies don't typically have
+ * pubic hair in the cleft of the butt cheeks... They only will have it on
+ * their pubic mounds." This field only ever reports on the back-view
+ * cleft/sacrum/navel area (never the front-view pubic mound, a different
+ * check's territory), so any unnegated hair mention here is always the
+ * disallowed case, with no legitimate clean-pass use of the word to protect
+ * against. Posted IG rows #354/#355 shipped undetected because the model's
+ * own wording said "a line of hair at the top of the cleft" without the word
+ * "pubic", which the old pubic/vulva/labia/genital-only pattern could not
+ * see; assets 855/860 were already caught because their wording happened to
+ * include "pubic". The gap was consistency across wording, not absence of a
+ * check.
  */
 export function backAnatomyReadsAsDefect(read: string): boolean {
   const text = read.trim()
@@ -603,7 +618,8 @@ export function backAnatomyReadsAsDefect(read: string): boolean {
   // views (assets 862-865) on their own clean read.
   return (
     hasUnnegatedMention(text, /\b(pubic|vulva|labia|genital)/gi) ||
-    hasUnnegatedMention(text, /\bnavel\b|\bbelly[\s-]?button\b/gi)
+    hasUnnegatedMention(text, /\bnavel\b|\bbelly[\s-]?button\b/gi) ||
+    hasUnnegatedMention(text, /\b(hair|hairy|hairline|fuzz|stubble)\b/gi)
   )
 }
 
@@ -675,7 +691,7 @@ export function enforceEnumeratedAnatomy(verdict: VisionVerdict): VisionVerdict 
   }
   if (backDefect && checks.faceBodyIntegrity !== 'fail') {
     checks.faceBodyIntegrity = 'fail'
-    overrides.push(`backAnatomyRead "${verdict.backAnatomyRead}" reads as a genital or navel rendering defect on a back view`)
+    overrides.push(`backAnatomyRead "${verdict.backAnatomyRead}" reads as a genital, navel, or cleft/sacrum hair rendering defect on a back view`)
   }
   if (overrides.length === 0) return verdict
 
