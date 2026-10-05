@@ -1401,6 +1401,56 @@ describe('legible text baked into the image', () => {
       expect(classifyLegibleText('')).toBe('none')
     })
   })
+
+  // Ticket #13534, run 1245. Three We-Vibe Touch X / Womanizer Starlet 3
+  // candidates BLOCKed on molded control-button glyphs (power symbol,
+  // plus/menu symbol) that carry no letters at all. Verified directly
+  // against the real stored vision verdicts: post #389's picked candidate
+  // (asset #965) is the clean false positive this fixes; posts #385 (asset
+  // #959, "appears to read something like 'we-vibe'... not fully legible")
+  // and #386 (asset #955, "wOVae (brand wordmark...)") are genuine garbled
+  // or hedged brand-mark attempts and must keep blocking; post #390 (asset
+  // #966, "dot-and-dash pseudo-text... not fully legible as words") already
+  // blocks via the existing defect-pattern guard and must keep doing so.
+  describe('molded control-icon glyphs with no other legible text (ticket #13534)', () => {
+    it('post 389 / asset #965: a power symbol and a plus/menu glyph, with no other legible text, is not a brand-mark misread', () => {
+      expect(classifyLegibleText(
+        'Two small molded/embossed circular buttons on the product surface — one appears to show a power symbol (⏻) ' +
+        'and one shows what may be a plus/menu symbol; exact text not cleanly legible. A small dot (possible LED or ' +
+        'microphone port) is also present. No other legible text in frame.',
+      )).toBe('none')
+    })
+
+    it('the full pipeline no longer blocks the post 389 candidate', async () => {
+      const r = await run(
+        'Two small molded/embossed circular buttons on the product surface — one appears to show a power symbol (⏻) ' +
+        'and one shows what may be a plus/menu symbol; exact text not cleanly legible. A small dot (possible LED or ' +
+        'microphone port) is also present. No other legible text in frame.',
+      )
+      expect(checks(r)).not.toContain('vision-legible-text')
+      expect(r.blocked).toBe(false)
+    })
+
+    it('post 385 / asset #959: a hedged "appears to read" brand-mark attempt still blocks', () => {
+      expect(classifyLegibleText(
+        'Partial embossed/printed text on the product body, appears to read something like "we-vibe" or similar ' +
+        'but not fully legible; two small white oval buttons visible on product surface.',
+      )).toBe('unclassified')
+    })
+
+    it('post 386 / asset #955: a named garbled wordmark alongside control-button markings still blocks', () => {
+      expect(classifyLegibleText(
+        'wOVae (brand wordmark on product body); + and additional control button markings visible on product surface',
+      )).toBe('unclassified')
+    })
+
+    it('post 390 / asset #966: dot-and-dash pseudo-text alongside an icon glyph still blocks via the existing defect guard', () => {
+      expect(classifyLegibleText(
+        'Small circular button icons (power symbol) on product surface; dot-and-dash pseudo-text/button markings ' +
+        'on the pink device body, not fully legible as words.',
+      )).toBe('unclassified')
+    })
+  })
 })
 
 // Ticket #13368: the New-in carousel's packshot card and the typographic

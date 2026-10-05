@@ -300,6 +300,17 @@ const BRAND_MARK_MAX_CHARS = 40
 const EXPLICIT_NO_TEXT_PATTERNS: readonly RegExp[] = [
   /\bno legible (letters?|words?|text|lettering)\b/i,
   /\bno (readable|legible) (text|words?|letters?)\b/i,
+  // Ticket #13534, verified against social post #389's picked candidate
+  // (asset #965, We-Vibe/Womanizer-class product with molded control
+  // buttons): "one appears to show a power symbol ... and one shows what
+  // may be a plus/menu symbol; exact text not cleanly legible ... No other
+  // legible text in frame." The model names the icon glyphs it saw (not
+  // letters) and then explicitly denies any OTHER legible text in the same
+  // breath, which the two patterns above miss because they require "no"
+  // immediately before "legible"/"readable", not "no other legible". Same
+  // defect-pattern guard as the rest of this list: a mixed report that also
+  // hedges toward a real garbled attempt still falls through and blocks.
+  /\bno other (readable|legible) (text|words?|letters?)\b/i,
 ]
 const ATTEMPTED_TEXT_DEFECT_PATTERNS: readonly RegExp[] = [
   /\bgarbled\b/i,
