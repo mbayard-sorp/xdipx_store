@@ -54,6 +54,12 @@ const tick = (
   runSocialPublishTick({
     removalWatch: async () => null,
     isVideoEnabled: async () => true,
+    // Ticket #13725: no-op by default, mirroring social-publish-job.server.test.ts's
+    // own `tick` wrapper -- without this a terminal failure or gate bounce would
+    // call the real ticket writer and the real owner-blocker writer against the
+    // live database.
+    fileDeadRowTicket: async () => {},
+    fileOwnerApprovedBounceBlocker: async () => {},
     ...opts,
     // Ticket #11453: default the media-reachability check to "always
     // reachable" (fake CDN urls throughout this file), mirroring

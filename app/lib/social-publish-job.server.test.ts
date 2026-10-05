@@ -76,6 +76,12 @@ const tick = (
   runSocialPublishTick({
     removalWatch: async () => null,
     isVideoEnabled: async () => true,
+    // Ticket #13725: no-op by default, same reasoning as every other
+    // advisory stub in this file -- without this, a terminal failure or a
+    // gate bounce in ANY case below would call the real ticket writer and
+    // the real owner-blocker writer against the live database.
+    fileDeadRowTicket: async () => {},
+    fileOwnerApprovedBounceBlocker: async () => {},
     ...opts,
     // Ticket #11453: default the media-reachability check to "always
     // reachable" (fake CDN urls throughout this file), the same way every
@@ -605,6 +611,89 @@ describe('failure handling', () => {
   })
 })
 
+// Ticket #13725 (owner all-hands 2026-10-05): a row that dies at the publish
+// tick -- a terminal failure, or an owner-approved/agent-passed row the
+// deterministic re-check bounces -- must raise a signal immediately rather
+// than waiting for the day-close zero-day check.
+describe('reporting a dead row immediately (ticket #13725)', () => {
+  it('files a ticket on a terminal publish failure, not on a retryable one', async () => {
+    const tickets: unknown[] = []
+    const { repo } = fakeRepo([post({ errorMessage: 'Meta 500' })])
+    await tick({
+      isEnabled: enabled, maxPerDay: cap(3), repo,
+      publish: async () => ({ ok: false, detail: 'Meta 500 again' }),
+      fileDeadRowTicket: async (input) => { tickets.push(input) },
+    })
+    expect(tickets).toHaveLength(1)
+    const ticket = tickets[0] as { dedupeKey: string; priority: number; team: string; suggestion: string }
+    expect(ticket.dedupeKey).toBe('social-publish-dead:1')
+    expect(ticket.priority).toBe(1)
+    expect(ticket.team).toBe('social')
+    expect(ticket.suggestion).toContain('terminal publish failure')
+    expect(ticket.suggestion).toContain('Meta 500 again')
+
+    // A first, retryable failure is not dead yet -- no ticket.
+    const retryTickets: unknown[] = []
+    const { repo: retryRepo } = fakeRepo([post({ errorMessage: null })])
+    await tick({
+      isEnabled: enabled, maxPerDay: cap(3), repo: retryRepo,
+      publish: async () => ({ ok: false, detail: 'Meta 500' }),
+      fileDeadRowTicket: async (input) => { retryTickets.push(input) },
+    })
+    expect(retryTickets).toHaveLength(0)
+  })
+
+  it('files a ticket when an agent-passed row is bounced by the gate, with no owner blocker', async () => {
+    const tickets: unknown[] = []
+    const blockers: unknown[] = []
+    const { repo } = fakeRepo([post({ mediaUrls: [`${CDN}/77292A.jpg`] })])
+    await tick({
+      isEnabled: enabled, maxPerDay: cap(3), repo, publish: vi.fn(),
+      fileDeadRowTicket: async (input) => { tickets.push(input) },
+      fileOwnerApprovedBounceBlocker: async (input) => { blockers.push(input) },
+    })
+    expect(tickets).toHaveLength(1)
+    const ticket = tickets[0] as { dedupeKey: string; suggestion: string }
+    expect(ticket.dedupeKey).toBe('social-publish-dead:1')
+    expect(ticket.suggestion).toContain('image-provenance')
+    expect(ticket.suggestion).not.toContain('owner had approved')
+    expect(blockers).toHaveLength(0)
+  })
+
+  it('files both a ticket and an owner blocker when an owner-approved row is bounced by the gate', async () => {
+    const tickets: unknown[] = []
+    const blockers: unknown[] = []
+    const { repo } = fakeRepo([post({
+      feedback: null, gateStatus: 'owner', mediaUrls: [`${CDN}/77292A.jpg`],
+    })])
+    await tick({
+      isEnabled: enabled, maxPerDay: cap(3), repo, publish: vi.fn(),
+      fileDeadRowTicket: async (input) => { tickets.push(input) },
+      fileOwnerApprovedBounceBlocker: async (input) => { blockers.push(input) },
+    })
+    expect(tickets).toHaveLength(1)
+    expect((tickets[0] as { suggestion: string }).suggestion).toContain('owner had approved')
+    expect(blockers).toHaveLength(1)
+    const blocker = blockers[0] as { dedupeKey: string; title: string; category: string }
+    expect(blocker.dedupeKey).toBe('social-publish-owner-approved-bounced-1')
+    expect(blocker.title).toContain('post #1 you approved did not publish')
+    expect(blocker.category).toBe('approval')
+  })
+
+  it('never throws into the tick when the ticket writer or the blocker writer fails', async () => {
+    const { repo, calls } = fakeRepo([post({
+      feedback: null, gateStatus: 'owner', mediaUrls: [`${CDN}/77292A.jpg`],
+    })])
+    const r = await tick({
+      isEnabled: enabled, maxPerDay: cap(3), repo, publish: vi.fn(),
+      fileDeadRowTicket: async () => { throw new Error('bus down') },
+      fileOwnerApprovedBounceBlocker: async () => { throw new Error('blocker down') },
+    })
+    expect(r.attempts[0]?.outcome).toBe('blocked_by_gate')
+    expect(calls.needsChanges).toHaveLength(1)
+  })
+})
+
 describe('the owner edit wins', () => {
   it('gates and publishes the edited caption, not the original draft', async () => {
     // If he rewrote it, the rewrite is what ships and what gets checked.
@@ -627,6 +716,8 @@ describe('the removal watch guards the tick', () => {
     const publish = vi.fn()
     const r = await runSocialPublishTick({
       isEnabled: enabled, isVideoEnabled: enabled, maxPerDay: cap(3), publish, repo,
+      fileDeadRowTicket: async () => {},
+      fileOwnerApprovedBounceBlocker: async () => {},
       removalWatch: async () => ({
         checked: 3, removed: [17], removalsInWindow: 2, unknown: 0, valveTurnedOff: true,
       }),
@@ -642,6 +733,8 @@ describe('the removal watch guards the tick', () => {
       // Ticket #11453: this call bypasses the `tick` wrapper's default, so it
       // needs its own media-reachability stub (fake CDN url in `post()`).
       gateDeps: { checkMediaReachable: async () => true },
+      fileDeadRowTicket: async () => {},
+      fileOwnerApprovedBounceBlocker: async () => {},
       removalWatch: async () => ({
         checked: 3, removed: [17], removalsInWindow: 1, unknown: 0, frequencySteppedTo: 1,
       }),
