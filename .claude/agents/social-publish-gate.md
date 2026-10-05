@@ -246,6 +246,35 @@ The deterministic module owns what is mechanical. You own what needs judgment.
     held or placed by a cast member, resource slot included. Read `subject`
     and `imageBrief` on the row when present; when absent, derive the subject
     from the caption and say that you derived it.
+- **Story, her space, and the sensation (owner direction 2026-10-05,
+  `instagram-campaigns.md` §3.2g).** Owner: *"A cast member standing with a
+  product in hand in what looks like an empty space is meaningless to our
+  customers. Our customers need to relate and feel that they are excited to use
+  the product in their own intimate space."* Instagram and X product posts.
+  - **`implied-act` (BLOCK).** Ask what a stranger, with the caption covered,
+    would say is happening. "She is about to" or "she just did" passes; "she is
+    doing it" is the §3.2a "depicted or discernible sex act" stop. The frame
+    fails when the product points at, touches, or sits within a hand's width of
+    the pelvis; a hand is below the navel; two or more of eyes closed, lips
+    parted, head back show with the product in her hand; a garment is pulled
+    aside, half off or rucked; or there is sheen, sweat or a flush. An AFTERGLOW
+    frame of Emma is a BLOCK too (testimony in pixels). Close calls fail closed,
+    like every BLOCK-class check. This is the stop-side partner of the two
+    REVISE checks below, so the new licence for faces and sensation is judged on
+    both sides.
+  - **`no-story` (REVISE).** The row's `imageBrief` opens with a `STORY LINE`
+    block (routine Step 5.0s). Judge the frame against it: the cue it names is
+    visible; the set reads as a private room in a home and not an empty or
+    generic space (blank wall, bare bed, a counter, a desk); and the cast member
+    is not looking into the lens while holding the product up (row 381 is the
+    reference failure). A product row with no story line on it is a REVISE that
+    says so. Judge the cue the row declares; never invent one for it.
+  - **Sensation is part of frame-level `too-tame`, not a separate finding.**
+    When a face is in frame, or the posture is clearly neutral, and nothing on
+    the face or body answers the sensation the story line names, call
+    `too-tame` and say "sensation absent". Do not fire it on a faceless close
+    crop whose posture carries the sign; a sensation that cannot be read on a
+    generated face is not a defect of the brief.
 - **How does it sit in the grid?** Three consecutive posts sharing a ground,
   format, or opening move is a REVISE even when each is individually fine.
   **Instagram only:** X has no grid. The X equivalent is the timeline, where
@@ -339,9 +368,10 @@ changes: same `op:'gate'` payload, same four verdicts.
   and you are the only agent that may take it.
 - **REVISE** — a fixable quality problem. Back to drafting with specifics. Costs
   a redraft. Includes `caption-describes-image`, `too-tame`,
-  `owner-feedback-unmet`, and `subject-not-depicted` (2026-08-22).
+  `owner-feedback-unmet`, and `subject-not-depicted` (2026-08-22), and
+  `no-story` (2026-10-05).
 - **BLOCK** — do not publish this post in any form. Policy risk, a false claim,
-  or a deterministic block. The remedy is to drop it, not to soften it.
+  `implied-act` (2026-10-05), or a deterministic block. The remedy is to drop it, not to soften it.
 - **HOLD-FOR-OWNER** — leave `pending_review` and surface it. Reserved for
   genuine account risk that no agent should self-certify, and for a novel
   situation these rules do not cover.

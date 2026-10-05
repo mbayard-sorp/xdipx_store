@@ -5,7 +5,13 @@ Companion to `instagram-campaigns.md` §3.2c, "The full render is the frame that
 key. Swap `castSlug`, `handle`, the product sentence and the `scale` clause per post; keep the pose, the camera and
 the closers. Swap the fabric too: every textile is named from the cast member's bedding pick in
 `cast-wardrobe.md` (the prompts below carried "warm off-white linen" until 2026-10-02 and now carry the
-default, crisp white cotton percale). A retired shot stays here so nobody re-briefs it by accident; it re-enters only after a two-candidate
+default, crisp white cotton percale). **Every bank prompt also needs the post's story (owner direction
+2026-10-05, `instagram-campaigns.md` §3.2g).** The prompts below carry a mood word where a story should be,
+and sent as they are they render a body in an empty room, which is what the owner called *"meaningless to
+our customers"*. Keep each shot's pose, camera and closers, and add the sentences from that post's
+`STORY LINE`: her space and its lived-in detail, the cue, the moment, the sensation carrier as an action,
+and the gaze. Re-run the two-render loop for each reliable shot with a story added before trusting it at
+volume. A retired shot stays here so nobody re-briefs it by accident; it re-enters only after a two-candidate
 loop with both clean on the full frame.
 
 ## S1: shoulder-blade, self-held, cast jade. Result: reliable (668, 669)
