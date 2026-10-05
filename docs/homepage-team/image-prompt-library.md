@@ -2498,6 +2498,48 @@ zero shipped. No keeper. Logged so the next attempt on this wardrobe piece start
 - **Not generated:** the X 16:9 variant (ticket #10685's generate-at-4:5-then-crop). No IG 4:5
   candidate ever cleared the recorded vision-gate verdict to crop from.
 
+### RESOLVED — v5, Option B (composition fix, no wardrobe change), run 1257, 2026-10-05, 2/2 attempts
+
+A peer `media-manager` instance first proposed fixing v1-v4's `nippleOccluded` failures by swapping
+Emma's wardrobe to a fully opaque matte cream ribbed cotton-jersey bralette/brief. That brief was
+**declined and not generated**: it fails `cast-wardrobe.md` styling rule 1 ("skimpy, sheer where
+possible... a piece that covers more than that is a REVISE") and rule 4 (never name a fabric "cream"
+— the exact beige-sheet failure that file exists to prevent). The coordinator agreed and withdrew it.
+
+**Option B instead: keep Emma's actual closet piece (sheer tulle bralette/brief, unchanged from the
+original brief) but crop tight enough that the bralette's band/cups never enter frame at all**,
+removing the nipple-occlusion risk zone from the shot entirely rather than re-fighting its opacity.
+No wardrobe mention at all in the prompt (the piece exists above-frame, unrendered-in-detail).
+
+- **v5 attempt 1/2 reject (new failure mode, not the v1-v4 one):** cropped "bottom of ribcage to top
+  of hip bones." 4 billed candidates (`atlas/seedream-4.5-edit`), 0 shipped: 1 `crop_rejected:uncroppable`,
+  3 `vision_gate_fail:genitaliaAbsent` — the crop/product-contact point drifted down into the
+  pelvic/groin zone ("pubic hair and the mons pubis region are visibly exposed," "product...held in
+  direct contact with...the genital area"). "Top of hip bones" as the lower crop boundary was not a
+  tight enough anchor; the model drifted the self-held product placement down toward the groin. Two
+  of the four verdicts also carried the same `[enumerated-anatomy override: handDigitCounts [5] with
+  handOccludedDigits [1]]` false-positive flip already logged in v4 above — reconfirms that pattern is
+  a `social-vision-gate.server.ts` scoring bug independent of wardrobe AND independent of this crop
+  fix; still worth its own ticket.
+- **v5 attempt 2/2 keeper:** moved the lower crop boundary up to the natural waist/navel line (not
+  hip bones), explicitly negative-listed hip bones/hip crease/groin/mons pubis/pubic hair/genitalia,
+  and anchored the product contact point explicitly at navel height ("never moving lower than the
+  navel toward the waistband or hips"). Also reworded the hand clause to make the thumb visibly laid
+  across the fingers rather than hidden, to dodge the digit-count override (inconclusive whether this
+  helped; only 1 candidate billed+shipped this round, not 4, so no contrast). 1 candidate shipped
+  clean. Verified by manual review against `76940D.jpg`: pinched-neck/bulb-head silhouette matches
+  the reference exactly, five-finger grip reads naturally (thumb visible, no extra/missing digits),
+  no text/logo/buttons rendered (hand position naturally occludes the control buttons), crop stays
+  entirely above the navel-to-ribcage band (no hips, no groin, no breast, no face), coral-soft cushion
+  and washed-denim-blue carry-on corner present, bright window daylight, no beige/cream cast anywhere.
+  Asset: `social-vedo-wini-rechargeable-mini-wand-tease-me-turquoise-cast-hotel-window-light-20261005-1.jpg`.
+- **Lesson for the next stomach-zone self-held brief:** anchor the lower crop boundary at the
+  **natural waist/navel line**, not "hip bones" — hip bones reads anatomically close enough to the
+  groin that a self-held product brief drifts the contact point down into it. Pair this with an
+  explicit negative list naming the pelvic-region tokens (hip bones, hip crease, groin, mons pubis,
+  pubic hair, genitalia, labia) even on a stomach-zone brief where they were not expected to be at
+  risk — this run shows they are, once the product is "self-held" and drifting is possible.
+
 ---
 
 *Seeded 2026-07-17 from the doctrine §4 directives and the mission-brief §2 image rules.
