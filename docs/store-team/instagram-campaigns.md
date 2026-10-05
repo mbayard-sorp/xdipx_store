@@ -293,7 +293,9 @@ said nothing.
 
 **Bodyscape is the default on-skin frame (owner direction 2026-09-22, codified same day).** The body
 is the landscape and the product is the only object in it. Close crop, one zone, skin fills the
-frame, no face unless the brief says why. Reference frames in the socials library: asset 602
+frame, no face unless the brief says why (amended 2026-10-05: a face may enter at the frame edge
+when it carries the sensation, and the room's lived-in detail and the story cue are in frame, per
+§3.2g items 4 and 5). Reference frames in the socials library: asset 602
 (Womanizer Beauty in the hip hollow, gold waist chain, sheet closing the top corner) and asset 607
 (LELO SONA held flat on the stomach, sheet closing the bottom edge). Licensed compositions include:
 
@@ -582,7 +584,9 @@ pipeline already carries the on-skin machinery from tickets #10484, #10485, #104
 extending it later is a decision, not a build. Until that decision, no routine widens this to video
 on its own reading of "no more boring posts".
 
-**Product in hand is not an on-skin frame (owner ruling 2026-09-23).** A presenter holding the
+**Product in hand is not an on-skin frame (owner ruling 2026-09-23).** This ruling is for the
+talking video frame only; on a still, a chest-height hold presented to the lens is a `no-story`
+REVISE (§3.2g item 6, owner 2026-10-05). A presenter holding the
 product at chest height while speaking is a hold, not a contact frame; this section's zones, caps,
 and standing order do not apply to it, and §3.2a still binds it on every frame. On-skin stays out
 of the talking frame. Whether on-skin reaches video at all is still the 2026-09-22 scope boundary
@@ -797,7 +801,10 @@ be pulled up so we only see the cleft of her butt and she would be holding the t
 a back massager, so we need to understand the story that's playing out in the scene"*; *"She is coming
 out the sheets and it's AI sloppy."* Four rules, binding on every bodyscape brief from today:
 
-- **Every brief carries a story line, written by the writers room, before the art direction.** Format,
+- **Every brief carries a story line, written by the writers room, before the art direction.**
+  Amended 2026-10-05: the format, the licensed moments and the sensation fence now live in §3.2g,
+  and where this bullet and §3.2g differ, §3.2g wins. The 2026-09-23 wording follows for the record.
+  Format,
   one line: `BEFORE | AFTER: <cast> wants <one clause>. Cue: <one object or light in frame that shows
   the moment>. Hand: <which hand holds the product, and how>.` Exactly one cue, and it is an object or
   the hour of light, never a facial expression (faces are mostly out of crop) and never the body. The
@@ -851,13 +858,129 @@ out the sheets and it's AI sloppy."* Four rules, binding on every bodyscape brie
   Excellent presentation of the product and the body."* One prop and an hour of light away from a
   story.
 
-**Where the story line comes from.** One episode-writer pass per product post, Sonnet class, one call,
+**Where the story line comes from.** Wired 2026-10-05, see §3.2g item 1: `routine-social-daily.md`
+Step 5.0s and `episode-writer.md` `<stills_story_line>`. The 2026-09-23 design, which no playbook
+carried until then: one episode-writer pass per product post, Sonnet class, one call,
 run in the daily social routine immediately before social-art-director's brief step: input is the
 handle, the cast slug, the body zone and shot already chosen by the rotation, and the series bible §4
 and §9 pointers; output is the story line in the format above plus the cue's negative (for example, no
 second person implied in the bed). series-showrunner does not join the daily run; in the weekly
 writers-room retro it reads the week's story lines against the owner's frame notes and keeps a
 banned-cue list so a cue cannot repeat inside five posts, the same window as the zone.
+
+### 3.2g Story, her space, and the sensation (owner direction 2026-10-05)
+
+Owner, verbatim: *"what is missing is a story behind what is in the image. This is something we
+have discussed in previous threads and we had decided, if I remember right use the writers room to
+craft scenes that have a narrative and more effectively tell stories. A cast member standing with a
+product in hand in what looks like an empty space is meaningless to our customers. Our customers
+need to relate and feel that they are excited to use the product in their own intimate space ...
+we should still be focused on bodyscapes that include the lingerie. It's OK to see cast members
+faces and bodies, but we need to show our customers that the sensation they are after, can be
+achieved with our products."*
+
+**Why it had to be said twice.** The 2026-09-23 story rule in §3.2c was written here and nowhere
+else. `routine-social-daily.md` had no step that called the writers room, `social-art-director.md`
+had no field for a story, and `episode-writer.md` had no stills mode, so no run ever produced a
+story line. Rows 381 (Jade on an empty bed holding the La Nua bottle up to the lens) and 384
+(Marcus with the same bottle at a kitchen table) are what that gap renders. This section is wired
+into all three, and into `media-manager.md` and `social-publish-gate.md`, on the same day.
+
+**Where it supersedes the 2026-09-23 rule.** Two lines in the §3.2c story bullet are replaced by
+this section, and a run quoting them is quoting a retired rule: "the moment is before or after an
+evening or a decision, never before or after the act", and "AFTER ... never lives on her body". The
+owner's own words on 2026-09-23 were *"a story that she either just used it or is about to use
+it"*; the rule narrowed them. Everything else in §3.2c stands: held for use, the category grips,
+the buttocks rule, body hair, the gravity rule, placement follows use.
+
+**1. Every Instagram and X product frame starts from a story line, written before the brief.**
+`episode-writer` writes it (the writers room, stills mode) in routine Step 5.0s, in the format in
+`episode-writer.md` `<stills_story_line>`: Moment, Set, Cue, Sensation, Gaze, Hand, Garment, Cue
+negative. `social-art-director` puts it at the top of the brief, ahead of location and cast. If the
+writers-room pass did not run, the art director writes the story line itself in the same format
+and the run event says the pass was missing, because a frame briefed with no story is the failure
+this section exists to stop. The story line rides onto the draft row as the first lines of
+`imageBrief`, so the publish gate and the weekly retro can read the intended moment instead of
+guessing it.
+
+**2. The moment is just before use or just after it. Never during.** Three moments are licensed:
+
+- **ANTICIPATION**: she is about to. The product is in her hand at a licensed placement (hip, belly
+  above the navel, collarbone, at her side, at her shoulder) and may touch skin lightly. The face,
+  when it is in frame, shows the wanting: eyes on the product, a lip caught in her teeth, a slow
+  smile, a breath held.
+- **AFTERGLOW**: she has just finished. The product is set down beside her, on the pillow, the
+  sheet or the nightstand, and is out of contact with her body and out of her grip. The face or the
+  body shows ease: eyes closed or a loose smile, limbs slack across the bed.
+- **CHOOSING**: she is deciding between two, or picking it out of the drawer. Emma's default.
+
+The stranger test decides it. Someone shown the frame with the caption covered and asked what is
+happening must answer "she is about to" or "she just did". If the honest answer is "she is doing
+it", the frame is the §3.2a "depicted or discernible sex act" stop and the gate BLOCKs it as
+`implied-act`. Emma gets ANTICIPATION or CHOOSING only, never AFTERGLOW: an afterglow frame of an
+AI guide is testimony in pixels. A second person in frame or implied by the set is ANTICIPATION
+only.
+
+**3. The sensation reads in the frame, inside a fence the gate can judge.** The story line names
+what the product does, from the PDP (a deep rumble, an air-pulse, a slow glide), and one sign that
+the body answered it. Exactly one carrier, named as an action: the face (eyes closed, lips parted,
+a slow smile, head tipped back), or the posture (toes curled into the sheet, fingers twisted into
+it, the back lifting off the mattress, an arm thrown over her head). On a faceless crop the posture
+carries it; a face outside the crop cannot.
+
+The fence, binding on the brief and judged on the pixels:
+
+- Contact or expression, never both at full strength. A frame whose product touches her body may
+  show anticipation on the face; the eased, eyes-closed AFTERGLOW face goes with the product set
+  down and out of her hand.
+- At most one of eyes closed, lips parted, head back at once. Two or more, with the product in
+  her hand and a bare or shifted garment, is `implied-act`.
+- The product never points at, touches, or sits within a hand's width of the pelvis. No hand below
+  the navel. Garments sit as styled: nothing pulled aside, half off or rucked.
+- Limbs are loose, never splayed toward the camera. No sheen, no sweat, no flush on the chest.
+- The face shows a state of mind (wanting, amusement, ease), never the peak.
+
+**4. Her space, never an empty one.** A product used on the body is set in an intimate space a
+customer would recognise as her own kind of room: her bed, her bath, her sofa, the floor against
+her bed, a hotel bed on a trip, a beach-house bed. Kitchen counters, bathroom vanities, desks,
+hotel lobbies and blank walls are retired for pleasure products. Care, storage, gift and travel
+subjects may use a place that is the story (a packed suitcase, the bath ledge beside the toy a
+cleaner serves). Daylight stays the default (§3.2a, *"Don't always make it at night"*); a night
+frame names why.
+
+- At **medium** crop the frame carries two lived-in details that are hers, beyond the furniture
+  (her rings on the nightstand, her robe over the chair, the bedding from her closet in
+  `cast-wardrobe.md`, the lamp left on, a phone face-down), and one of them is the story cue.
+- At **close** crop the cue and her bedding carry it. At **macro** the cue alone carries it, so
+  prefer close or medium for a frame whose story needs the room.
+- At most two story objects, and the product fills about a fifth of the frame or more. Story
+  objects pull the camera wide, and identity drift is already the main BLOCK.
+- Mugs, cups, candles, journals, notebooks, books and letters are banned as cues: they are the
+  housewares still life §3.2c retired, and the written-on ones bake pseudo-text the gate blocks.
+
+**5. Bodyscape with lingerie stays the default, and a face may enter it.** The 2026-09-22 and
+2026-09-27 standing orders do not move. What changes is "no face unless the brief says why": a
+face may enter a bodyscape at the frame edge, in profile or three-quarter, with the eyes closed, on
+the product, or away toward the light, when it carries the sensation. The lingerie line from the
+§3.2a Styling rules still closes an edge. **That frame is not a portrait.** For the 1-per-rolling-7
+portrait cap, a portrait is a frame where the face is frontal to the lens, the full figure is in
+frame, or the garment is the subject. The cast rotation floor (no member on more than 2 of any 5
+consecutive product posts) still holds, because more faces means more age-ambiguity exposure.
+
+**6. Nobody presents a product to the lens.** A cast member looking into the camera while holding
+the product up at chest height is a demonstration, and it is the reference failure (row 381). On a
+still the gaze goes to the moment: the product, the partner, the light, or closed. The §3.2c ruling
+that "product in hand is not an on-skin frame" was written for the talking video frame and is not
+an exemption for stills; a still that is a chest-height hold with no zone is a REVISE (`no-story`).
+
+**How it is enforced.** `media-manager` re-renders a frame that presents to the lens, sits in an
+empty or generic room, or fails the stranger test, before the gate sees it. `social-publish-gate`
+REVISEs `no-story` (no story line on the row, no visible cue, an empty set, presenting to the lens),
+reads a tame frame with a face in it or with clearly neutral posture as `too-tame` (frame subtype),
+and BLOCKs `implied-act`. The writers-room retro (`routine-writers-room-weekly.md` Step 5) reads the
+week's story lines against the owner's frame notes and keeps the banned-cue list for the five-post
+window. `bodyscape-shot-bank.md` keeps its poses, cameras and closers; the set, cue and sensation
+sentences come from each post's story line and are never left out of a bank prompt.
 
 ### 3.2d The paired reference frames (owner-approved 2026-09-24)
 
@@ -1331,8 +1454,16 @@ warm-light mandate in `docs/design-doctrine.md` §4 still bind, and the ceiling 
 
 **Variety is a rule, not an aspiration.**
 
-- **No location repeat inside 8 consecutive Instagram product posts.** Bedroom is the default every
-  model reaches for, so it is the one most likely to violate this.
+- **A product used on the body is set in an intimate space (owner direction 2026-10-05, §3.2g
+  item 4):** her bedroom, bath, sofa, a hotel bed, a tent, a beach-house bed. Non-intimate
+  locations (kitchen, car, market, podcast set) are for care, storage, gift and travel subjects,
+  where the place is the story.
+- **No spot repeat inside 8 consecutive Instagram product posts.** The window applies to the spot,
+  not the room: bed edge, headboard, the floor against the bed, window seat, vanity stool, bath rim,
+  sofa arm. No two consecutive posts share both room and hour. Each cast member's room stays
+  recognisably theirs. Variety comes from inside intimate spaces, never from leaving them: the
+  2026-08-19 sentence that called the bedroom the default to ration is what put pleasure products
+  on kitchen tables (rows 377 to 390), and it is retired.
 - **No cast member carries more than 2 of any 5 consecutive product posts.** A rotation with one
   face is not a cast.
 - **Every run states, in its decision event, the location and cast member chosen and the last time

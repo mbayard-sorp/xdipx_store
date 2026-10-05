@@ -1513,6 +1513,24 @@ Before declaring Instagram or X degraded-to-zero for want of a cast member, re-r
 above and say in the run summary which query and which credential you used. Never cite an owner
 blocker as proof the roster is empty; blockers can be filed in error, and this one was.
 
+**Step 5.0s, the writers room writes the story line, before the art director (owner direction
+2026-10-05, `instagram-campaigns.md` §3.2g).** For every Instagram and X product post, call
+`episode-writer` once in its stills mode (`<stills_story_line>`, Sonnet class, one call per post)
+with: the handle, title and category; the one sentence from the PDP that says what the product
+does; the cast members eligible for it (approved, matched to the product under §3.7a, and not on
+2 of the last 5 product posts), from which it picks one; the campaign beat; and the cues used in
+the last five product posts (read them off the first lines of `imageBrief` on the last five rows).
+It returns a `STORY LINE` block (Moment, Set, Cue, Sensation, Gaze, Hand, Garment, Cue negative).
+Hand that block to `social-art-director` with the rest of its inputs; it goes at the top of the
+brief, and the art director chooses the body zone, camera and crop that serve its Hand line. A
+locked campaign cast (§5) wins: the art director swaps the cast and keeps the moment. The owner
+asked for this on 2026-09-23, it was written into the campaign doc and never into
+this step, and on 2026-10-05 he named what that gap renders: *"A cast member standing with a
+product in hand in what looks like an empty space is meaningless to our customers."* If the
+writer cannot run (no PDP sentence, a failed call), the art director writes the story line itself
+in the same format and the run summary names the post and the reason. A product post never goes
+to generation without a story line.
+
 **Step 5.0, invoke `social-art-director` FIRST, before any image is generated.** It chooses the
 location and the cast member, enforces the §3.8 variety windows against the last 8 product posts,
 holds cast continuity across the campaign, and hands back the scene brief with its negatives and
@@ -1550,8 +1568,10 @@ per-campaign total:
 - **Charge: roughly 4 ceiling / 2 mid / 1 educational per rolling 7.** §3.2b gives both an on-skin
   definition: **ceiling on-skin** is a bare contact zone in implied-nude territory (hip hollow, small
   of the back to the dimples, sternum with the breasts bare, stomach to the navel); **mid on-skin**
-  is a contact zone that reads clothed-adjacent even while bare (inner wrist, forearm, behind the
-  knee, the back of a shoulder). Educational stays the only frame that may be quiet.
+  is a contact zone that reads clothed-adjacent even while bare (inner wrist, behind the knee, the
+  back of a shoulder). `forearm` is retired on Instagram and X (`imagery-owner-notes.md` entry 3,
+  owner 2026-10-02), and rows 378 to 390 on 2026-10-04 used it anyway because this line still
+  listed it. Educational stays the only frame that may be quiet.
 - **At most 3 close crops per rolling 7, and never two consecutive.** At least one ceiling frame per
   rolling 7 is wide enough to read a location. Ten tight crops of bare skin is a stock library.
 - **Body-zone rotation window of 5.** No zone repeats inside 5 consecutive on-skin frames, judged on
@@ -2348,6 +2368,11 @@ text`. If you cannot describe the final image in plain prose for `altText`, the 
 Alongside `altText`, the draft carries `subject` (the post's subject in one line) and `imageBrief`
 (the brief `social-art-director` returned, with subject, product(s), and the feeling being sold per
 `instagram-campaigns.md` §3.9). All three are accepted by `op:'draft'` and `op:'rework'`.
+**`imageBrief` opens with the Step 5.0s `STORY LINE` block, verbatim, on every Instagram and X
+product row (owner direction 2026-10-05, §3.2g item 1).** The publish gate reads the intended
+moment and cue from it, the next run reads the five-post cue window from it, and the weekly
+writers-room retro reads the week's story lines from it. Rows 384 and 395 went out with an empty
+`imageBrief`; that is a run defect from today and the run summary names it.
 
 One `event` per draft (`eventType:'step'`, `phase:'draft'`):
 

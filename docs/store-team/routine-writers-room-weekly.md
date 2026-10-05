@@ -256,7 +256,20 @@ mode with the writers' one-line reason, speaker and est cost, and the batch tota
 
    Keep the theme slug short and dateless. Quote the owner verbatim; never paraphrase his words
    into the ledger.
-3. Record one `phase:'retro'` event per theme filed or superseded, plus the batch's filed versus
+3. **Read the week's social story lines (owner direction 2026-10-05, `instagram-campaigns.md`
+   §3.2g).** The room also writes the story line for every Instagram and X product still, in the
+   daily social routine's Step 5.0s. Pull the last 7 days of Instagram and X product rows
+   (`POST /api/team/social-post {"op":"list"}`), read the `STORY LINE` block at the top of each
+   `imageBrief`, and set it beside the owner's feedback on those rows and the asset feedback in
+   `imagery-owner-notes.md`. Three outputs, filed through the same ledger convention as above but
+   appending to `docs/store-team/imagery-owner-notes.md` with dedupe keys
+   `imagery:owner-note:<theme-slug>`: a theme the owner flagged on 2 frames (a cue that read as
+   staged, a set that read empty, a sensation that read as the act); the banned-cue list, a
+   numbered list of cues used in the last five product posts, which the next week's writers read
+   (post it in the retro event so the daily routine can quote it); and the count of product rows
+   that shipped with no story line, which should be zero. A nonzero count is a routine defect and
+   gets a `code` or `instructions` row naming the run.
+4. Record one `phase:'retro'` event per theme filed or superseded, plus the batch's filed versus
    dropped count with drop reasons, the last batch's approval rate, and the learn read with its n.
 
 ## Step 6: Report and finish
