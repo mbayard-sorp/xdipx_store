@@ -2448,5 +2448,145 @@ content-blog --run-id 1239`, Atlas `seedream-4.5-edit`, 4:3. Concept: surface an
 
 ---
 
+## Social bodyscape — Emma / Wini Rechargeable Mini Wand, hotel window seat (reject run, run 1257, 2026-10-05)
+
+`cast: emma` + `vedo-wini-rechargeable-mini-wand-tease-me-turquoise`, archetype cast, bodyZone
+stomach, cropScale close, contactMode self-held, sceneLocation hotel-window-seat-late-morning.
+Route: `gen-social-image.ts` → `/api/team/social-image` op `cast`, Atlas `seedream-4.5-edit`,
+ref-image the 76940D back face (no glyphs). Four full attempts (8 batches, 16 billed candidates),
+zero shipped. No keeper. Logged so the next attempt on this wardrobe piece starts from v4, not v1.
+
+- **v1 reject (4/4 crop_rejected:uncroppable):** brief's "narrow opaque lined lace front panel"
+  on the micro brief rendered as fully sheer mesh with visible vertical seam lines and no opaque
+  coverage at all — the exact `cast-wardrobe.md` asset-896 failure ("a 'small triangle' on a sheer
+  bottom rendered sheer and showed the outline through it"), this time on the front panel rather
+  than a bottom triangle. The crop-to-zone pass correctly refused rather than let it reach the
+  vision gate. Composition was also wrong: all 4 candidates rendered a medium shot with Emma's full
+  face in frame despite "No face in frame" in the brief — the crop-to-zone pass tolerated it only
+  because the panel failure made the whole frame uncroppable first.
+- **v2 fix (front panel) + v2 reject (4/4 vision_gate_fail:nippleOccluded):** naming the panel
+  explicitly as "SOLID, OPAQUE, matte white cotton-lined... no mesh, no tulle, no transparency, no
+  visible weave or seam lines" and adding "extreme close-up crop" framing fixed the panel AND the
+  face-in-frame problem (0/4 face failures afterward). But the sheer tulle triangle bralette with
+  embroidered daisy appliqués (the Emma closet piece, `cast-wardrobe.md`) now failed the opposite
+  way: nipple/areola outline visible through the sheer mesh around the daisy, same failure class as
+  the panel, now on the bralette.
+- **v3 fix (nipple) attempt, still 3/4 vision_gate_fail:nippleOccluded:** describing the daisy as
+  "solid, fully opaque embroidered... dense opaque embroidery, not sheer, with zero transparency...
+  large enough to completely cover and conceal the entire nipple and areola with margin to spare"
+  did not reliably fix it — still failed on areola edge visible 3 of 4 times. One of the 4 (asset
+  985) passed `nippleOccluded` clean.
+- **v4 attempt (hand-digit fix), still 0/4 survived; mixed failure modes:** the 1-of-4 that cleared
+  nippleOccluded in v3 (985) and a v2 near-miss (981) both recorded `pass:false` on `handAnatomy`
+  alone, with the verdict's own prose reading "All checks pass" / "No exposure violations detected"
+  immediately before a bracketed `[enumerated-anatomy override: handDigitCounts [5] with
+  handOccludedDigits [1] includes a hand that does not add up to five]` flips it to fail. Manual
+  inspection of both (cropped to the hand) shows a normal five-digit grip with the thumb naturally
+  and correctly occluded behind the handle — this reads as a gate scoring bug on the
+  5-total/1-occluded case, not a rendered defect, and is worth a ticket rather than a prompt fix.
+  v4 reworded the hand clause to force all five digits into plain view (no occlusion) to dodge the
+  override regardless of root cause; it did not reproduce the two near-misses — nippleOccluded
+  reverted to failing 3 of 4 again, and the 4th new failure read `handAnatomy` differently this
+  time ("4 clearly countable fingers, thumb partially obscured... digit tally uncertain").
+- **Open questions for the next attempt on this SKU/wardrobe pairing:** (1) the sheer-tulle +
+  opaque-appliqué combination is not yet reliable past ~25% pass rate on `nippleOccluded` even with
+  maximal opacity language in the prompt — consider briefing a denser lace (not tulle) for this
+  cast/product pairing, or accept the lower yield and budget more candidates per attempt. (2) file
+  the `[enumerated-anatomy override]` false-positive pattern (verdict prose says checks pass, then
+  the override flips the overall verdict) as a `social-vision-gate.server.ts` ticket rather than
+  re-fighting it with hand-pose wording — it cost a full attempt (v4) for no gain.
+- **Not generated:** the X 16:9 variant (ticket #10685's generate-at-4:5-then-crop). No IG 4:5
+  candidate ever cleared the recorded vision-gate verdict to crop from.
+
+### RESOLVED — v5, Option B (composition fix, no wardrobe change), run 1257, 2026-10-05, 2/2 attempts
+
+A peer `media-manager` instance first proposed fixing v1-v4's `nippleOccluded` failures by swapping
+Emma's wardrobe to a fully opaque matte cream ribbed cotton-jersey bralette/brief. That brief was
+**declined and not generated**: it fails `cast-wardrobe.md` styling rule 1 ("skimpy, sheer where
+possible... a piece that covers more than that is a REVISE") and rule 4 (never name a fabric "cream"
+— the exact beige-sheet failure that file exists to prevent). The coordinator agreed and withdrew it.
+
+**Option B instead: keep Emma's actual closet piece (sheer tulle bralette/brief, unchanged from the
+original brief) but crop tight enough that the bralette's band/cups never enter frame at all**,
+removing the nipple-occlusion risk zone from the shot entirely rather than re-fighting its opacity.
+No wardrobe mention at all in the prompt (the piece exists above-frame, unrendered-in-detail).
+
+- **v5 attempt 1/2 reject (new failure mode, not the v1-v4 one):** cropped "bottom of ribcage to top
+  of hip bones." 4 billed candidates (`atlas/seedream-4.5-edit`), 0 shipped: 1 `crop_rejected:uncroppable`,
+  3 `vision_gate_fail:genitaliaAbsent` — the crop/product-contact point drifted down into the
+  pelvic/groin zone ("pubic hair and the mons pubis region are visibly exposed," "product...held in
+  direct contact with...the genital area"). "Top of hip bones" as the lower crop boundary was not a
+  tight enough anchor; the model drifted the self-held product placement down toward the groin. Two
+  of the four verdicts also carried the same `[enumerated-anatomy override: handDigitCounts [5] with
+  handOccludedDigits [1]]` false-positive flip already logged in v4 above — reconfirms that pattern is
+  a `social-vision-gate.server.ts` scoring bug independent of wardrobe AND independent of this crop
+  fix; still worth its own ticket.
+- **v5 attempt 2/2 keeper:** moved the lower crop boundary up to the natural waist/navel line (not
+  hip bones), explicitly negative-listed hip bones/hip crease/groin/mons pubis/pubic hair/genitalia,
+  and anchored the product contact point explicitly at navel height ("never moving lower than the
+  navel toward the waistband or hips"). Also reworded the hand clause to make the thumb visibly laid
+  across the fingers rather than hidden, to dodge the digit-count override (inconclusive whether this
+  helped; only 1 candidate billed+shipped this round, not 4, so no contrast). 1 candidate shipped
+  clean. Verified by manual review against `76940D.jpg`: pinched-neck/bulb-head silhouette matches
+  the reference exactly, five-finger grip reads naturally (thumb visible, no extra/missing digits),
+  no text/logo/buttons rendered (hand position naturally occludes the control buttons), crop stays
+  entirely above the navel-to-ribcage band (no hips, no groin, no breast, no face), coral-soft cushion
+  and washed-denim-blue carry-on corner present, bright window daylight, no beige/cream cast anywhere.
+  Asset: `social-vedo-wini-rechargeable-mini-wand-tease-me-turquoise-cast-hotel-window-light-20261005-1.jpg`.
+- **Lesson for the next stomach-zone self-held brief:** anchor the lower crop boundary at the
+  **natural waist/navel line**, not "hip bones" — hip bones reads anatomically close enough to the
+  groin that a self-held product brief drifts the contact point down into it. Pair this with an
+  explicit negative list naming the pelvic-region tokens (hip bones, hip crease, groin, mons pubis,
+  pubic hair, genitalia, labia) even on a stomach-zone brief where they were not expected to be at
+  risk — this run shows they are, once the product is "self-held" and drifting is possible.
+
+---
+
+## Social presenting shot — Maya / VeDO Moe mini wand, X row 394 slide 2 (final attempt, run 1257, 2026-10-05)
+
+`cast: maya` + `vedo-moe-rechargeable-extra-mini-wand-black`, archetype cast, cropScale medium (a
+chest-height presenting hold, not an on-skin frame — §3.2c: "product in hand is not an on-skin
+frame"), bodyZone/contactMode `none`, sceneLocation sunlit-loft, platform X (16:9). Route:
+`gen-social-image.ts --cast-slug maya --crop-scale medium` → Atlas `seedream-4.5-edit`,
+`--candidates 1` (budget: 1 attempt, 2 billed candidates max). This was the second attempt on this
+exact concept: a first attempt on the same slot (cast Diego) solved a buttons/control-face wordmark
+by compositing off a glyph-free back-face reference; a prior Maya attempt then reintroduced a
+legible "VeDO" wordmark baked into the wand HANDLE (not the control face).
+
+- **Reference fix (worked — no text/wordmark in either verdict this round):** this SKU's product
+  media follows the same lettered-suffix convention as the 76940D case. Of the six images
+  (`99926A`-`99926F`), A/E are boxed packshots, B/C are front/three-quarter views with a legible
+  "VeDO" wordmark printed on the handle below the power button, and **D is the back view with zero
+  printed or molded marks anywhere on the ball head, neck, or handle** (just the charging-pin
+  contacts, not text). Used `99926D.jpg` as `--ref-image`, plus an explicit negative naming the
+  FULL product surface ("no text/letters/logo/wordmark anywhere on the product including the
+  handle, the neck, and the head, no VeDO wordmark anywhere on the product body") rather than only
+  the control face. **Result: neither billed candidate's vision-gate verdict mentioned text, a
+  wordmark, a logo, or baked-in lettering at all** — read this as the fix holding on this SKU.
+- **New, different blocker (both candidates BLOCKed, `vision_gate_fail:nippleOccluded`):** Maya's
+  closet coral sheer tulle plunge bralette with its embroidered coral appliqué rendered with the
+  nipple/areola outline visible through the sheer fabric despite the prompt stating the appliqué
+  "dense and fully opaque... covering each nipple and areola completely with margin to spare, no
+  sheer gap at the edge." Same failure class already logged above in the Wini/Emma v1-v4 reject
+  run (sheer-tulle-plus-opaque-appliqué is not yet reliable much past ~25% pass on `nippleOccluded`
+  even with maximal-opacity language) — this is the second SKU/cast pairing to hit it, not a
+  one-off. One verdict also carried the same `[enumerated-anatomy override: handDigitCounts [5,5]
+  with handOccludedDigits [0,1]]` false-positive pattern already flagged as a
+  `social-vision-gate.server.ts` scoring bug in that same v4/v5 log; it did not change the outcome
+  here (the nippleOccluded fail alone was dispositive on both candidates) but reconfirms the
+  pattern is cast/SKU-independent.
+- **Stopped per budget, not retried:** both billed candidates were spent (1 CLI call, internal
+  2-batch auto-retry, 1 candidate each). Per the run's explicit instruction this was the last try
+  for this post this run; no third attempt was made. Nothing shipped for row 394 slide 2 this run.
+- **Lesson for the next attempt on this slot:** the text/wordmark fix (glyph-free lettered-suffix
+  reference + full-surface negative) is now validated and should be the default opening move for
+  any VeDO product with a `[SKU]A`-`[SKU]F` media set, rather than something to re-derive per SKU.
+  The remaining open problem is independent: before the next attempt on Maya's coral bralette
+  specifically (or any sheer-tulle-plus-appliqué closet piece), consider either briefing a denser
+  lace for that piece (as the Wini/Emma log already recommended and nobody has yet actioned) or
+  budgeting more than 2 candidates so the ~25% pass rate has room to land one.
+
+---
+
 *Seeded 2026-07-17 from the doctrine §4 directives and the mission-brief §2 image rules.
 Owner: `media-manager` (append keepers/rejects each run); pruned monthly.*
