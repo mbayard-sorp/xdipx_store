@@ -855,6 +855,35 @@ describe('backAnatomyReadsAsDefect (ticket #11029)', () => {
   })
 })
 
+// Ticket #13160: posted IG rows #354/#355 (from behind, wand across the lower
+// back, sheet knotted at the hip) shipped with a line of hair at the top of
+// the cleft/sacrum that the old pattern missed, because the model's own
+// wording never said "pubic" — it just named the hair and where it was. The
+// old pattern only ever caught this class when the model happened to qualify
+// it as "pubic"-style; the gap was that qualifier, not the check itself.
+describe('backAnatomyReadsAsDefect — bare hair mention (ticket #13160)', () => {
+  it('flags a hair mention with no "pubic" qualifier at all (the #354/#355 shape)', () => {
+    expect(backAnatomyReadsAsDefect('a line of hair at the top of the cleft')).toBe(true)
+    expect(backAnatomyReadsAsDefect('hair visible along the sacrum')).toBe(true)
+    expect(backAnatomyReadsAsDefect('a faint stubble line on the lower back')).toBe(true)
+  })
+
+  it('flags hairy/hairline/fuzz the same way', () => {
+    expect(backAnatomyReadsAsDefect('the skin above the cleft reads hairy')).toBe(true)
+    expect(backAnatomyReadsAsDefect('a hairline above the sacrum')).toBe(true)
+    expect(backAnatomyReadsAsDefect('light fuzz at the top of the cleft')).toBe(true)
+  })
+
+  it('does not flag a clean read that negates hair with no "pubic" qualifier', () => {
+    expect(backAnatomyReadsAsDefect('smooth skin, no hair visible above the cleft')).toBe(false)
+    expect(backAnatomyReadsAsDefect('no hair or navel visible')).toBe(false)
+  })
+
+  it('still flags a bare hair mention when a different clause negates something else', () => {
+    expect(backAnatomyReadsAsDefect('no navel visible, a line of hair at the sacrum')).toBe(true)
+  })
+})
+
 describe('enforceEnumeratedAnatomy (ticket #11029)', () => {
   const CLEAN_ENUMERATED: VisionVerdict = {
     ...CLEAN_RESPONSE,
@@ -962,6 +991,20 @@ describe('enforceEnumeratedAnatomy (ticket #11029)', () => {
     const result = enforceEnumeratedAnatomy(verdict)
     expect(result.pass).toBe(false)
     expect(result.checks!.faceBodyIntegrity).toBe('fail')
+  })
+
+  // Ticket #13160, the posted #354/#355 shape: a bare hair mention with no
+  // "pubic" qualifier, which is exactly the wording that shipped undetected.
+  it('forces faceBodyIntegrity to fail on a bare hair mention with no "pubic" qualifier (the #354/#355 shape)', () => {
+    const verdict: VisionVerdict = {
+      ...CLEAN_ENUMERATED,
+      handDigitCounts: [],
+      backAnatomyRead: 'a line of hair at the top of the cleft and the sacrum',
+    }
+    const result = enforceEnumeratedAnatomy(verdict)
+    expect(result.pass).toBe(false)
+    expect(result.checks!.faceBodyIntegrity).toBe('fail')
+    expect(result.notes).toContain('cleft/sacrum hair')
   })
 
   it('applies both overrides together and does not clobber an already-failing check', () => {
