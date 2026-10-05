@@ -29,7 +29,7 @@ import { and, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm'
 import { db } from './db.server'
 import { socialPosts } from '../../db/schema'
 import { runDeterministicPublishChecks, type GateFinding } from './social-publish-gate.server'
-import { isTickEligible, preserveGateStamp } from './social-publish-approve.server'
+import { effectiveGateStatus, isTickEligible, preserveGateStamp } from './social-publish-approve.server'
 import { runRemovalWatch, type RemovalWatchResult } from './social-removal-watch.server'
 import { checkLinkedProductStock } from './social-publish/stock-guard.server'
 import { resolvePostProductHandle } from './social-publish/product-handle.server'
@@ -37,6 +37,7 @@ import { estimateXPostCostUsd, estimateXSpendUsd, isRetryFutileXError } from './
 import { permalinkFor } from './social-permalink.server'
 import { formatLaSlot } from './social-schedule'
 import { fileBlocker } from './owner-blockers.server'
+import { createSuggestion } from './team.server'
 import { isVideoPost } from '~/components/admin/social/types'
 import type { AutoPublishPlatform } from './team-keys'
 
@@ -253,6 +254,13 @@ export interface PublishTickDeps {
    * Instagram to check eight posts is not the unit under test here.
    */
   removalWatch?: () => Promise<RemovalWatchResult | null>
+  /**
+   * Ticket #13725. Injected so a dead-row report is testable without a
+   * database: defaults to the real ticket writer and the real owner blocker
+   * writer respectively. See `reportDeadPublishRow` below.
+   */
+  fileDeadRowTicket?: (input: Parameters<typeof createSuggestion>[0]) => Promise<unknown>
+  fileOwnerApprovedBounceBlocker?: (input: Parameters<typeof fileBlocker>[0]) => Promise<unknown>
 }
 
 /**
@@ -571,6 +579,83 @@ export async function reportOverdueApproved(
     // it; the count still reaches the caller and the run result.
   }
   return overdue.length
+}
+
+/**
+ * Ticket #13725 (owner all-hands 2026-10-05): "Why have no social media posts
+ * gone out today ... Figure out why there are no posts and if there's a
+ * blocker somewhere, get it cleared out." Three approved rows died at the
+ * publish tick that day and nothing raised a signal until the day-close
+ * zero-day check, hours later: a terminal `markFailed`, and two
+ * owner-approved rows the deterministic re-check bounced back to
+ * `needs_changes`. This fires at both of those moments instead of waiting
+ * for day-close.
+ *
+ * Filed through the same writer the zero-day alarm uses
+ * (`createSuggestion`/`createSuggestionDetailed`), with a per-row dedupe key
+ * so a row that is still dead on the next hourly tick re-observes the same
+ * ticket rather than filing a second one. A row whose gate status is
+ * `'owner'` additionally gets an owner blocker, because the owner believed
+ * that specific post was going out; an agent-passed row did not carry that
+ * expectation, so it gets the ticket only.
+ *
+ * Never throws into the tick, same as `reportOverdueApproved` above: an
+ * advisory that fails to file must not cost the row its publish attempt.
+ */
+export async function reportDeadPublishRow(
+  post: Pick<PostRow, 'id' | 'gateStatus' | 'feedback'>,
+  platform: PublishPlatform,
+  outcome: 'terminal_failed' | 'bounced_by_gate',
+  detail: string,
+  deps: Pick<PublishTickDeps, 'fileDeadRowTicket' | 'fileOwnerApprovedBounceBlocker'> = {},
+): Promise<void> {
+  const fileTicket = deps.fileDeadRowTicket ?? createSuggestion
+  const gateStatus = effectiveGateStatus(post)
+  const ownerApproved = gateStatus === 'owner'
+  const what = outcome === 'terminal_failed'
+    ? 'died at the publish tick: a terminal publish failure'
+    : `was bounced back to needs_changes by the publish-time deterministic re-check (gate_status: ${gateStatus ?? 'unknown'})`
+
+  try {
+    await fileTicket({
+      team: 'social',
+      category: 'other',
+      kind: 'code',
+      priority: 1,
+      cxRisk: 'med',
+      dedupeKey: `social-publish-dead:${post.id}`,
+      dedupeScope: 'recurring',
+      suggestion:
+        `Approved ${platform} post #${post.id} ${what}${ownerApproved ? '; the owner had approved this row' : ''}. ` +
+        `Detail: ${detail}. Diagnose from this: a terminal failure needs the underlying publish error fixed or the ` +
+        'row re-drafted; a gate bounce needs the finding checked for a real defect in the draft/product/media ' +
+        'versus a gate false positive (app/lib/social-publish-gate.server.ts, app/lib/social-vision-gate.server.ts). ' +
+        `DONE WHEN: #${post.id} (or a re-draft carrying reworkedFrom:${post.id}) reaches status posted, or the row ` +
+        'is dismissed with a stated reason.',
+    })
+  } catch {
+    // Same as reportOverdueApproved: an advisory must never take the tick down.
+  }
+
+  if (outcome !== 'bounced_by_gate' || !ownerApproved) return
+
+  const fileOwnerBlocker = deps.fileOwnerApprovedBounceBlocker ?? fileBlocker
+  try {
+    await fileOwnerBlocker({
+      dedupeKey: `social-publish-owner-approved-bounced-${post.id}`,
+      title: `${platform} post #${post.id} you approved did not publish`,
+      detail:
+        `You approved this post and it was due to ship, but the publish-time deterministic re-check bounced it ` +
+        `back to needs_changes before it went out. Detail: ${detail}`,
+      unblocks: `Post #${post.id} actually publishing the way you approved it.`,
+      whereToGo: '/admin/socials/queue?view=needs_changes',
+      category: 'approval',
+      priority: 1,
+      source: 'agent',
+    })
+  } catch {
+    // Same: an advisory must not take the tick down.
+  }
 }
 
 export function makeDbPublishRepo(platform: PublishPlatform): PublishRepo {
@@ -930,6 +1015,10 @@ export async function runSocialPublishTick(deps: PublishTickDeps): Promise<Publi
       const summary = gate.findings.map(f => `[${f.check}] ${f.detail}`).join(' ')
       await repo.markNeedsChanges(post.id, preserveGateStamp(post.feedback, summary) ?? summary)
       attempts.push({ postId: post.id, outcome: 'blocked_by_gate', findings: gate.findings })
+      // #13725: this row was `isTickEligible` (gate_status pass-or-owner) a
+      // few lines up, so the owner or an agent believed it would ship. Raise
+      // the signal now rather than at day-close.
+      await reportDeadPublishRow(post, platform, 'bounced_by_gate', summary, deps)
       continue
     }
 
@@ -960,6 +1049,8 @@ export async function runSocialPublishTick(deps: PublishTickDeps): Promise<Publi
       outcome: 'failed',
       detail: terminal ? `terminal: ${result.detail}` : `will retry: ${result.detail}`,
     })
+    // #13725: a terminal failure means this row will never ship on its own.
+    if (terminal) await reportDeadPublishRow(post, platform, 'terminal_failed', result.detail, deps)
   }
 
   return {
