@@ -131,6 +131,35 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
  * unrelated to tagging, and this adapter simply never reads the field now.
  */
 
+/**
+ * Pin a Shopify CDN image URL to JPEG. Instagram ingests JPEG only, and
+ * cdn.shopify.com negotiates the format off the fetcher's Accept header: the
+ * same URL comes back image/webp to `Accept: image/webp,*\/*` and image/jpeg
+ * to `Accept: *\/*` (verified 2026-10-05). `format=pjpg` makes the CDN
+ * return JPEG whatever Meta's fetcher asks for. Row 393 (2026-10-05, a 6-slide
+ * New-in carousel with a gate PASS) failed both publish attempts with Meta's
+ * 9004 "Only photo or video can be accepted as media type", which is the
+ * error a non-JPEG fetch produces. Any other host, or a string that is not a
+ * URL, passes through unchanged.
+ */
+export function jpegImageUrl(url: string): string {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return url
+  }
+  if (parsed.hostname !== 'cdn.shopify.com') return url
+  parsed.searchParams.set('format', 'pjpg')
+  return parsed.toString()
+}
+
+/** Meta's numeric codes, so a failure in the row's error column can be looked up. */
+function metaCodeSuffix(error: MetaError): string {
+  if (error.code === undefined) return ''
+  return ` (code ${error.code}${error.error_subcode !== undefined ? `, subcode ${error.error_subcode}` : ''})`
+}
+
 /** Create one media container; returns its id or an error detail. */
 async function createContainer(
   igId: string,
@@ -138,7 +167,7 @@ async function createContainer(
   token: string,
 ): Promise<{ ok: true; id: string } | { ok: false; detail: string }> {
   const created = await igRequest(`/${igId}/media`, { method: 'POST', params, token })
-  if (!created.ok) return { ok: false, detail: describeInstagramApiError(created.error) }
+  if (!created.ok) return { ok: false, detail: describeInstagramApiError(created.error) + metaCodeSuffix(created.error) }
   const id = String(created.data['id'] ?? '')
   if (!id) return { ok: false, detail: 'Instagram returned no container id' }
   return { ok: true, id }
@@ -231,10 +260,11 @@ export const instagramPublisher: SocialPublisher = {
 
       const childIds: string[] = []
       for (const [index, url] of urls.entries()) {
+        const slide = `Carousel slide ${index + 1}/${urls.length}`
         const item = await createContainer(
           igId,
           {
-            image_url: url,
+            image_url: jpegImageUrl(url),
             is_carousel_item: 'true',
             // Alt text on the first slide only; IG renders one accessibility
             // description for the whole carousel post.
@@ -242,9 +272,9 @@ export const instagramPublisher: SocialPublisher = {
           },
           token,
         )
-        if (!item.ok) return { ok: false, reason: 'error', detail: item.detail }
+        if (!item.ok) return { ok: false, reason: 'error', detail: `${slide}: ${item.detail}` }
         const ingested = await pollUntilFinished(item.id, token)
-        if (!ingested.ok) return { ok: false, reason: 'error', detail: ingested.detail }
+        if (!ingested.ok) return { ok: false, reason: 'error', detail: `${slide}: ${ingested.detail}` }
         childIds.push(item.id)
       }
 
@@ -253,7 +283,7 @@ export const instagramPublisher: SocialPublisher = {
         { media_type: 'CAROUSEL', children: childIds.join(','), caption },
         token,
       )
-      if (!parent.ok) return { ok: false, reason: 'error', detail: parent.detail }
+      if (!parent.ok) return { ok: false, reason: 'error', detail: `Carousel container: ${parent.detail}` }
       const ingested = await pollUntilFinished(parent.id, token)
       if (!ingested.ok) return { ok: false, reason: 'error', detail: ingested.detail }
       const published = await publishContainer(igId, parent.id, token)
@@ -264,12 +294,12 @@ export const instagramPublisher: SocialPublisher = {
     // Single image or Reels: one container, one poll, one publish.
     const params: Record<string, string> =
       input.media.kind === 'image'
-        ? { image_url: input.media.imageUrl, caption, ...(altText ? { alt_text: altText } : {}) }
+        ? { image_url: jpegImageUrl(input.media.imageUrl), caption, ...(altText ? { alt_text: altText } : {}) }
         : {
             media_type: 'REELS',
             video_url: input.media.videoUrl,
             caption,
-            ...(input.media.posterUrl ? { cover_url: input.media.posterUrl } : {}),
+            ...(input.media.posterUrl ? { cover_url: jpegImageUrl(input.media.posterUrl) } : {}),
           }
 
     const created = await createContainer(igId, params, token)
