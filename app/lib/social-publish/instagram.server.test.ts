@@ -9,7 +9,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 vi.mock('~/lib/instagram-token.server', () => ({
   getInstagramAccessToken: async () => process.env['IG_GRAPH_ACCESS_TOKEN']?.trim() || null,
 }))
-import { instagramPublisher } from './instagram.server'
+import { instagramPublisher, jpegImageUrl } from './instagram.server'
 
 interface Captured { path: string; params: Record<string, string> }
 
@@ -265,5 +265,72 @@ describe('instagramPublisher alt text (ticket #5042)', () => {
     })
     const create = calls.find(c => c.params['image_url'] === 'a.jpg')
     expect(create?.params['alt_text']).toHaveLength(1000)
+  })
+})
+
+/**
+ * Row 393 (2026-10-05): a gate-PASSed six-slide carousel failed both publish
+ * attempts with Meta 9004 "Only photo or video can be accepted as media type".
+ * cdn.shopify.com serves webp to a fetcher that accepts it, and Instagram
+ * ingests JPEG only, so every Shopify CDN image URL is pinned to JPEG.
+ */
+describe('instagramPublisher JPEG pinning and failure detail (row 393)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
+    vi.restoreAllMocks()
+  })
+
+  const cdn = 'https://cdn.shopify.com/s/files/1/0761/6872/4651/files/social-card-plate-20261005-1-84a478.jpg?v=1791210006'
+
+  it('pins a Shopify CDN URL to JPEG and keeps its version param', () => {
+    const out = new URL(jpegImageUrl(cdn))
+    expect(out.searchParams.get('format')).toBe('pjpg')
+    expect(out.searchParams.get('v')).toBe('1791210006')
+    expect(out.pathname).toBe(new URL(cdn).pathname)
+  })
+
+  it('replaces an existing format param rather than adding a second one', () => {
+    const out = new URL(jpegImageUrl(`${cdn}&format=webp`))
+    expect(out.searchParams.getAll('format')).toEqual(['pjpg'])
+  })
+
+  it('leaves other hosts and non-URLs untouched', () => {
+    expect(jpegImageUrl('https://blob.vercel-storage.com/x.jpg')).toBe('https://blob.vercel-storage.com/x.jpg')
+    expect(jpegImageUrl('a.jpg')).toBe('a.jpg')
+  })
+
+  it('sends JPEG-pinned URLs on every carousel slide and on a single image', async () => {
+    const calls = installFakeGraph()
+    await instagramPublisher.publish({ postId: 1, media: { kind: 'carousel', imageUrls: [cdn, cdn] }, caption: 'two' })
+    await instagramPublisher.publish({ postId: 2, media: { kind: 'image', imageUrl: cdn }, caption: 'one' })
+    const imageUrls = calls.map(c => c.params['image_url']).filter((u): u is string => !!u)
+    expect(imageUrls).toHaveLength(3)
+    expect(imageUrls.every(u => new URL(u).searchParams.get('format') === 'pjpg')).toBe(true)
+  })
+
+  it('names the failing slide and Meta codes when a slide container is refused', async () => {
+    vi.stubEnv('IG_GRAPH_ACCESS_TOKEN', 'tok')
+    vi.stubEnv('IG_BUSINESS_ACCOUNT_ID', 'ig-1')
+    let item = 0
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      item += 1
+      if (item === 3) {
+        return jsonResponse({ error: { message: 'Only photo or video can be accepted as media type.', code: 9004, error_subcode: 2207052 } })
+      }
+      // Odd calls create a slide, even calls poll it to FINISHED.
+      return jsonResponse(item % 2 === 1 ? { id: `item-${item}` } : { status_code: 'FINISHED' })
+    }))
+    const result = await instagramPublisher.publish({
+      postId: 393,
+      media: { kind: 'carousel', imageUrls: [cdn, cdn, cdn] },
+      caption: 'three',
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.detail).toBe(
+        'Carousel slide 2/3: Only photo or video can be accepted as media type. (code 9004, subcode 2207052)',
+      )
+    }
   })
 })
