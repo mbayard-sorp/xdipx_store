@@ -424,7 +424,7 @@ describe('generateCastComposite budget guard (#11009)', () => {
     vi.resetModules()
 
     const nowSpy = vi.spyOn(Date, 'now')
-    nowSpy.mockReturnValueOnce(1_000_000_000)      // deadline computed at entry
+    nowSpy.mockReturnValueOnce(1_000_000_000)      // startedAt / deadline computed at entry
     nowSpy.mockReturnValueOnce(1_000_000_000 + 241_000) // checked after attempt 1: over the 240s budget
 
     const { generateCastComposite } = await import('./social-media.server')
@@ -441,7 +441,7 @@ describe('generateCastComposite budget guard (#11009)', () => {
     vi.resetModules()
 
     const nowSpy = vi.spyOn(Date, 'now')
-    nowSpy.mockReturnValueOnce(1_000_000_000)      // deadline computed at entry
+    nowSpy.mockReturnValueOnce(1_000_000_000)      // startedAt / deadline computed at entry
     nowSpy.mockReturnValueOnce(1_000_000_000 + 5_000) // checked after attempt 1: well inside budget
 
     const { generateCastComposite } = await import('./social-media.server')
@@ -449,14 +449,51 @@ describe('generateCastComposite budget guard (#11009)', () => {
 
     expect(composeSceneFrame).toHaveBeenCalledTimes(2)
   })
+
+  // Ticket #13173 correction: the original fix only checked `now <
+  // deadlineAt`, which a first round landing at ~230s still passes (230s <
+  // 240s) even though a second round of similar length cannot finish before
+  // Vercel's real 300s ceiling. Live incident: L3 returned a 504 at 304.9s.
+  it('skips the second attempt when the first round itself ran long, even though the 240s soft deadline has not passed yet (#13173)', async () => {
+    const composeSceneFrame = vi.fn(async () => ({ urls: [], requestIds: [], costKey: 'fal/flux-2-edit' }))
+    vi.doMock('./fal-video.server', () => ({ composeSceneFrame }))
+    vi.resetModules()
+
+    const nowSpy = vi.spyOn(Date, 'now')
+    nowSpy.mockReturnValueOnce(1_000_000_000)             // startedAt / deadline computed at entry
+    nowSpy.mockReturnValueOnce(1_000_000_000 + 230_000)   // checked after attempt 1: 230s elapsed, still under the 240s soft deadline
+
+    const { generateCastComposite } = await import('./social-media.server')
+    const result = await generateCastComposite(CAST_OPTS)
+
+    // Remaining budget (240s - 230s = 10s) cannot cover another ~230s round,
+    // so the second attempt must never start.
+    expect(composeSceneFrame).toHaveBeenCalledTimes(1)
+    expect(result.urls).toEqual([])
+  })
 })
 
-describe('hasCastCompositeBudgetLeft (#11009)', () => {
-  it('reads true before the deadline and false at or after it', async () => {
+describe('hasCastCompositeBudgetLeft (#11009, corrected #13173)', () => {
+  it('reads true only when the remaining time covers the first round plus margin', async () => {
     const { hasCastCompositeBudgetLeft } = await import('./social-media.server')
-    expect(hasCastCompositeBudgetLeft(1_000, 500)).toBe(true)
-    expect(hasCastCompositeBudgetLeft(1_000, 1_000)).toBe(false)
-    expect(hasCastCompositeBudgetLeft(1_000, 1_001)).toBe(false)
+    // deadlineAt=200_000, now=100_000: 100s remaining. A 1s first round plus
+    // the 15s margin fits comfortably.
+    expect(hasCastCompositeBudgetLeft(200_000, 1_000, 100_000)).toBe(true)
+    // Same remaining time, but a first round long enough that it plus the
+    // margin no longer fits.
+    expect(hasCastCompositeBudgetLeft(200_000, 95_000, 100_000)).toBe(false)
+    // At or past the deadline itself is always false regardless of margin.
+    expect(hasCastCompositeBudgetLeft(1_000, 0, 1_000)).toBe(false)
+    expect(hasCastCompositeBudgetLeft(1_000, 0, 1_001)).toBe(false)
+  })
+
+  it('reproduces the live #13173 incident shape: a long first round defeats the naive now<deadline check', async () => {
+    const { hasCastCompositeBudgetLeft } = await import('./social-media.server')
+    // 240s soft deadline from entry; first round itself took 230s. The old
+    // check (now < deadlineAt) alone would have read true here (230s <
+    // 240s) and let a second ~230s round start, which is exactly what ran
+    // past Vercel's 300s ceiling live (L3: 504 at 304.9s).
+    expect(hasCastCompositeBudgetLeft(240_000, 230_000, 230_000)).toBe(false)
   })
 })
 

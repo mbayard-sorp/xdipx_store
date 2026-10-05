@@ -836,11 +836,30 @@ async function generateCastCompositeBatch(
  */
 const CAST_COMPOSITE_BUDGET_MS = 240_000
 
-/** Exported for the timeout-path test (#11009): true while there is still
- * budget left to plausibly start and finish a second full generate+vision-gate
- * round before the platform's own deadline. */
-export function hasCastCompositeBudgetLeft(deadlineAt: number, now: number = Date.now()): boolean {
-  return now < deadlineAt
+/**
+ * Extra safety margin on top of the first round's own measured duration
+ * (ticket #13173 correction to #11009's original fix). The first fix only
+ * checked `now < deadlineAt` before starting a second round, which lets a
+ * second round that STARTS within the 240s soft deadline still FINISH well
+ * past the platform's real 300s ceiling whenever the first round itself ran
+ * long — confirmed live: a first round landing at ~230s passed that check
+ * (230s < 240s) and the batch was killed by Vercel at 304.9s. Requiring the
+ * remaining budget to cover the first round's own duration, plus this
+ * margin for run-to-run variance, is what actually predicts whether a
+ * second round of similar length can finish in time.
+ */
+const SECOND_ROUND_DURATION_MARGIN_MS = 15_000
+
+/** Exported for the timeout-path test (#11009, corrected #13173): true only
+ * when the remaining time before `deadlineAt` can plausibly cover a second
+ * round as long as the first one measured, plus a safety margin — not
+ * merely whether `deadlineAt` itself has not yet passed. */
+export function hasCastCompositeBudgetLeft(
+  deadlineAt: number,
+  firstRoundDurationMs: number,
+  now: number = Date.now(),
+): boolean {
+  return deadlineAt - now >= firstRoundDurationMs + SECOND_ROUND_DURATION_MARGIN_MS
 }
 
 /**
@@ -861,12 +880,15 @@ export function hasCastCompositeBudgetLeft(deadlineAt: number, now: number = Dat
 export async function generateCastComposite(
   opts: GenerateCastCompositeOpts,
 ): Promise<GenerateCastCompositeResult> {
-  const deadlineAt = Date.now() + CAST_COMPOSITE_BUDGET_MS
+  const startedAt = Date.now()
+  const deadlineAt = startedAt + CAST_COMPOSITE_BUDGET_MS
   const first = await generateCastCompositeBatch(opts)
+  const now = Date.now()
+  const firstRoundDurationMs = now - startedAt
   if (first.urls.length > 0) return first
 
-  if (!hasCastCompositeBudgetLeft(deadlineAt)) {
-    console.error('[social-media] skipping cast-composite regeneration: over the route time budget')
+  if (!hasCastCompositeBudgetLeft(deadlineAt, firstRoundDurationMs, now)) {
+    console.error('[social-media] skipping cast-composite regeneration: not enough budget left for a second round this long')
     return first
   }
 

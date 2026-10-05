@@ -164,4 +164,25 @@ describe('listLibraryAssets WHERE clause', () => {
     expect(rendered).toContain('product_identity_failed_at')
     expect(rendered).toContain('is null')
   })
+
+  it('does not filter on vision_verdict by default (admin grid still shows unjudged rows)', async () => {
+    whereCalls.length = 0
+    await listLibraryAssets(parseLibraryFilters(new URL('https://x.test/admin/socials/library')))
+    const rendered = renderWhere(whereCalls[0])
+    expect(rendered).not.toContain('vision_verdict')
+  })
+
+  // Ticket #13173: a row with no recorded visionVerdict at all (platform
+  // killed the cast request between ingest and the gate, #11009) is not
+  // "checked and failed" -- it must never look like a free reuse candidate.
+  it('excludes unjudged rows (vision_verdict is null) when excludeUnjudged is set (#13173)', async () => {
+    whereCalls.length = 0
+    await listLibraryAssets({
+      ...parseLibraryFilters(new URL('https://x.test/admin/socials/library')),
+      excludeUnjudged: true,
+    })
+    const rendered = renderWhere(whereCalls[0])
+    expect(rendered).toContain('vision_verdict')
+    expect(rendered).toContain('is not null')
+  })
 })
