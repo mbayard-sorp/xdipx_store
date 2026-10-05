@@ -929,6 +929,16 @@ describe('enforceEnumeratedAnatomy (ticket #11029)', () => {
     expect(enforceEnumeratedAnatomy(verdict)).toEqual(verdict)
   })
 
+  // Ticket #13695: run 1257 (assets 985, 981) reported handDigitCounts [5]
+  // with handOccludedDigits [1] for the same five-finger grip with the thumb
+  // naturally occluded, i.e. the model counted the hidden thumb as part of
+  // its total rather than excluding it. Manual pixel review confirmed an
+  // ordinary, correct hand; the override must not flip this to a fail.
+  it('passes a gripping hand reported as five total digits with one occluded', () => {
+    const verdict: VisionVerdict = { ...CLEAN_ENUMERATED, handDigitCounts: [5], handOccludedDigits: [1], backAnatomyRead: '' }
+    expect(enforceEnumeratedAnatomy(verdict)).toEqual(verdict)
+  })
+
   it('still fails four visible digits when nothing is reported hidden, or the field is absent', () => {
     const variants: Array<Pick<VisionVerdict, 'handOccludedDigits'>> = [{ handOccludedDigits: [0] }, {}, { handOccludedDigits: null }]
     for (const variant of variants) {
@@ -962,6 +972,16 @@ describe('enforceEnumeratedAnatomy (ticket #11029)', () => {
     expect(badHandDigitCounts([4], [-1])).toEqual([4])
     expect(badHandDigitCounts([4, 5], [1, 0])).toEqual([])
     expect(badHandDigitCounts([], [])).toEqual([])
+  })
+
+  it('accepts a total-already-five reading, not only visible-plus-hidden-five', () => {
+    expect(badHandDigitCounts([5], [1])).toEqual([])
+    expect(badHandDigitCounts([5], [0])).toEqual([])
+    expect(badHandDigitCounts([5, 5], [1, 4])).toEqual([])
+    // k === n (all claimed digits also claimed hidden) is not a sane total-five reading.
+    expect(badHandDigitCounts([5], [5])).toEqual([5])
+    // k > n is nonsensical under either convention.
+    expect(badHandDigitCounts([2], [4])).toEqual([2])
   })
 
   it('forces handAnatomy to fail when any one of multiple hands has a bad count', () => {
