@@ -13,6 +13,9 @@ const runVisionGateMock = vi.hoisted(() => vi.fn())
 const runVisionGateOnImageMock = vi.hoisted(() => vi.fn())
 const regateAssetMock = vi.hoisted(() => vi.fn())
 const runProductFidelityCheckOnImagesMock = vi.hoisted(() => vi.fn())
+const isValidVerdictShapeMock = vi.hoisted(() => vi.fn())
+const enforceEnumeratedAnatomyMock = vi.hoisted(() => vi.fn())
+const recordVisionVerdictMock = vi.hoisted(() => vi.fn())
 
 const TEAM_IDS = ['homepage', 'social', 'ads', 'email', 'strategy', 'content', 'product', 'video', 'support']
 vi.mock('~/lib/team.server', () => ({
@@ -24,6 +27,9 @@ vi.mock('~/lib/social-vision-gate.server', () => ({
   runVisionGate: runVisionGateMock,
   runVisionGateOnImage: runVisionGateOnImageMock,
   regateAsset: regateAssetMock,
+  isValidVerdictShape: isValidVerdictShapeMock,
+  enforceEnumeratedAnatomy: enforceEnumeratedAnatomyMock,
+  recordVisionVerdict: recordVisionVerdictMock,
 }))
 vi.mock('~/lib/social-product-fidelity.server', () => ({
   runProductFidelityCheckOnImages: runProductFidelityCheckOnImagesMock,
@@ -68,6 +74,9 @@ beforeEach(() => {
   runVisionGateOnImageMock.mockResolvedValue(VERDICT)
   regateAssetMock.mockResolvedValue(VERDICT)
   runProductFidelityCheckOnImagesMock.mockResolvedValue(FIDELITY_VERDICT)
+  isValidVerdictShapeMock.mockReturnValue(true)
+  enforceEnumeratedAnatomyMock.mockImplementation((v: unknown) => v)
+  recordVisionVerdictMock.mockResolvedValue(undefined)
 })
 
 describe('judge-only (no assetId)', () => {
@@ -163,6 +172,81 @@ describe('calling team (ticket #11856)', () => {
 // anatomy branch above for gateProductFidelityBuffer's own remote fallback.
 // A cloud content run has no ANTHROPIC_API_KEY, so without this route
 // support the fidelity check failed closed on every run.
+// Ticket #13524 (split off #13397 1-of-5): a pre-computed verdict skips the
+// in-process Anthropic call entirely and is written straight through
+// recordVisionVerdict, shape-validated against the same contract a model
+// response has to pass.
+describe('record-only mode (ticket #13524)', () => {
+  const PRECOMPUTED_VERDICT = {
+    pass: true,
+    checks: {
+      limbCount: 'pass', handAnatomy: 'pass', faceBodyIntegrity: 'pass', extraOrMergedLimbs: 'pass',
+      nippleOccluded: 'pass', genitaliaAbsent: 'pass', anusNotVisible: 'pass', adultUnambiguous: 'pass',
+    },
+    notes: 'Judged elsewhere.',
+    legibleText: '',
+    skinMarks: '',
+    productPhysics: 'not_applicable',
+    handDigitCounts: [],
+    backAnatomyRead: '',
+  }
+
+  it('(a) accepts a well-formed pre-computed verdict, records it, and never calls the model', async () => {
+    const res = await post({ verdict: PRECOMPUTED_VERDICT, assetId: 500 })
+    expect(res.status).toBe(200)
+    expect(isValidVerdictShapeMock).toHaveBeenCalledWith(PRECOMPUTED_VERDICT)
+    expect(recordVisionVerdictMock).toHaveBeenCalledWith(
+      500,
+      expect.objectContaining({ pass: true, checkCompleted: true }),
+    )
+    expect(runVisionGateMock).not.toHaveBeenCalled()
+    expect(runVisionGateOnImageMock).not.toHaveBeenCalled()
+    expect(regateAssetMock).not.toHaveBeenCalled()
+    const body = await res.json() as { recorded?: boolean; assetId?: number; pass?: boolean }
+    expect(body.recorded).toBe(true)
+    expect(body.assetId).toBe(500)
+    expect(body.pass).toBe(true)
+  })
+
+  it('applies the enumerated-anatomy override to a pre-computed verdict before recording it', async () => {
+    await post({ verdict: PRECOMPUTED_VERDICT, assetId: 500 })
+    expect(enforceEnumeratedAnatomyMock).toHaveBeenCalledWith(
+      expect.objectContaining({ ...PRECOMPUTED_VERDICT, checkCompleted: true }),
+    )
+  })
+
+  it('(b) rejects a malformed verdict (400, fail closed) without recording anything', async () => {
+    isValidVerdictShapeMock.mockReturnValue(false)
+    const res = await post({ verdict: { nonsense: true }, assetId: 500 })
+    expect(res.status).toBe(400)
+    expect(recordVisionVerdictMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects a pre-computed verdict with no assetId to record against', async () => {
+    const res = await post({ verdict: PRECOMPUTED_VERDICT })
+    expect(res.status).toBe(400)
+    expect(recordVisionVerdictMock).not.toHaveBeenCalled()
+    expect(isValidVerdictShapeMock).not.toHaveBeenCalled()
+  })
+
+  it('still runs the money gate, and refuses before recording when gated', async () => {
+    gateMock.mockResolvedValue({ ok: false, reason: 'over_budget' })
+    const res = await post({ verdict: PRECOMPUTED_VERDICT, assetId: 500 })
+    expect(res.status).toBe(403)
+    expect(recordVisionVerdictMock).not.toHaveBeenCalled()
+  })
+
+  // (c) every existing test below (and above) exercises the route with no
+  // `verdict` field at all and is unaffected by this branch.
+  it('(c) does not take the record-only branch when verdict is omitted', async () => {
+    const res = await post({ imageUrl: 'https://cdn.shopify.com/files/x.jpg', assetId: 238 })
+    expect(res.status).toBe(200)
+    expect(isValidVerdictShapeMock).not.toHaveBeenCalled()
+    expect(recordVisionVerdictMock).not.toHaveBeenCalled()
+    expect(regateAssetMock).toHaveBeenCalledWith(238, 'https://cdn.shopify.com/files/x.jpg')
+  })
+})
+
 describe('fidelity mode (ticket #13333)', () => {
   it('runs the fidelity check and returns the ProductFidelityVerdict unchanged', async () => {
     const res = await post({

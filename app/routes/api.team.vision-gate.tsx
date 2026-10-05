@@ -3,6 +3,7 @@
  *
  *   { imageUrl, assetId? } -> VisionVerdict (+ recorded:true, assetId when assetId given)
  *   { imageBase64, mediaType } -> VisionVerdict
+ *   { verdict, assetId } -> VisionVerdict (+ recorded:true, assetId), record-only, no model call
  *   { mode: 'fidelity', imageBase64, mediaType, referenceImageBase64, referenceMediaType, team?, runId? } -> ProductFidelityVerdict
  *
  * Why this route exists (ticket #8989). scripts/gen-notebook-art.ts gates
@@ -67,6 +68,18 @@
  * Returns the `ProductFidelityVerdict` from `runProductFidelityCheckOnImages`
  * unchanged, including `checkCompleted`, the same way the anatomy branch
  * returns `VisionVerdict` unchanged.
+ *
+ * `verdict` (ticket #13524, split off #13397 step 1-of-5) is a record-only
+ * mode: pass an already-computed `VisionVerdict` (shape-validated against the
+ * same `isValidVerdictShape` contract a model response has to pass) alongside
+ * `assetId`, and this route skips the in-process Anthropic call entirely and
+ * writes it straight through `recordVisionVerdict`, the same write the
+ * model-driven branch below makes after its own call. A malformed or
+ * incomplete verdict is rejected outright (400, nothing written), never
+ * silently recorded as if it had been judged. #13397's own eventual aim is
+ * moving vision judgment into each routine's own sandbox; this route only
+ * grows the write-through seam for that, it does not do any of that
+ * rewiring itself.
  */
 import type { ActionFunctionArgs } from 'react-router'
 import { assertTeamAuth, gate, isTeamId, type TeamId } from '~/lib/team.server'
@@ -117,6 +130,36 @@ export async function action({ request }: ActionFunctionArgs) {
       return Response.json(verdict, { headers: { 'Cache-Control': 'no-store' } })
     }
 
+    const assetId = num(b['assetId'])
+
+    // Record-only mode (ticket #13524): a pre-computed verdict skips the
+    // in-process Anthropic call entirely. Shape-validated against the same
+    // contract a model response has to pass; malformed/incomplete is
+    // rejected outright (400), never silently recorded.
+    const precomputedVerdict = b['verdict']
+    if (precomputedVerdict !== undefined) {
+      if (assetId == null) {
+        return new Response('Bad Request: assetId required when passing a pre-computed verdict', { status: 400 })
+      }
+      const { isValidVerdictShape, enforceEnumeratedAnatomy, recordVisionVerdict } = await import(
+        '~/lib/social-vision-gate.server'
+      )
+      if (!isValidVerdictShape(precomputedVerdict)) {
+        return new Response('Bad Request: verdict did not match the expected VisionVerdict shape', { status: 400 })
+      }
+      const gateResult = await gate(team, num(b['runId']))
+      if (!gateResult.ok) {
+        return Response.json({ error: 'gated', reason: gateResult.reason, gate: gateResult }, { status: 403 })
+      }
+      const verdict = enforceEnumeratedAnatomy({
+        ...precomputedVerdict,
+        checkedAt: new Date().toISOString(),
+        checkCompleted: true,
+      })
+      await recordVisionVerdict(assetId, verdict)
+      return Response.json({ ...verdict, recorded: true, assetId }, { headers: { 'Cache-Control': 'no-store' } })
+    }
+
     const imageUrl = str(b['imageUrl'])
     if (!imageUrl && !(imageBase64 && mediaType)) {
       return new Response('Bad Request: imageUrl, or imageBase64 + mediaType, required', { status: 400 })
@@ -128,7 +171,6 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     const { runVisionGate, runVisionGateOnImage, regateAsset } = await import('~/lib/social-vision-gate.server')
-    const assetId = num(b['assetId'])
     const verdict = imageUrl
       ? assetId != null
         ? await regateAsset(assetId, imageUrl)
