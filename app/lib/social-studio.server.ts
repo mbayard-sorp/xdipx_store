@@ -329,6 +329,17 @@ export interface LibraryFilters {
    * should never be offered again.
    */
   excludeProductIdentityBlocked?: boolean
+  /**
+   * #13173: excludes rows with no recorded `visionVerdict` at all (`IS NULL`,
+   * never merely `pass:false`). Optional and defaults to off, so the admin
+   * library grid keeps showing these rows for provenance — only
+   * `api.team.social-asset-query.tsx`'s reuse-first search sets it. A row
+   * like this is not "checked and failed", it is "never judged": the
+   * platform killed the request between ingest and the vision gate (a cast
+   * op running past Vercel's 300s ceiling, #11009/#13173), so the row looks
+   * exactly like a fresh, reusable candidate with nothing to say it is not.
+   */
+  excludeUnjudged?: boolean
 }
 
 export function parseLibraryFilters(url: URL): LibraryFilters {
@@ -383,6 +394,7 @@ export async function listLibraryAssets(f: LibraryFilters): Promise<LibraryPage>
   }
   if (f.before) conds.push(lt(socialMediaAssets.id, f.before))
   if (f.excludeProductIdentityBlocked) conds.push(isNull(socialMediaAssets.productIdentityFailedAt))
+  if (f.excludeUnjudged) conds.push(isNotNull(socialMediaAssets.visionVerdict))
   // Always applied, not conditional on a truthy value: the default
   // (archived=false) must actively exclude archived rows, which is the
   // entire point of the archive feature (#5426).

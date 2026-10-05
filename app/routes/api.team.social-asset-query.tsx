@@ -55,6 +55,13 @@
  * `applyPublishGateVerdict` now stamps such a BLOCK back onto the asset row
  * (`product_identity_failed_at`), and this route excludes any row carrying
  * that stamp, unlike `/admin/socials/library`, which still shows it.
+ *
+ * `excludeUnjudged` (#13173): always on, unconditionally. A row with no
+ * recorded `visionVerdict` at all was never judged — the platform killed the
+ * cast request (Vercel's 300s function ceiling) between ingest and the
+ * vision gate, leaving a row that looks exactly like a fresh, reusable
+ * candidate. Excluded here the same way a product-identity BLOCK is, unlike
+ * `/admin/socials/library`, which still shows it for provenance.
  */
 import type { ActionFunctionArgs } from 'react-router'
 import { assertTeamAuth } from '~/lib/team.server'
@@ -103,6 +110,11 @@ export async function action({ request }: ActionFunctionArgs) {
       // product-identity is never a valid candidate — it can't ship for this
       // SKU regardless of how many times it's offered.
       excludeProductIdentityBlocked: true,
+      // #13173: a row with no recorded visionVerdict was never judged at
+      // all (the platform killed the cast request between ingest and the
+      // gate), not "checked and passed" — exclude it the same way an
+      // unjudged row must never look like a free reuse candidate.
+      excludeUnjudged: true,
     })
 
     const assets = page.assets.slice(0, limit).map(a => ({

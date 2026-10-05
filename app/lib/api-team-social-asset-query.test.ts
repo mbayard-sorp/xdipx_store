@@ -144,6 +144,17 @@ describe('search', () => {
     }))
   })
 
+  // Ticket #13173: a row with no recorded visionVerdict was never judged at
+  // all (the platform killed the cast request between ingest and the gate),
+  // not "checked and passed" — it must never look like a free reuse
+  // candidate, so this route always excludes it too.
+  it('always excludes unjudged assets (no visionVerdict at all), unconditionally (#13173)', async () => {
+    await post({ op: 'search' })
+    expect(listLibraryAssetsMock).toHaveBeenCalledWith(expect.objectContaining({
+      excludeUnjudged: true,
+    }))
+  })
+
   // Ticket #11022: the owner's frame feedback is keyed by provider request
   // id, and the majority of on-skin candidates are gate-dropped, so a
   // requestId lookup must reach a row regardless of the reuse-first
