@@ -589,13 +589,36 @@ fever-severity tier change to the body red-flag list left FAQ Q5's copy of the s
 unchanged; run 1037 took an accuracy-gate BLOCK when the post told readers to read the printed ingress
 code and never the adjective, then two sections later extended a safe-under-running-water endorsement
 to two products on the strength of the bare adjective "100 percent waterproof," which neither
-manufacturer backs with a printed IP code. Before submit: list every RULE or STANDARD the draft tells
-the reader to apply (read the printed code, never the adjective; use water-based only; stop at these
-symptoms), then grep the whole document, the FAQ block included, for every place the post applies that
-rule to a specific product or case, and confirm each application obeys the rule the post itself set.
-This runs in addition to, not instead of, the enumeration-consistency scan in Step 5 item 3, which
-stays scoped to the rewrite cycle: this pre-flight catches it on first submit, before a gate cycle is
-spent on it.
+manufacturer backs with a printed IP code. Run 1239 hit the same class five times in one post (two
+ingress-code conflicts, two FAQ-vs-body claim divergences, one source-attribution gap), and a manual
+run of this scan alone caught only one of the five.
+
+Run the deterministic checker on the draft JSON FIRST, alongside the other four mandatory checkers
+above, and drive it to exit 0 before the manual pass below:
+
+```bash
+npx tsx scripts/check-self-consistency.ts <draft.json>
+```
+
+The checker extracts every TOKEN the post defines or instructs on — an ingress/IP rating code
+(`IPX4`, `IPX7`, ...) or a numbered-enumeration promise ("four red flags", "three steps") — and
+flags, with the conflicting sites named and quoted: a code instructed on but never defined anywhere
+in the document; two instructions for the SAME code on the same water-exposure action that disagree
+(one permits a shower/jet/running-tap/submersion, another forbids it); and the SAME named
+enumeration promised with a different count at a different site, the FAQ block included, or a
+promise whose own inline list does not match the number it just stated. See
+`app/lib/self-consistency.ts` for the full definition. This is the mechanical slice only: it would
+have caught run 1239's two ingress-code conflicts, not its FAQ-vs-body claim divergences or its
+source-attribution gap, because those share no reusable token the checker can key on.
+
+The manual re-read below still runs after the checker is clean, because it catches what the checker
+cannot: before submit, list every RULE or STANDARD the draft tells the reader to apply (read the
+printed code, never the adjective; use water-based only; stop at these symptoms), then grep the
+whole document, the FAQ block included, for every place the post applies that rule to a specific
+product or case, and confirm each application obeys the rule the post itself set. This runs in
+addition to, not instead of, the enumeration-consistency scan in Step 5 item 3, which stays scoped
+to the rewrite cycle: this pre-flight catches it on first submit, before a gate cycle is spent on
+it.
 
 **Humanizer pre-flight (mandatory, before Step 5; charter "Write like a person", owner direction
 2026-10-01):** once the draft is complete, read `.claude/skills/humanizer/SKILL.md` and run its full
