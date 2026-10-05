@@ -352,4 +352,11 @@ Keep entries terse and factual. This file is content/documentation on the agent-
 - **Evidence:** Step 2c sameness surfaces = rails (product selection), wayfinder/promo imagery, couples copy, announcement; `rails-fingerprint --assert-changed rails,couples` exit 0; Step 7 render-truth PASS at origin (96.6% link ratio). 5 generations, 3 placed (2 retries after self-review fails). Step 5b day 1: pleasure + play standfirst micro-refresh verified, shelf deep-refresh deferred (turn cap); others health-sweep only; deck 1 day old. homeSeo HOLD (populated, matches live, 33 days). Step 7.5 skipped (turn cap).
 - **Appended by:** agent-editor, ticket #13278 (this changelog append was pending; run 1215 itself hit the turn cap before opening the PR).
 
+### 2026-10-04 · Routine A run 1233 · Bullet & Travel Week day 7 (Sun, trip home)
+
+- **What changed:** hero re-pinned `crave-vesper-mini-rose-gold` -> `lelo-dot-travel-clitoral-pinpoint-vibrator-purple` with new `emmaHero` copy; rail `teamRail-2026-09-06-0` slot 3 `lelo-dot-travel` -> `crave-vesper-mini-rose-gold` with new eyebrow/heading/aside; `teamRail-2026-09-06-2` heading refreshed; wayfinder labels `wf65a`/`wf65b`/`wf65c` plus promo heading/body and new promo art (`image-8ab9d870345bfe9fe4ba21ef0e5ea62fd17e2c53-2560x1440-jpg`); couples heading/body and new art (`image-8f5171bcd64b695f91c1466a5236579d70fad701-2560x1440-jpg`); announcement msg 1; `categoryPage-body` + `categoryPage-wear` masthead standfirst.
+- **Why:** Bullet & Travel Week Sunday trip-home edit.
+- **Evidence:** run 1233; `singleton.homepage` rev `jtzXmr5sPTxAjhSjhot0bu` (pre-revert of wf65b art); `rails-fingerprint --assert-changed rails,hero,couples` OK; Step 7 render-truth PASS at origin. Sameness surfaces: hero, rails, wayfinder promo, couples, announcement.
+- **Appended by:** agent-editor, ticket #13485 (this changelog append was pending; run 1233 itself hit the turn budget before opening the PR).
+
 <!-- Newest entries appended above this line by each routine's changelog step. -->
