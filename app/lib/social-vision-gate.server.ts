@@ -657,11 +657,22 @@ function hasUnnegatedMention(text: string, pattern: RegExp): boolean {
 }
 
 /**
- * Ticket #13174. The visible counts of hands that do not add up to five once
- * each hand's hidden digits are counted back in. More than five visible is
- * always bad, whatever is claimed hidden. `occluded` is trusted only when it
- * is an array of finite non-negative numbers the same length as `visible`;
- * anything else reads as all zeros (the pre-#13174 rule: five visible or bad).
+ * Ticket #13174, revised by #13695. The visible counts of hands that do not
+ * add up to five once each hand's hidden digits are reconciled. More than
+ * five visible is always bad, whatever is claimed hidden. `occluded` is
+ * trusted only when it is an array of finite non-negative numbers the same
+ * length as `visible`; anything else reads as all zeros (the pre-#13174
+ * rule: five visible or bad).
+ *
+ * The model is asked for `n` ("digits you can actually see") and `k`
+ * ("digits hidden behind something, inferred present") separately, but in
+ * practice reports a correctly-occluded hand under either convention: `n`
+ * excluding the hidden digit (`n + k === 5`, the #13174 design) or `n`
+ * already counting it (`n === 5` with `k < n`, e.g. assets 985/981 this
+ * run: handDigitCounts [5] with handOccludedDigits [1] on a five-finger
+ * grip with the thumb naturally occluded behind the product). Accept
+ * either reading rather than only the first, so a naturally occluded but
+ * anatomically complete hand does not flip a passing verdict to a fail.
  */
 export function badHandDigitCounts(visible: readonly number[], occluded: readonly number[] | null | undefined): number[] {
   const hidden =
@@ -670,7 +681,13 @@ export function badHandDigitCounts(visible: readonly number[], occluded: readonl
     occluded.every((n) => typeof n === 'number' && Number.isFinite(n) && n >= 0)
       ? occluded
       : null
-  return visible.filter((n, i) => n > 5 || n + (hidden?.[i] ?? 0) !== 5)
+  return visible.filter((n, i) => {
+    if (n > 5) return true
+    const k = hidden?.[i] ?? 0
+    const visiblePlusHiddenIsFive = n + k === 5
+    const totalAlreadyFive = k < n && n === 5
+    return !(visiblePlusHiddenIsFive || totalAlreadyFive)
+  })
 }
 
 /**
