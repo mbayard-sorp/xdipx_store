@@ -2542,5 +2542,51 @@ No wardrobe mention at all in the prompt (the piece exists above-frame, unrender
 
 ---
 
+## Social presenting shot — Maya / VeDO Moe mini wand, X row 394 slide 2 (final attempt, run 1257, 2026-10-05)
+
+`cast: maya` + `vedo-moe-rechargeable-extra-mini-wand-black`, archetype cast, cropScale medium (a
+chest-height presenting hold, not an on-skin frame — §3.2c: "product in hand is not an on-skin
+frame"), bodyZone/contactMode `none`, sceneLocation sunlit-loft, platform X (16:9). Route:
+`gen-social-image.ts --cast-slug maya --crop-scale medium` → Atlas `seedream-4.5-edit`,
+`--candidates 1` (budget: 1 attempt, 2 billed candidates max). This was the second attempt on this
+exact concept: a first attempt on the same slot (cast Diego) solved a buttons/control-face wordmark
+by compositing off a glyph-free back-face reference; a prior Maya attempt then reintroduced a
+legible "VeDO" wordmark baked into the wand HANDLE (not the control face).
+
+- **Reference fix (worked — no text/wordmark in either verdict this round):** this SKU's product
+  media follows the same lettered-suffix convention as the 76940D case. Of the six images
+  (`99926A`-`99926F`), A/E are boxed packshots, B/C are front/three-quarter views with a legible
+  "VeDO" wordmark printed on the handle below the power button, and **D is the back view with zero
+  printed or molded marks anywhere on the ball head, neck, or handle** (just the charging-pin
+  contacts, not text). Used `99926D.jpg` as `--ref-image`, plus an explicit negative naming the
+  FULL product surface ("no text/letters/logo/wordmark anywhere on the product including the
+  handle, the neck, and the head, no VeDO wordmark anywhere on the product body") rather than only
+  the control face. **Result: neither billed candidate's vision-gate verdict mentioned text, a
+  wordmark, a logo, or baked-in lettering at all** — read this as the fix holding on this SKU.
+- **New, different blocker (both candidates BLOCKed, `vision_gate_fail:nippleOccluded`):** Maya's
+  closet coral sheer tulle plunge bralette with its embroidered coral appliqué rendered with the
+  nipple/areola outline visible through the sheer fabric despite the prompt stating the appliqué
+  "dense and fully opaque... covering each nipple and areola completely with margin to spare, no
+  sheer gap at the edge." Same failure class already logged above in the Wini/Emma v1-v4 reject
+  run (sheer-tulle-plus-opaque-appliqué is not yet reliable much past ~25% pass on `nippleOccluded`
+  even with maximal-opacity language) — this is the second SKU/cast pairing to hit it, not a
+  one-off. One verdict also carried the same `[enumerated-anatomy override: handDigitCounts [5,5]
+  with handOccludedDigits [0,1]]` false-positive pattern already flagged as a
+  `social-vision-gate.server.ts` scoring bug in that same v4/v5 log; it did not change the outcome
+  here (the nippleOccluded fail alone was dispositive on both candidates) but reconfirms the
+  pattern is cast/SKU-independent.
+- **Stopped per budget, not retried:** both billed candidates were spent (1 CLI call, internal
+  2-batch auto-retry, 1 candidate each). Per the run's explicit instruction this was the last try
+  for this post this run; no third attempt was made. Nothing shipped for row 394 slide 2 this run.
+- **Lesson for the next attempt on this slot:** the text/wordmark fix (glyph-free lettered-suffix
+  reference + full-surface negative) is now validated and should be the default opening move for
+  any VeDO product with a `[SKU]A`-`[SKU]F` media set, rather than something to re-derive per SKU.
+  The remaining open problem is independent: before the next attempt on Maya's coral bralette
+  specifically (or any sheer-tulle-plus-appliqué closet piece), consider either briefing a denser
+  lace for that piece (as the Wini/Emma log already recommended and nobody has yet actioned) or
+  budgeting more than 2 candidates so the ~25% pass rate has room to land one.
+
+---
+
 *Seeded 2026-07-17 from the doctrine §4 directives and the mission-brief §2 image rules.
 Owner: `media-manager` (append keepers/rejects each run); pruned monthly.*
