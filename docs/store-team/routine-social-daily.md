@@ -1748,6 +1748,15 @@ generation, two different wrong shapes, confirm this is a shape-risk product han
 cached asset. Treat as **reuse-degraded/fresh-degraded** until a working frame is found and logged in
 `social_media_assets`, matching the B-Swish and JO H2O treatment above.
 
+**La Nua Mist Toy Cleaner** (`la-nua-mist-toy-cleaner`) — six independent cast-composite attempts
+across run 1236 (2026-10-04) BLOCKed on vision-legible-text: rows 374, 375, 377, 378, 380 all
+rendered either a garbled sub-line under the LA nua wordmark or a mirrored/rotated full wordmark.
+The only two attempts that cleared either showed the wordmark ALONE with no sub-line (row 376 v1,
+2026-10-03 batch) or fully occluded the label with the cast member's grip (rows 379, 381, both
+2026-10-04). Treat this SKU as **occlude-only** (grip fully covers the printed label, only frosted
+glass and bamboo-tone cap visible) going forward, skipping the wordmark-visible attempt entirely
+rather than re-rolling it, per the two-failed-regen switch rule above.
+
 For any SKU on this list, the `social-art-director` brief MUST
 either occlude or angle the marked region out of frame (hand-over-handle grip, band turned away,
 composite the real plate over the marked segment) OR the run prefers a clean-bodied product for that
