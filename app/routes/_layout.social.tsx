@@ -19,12 +19,16 @@ import { useEffect, useState } from 'react'
 import { AgeGatePanel, type VerificationLevel } from '~/components/store/AgeGate'
 import { useAgeVerified } from '~/lib/use-age-verified'
 import { Reveal } from '~/components/motion/Reveal'
-import { getSocialLandingSettings, getEmmaHeroSettings } from '~/lib/sanity.server'
+import { getSocialLandingSettings, getEmmaHeroSettings, getBlogPosts } from '~/lib/sanity.server'
 import { getDiscoveryIndex } from '~/lib/discovery.server'
 import { getRecentSocialProductHandles } from '~/lib/social-landing.server'
+import { getProductsByTagPaged } from '~/lib/shopify.server'
 import { withTimeout } from '~/lib/with-timeout.server'
 import { buildSocialMeta } from '~/lib/social-meta'
+import { NotebookRail } from '~/components/blog/NotebookRail'
 import type { DiscoveryProduct } from '~/types/discovery'
+import type { VaultDeal } from '~/types'
+import type { BlogPostCard } from '~/types/cms'
 
 const CANONICAL = 'https://xdipx.com/social'
 
@@ -34,6 +38,21 @@ const RECENT_TIMEOUT_MS = 3000
 // PDP links carry the source of the arrival: this bio-link is what the
 // Instagram profile points at.
 const RECENT_UTM = 'utm_source=instagram&utm_medium=social'
+
+// Latest-from-the-Notebook module: every Instagram/X echo post links here, so
+// the bio link has to make good on "the article is the first thing behind
+// it" (owner all-hands 2026-10-03).
+const NOTEBOOK_POST_COUNT = 2
+
+// New-this-week strip: products tagged `new-arrival` (same tag /new filters
+// on) created in the last week. Scans up to NEW_THIS_WEEK_SCAN_LIMIT so the
+// count is honest without paginating the whole tag; `hasMore` marks a count
+// that undershoots the real total.
+const NEW_ARRIVAL_TAG = 'new-arrival'
+const NEW_THIS_WEEK_DAYS = 7
+const NEW_THIS_WEEK_SCAN_LIMIT = 24
+const NEW_THIS_WEEK_THUMB_COUNT = 3
+
 const TITLE = 'Start here | xdipx'
 const DESCRIPTION =
   'You found us from a video. This is the quiet corner: chat with Emma, see what she is pointing people at, and stay close. Discreet shipping, billed as XDIPX.'
@@ -66,6 +85,29 @@ function inStock(p: DiscoveryProduct): boolean {
   return p.totalInventory === null || p.totalInventory > 0
 }
 
+interface NewThisWeekSummary {
+  count: number
+  hasMore: boolean
+  thumbnails: VaultDeal[]
+}
+
+async function getNewThisWeekSummary(): Promise<NewThisWeekSummary> {
+  const since = new Date(Date.now() - NEW_THIS_WEEK_DAYS * 24 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 10)
+  const { deals, hasNextPage } = await getProductsByTagPaged(
+    NEW_ARRIVAL_TAG,
+    1,
+    NEW_THIS_WEEK_SCAN_LIMIT,
+    `created_at:>='${since}'`,
+  )
+  return {
+    count: deals.length,
+    hasMore: hasNextPage,
+    thumbnails: deals.slice(0, NEW_THIS_WEEK_THUMB_COUNT),
+  }
+}
+
 export async function loader() {
   // Swappable product module: singleton.socialLanding.featuredProductHandle
   // wins, falling back to the storefront hero pin
@@ -73,7 +115,7 @@ export async function loader() {
   // Both Sanity legs are bounded and degrade to null so a slow leg can never
   // sink the landing. In parallel we pull the handles of products featured in
   // the last week of social posts to fill the grid below the pin.
-  const [settings, emmaHero, recentHandles] = await Promise.all([
+  const [settings, emmaHero, recentHandles, notebook, newThisWeek] = await Promise.all([
     withTimeout(getSocialLandingSettings(), SANITY_TIMEOUT_MS, null, 'getSocialLandingSettings(social)'),
     withTimeout(getEmmaHeroSettings(), SANITY_TIMEOUT_MS, null, 'getEmmaHeroSettings(social)'),
     withTimeout(
@@ -81,6 +123,18 @@ export async function loader() {
       RECENT_TIMEOUT_MS,
       [] as string[],
       'getRecentSocialProductHandles(social)',
+    ),
+    withTimeout(
+      getBlogPosts({ page: 1, perPage: NOTEBOOK_POST_COUNT }),
+      SANITY_TIMEOUT_MS,
+      { posts: [] as BlogPostCard[], total: 0 },
+      'getBlogPosts(social)',
+    ),
+    withTimeout(
+      getNewThisWeekSummary(),
+      RECENT_TIMEOUT_MS,
+      { count: 0, hasMore: false, thumbnails: [] as VaultDeal[] },
+      'getNewThisWeekSummary(social)',
     ),
   ])
 
@@ -128,6 +182,8 @@ export async function loader() {
     emmaBlurb: settings?.emmaBlurb ?? null,
     product,
     recentProducts,
+    notebookPosts: notebook.posts,
+    newThisWeek,
   }
 }
 
@@ -152,7 +208,8 @@ function pdpHref(handle: string): string {
 }
 
 export default function SocialLanding() {
-  const { heading, emmaBlurb, product, recentProducts } = useLoaderData<typeof loader>()
+  const { heading, emmaBlurb, product, recentProducts, notebookPosts, newThisWeek } =
+    useLoaderData<typeof loader>()
   const { verified } = useAgeVerified()
   const rootData = useRouteLoaderData<{ ENV?: { AGE_GATE_LEVEL?: string } }>('root')
   const ageGateLevel = (rootData?.ENV?.AGE_GATE_LEVEL ?? 'click_through') as VerificationLevel
@@ -193,6 +250,61 @@ export default function SocialLanding() {
               </button>
               <p className="mt-2 text-xs text-ink-4">Opens the chat. She is online.</p>
             </section>
+
+            {/* Latest from the Notebook: the echo post on Instagram/X says the
+                article is the first thing behind this bio link, so it has to
+                actually sit here, above everything else on the page. */}
+            {notebookPosts.length > 0 && (
+              <Reveal variant="up" as="section">
+                <NotebookRail
+                  posts={notebookPosts}
+                  className=""
+                  seeAllHref="/notebook"
+                  seeAllLabel="More from the Notebook →"
+                />
+              </Reveal>
+            )}
+
+            {/* New this week: a quiet pointer at /new, not a countdown. Hidden
+                entirely when nothing in the window is in stock, same idiom as
+                every other swappable module on this page. */}
+            {newThisWeek.count > 0 && (
+              <Reveal variant="up" as="section">
+                <Link
+                  to="/new"
+                  className="flex items-center gap-4 rounded-[18px] border border-line bg-paper-2 p-4 transition-shadow hover:shadow-md"
+                >
+                  <div className="flex shrink-0 -space-x-3">
+                    {newThisWeek.thumbnails.map(deal =>
+                      deal.images[0] ? (
+                        <img
+                          key={deal.id}
+                          src={deal.images[0].url}
+                          alt={deal.images[0].altText || deal.seoTitle}
+                          className="h-14 w-14 rounded-full border-2 border-paper bg-paper-3 object-cover"
+                          loading="lazy"
+                          width={56}
+                          height={56}
+                        />
+                      ) : (
+                        <div
+                          key={deal.id}
+                          className="h-14 w-14 rounded-full border-2 border-paper bg-paper-3"
+                        />
+                      ),
+                    )}
+                  </div>
+                  <div className="flex-1 text-left">
+                    <p className="text-sm font-semibold text-ink">
+                      {newThisWeek.count}
+                      {newThisWeek.hasMore ? '+' : ''} new this week
+                    </p>
+                    <p className="text-xs text-ink-4">Fresh on the shelf, worth a look.</p>
+                  </div>
+                  <span className="link-coral shrink-0 text-sm font-semibold">Take a peek →</span>
+                </Link>
+              </Reveal>
+            )}
 
             {/* Swappable featured product, Sanity-driven, degrades to hidden */}
             {product && (
