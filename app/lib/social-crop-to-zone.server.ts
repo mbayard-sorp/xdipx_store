@@ -272,7 +272,14 @@ export function expandBoxToAspect(
   return { left: Math.round(left), top: Math.round(top), width, height }
 }
 
-const defaultDeps: Required<CropToZoneDeps> = {
+/**
+ * Builds the default deps bound to one correlation id (ticket #13526, split
+ * 1-of-3 off #13398), the sibling factory to
+ * `social-vision-gate.server.ts`'s `buildDefaultDeps` — see that module's
+ * doc comment for why this is a factory rather than a module-level const.
+ */
+function buildDefaultDeps(refId?: string): Required<CropToZoneDeps> {
+  return {
   callVision: async (imageBase64, mediaType, bodyZone) => {
     const { default: Anthropic } = await import('@anthropic-ai/sdk')
     const client = new Anthropic({ apiKey: process.env['ANTHROPIC_API_KEY']?.trim() })
@@ -295,16 +302,17 @@ const defaultDeps: Required<CropToZoneDeps> = {
       ],
     })
     const { logMessageUsage } = await import('./token-log.server')
-    logMessageUsage('social-crop-to-zone', SONNET, 'social-crop-to-zone/callVision', msg.usage)
+    logMessageUsage('social-crop-to-zone', SONNET, 'social-crop-to-zone/callVision', msg.usage, refId)
     const block = msg.content[0]
     if (block?.type !== 'text') throw new Error('crop-to-zone: unexpected response block type')
     const cleaned = block.text.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim()
     return JSON.parse(cleaned)
   },
+  }
 }
 
-function resolve(deps?: CropToZoneDeps): Required<CropToZoneDeps> {
-  return { ...defaultDeps, ...(deps ?? {}) }
+function resolve(deps?: CropToZoneDeps, refId?: string): Required<CropToZoneDeps> {
+  return { ...buildDefaultDeps(refId), ...(deps ?? {}) }
 }
 
 /**
@@ -320,8 +328,9 @@ export async function cropImageToZone(
   image: { data: Buffer; mediaType: string },
   opts: CropToZoneOpts,
   deps?: CropToZoneDeps,
+  refId?: string,
 ): Promise<CropToZoneResult> {
-  const d = resolve(deps)
+  const d = resolve(deps, refId)
   const minShortSide = opts.minShortSidePx ?? 1080
 
   let imgWidth: number | undefined

@@ -433,7 +433,16 @@ export interface VisionGateDeps {
   lookupVerdictByUrl?: (bareUrl: string) => Promise<VisionVerdict | null>
 }
 
-const defaultDeps: Required<VisionGateDeps> = {
+/**
+ * Builds the default deps bound to one correlation id (ticket #13526, split
+ * 1-of-3 off #13398). A factory rather than a module-level const so each
+ * caller's `refId` (today a team run id, forwarded from
+ * api.team.vision-gate.tsx) reaches `logMessageUsage` and ultimately
+ * `api_token_log.ref_id`, instead of being silently dropped on the floor the
+ * way every vision-gate spend row was before this ticket.
+ */
+function buildDefaultDeps(refId?: string): Required<VisionGateDeps> {
+  return {
   fetchImageBase64: async (url) => {
     const res = await fetch(url)
     if (!res.ok) throw new Error(`fetch ${url} failed: HTTP ${res.status}`)
@@ -495,7 +504,7 @@ const defaultDeps: Required<VisionGateDeps> = {
       ],
     })
     const { logMessageUsage } = await import('./token-log.server')
-    logMessageUsage('social-vision-gate', SONNET, 'social-vision-gate/callVision', msg.usage)
+    logMessageUsage('social-vision-gate', SONNET, 'social-vision-gate/callVision', msg.usage, refId)
 
     if (!strict) {
       const toolBlock = msg.content.find(
@@ -569,10 +578,11 @@ const defaultDeps: Required<VisionGateDeps> = {
       .limit(1)
     return rows[0]?.visionVerdict ?? null
   },
+  }
 }
 
-function resolve(deps?: VisionGateDeps): Required<VisionGateDeps> {
-  return { ...defaultDeps, ...(deps ?? {}) }
+function resolve(deps?: VisionGateDeps, refId?: string): Required<VisionGateDeps> {
+  return { ...buildDefaultDeps(refId), ...(deps ?? {}) }
 }
 
 /**
@@ -855,8 +865,9 @@ async function confirmExposureChecks(
 export async function runVisionGateOnImage(
   image: { data: string; mediaType: string },
   deps?: VisionGateDeps,
+  refId?: string,
 ): Promise<VisionVerdict> {
-  const d = resolve(deps)
+  const d = resolve(deps, refId)
   const first = await getOneVerdict(image, d)
   return confirmExposureChecks(image, first, d)
 }
@@ -867,10 +878,10 @@ export async function runVisionGateOnImage(
  * rather than propagating, because a generation step that cannot complete
  * this check must treat that exactly like a real anatomy defect.
  */
-export async function runVisionGate(imageUrl: string, deps?: VisionGateDeps): Promise<VisionVerdict> {
+export async function runVisionGate(imageUrl: string, deps?: VisionGateDeps, refId?: string): Promise<VisionVerdict> {
   try {
-    const { data, mediaType } = await resolve(deps).fetchImageBase64(imageUrl)
-    return await runVisionGateOnImage({ data, mediaType }, deps)
+    const { data, mediaType } = await resolve(deps, refId).fetchImageBase64(imageUrl)
+    return await runVisionGateOnImage({ data, mediaType }, deps, refId)
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     return failClosedVerdict(`Vision gate check could not complete: ${message}`)
@@ -908,8 +919,9 @@ export async function regateAsset(
   assetId: number,
   url: string,
   deps?: VisionGateDeps,
+  refId?: string,
 ): Promise<VisionVerdict> {
-  const verdict = await runVisionGate(url, deps)
+  const verdict = await runVisionGate(url, deps, refId)
   await recordVisionVerdict(assetId, verdict, deps)
   return verdict
 }
