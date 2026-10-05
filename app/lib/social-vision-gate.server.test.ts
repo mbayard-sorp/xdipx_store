@@ -12,6 +12,7 @@ import {
   enforceEnumeratedAnatomy,
   backAnatomyReadsAsDefect,
   badHandDigitCounts,
+  rescoreStoredHandOverride,
   VISION_CHECK_NAMES,
   VISION_SYSTEM_PROMPT,
   VISION_VERDICT_TOOL_NAME,
@@ -1498,5 +1499,64 @@ describe('defaultDeps.callVision — forced tool call (ticket #13176)', () => {
     const captured = h.captureException.mock.calls[0]?.[0] as Error
     expect(captured.message).toContain('stop_reason=max_tokens')
     vi.restoreAllMocks()
+  })
+})
+
+// Ticket #13695 follow-up: rows 395/396 (2026-10-05) were refused at publish
+// twice after the owner approved them, because the image's STORED verdict
+// still carried the fail the pre-#13695 rule wrote. Re-scored on read.
+describe('rescoreStoredHandOverride (stored pre-#13695 verdicts)', () => {
+  const MODEL_NOTES = 'One hand grips a teal wand at the hip. All eight checks pass.'
+  const HAND_NOTE = ' [enumerated-anatomy override: handDigitCounts [5] with handOccludedDigits [1] includes a hand that does not add up to five]'
+  const stale = (over: Partial<VisionVerdict> = {}): VisionVerdict => {
+    const base = { ...CLEAN_RESPONSE, checkedAt: '2026-10-05T14:00:00.000Z', checkCompleted: true } as VisionVerdict
+    return {
+      ...base,
+      pass: false,
+      checks: { ...base.checks!, handAnatomy: 'fail' },
+      notes: MODEL_NOTES + HAND_NOTE,
+      handDigitCounts: [5],
+      handOccludedDigits: [1],
+      ...over,
+    }
+  }
+
+  it('restores the model pass on the row 395/396 shape and drops the override note', () => {
+    const result = rescoreStoredHandOverride(stale())
+    expect(result.pass).toBe(true)
+    expect(result.checks?.handAnatomy).toBe('pass')
+    expect(result.notes).toBe(MODEL_NOTES)
+  })
+
+  it('keeps a stored fail whose counts are still bad today', () => {
+    const six = stale({
+      handDigitCounts: [6],
+      handOccludedDigits: [0],
+      notes: MODEL_NOTES + ' [enumerated-anatomy override: handDigitCounts [6] with handOccludedDigits [0] includes a hand that does not add up to five]',
+    })
+    expect(rescoreStoredHandOverride(six)).toEqual(six)
+  })
+
+  it('keeps a stored fail when any other check failed', () => {
+    const other = stale({ checks: { ...stale().checks!, nippleOccluded: 'fail' } })
+    expect(rescoreStoredHandOverride(other)).toEqual(other)
+  })
+
+  it('keeps a stored fail when a back-view override rode along', () => {
+    const both = stale({
+      notes: MODEL_NOTES + ' [enumerated-anatomy override: handDigitCounts [5] with handOccludedDigits [1] includes a hand that does not add up to five; backAnatomyRead "x" reads as a genital, navel, or cleft/sacrum hair rendering defect on a back view]',
+    })
+    expect(rescoreStoredHandOverride(both)).toEqual(both)
+  })
+
+  it('keeps a model-own hand fail (no override note) untouched', () => {
+    const own = stale({ notes: 'Six fingers on the left hand.' })
+    expect(rescoreStoredHandOverride(own)).toEqual(own)
+  })
+
+  it('is applied by getVisionVerdictByUrl, which the publish gate reads', async () => {
+    const lookup = vi.fn(async () => stale())
+    const result = await getVisionVerdictByUrl('https://cdn.shopify.com/files/x.jpg?v=1', { lookupVerdictByUrl: lookup })
+    expect(result?.pass).toBe(true)
   })
 })

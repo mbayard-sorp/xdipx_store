@@ -733,6 +733,36 @@ export function enforceEnumeratedAnatomy(verdict: VisionVerdict): VisionVerdict 
   }
 }
 
+// The hand override alone, as `enforceEnumeratedAnatomy` appends it. Anchored
+// on its fixed ending, because the counts inside it carry their own brackets
+// and a back-view override would follow it after "; ".
+const HAND_OVERRIDE_NOTE = /\s*\[enumerated-anatomy override: handDigitCounts .*? includes a hand that does not add up to five\]\s*$/s
+
+/**
+ * Ticket #13695 follow-up. A verdict stored before the #13695 fix keeps the
+ * fail the old hand-count rule wrote into it, and the publish gate reads the
+ * stored verdict, so a repaired rule alone never frees an image already in
+ * the library. Rows 395 and 396 (2026-10-05, owner-approved twice) stayed
+ * refused for exactly that reason.
+ *
+ * Re-score on read, narrowly. The override only flips `handAnatomy` when the
+ * model's own answer was `pass` (see `enforceEnumeratedAnatomy`), so when the
+ * note carries the hand override and nothing else, and the stored counts are
+ * clean under today's rule, the model's own `pass` is restored. Any other
+ * failing check, a back-view override, or counts that are still bad leave
+ * the verdict exactly as stored.
+ */
+export function rescoreStoredHandOverride(verdict: VisionVerdict): VisionVerdict {
+  if (verdict.pass || !verdict.checkCompleted || !verdict.checks) return verdict
+  if (verdict.checks.handAnatomy !== 'fail') return verdict
+  const match = HAND_OVERRIDE_NOTE.exec(verdict.notes)
+  if (!match) return verdict
+  if (badHandDigitCounts(verdict.handDigitCounts ?? [], verdict.handOccludedDigits).length > 0) return verdict
+  const checks = { ...verdict.checks, handAnatomy: 'pass' as const }
+  if (Object.values(checks).some((c) => c !== 'pass')) return verdict
+  return { ...verdict, pass: true, checks, notes: verdict.notes.slice(0, match.index) }
+}
+
 /** One model call, parsed into a verdict, with the existing JSON-parse-failure retry. Never throws. */
 async function getOneVerdict(
   image: { data: string; mediaType: string },
@@ -948,7 +978,8 @@ export async function getVisionVerdictByUrl(url: string, deps?: VisionGateDeps):
   const bare = stripUrlQuery(url)
   if (!bare) return null
   try {
-    return await resolve(deps).lookupVerdictByUrl(bare)
+    const stored = await resolve(deps).lookupVerdictByUrl(bare)
+    return stored ? rescoreStoredHandOverride(stored) : stored
   } catch (err) {
     console.error(`[social-vision-gate] verdict lookup failed, treating as missing: ${url}`, err)
     return null
