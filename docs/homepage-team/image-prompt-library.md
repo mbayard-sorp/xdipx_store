@@ -2450,3 +2450,19 @@ content-blog --run-id 1239`, Atlas `seedream-4.5-edit`, 4:3. Concept: surface an
 
 *Seeded 2026-07-17 from the doctrine §4 directives and the mission-brief §2 image rules.
 Owner: `media-manager` (append keepers/rejects each run); pruned monthly.*
+
+## Notebook §0-P keeper — content run 1260, "How Do You Pick a Costume You Can Actually Play In?"
+
+`cast: none` + Rene Rofe Reform School Velcro mini skirt costume (`rene-rofe-reform-school-velcro-mini-skirt-costume-red-small-polybag`,
+ref `80403.jpg`), `guides`, sincere staging. Route: `gen-notebook-art.ts --feature content-blog --run-id 1260`, Atlas
+`seedream-4.5-edit`, 4:3. Keeper = round 4: tight front-on crop, waistband with overlapping closure tab across the
+upper frame, top third of pleats, hem and rest of the skirt framed so length never reads, very pale lavender ground.
+Asset `image-c7b74057fb673e7130bb683643481bcb4d74fe81-2304x1728-jpg`.
+- **Reject (ground):** "plum-soft lavender seamless" + "directional daylight" renders dark maroon, near-black corners and a
+  hard spotlight patch (round 1). Fix: "very pale plum-soft lavender (hex F3E8FB, almost white)", "soft diffuse even
+  daylight from a large overhead window", "no spotlight, no light beam, no sunbeam patch, no dim corners".
+- **Reject (silhouette):** a micro-mini asked to be "laid flat and fanned" renders as a circle skirt; asked to "hang" it
+  renders knee-length even when the prompt says "very short, a few times the waistband depth" (round 3, 3 of 3). The model
+  ignores length words. Fix: crop so the hem is out of frame, or lie it front-on and compact; drop the hanger.
+- **Reject (anatomy gate):** the worn-on-body packshot (`80403.jpg` is a faceless torso crop) fails `adultUnambiguous`
+  as an editorial-crop fallback. A body-worn packshot is not a usable §0-P fallback.
