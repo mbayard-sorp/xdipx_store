@@ -2448,5 +2448,57 @@ content-blog --run-id 1239`, Atlas `seedream-4.5-edit`, 4:3. Concept: surface an
 
 ---
 
+## Social bodyscape — Emma / Wini Rechargeable Mini Wand, hotel window seat (reject run, run 1257, 2026-10-05)
+
+`cast: emma` + `vedo-wini-rechargeable-mini-wand-tease-me-turquoise`, archetype cast, bodyZone
+stomach, cropScale close, contactMode self-held, sceneLocation hotel-window-seat-late-morning.
+Route: `gen-social-image.ts` → `/api/team/social-image` op `cast`, Atlas `seedream-4.5-edit`,
+ref-image the 76940D back face (no glyphs). Four full attempts (8 batches, 16 billed candidates),
+zero shipped. No keeper. Logged so the next attempt on this wardrobe piece starts from v4, not v1.
+
+- **v1 reject (4/4 crop_rejected:uncroppable):** brief's "narrow opaque lined lace front panel"
+  on the micro brief rendered as fully sheer mesh with visible vertical seam lines and no opaque
+  coverage at all — the exact `cast-wardrobe.md` asset-896 failure ("a 'small triangle' on a sheer
+  bottom rendered sheer and showed the outline through it"), this time on the front panel rather
+  than a bottom triangle. The crop-to-zone pass correctly refused rather than let it reach the
+  vision gate. Composition was also wrong: all 4 candidates rendered a medium shot with Emma's full
+  face in frame despite "No face in frame" in the brief — the crop-to-zone pass tolerated it only
+  because the panel failure made the whole frame uncroppable first.
+- **v2 fix (front panel) + v2 reject (4/4 vision_gate_fail:nippleOccluded):** naming the panel
+  explicitly as "SOLID, OPAQUE, matte white cotton-lined... no mesh, no tulle, no transparency, no
+  visible weave or seam lines" and adding "extreme close-up crop" framing fixed the panel AND the
+  face-in-frame problem (0/4 face failures afterward). But the sheer tulle triangle bralette with
+  embroidered daisy appliqués (the Emma closet piece, `cast-wardrobe.md`) now failed the opposite
+  way: nipple/areola outline visible through the sheer mesh around the daisy, same failure class as
+  the panel, now on the bralette.
+- **v3 fix (nipple) attempt, still 3/4 vision_gate_fail:nippleOccluded:** describing the daisy as
+  "solid, fully opaque embroidered... dense opaque embroidery, not sheer, with zero transparency...
+  large enough to completely cover and conceal the entire nipple and areola with margin to spare"
+  did not reliably fix it — still failed on areola edge visible 3 of 4 times. One of the 4 (asset
+  985) passed `nippleOccluded` clean.
+- **v4 attempt (hand-digit fix), still 0/4 survived; mixed failure modes:** the 1-of-4 that cleared
+  nippleOccluded in v3 (985) and a v2 near-miss (981) both recorded `pass:false` on `handAnatomy`
+  alone, with the verdict's own prose reading "All checks pass" / "No exposure violations detected"
+  immediately before a bracketed `[enumerated-anatomy override: handDigitCounts [5] with
+  handOccludedDigits [1] includes a hand that does not add up to five]` flips it to fail. Manual
+  inspection of both (cropped to the hand) shows a normal five-digit grip with the thumb naturally
+  and correctly occluded behind the handle — this reads as a gate scoring bug on the
+  5-total/1-occluded case, not a rendered defect, and is worth a ticket rather than a prompt fix.
+  v4 reworded the hand clause to force all five digits into plain view (no occlusion) to dodge the
+  override regardless of root cause; it did not reproduce the two near-misses — nippleOccluded
+  reverted to failing 3 of 4 again, and the 4th new failure read `handAnatomy` differently this
+  time ("4 clearly countable fingers, thumb partially obscured... digit tally uncertain").
+- **Open questions for the next attempt on this SKU/wardrobe pairing:** (1) the sheer-tulle +
+  opaque-appliqué combination is not yet reliable past ~25% pass rate on `nippleOccluded` even with
+  maximal opacity language in the prompt — consider briefing a denser lace (not tulle) for this
+  cast/product pairing, or accept the lower yield and budget more candidates per attempt. (2) file
+  the `[enumerated-anatomy override]` false-positive pattern (verdict prose says checks pass, then
+  the override flips the overall verdict) as a `social-vision-gate.server.ts` ticket rather than
+  re-fighting it with hand-pose wording — it cost a full attempt (v4) for no gain.
+- **Not generated:** the X 16:9 variant (ticket #10685's generate-at-4:5-then-crop). No IG 4:5
+  candidate ever cleared the recorded vision-gate verdict to crop from.
+
+---
+
 *Seeded 2026-07-17 from the doctrine §4 directives and the mission-brief §2 image rules.
 Owner: `media-manager` (append keepers/rejects each run); pruned monthly.*
