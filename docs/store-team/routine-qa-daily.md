@@ -418,6 +418,11 @@ curl -s -X POST "$BASE_URL/api/team/suggestion" \
        "suggestion":"<what is wrong, where, and what done looks like>"}'
 ```
 
+If the out-of-scope finding is about an existing PR rather than needing one of its own, attach that
+PR as a `kind:"note"` link, never `kind:"pr"`: a `pr`-kind link asserts that PR implements this
+ticket's own DONE WHEN, which is false when the PR is merely the context the finding is about
+(ticket #13416 sat invisible to review this way, looking claimed when nobody had actually implemented it).
+
 ## Step 7 — Retro + spend + finish
 
 1. Retro: which bounce reasons repeat, and what instruction change would stop them recurring. File
