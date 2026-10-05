@@ -36,9 +36,22 @@ export function emphasisParts(text: string, emphasis: string): { before: string;
     clears the doctrine contrast floor on ink/scrimmed grounds); pass it whenever
     the heading sits on a dark or photo-scrimmed surface. Base `.em` plum only
     clears ~2.48:1 there, under the large-display 3:1 floor. */
+/** Strip inline HTML an agent or editor typed into a plain-text heading field.
+    Sanity headline fields are strings, so React escapes the markup and the
+    page shows it literally: on 2026-10-05 the live hero H1 read
+    "...holds the <em>remote</em>." An `<em>`/`<i>` span is the author saying
+    which word to emphasize, so its text is returned as `marked` and wins over
+    the separate `emphasis` field. Any other tag is dropped. */
+export function stripInlineMarkup(text: string): { text: string; marked: string | null } {
+  const marked = text.match(/<(em|i)\b[^>]*>([\s\S]*?)<\/\1\s*>/i)?.[2]?.replace(/<[^>]*>/g, '').trim() || null
+  return { text: text.replace(/<\/?[a-z][^>]*>/gi, ''), marked }
+}
+
 export function EmphasizedHeading({ text, emphasis, onDark = false }: { text: string; emphasis?: string | undefined; onDark?: boolean }) {
   const emClass = onDark ? 'em em-on-dark' : 'em'
-  const trimmed = text.trim()
+  const clean = stripInlineMarkup(text)
+  const trimmed = clean.text.trim()
+  if (clean.marked) emphasis = clean.marked
   const parts = emphasis ? emphasisParts(trimmed, emphasis) : null
   if (parts) return <>{parts.before}<em className={emClass}>{parts.match}</em>{parts.after}</>
   // Strip trailing punctuation AND the brand motifs an Emma heading can end on,

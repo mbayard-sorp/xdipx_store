@@ -98,4 +98,19 @@ describe('EmphasizedHeading last-word fallback picks a word, not a glyph', () =>
     expect(html(<EmphasizedHeading text="Two  spaces here." />))
       .toBe('Two spaces <em class="em">here</em>.')
   })
+  it('strips literal <em> tags typed into the field and emphasizes the tagged word', () => {
+    // 2026-10-05: the live hero H1 rendered "...holds the <em>remote</em>." verbatim.
+    expect(html(<EmphasizedHeading text="One of you wears it. The other holds the <em>remote</em>." />))
+      .toBe('One of you wears it. The other holds the <em class="em">remote</em>.')
+  })
+
+  it('lets inline <em> markup win over a stale emphasis field', () => {
+    expect(html(<EmphasizedHeading text="Slow <em>down</em> tonight." emphasis="tonight" />))
+      .toBe('Slow <em class="em">down</em> tonight.')
+  })
+
+  it('drops other stray tags', () => {
+    expect(html(<EmphasizedHeading text="Made for <strong>two</strong>." />))
+      .toBe('Made for <em class="em">two</em>.')
+  })
 })
