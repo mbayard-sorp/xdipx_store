@@ -173,7 +173,14 @@ function mediaTypeOf(mediaType: string): AllowedMediaType {
     : 'image/jpeg'
 }
 
-const defaultDeps: Required<ProductFidelityDeps> = {
+/**
+ * Builds the default deps bound to one correlation id (ticket #13526, split
+ * 1-of-3 off #13398), the sibling factory to
+ * `social-vision-gate.server.ts`'s `buildDefaultDeps` — see that module's
+ * doc comment for why this is a factory rather than a module-level const.
+ */
+function buildDefaultDeps(refId?: string): Required<ProductFidelityDeps> {
+  return {
   fetchImageBase64: defaultFetchImageBase64,
   callVision: async (renderedImage, referenceImage, opts) => {
     const { default: Anthropic } = await import('@anthropic-ai/sdk')
@@ -201,16 +208,17 @@ const defaultDeps: Required<ProductFidelityDeps> = {
       ],
     })
     const { logMessageUsage } = await import('./token-log.server')
-    logMessageUsage('social-product-fidelity', SONNET, 'social-product-fidelity/callVision', msg.usage)
+    logMessageUsage('social-product-fidelity', SONNET, 'social-product-fidelity/callVision', msg.usage, refId)
     const block = msg.content[0]
     if (block?.type !== 'text') throw new Error('product-fidelity check: unexpected response block type')
     const cleaned = block.text.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim()
     return JSON.parse(cleaned)
   },
+  }
 }
 
-function resolve(deps?: ProductFidelityDeps): Required<ProductFidelityDeps> {
-  return { ...defaultDeps, ...(deps ?? {}) }
+function resolve(deps?: ProductFidelityDeps, refId?: string): Required<ProductFidelityDeps> {
+  return { ...buildDefaultDeps(refId), ...(deps ?? {}) }
 }
 
 /**
@@ -223,8 +231,9 @@ export async function runProductFidelityCheckOnImages(
   renderedImage: { data: string; mediaType: string },
   referenceImage: { data: string; mediaType: string },
   deps?: ProductFidelityDeps,
+  refId?: string,
 ): Promise<ProductFidelityVerdict> {
-  const d = resolve(deps)
+  const d = resolve(deps, refId)
   try {
     const parsed = await d.callVision(renderedImage, referenceImage)
     if (!isValidFidelityShape(parsed)) {
@@ -246,14 +255,15 @@ export async function runProductFidelityCheck(
   renderedImageUrl: string,
   referenceImageUrl: string,
   deps?: ProductFidelityDeps,
+  refId?: string,
 ): Promise<ProductFidelityVerdict> {
-  const d = resolve(deps)
+  const d = resolve(deps, refId)
   try {
     const [rendered, reference] = await Promise.all([
       d.fetchImageBase64(renderedImageUrl),
       d.fetchImageBase64(referenceImageUrl),
     ])
-    return await runProductFidelityCheckOnImages(rendered, reference, deps)
+    return await runProductFidelityCheckOnImages(rendered, reference, deps, refId)
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     return failClosedVerdict(`Product-fidelity check could not complete: ${message}`)

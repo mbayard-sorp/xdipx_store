@@ -130,6 +130,8 @@ export interface TokenLogEntry {
   productId?:           string
   sku?:                 string
   caller?:              string   // free-form: function / route that originated the call
+  /** Correlation id (team run id, video_jobs.job_id, ad batch id) -> api_token_log.ref_id. */
+  refId?:               string
 }
 
 /**
@@ -204,6 +206,7 @@ export async function logApiTokens(entry: TokenLogEntry): Promise<void> {
       productId:           entry.productId           ?? null,
       sku:                 entry.sku                 ?? null,
       caller:              entry.caller              ?? null,
+      refId:               entry.refId               ?? null,
       inputTokens:         entry.inputTokens,
       outputTokens:        entry.outputTokens,
       cacheCreationTokens: cacheCreation,
@@ -234,6 +237,7 @@ export function logMessageUsage(
     cache_creation_input_tokens?: number | null
     cache_read_input_tokens?: number | null
   },
+  refId?: string,
 ): void {
   void logApiTokens({
     feature,
@@ -244,6 +248,7 @@ export function logMessageUsage(
     cacheCreationTokens: usage.cache_creation_input_tokens ?? 0,
     cacheReadTokens: usage.cache_read_input_tokens ?? 0,
     caller,
+    ...(refId !== undefined ? { refId } : {}),
   }).catch(err => console.error(`[token-log] ${feature} usage log failed (ignored):`, err))
 }
 

@@ -126,6 +126,24 @@ describe('logMessageUsage (vision-gate spend, 2026-09-29)', () => {
     expect(state.incr.find(i => i.key.startsWith('SPEND:'))?.by).toBe(1)
   })
 
+  it('forwards an explicit refId into the ledger row (#13526)', async () => {
+    logMessageUsage('social-vision-gate', 'claude-sonnet-4-6', 'social-vision-gate/callVision', {
+      input_tokens: 100,
+      output_tokens: 10,
+    }, 'run-456')
+    await vi.waitFor(() => expect(state.inserted).toHaveLength(1))
+    expect(state.inserted[0]!['refId']).toBe('run-456')
+  })
+
+  it('defaults refId to null when omitted (#13526)', async () => {
+    logMessageUsage('social-vision-gate', 'claude-sonnet-4-6', 'social-vision-gate/callVision', {
+      input_tokens: 100,
+      output_tokens: 10,
+    })
+    await vi.waitFor(() => expect(state.inserted).toHaveLength(1))
+    expect(state.inserted[0]!['refId']).toBeNull()
+  })
+
   it('never throws into the caller when the ledger write fails', async () => {
     state.insertThrows = true
     expect(() =>

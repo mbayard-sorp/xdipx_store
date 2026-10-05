@@ -205,7 +205,11 @@ export function fidelityDepsForEnv(runId?: number, team?: TeamId): ProductFideli
  *  'content' default) picks which team's budget/run-lock the remote check
  *  gates on when it has to fall back to the server-side route. */
 export async function gateImageBuffer(buf: Buffer, deps?: VisionGateDeps, runId?: number, team?: TeamId): Promise<VisionVerdict> {
-  return runVisionGateOnImage({ data: buf.toString('base64'), mediaType: sniffImageMediaType(buf) }, deps ?? visionDepsForEnv(runId, team))
+  return runVisionGateOnImage(
+    { data: buf.toString('base64'), mediaType: sniffImageMediaType(buf) },
+    deps ?? visionDepsForEnv(runId, team),
+    runId?.toString(),
+  )
 }
 
 /**
@@ -248,6 +252,7 @@ export async function gateProductFidelityBuffer(
     { data: buf.toString('base64'), mediaType: sniffImageMediaType(buf) },
     reference,
     resolvedDeps,
+    runId?.toString(),
   )
 }
 

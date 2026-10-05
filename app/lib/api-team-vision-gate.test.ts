@@ -168,6 +168,54 @@ describe('calling team (ticket #11856)', () => {
   })
 })
 
+// Ticket #13526 (split 1-of-3 off #13398): the already-extracted `runId`
+// now also flows into the vision-check calls themselves as `refId`, not
+// only into `gate()`, so a spend row can be correlated back to the run that
+// produced it.
+describe('refId forwarding (ticket #13526)', () => {
+  it('passes runId (stringified) as refId to runVisionGate', async () => {
+    const res = await post({ imageUrl: 'https://cdn.shopify.com/files/x.jpg', runId: 42 })
+    expect(res.status).toBe(200)
+    expect(runVisionGateMock).toHaveBeenCalledWith('https://cdn.shopify.com/files/x.jpg', undefined, '42')
+  })
+
+  it('passes runId (stringified) as refId to runVisionGateOnImage', async () => {
+    const res = await post({ imageBase64: 'abc', mediaType: 'image/jpeg', runId: 7 })
+    expect(res.status).toBe(200)
+    expect(runVisionGateOnImageMock).toHaveBeenCalledWith({ data: 'abc', mediaType: 'image/jpeg' }, undefined, '7')
+  })
+
+  it('passes runId (stringified) as refId to regateAsset', async () => {
+    const res = await post({ imageUrl: 'https://cdn.shopify.com/files/onskin.jpg', assetId: 238, runId: 99 })
+    expect(res.status).toBe(200)
+    expect(regateAssetMock).toHaveBeenCalledWith(238, 'https://cdn.shopify.com/files/onskin.jpg', undefined, '99')
+  })
+
+  it('passes runId (stringified) as refId to runProductFidelityCheckOnImages', async () => {
+    const res = await post({
+      mode: 'fidelity',
+      imageBase64: 'rendered-b64',
+      mediaType: 'image/png',
+      referenceImageBase64: 'reference-b64',
+      referenceMediaType: 'image/jpeg',
+      runId: 13,
+    })
+    expect(res.status).toBe(200)
+    expect(runProductFidelityCheckOnImagesMock).toHaveBeenCalledWith(
+      { data: 'rendered-b64', mediaType: 'image/png' },
+      { data: 'reference-b64', mediaType: 'image/jpeg' },
+      undefined,
+      '13',
+    )
+  })
+
+  it('omits refId entirely (no trailing args) when no runId is given', async () => {
+    const res = await post({ imageUrl: 'https://cdn.shopify.com/files/x.jpg' })
+    expect(res.status).toBe(200)
+    expect(runVisionGateMock).toHaveBeenCalledWith('https://cdn.shopify.com/files/x.jpg')
+  })
+})
+
 // Ticket #13333: the product-fidelity mode, the server-side sibling of the
 // anatomy branch above for gateProductFidelityBuffer's own remote fallback.
 // A cloud content run has no ANTHROPIC_API_KEY, so without this route

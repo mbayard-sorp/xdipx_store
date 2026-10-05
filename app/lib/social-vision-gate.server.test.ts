@@ -19,6 +19,7 @@ import {
   type VisionVerdict,
   type VisionGateDeps,
 } from './social-vision-gate.server'
+import { logMessageUsage } from './token-log.server'
 
 // Ticket #13176: `defaultDeps.callVision` (the real Anthropic-calling
 // implementation, unreachable from every other test in this file because
@@ -1402,6 +1403,50 @@ describe('defaultDeps.callVision — forced tool call (ticket #13176)', () => {
       expect.objectContaining({ message: expect.stringContaining('stop_reason=max_tokens') }),
     )
     errorSpy.mockRestore()
+  })
+
+  // Ticket #13526 (split 1-of-3 off #13398): the correlation id a caller
+  // passes through runVisionGateOnImage must reach logMessageUsage, via the
+  // real (non-overridden) defaultDeps.callVision, so an api_token_log row can
+  // be traced back to the run that produced it.
+  it('forwards refId through to logMessageUsage (#13526)', async () => {
+    h.mockCreate.mockReset()
+    h.mockCreate.mockResolvedValue({
+      content: [{ type: 'tool_use', id: 'toolu_refid', name: VISION_VERDICT_TOOL_NAME, input: CLEAN_RESPONSE }],
+      stop_reason: 'tool_use',
+      usage: { input_tokens: 10, output_tokens: 5 },
+    })
+    vi.mocked(logMessageUsage).mockClear()
+
+    await runVisionGateOnImage({ data: 'ZmFrZQ==', mediaType: 'image/jpeg' }, undefined, 'run-123')
+
+    expect(logMessageUsage).toHaveBeenCalledWith(
+      'social-vision-gate',
+      expect.any(String),
+      'social-vision-gate/callVision',
+      expect.anything(),
+      'run-123',
+    )
+  })
+
+  it('passes refId as undefined when the caller gives none (#13526)', async () => {
+    h.mockCreate.mockReset()
+    h.mockCreate.mockResolvedValue({
+      content: [{ type: 'tool_use', id: 'toolu_norefid', name: VISION_VERDICT_TOOL_NAME, input: CLEAN_RESPONSE }],
+      stop_reason: 'tool_use',
+      usage: { input_tokens: 10, output_tokens: 5 },
+    })
+    vi.mocked(logMessageUsage).mockClear()
+
+    await runVisionGateOnImage({ data: 'ZmFrZQ==', mediaType: 'image/jpeg' })
+
+    expect(logMessageUsage).toHaveBeenCalledWith(
+      'social-vision-gate',
+      expect.any(String),
+      'social-vision-gate/callVision',
+      expect.anything(),
+      undefined,
+    )
   })
 
   // The second half of the same DONE WHEN: when the strict retry is ALSO

@@ -118,15 +118,24 @@ export async function action({ request }: ActionFunctionArgs) {
       if (!referenceImageBase64 || !referenceMediaType) {
         return new Response('Bad Request: referenceImageBase64 + referenceMediaType required for a fidelity request', { status: 400 })
       }
-      const gateResult = await gate(team, num(b['runId']))
+      const runId = num(b['runId'])
+      const gateResult = await gate(team, runId)
       if (!gateResult.ok) {
         return Response.json({ error: 'gated', reason: gateResult.reason, gate: gateResult }, { status: 403 })
       }
       const { runProductFidelityCheckOnImages } = await import('~/lib/social-product-fidelity.server')
-      const verdict = await runProductFidelityCheckOnImages(
-        { data: imageBase64, mediaType },
-        { data: referenceImageBase64, mediaType: referenceMediaType },
-      )
+      const fidelityRefId = runId?.toString()
+      const verdict = fidelityRefId !== undefined
+        ? await runProductFidelityCheckOnImages(
+            { data: imageBase64, mediaType },
+            { data: referenceImageBase64, mediaType: referenceMediaType },
+            undefined,
+            fidelityRefId,
+          )
+        : await runProductFidelityCheckOnImages(
+            { data: imageBase64, mediaType },
+            { data: referenceImageBase64, mediaType: referenceMediaType },
+          )
       return Response.json(verdict, { headers: { 'Cache-Control': 'no-store' } })
     }
 
@@ -165,17 +174,25 @@ export async function action({ request }: ActionFunctionArgs) {
       return new Response('Bad Request: imageUrl, or imageBase64 + mediaType, required', { status: 400 })
     }
 
-    const gateResult = await gate(team, num(b['runId']))
+    const runId = num(b['runId'])
+    const gateResult = await gate(team, runId)
     if (!gateResult.ok) {
       return Response.json({ error: 'gated', reason: gateResult.reason, gate: gateResult }, { status: 403 })
     }
 
     const { runVisionGate, runVisionGateOnImage, regateAsset } = await import('~/lib/social-vision-gate.server')
+    const refId = runId?.toString()
     const verdict = imageUrl
       ? assetId != null
-        ? await regateAsset(assetId, imageUrl)
-        : await runVisionGate(imageUrl)
-      : await runVisionGateOnImage({ data: imageBase64!, mediaType: mediaType! })
+        ? refId !== undefined
+          ? await regateAsset(assetId, imageUrl, undefined, refId)
+          : await regateAsset(assetId, imageUrl)
+        : refId !== undefined
+          ? await runVisionGate(imageUrl, undefined, refId)
+          : await runVisionGate(imageUrl)
+      : refId !== undefined
+        ? await runVisionGateOnImage({ data: imageBase64!, mediaType: mediaType! }, undefined, refId)
+        : await runVisionGateOnImage({ data: imageBase64!, mediaType: mediaType! })
 
     return Response.json(
       { ...verdict, ...(assetId != null ? { recorded: true, assetId } : {}) },
