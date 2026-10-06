@@ -45,6 +45,7 @@ const PASS_VERDICT: VisionVerdict = {
   productPhysics: 'not_applicable',
   handDigitCounts: [],
   backAnatomyRead: '',
+  frontWaistbandRead: '',
 }
 
 const FAIL_VERDICT: VisionVerdict = {

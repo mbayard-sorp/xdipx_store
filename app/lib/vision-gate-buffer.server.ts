@@ -112,6 +112,11 @@ export function remoteVisionCallVision(runId?: number, team?: TeamId): NonNullab
       // pass sees the same hidden-digit counts the route judged with.
       handOccludedDigits: verdict.handOccludedDigits ?? null,
       backAnatomyRead: verdict.backAnatomyRead,
+      // Ticket #13648: forwarded for the same reason as backAnatomyRead above
+      // — isValidVerdictShape now requires it on every parsed response, so
+      // omitting it here would fail-close every remote (sandbox-with-no-
+      // ANTHROPIC_API_KEY) call as a malformed shape.
+      frontWaistbandRead: verdict.frontWaistbandRead,
     }
   }
 }

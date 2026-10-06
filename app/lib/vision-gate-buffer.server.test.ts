@@ -35,6 +35,7 @@ const CLEAN_VERDICT = {
   productPhysics: 'not_applicable',
   handDigitCounts: [],
   backAnatomyRead: '',
+  frontWaistbandRead: '',
 }
 
 describe('remoteVisionCallVision team plumbing (ticket #11856)', () => {

@@ -29,6 +29,7 @@ const CLEAN_VERDICT = {
   productPhysics: 'not_applicable',
   handDigitCounts: [],
   backAnatomyRead: '',
+  frontWaistbandRead: '',
 }
 
 // Shape of the real incident: an extra hand cupped beneath the gripping hand,
@@ -51,6 +52,7 @@ const THREE_HANDS_VERDICT = {
   productPhysics: 'not_applicable',
   handDigitCounts: [],
   backAnatomyRead: '',
+  frontWaistbandRead: '',
 }
 
 // Real PNG magic bytes (0x89 'P' 'N' 'G') prefixed onto fake payload bytes so

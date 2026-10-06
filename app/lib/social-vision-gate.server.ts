@@ -258,6 +258,21 @@ export interface VisionVerdict {
    * `null` means the check never ran at all (the fail-closed path).
    */
   backAnatomyRead: string | null
+  /**
+   * Ticket #13648, split off #13160 (owner note on asset 846, lilac briefs
+   * front view: "The pubic hair above the panties is not needed."). REPORT
+   * field, same idiom as `backAnatomyRead`, but NOT back-view-gated: it
+   * applies to ANY frame where a waistband, underwear, or lingerie edge is
+   * visible on the body, front or back. `backAnatomyRead` is explicitly
+   * scoped to the back-view cleft/sacrum/navel area per its own prompt
+   * instruction, so it structurally cannot see a front-view lingerie frame
+   * with hair visible above the waistband, a different region and a
+   * different frame orientation. `''` when the check ran and found nothing
+   * notable (including when no waistband/underwear/lingerie edge is visible
+   * at all). `null` means the check never ran at all (the fail-closed path,
+   * same distinction `backAnatomyRead` draws).
+   */
+  frontWaistbandRead: string | null
 }
 
 /**
@@ -271,7 +286,7 @@ export interface VisionVerdict {
 function failClosedVerdict(notes: string): VisionVerdict {
   const checks = {} as Record<VisionCheckName, 'pass' | 'fail'>
   for (const name of VISION_CHECK_NAMES) checks[name] = 'fail'
-  return { pass: false, checks, notes, checkedAt: new Date().toISOString(), checkCompleted: false, legibleText: null, skinMarks: null, productPhysics: null, handDigitCounts: null, backAnatomyRead: null }
+  return { pass: false, checks, notes, checkedAt: new Date().toISOString(), checkCompleted: false, legibleText: null, skinMarks: null, productPhysics: null, handDigitCounts: null, backAnatomyRead: null, frontWaistbandRead: null }
 }
 
 /**
@@ -290,7 +305,7 @@ function failClosedVerdict(notes: string): VisionVerdict {
  * two fields needs to change.
  */
 function incompleteVerdict(notes: string): VisionVerdict {
-  return { pass: false, checks: null, notes, checkedAt: new Date().toISOString(), checkCompleted: false, legibleText: null, skinMarks: null, productPhysics: null, handDigitCounts: null, backAnatomyRead: null }
+  return { pass: false, checks: null, notes, checkedAt: new Date().toISOString(), checkCompleted: false, legibleText: null, skinMarks: null, productPhysics: null, handDigitCounts: null, backAnatomyRead: null, frontWaistbandRead: null }
 }
 
 /**
@@ -343,6 +358,8 @@ export function isValidVerdictShape(v: unknown): v is Omit<VisionVerdict, 'check
   // backAnatomyRead is a report field, same convention as legibleText: always
   // a string, possibly ''.
   if (typeof o['backAnatomyRead'] !== 'string') return false
+  // Ticket #13648: frontWaistbandRead is a report field, same convention.
+  if (typeof o['frontWaistbandRead'] !== 'string') return false
   return true
 }
 
@@ -377,10 +394,12 @@ REPORT, feeds handOccludedDigits: for the same hands in the same order, how many
 
 REPORT, feeds backAnatomyRead: for any back-view frame only (the camera facing the person's back), name exactly what you see at the top of the gluteal cleft/sacrum area and at the navel region, in one short phrase (for example "smooth skin, no navel visible" or "a dense dark patch above the cleft resembling pubic hair"). Answer "" if the frame is not a back view, or is a back view with nothing notable in that area.
 
-Respond with ONLY a JSON object, no prose before or after, in exactly this shape:
-{"pass": true|false, "checks": {"limbCount": "pass"|"fail", "handAnatomy": "pass"|"fail", "faceBodyIntegrity": "pass"|"fail", "extraOrMergedLimbs": "pass"|"fail", "nippleOccluded": "pass"|"fail", "genitaliaAbsent": "pass"|"fail", "anusNotVisible": "pass"|"fail", "adultUnambiguous": "pass"|"fail"}, "notes": "one or two sentences on what you saw, especially for any fail", "legibleText": "<transcription of any legible text found, or empty string if none>", "skinMarks": "<description of any unbriefed mark on skin, or empty string if none>", "productPhysics": "supported"|"unsupported"|"not_applicable", "handDigitCounts": [<one integer per visible hand, left to right, empty array if none>], "handOccludedDigits": [<one integer per visible hand, same order, 0 when nothing hides a digit>], "backAnatomyRead": "<phrase describing the cleft/sacrum/navel area on a back-view frame, or empty string>"}
+REPORT, feeds frontWaistbandRead: on ANY frame, front or back, where a waistband, underwear, or lingerie edge is visible on the body, name any hair visible above or around that waistband/edge, in one short phrase (for example "no hair visible above the waistband" or "hair visible above the panty line"). This is not limited to back views, unlike backAnatomyRead above. Answer "" if no waistband/underwear/lingerie edge is visible anywhere in the frame, or if one is visible with nothing notable above or around it.
 
-"pass" is true only when all eight checks in "checks" are "pass"; "legibleText", "skinMarks", "productPhysics", "handDigitCounts", "handOccludedDigits", and "backAnatomyRead" never affect your own "pass" answer directly (a separate deterministic check reads productPhysics/handDigitCounts/handOccludedDigits/backAnatomyRead afterward, and skinMarks/legibleText are pure report fields). If the image has no visible people or hands at all (a product-only shot), checks 1-4 pass trivially; checks 5-8 still apply to any depicted skin or body part even without hands or a face; legibleText still applies to any text in the frame regardless; skinMarks still applies to any bare skin in the frame regardless; productPhysics answers "not_applicable" when there is no product-on-body contact to judge; handDigitCounts is an empty array and backAnatomyRead is "" when there is no hand or back view to report on. When in doubt about a genuine anatomy defect or an exposure/age-ambiguity issue, fail the check; this gate exists specifically to catch what a fast human scroll would catch, and a false block costs one regeneration while a false pass can publish something it must not. "legibleText" and "skinMarks" are always present in your response, even when they are ""; "productPhysics" is always present in your response, and is always one of "supported", "unsupported", or "not_applicable"; "handDigitCounts" is always present, even when it is []; "backAnatomyRead" is always present, even when it is "".`
+Respond with ONLY a JSON object, no prose before or after, in exactly this shape:
+{"pass": true|false, "checks": {"limbCount": "pass"|"fail", "handAnatomy": "pass"|"fail", "faceBodyIntegrity": "pass"|"fail", "extraOrMergedLimbs": "pass"|"fail", "nippleOccluded": "pass"|"fail", "genitaliaAbsent": "pass"|"fail", "anusNotVisible": "pass"|"fail", "adultUnambiguous": "pass"|"fail"}, "notes": "one or two sentences on what you saw, especially for any fail", "legibleText": "<transcription of any legible text found, or empty string if none>", "skinMarks": "<description of any unbriefed mark on skin, or empty string if none>", "productPhysics": "supported"|"unsupported"|"not_applicable", "handDigitCounts": [<one integer per visible hand, left to right, empty array if none>], "handOccludedDigits": [<one integer per visible hand, same order, 0 when nothing hides a digit>], "backAnatomyRead": "<phrase describing the cleft/sacrum/navel area on a back-view frame, or empty string>", "frontWaistbandRead": "<phrase describing hair above/around a visible waistband/lingerie edge on any frame, or empty string>"}
+
+"pass" is true only when all eight checks in "checks" are "pass"; "legibleText", "skinMarks", "productPhysics", "handDigitCounts", "handOccludedDigits", "backAnatomyRead", and "frontWaistbandRead" never affect your own "pass" answer directly (a separate deterministic check reads productPhysics/handDigitCounts/handOccludedDigits/backAnatomyRead/frontWaistbandRead afterward, and skinMarks/legibleText are pure report fields). If the image has no visible people or hands at all (a product-only shot), checks 1-4 pass trivially; checks 5-8 still apply to any depicted skin or body part even without hands or a face; legibleText still applies to any text in the frame regardless; skinMarks still applies to any bare skin in the frame regardless; productPhysics answers "not_applicable" when there is no product-on-body contact to judge; handDigitCounts is an empty array and backAnatomyRead/frontWaistbandRead are "" when there is no hand, back view, or waistband/underwear/lingerie edge to report on. When in doubt about a genuine anatomy defect or an exposure/age-ambiguity issue, fail the check; this gate exists specifically to catch what a fast human scroll would catch, and a false block costs one regeneration while a false pass can publish something it must not. "legibleText" and "skinMarks" are always present in your response, even when they are ""; "productPhysics" is always present in your response, and is always one of "supported", "unsupported", or "not_applicable"; "handDigitCounts" is always present, even when it is []; "backAnatomyRead" and "frontWaistbandRead" are always present, even when they are "".`
 
 export interface VisionCallOpts {
   /**
@@ -422,8 +441,9 @@ export const VISION_VERDICT_TOOL_INPUT_SCHEMA = {
     handDigitCounts: { type: 'array', items: { type: 'integer' } },
     handOccludedDigits: { type: 'array', items: { type: 'integer' } },
     backAnatomyRead: { type: 'string' },
+    frontWaistbandRead: { type: 'string' },
   },
-  required: ['pass', 'checks', 'notes', 'legibleText', 'skinMarks', 'productPhysics', 'handDigitCounts', 'backAnatomyRead'],
+  required: ['pass', 'checks', 'notes', 'legibleText', 'skinMarks', 'productPhysics', 'handDigitCounts', 'backAnatomyRead', 'frontWaistbandRead'],
 }
 
 export interface VisionGateDeps {
@@ -633,6 +653,23 @@ export function backAnatomyReadsAsDefect(read: string): boolean {
   )
 }
 
+/**
+ * Ticket #13648, split off #13160 (owner note on asset 846, lilac briefs
+ * front view: "The pubic hair above the panties is not needed."). Unlike
+ * `backAnatomyReadsAsDefect`, this field's territory is ONLY hair visible
+ * above or around a waistband/lingerie edge, on any frame orientation — it
+ * never reports on navel or genitalia wording, so the pattern here is
+ * narrower on purpose: a bare hair mention is always the disallowed case for
+ * this field, with no legitimate clean-pass use of the word to protect
+ * against, same reasoning `backAnatomyReadsAsDefect` already applies to its
+ * own hair clause (ticket #13160).
+ */
+export function frontWaistbandReadsAsDefect(read: string): boolean {
+  const text = read.trim()
+  if (!text) return false
+  return hasUnnegatedMention(text, /\b(hair|hairy|hairline|fuzz|stubble)\b/gi)
+}
+
 const CLAUSE_BOUNDARY = /[,.;:]|\b(?:and|but|with)\b/gi
 const NEGATION = /\b(no|not|none|absent|never|without|isn't|isnt)\b/i
 
@@ -706,7 +743,8 @@ export function enforceEnumeratedAnatomy(verdict: VisionVerdict): VisionVerdict 
 
   const badHandCounts = badHandDigitCounts(verdict.handDigitCounts ?? [], verdict.handOccludedDigits)
   const backDefect = backAnatomyReadsAsDefect(verdict.backAnatomyRead ?? '')
-  if (badHandCounts.length === 0 && !backDefect) return verdict
+  const frontWaistbandDefect = frontWaistbandReadsAsDefect(verdict.frontWaistbandRead ?? '')
+  if (badHandCounts.length === 0 && !backDefect && !frontWaistbandDefect) return verdict
 
   const checks = { ...verdict.checks }
   const overrides: string[] = []
@@ -719,6 +757,10 @@ export function enforceEnumeratedAnatomy(verdict: VisionVerdict): VisionVerdict 
   if (backDefect && checks.faceBodyIntegrity !== 'fail') {
     checks.faceBodyIntegrity = 'fail'
     overrides.push(`backAnatomyRead "${verdict.backAnatomyRead}" reads as a genital, navel, or cleft/sacrum hair rendering defect on a back view`)
+  }
+  if (frontWaistbandDefect && checks.faceBodyIntegrity !== 'fail') {
+    checks.faceBodyIntegrity = 'fail'
+    overrides.push(`frontWaistbandRead "${verdict.frontWaistbandRead}" reads as hair visible above or around a waistband/lingerie edge`)
   }
   if (overrides.length === 0) return verdict
 

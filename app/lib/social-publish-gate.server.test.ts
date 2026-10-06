@@ -47,6 +47,7 @@ const PASSING_VERDICT: VisionVerdict = {
   productPhysics: 'not_applicable',
   handDigitCounts: [],
   backAnatomyRead: '',
+  frontWaistbandRead: '',
 }
 
 /**
@@ -1016,6 +1017,7 @@ describe('vision-gate verdict', () => {
       productPhysics: 'not_applicable',
       handDigitCounts: [],
       backAnatomyRead: '',
+      frontWaistbandRead: '',
     }
     const r = await runRaw(
       { caption: CLEAN, mediaUrls: NON_PREFIX_MEDIA, postCreatedAt: null },

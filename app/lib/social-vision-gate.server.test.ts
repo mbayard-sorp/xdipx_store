@@ -11,6 +11,7 @@ import {
   isValidVerdictShape,
   enforceEnumeratedAnatomy,
   backAnatomyReadsAsDefect,
+  frontWaistbandReadsAsDefect,
   badHandDigitCounts,
   rescoreStoredHandOverride,
   VISION_CHECK_NAMES,
@@ -57,6 +58,7 @@ const CLEAN_RESPONSE = {
   productPhysics: 'not_applicable',
   handDigitCounts: [],
   backAnatomyRead: '',
+  frontWaistbandRead: '',
 }
 
 const ANATOMY_FAIL_RESPONSE = {
@@ -77,6 +79,7 @@ const ANATOMY_FAIL_RESPONSE = {
   productPhysics: 'not_applicable',
   handDigitCounts: [],
   backAnatomyRead: '',
+  frontWaistbandRead: '',
 }
 
 const NIPPLE_FAIL_RESPONSE = {
@@ -97,6 +100,7 @@ const NIPPLE_FAIL_RESPONSE = {
   productPhysics: 'not_applicable',
   handDigitCounts: [],
   backAnatomyRead: '',
+  frontWaistbandRead: '',
 }
 
 const GENITALIA_FAIL_RESPONSE = {
@@ -117,6 +121,7 @@ const GENITALIA_FAIL_RESPONSE = {
   productPhysics: 'not_applicable',
   handDigitCounts: [],
   backAnatomyRead: '',
+  frontWaistbandRead: '',
 }
 
 // Ticket #10477, the two calibration directions of `anusNotVisible`.
@@ -146,6 +151,7 @@ const LICENSED_PLUG_FRAME_RESPONSE = {
   productPhysics: 'not_applicable',
   handDigitCounts: [],
   backAnatomyRead: '',
+  frontWaistbandRead: '',
 }
 
 // The failing direction: the pose parts the buttocks and the anus reads.
@@ -167,6 +173,7 @@ const PARTED_ANUS_FAIL_RESPONSE = {
   productPhysics: 'not_applicable',
   handDigitCounts: [],
   backAnatomyRead: '',
+  frontWaistbandRead: '',
 }
 
 const AGE_AMBIGUOUS_FAIL_RESPONSE = {
@@ -187,6 +194,7 @@ const AGE_AMBIGUOUS_FAIL_RESPONSE = {
   productPhysics: 'not_applicable',
   handDigitCounts: [],
   backAnatomyRead: '',
+  frontWaistbandRead: '',
 }
 
 const BRANDED_TEXT_RESPONSE = {
@@ -207,6 +215,7 @@ const BRANDED_TEXT_RESPONSE = {
   productPhysics: 'not_applicable',
   handDigitCounts: [],
   backAnatomyRead: '',
+  frontWaistbandRead: '',
 }
 
 // Ticket #11477, the incident that prompted the check: a bead strand laid
@@ -231,6 +240,7 @@ const SKIN_MARKS_RESPONSE = {
   productPhysics: 'not_applicable',
   handDigitCounts: [],
   backAnatomyRead: '',
+  frontWaistbandRead: '',
 }
 
 // Ticket #11460, the three DONE WHEN cases for productPhysics. All three are
@@ -259,6 +269,7 @@ const UNSUPPORTED_PRODUCT_RESPONSE = {
   productPhysics: 'unsupported',
   handDigitCounts: [],
   backAnatomyRead: '',
+  frontWaistbandRead: '',
 }
 
 // Case 2: supported by grip. Fingers visibly wrapped around the product.
@@ -280,6 +291,7 @@ const GRIPPED_PRODUCT_RESPONSE = {
   productPhysics: 'supported',
   handDigitCounts: [],
   backAnatomyRead: '',
+  frontWaistbandRead: '',
 }
 
 // Case 3: supported, exaggerated scale. Proves no proportion/scale reject
@@ -303,6 +315,7 @@ const EXAGGERATED_SCALE_GRIPPED_RESPONSE = {
   productPhysics: 'supported',
   handDigitCounts: [],
   backAnatomyRead: '',
+  frontWaistbandRead: '',
 }
 
 function deps(over: Partial<VisionGateDeps> = {}): VisionGateDeps {
@@ -387,6 +400,21 @@ describe('isValidVerdictShape', () => {
     expect(isValidVerdictShape({ ...CLEAN_RESPONSE, productPhysics: 'supported' })).toBe(true)
     expect(isValidVerdictShape({ ...CLEAN_RESPONSE, productPhysics: 'unsupported' })).toBe(true)
     expect(isValidVerdictShape({ ...CLEAN_RESPONSE, productPhysics: 'not_applicable' })).toBe(true)
+  })
+
+  // Ticket #13648: frontWaistbandRead is a report field, same contract as
+  // backAnatomyRead — always a string, possibly ''.
+  it('rejects a missing frontWaistbandRead', () => {
+    const { frontWaistbandRead: _frontWaistbandRead, ...rest } = CLEAN_RESPONSE
+    expect(isValidVerdictShape(rest)).toBe(false)
+  })
+
+  it('rejects a non-string frontWaistbandRead', () => {
+    expect(isValidVerdictShape({ ...CLEAN_RESPONSE, frontWaistbandRead: null })).toBe(false)
+  })
+
+  it('accepts an empty-string frontWaistbandRead (checked, nothing found)', () => {
+    expect(isValidVerdictShape({ ...CLEAN_RESPONSE, frontWaistbandRead: '' })).toBe(true)
   })
 
   it('lists the four doctrine hard checks plus the four imagery-ceiling checks', () => {
@@ -886,6 +914,38 @@ describe('backAnatomyReadsAsDefect — bare hair mention (ticket #13160)', () =>
   })
 })
 
+// Ticket #13648, split off #13160 (owner note on asset 846, lilac briefs
+// front view: "The pubic hair above the panties is not needed."). Unlike
+// backAnatomyReadsAsDefect, this check is not back-view-gated and has no
+// navel/genital-word clause: its only territory is a bare hair mention above
+// or around a visible waistband/lingerie edge, on any frame orientation.
+describe('frontWaistbandReadsAsDefect (ticket #13648)', () => {
+  it('flags a bare hair mention above the waistband (the asset 846 shape)', () => {
+    expect(frontWaistbandReadsAsDefect('hair visible above the panty line')).toBe(true)
+    expect(frontWaistbandReadsAsDefect('a line of hair above the waistband')).toBe(true)
+  })
+
+  it('flags hairy/hairline/fuzz/stubble the same way', () => {
+    expect(frontWaistbandReadsAsDefect('the skin above the waistband reads hairy')).toBe(true)
+    expect(frontWaistbandReadsAsDefect('a hairline above the panty edge')).toBe(true)
+    expect(frontWaistbandReadsAsDefect('light fuzz above the waistband')).toBe(true)
+    expect(frontWaistbandReadsAsDefect('a faint stubble line above the lingerie edge')).toBe(true)
+  })
+
+  it('does not flag a clean read that negates hair above the waistband', () => {
+    expect(frontWaistbandReadsAsDefect('no hair visible above the waistband')).toBe(false)
+    expect(frontWaistbandReadsAsDefect('smooth skin above the panty line, no hair')).toBe(false)
+  })
+
+  it('does not flag an empty read (no waistband/underwear/lingerie edge visible, or nothing notable)', () => {
+    expect(frontWaistbandReadsAsDefect('')).toBe(false)
+  })
+
+  it('still flags a bare hair mention when a different clause negates something else', () => {
+    expect(frontWaistbandReadsAsDefect('no fabric wrinkling visible, a line of hair above the waistband')).toBe(true)
+  })
+})
+
 describe('enforceEnumeratedAnatomy (ticket #11029)', () => {
   const CLEAN_ENUMERATED: VisionVerdict = {
     ...CLEAN_RESPONSE,
@@ -968,6 +1028,16 @@ describe('enforceEnumeratedAnatomy (ticket #11029)', () => {
     expect(VISION_SYSTEM_PROMPT).not.toContain('count its fingers')
   })
 
+  // Ticket #13648: frontWaistbandRead's whole reason to exist is that it is
+  // NOT gated to back-view frames the way backAnatomyRead is, so the prompt
+  // wording is asserted directly, same idiom as the other calibration blocks
+  // in this file.
+  it('asks for frontWaistbandRead on any frame, not only back views', () => {
+    expect(VISION_SYSTEM_PROMPT).toContain('"frontWaistbandRead"')
+    expect(VISION_SYSTEM_PROMPT).toContain('feeds frontWaistbandRead')
+    expect(VISION_SYSTEM_PROMPT).toContain('not limited to back views')
+  })
+
   it('ignores a malformed hidden-digit array and falls back to the five-visible rule', () => {
     expect(badHandDigitCounts([4], [1, 0])).toEqual([4])
     expect(badHandDigitCounts([4], [-1])).toEqual([4])
@@ -1043,6 +1113,47 @@ describe('enforceEnumeratedAnatomy (ticket #11029)', () => {
     // Only the hand override needed to fire new; faceBodyIntegrity was
     // already failing, so it is not named again in the override note.
     expect(result.notes).toContain('handDigitCounts')
+  })
+
+  // Ticket #13648, the asset 846 shape: a FRONT-view lingerie frame with hair
+  // visible above the waistband, which backAnatomyRead structurally cannot
+  // see (it only ever reports on back-view frames). The model's own
+  // faceBodyIntegrity read 'pass' on asset 846; enumerating via
+  // frontWaistbandRead lets the code force the fail the self-grade missed,
+  // same pattern as the back-view hair override above.
+  it('forces faceBodyIntegrity to fail when frontWaistbandRead reads as a bare hair mention (asset 846 shape)', () => {
+    const verdict: VisionVerdict = {
+      ...CLEAN_ENUMERATED,
+      handDigitCounts: [],
+      frontWaistbandRead: 'hair visible above the panty line',
+    }
+    const result = enforceEnumeratedAnatomy(verdict)
+    expect(result.pass).toBe(false)
+    expect(result.checks!.faceBodyIntegrity).toBe('fail')
+    expect(result.notes).toContain('enumerated-anatomy override')
+    expect(result.notes).toContain('frontWaistbandRead')
+  })
+
+  it('does not fire on a clean frontWaistbandRead (no waistband edge visible, or nothing notable)', () => {
+    const verdict: VisionVerdict = { ...CLEAN_ENUMERATED, handDigitCounts: [5], frontWaistbandRead: '' }
+    expect(enforceEnumeratedAnatomy(verdict)).toEqual(verdict)
+  })
+
+  it('applies the hand and frontWaistbandRead overrides together without clobbering an already-failing check', () => {
+    const verdict: VisionVerdict = {
+      ...CLEAN_ENUMERATED,
+      checks: { ...CLEAN_ENUMERATED.checks!, faceBodyIntegrity: 'fail' },
+      handDigitCounts: [6],
+      frontWaistbandRead: 'hair visible above the waistband',
+      pass: false,
+    }
+    const result = enforceEnumeratedAnatomy(verdict)
+    expect(result.checks!.handAnatomy).toBe('fail')
+    expect(result.checks!.faceBodyIntegrity).toBe('fail')
+    // Only the hand override needed to fire new; faceBodyIntegrity was
+    // already failing, so it is not named again in the override note.
+    expect(result.notes).toContain('handDigitCounts')
+    expect(result.notes).not.toContain('frontWaistbandRead')
   })
 
   // DONE WHEN item 3: 691 and 689 (same shoot, same product family, clean
