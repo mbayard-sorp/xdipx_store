@@ -157,6 +157,9 @@ Apply exactly like social Step 7b:
   agent-editor opens the PR, never this run). Until the file has rules, it is read as empty.
 - The run summary states which feedback rows were applied and how, or "no new feedback since
   <SINCE>". Silence is not a report.
+- Feedback older than `<SINCE>` is not re-read here, so its lessons live only in
+  `ad-owner-notes.md`. Read the ledger's rules before drafting every pass, and name in the summary
+  which numbered rules each idea was checked against.
 
 ### Step 4. Draft 10 to 20 ideas
 
@@ -214,7 +217,9 @@ of M1 to M7 as passed in one clause each. A `policy_check` that only says "compl
 the API and by you.
 
 Before filing, run the self-gates on every string: humanizer pass, hard rules 1 to 9, the ladder row
-for the destination, and for Meta the M1 to M7 table. Anything that fails is rewritten once, then
+for the destination, every numbered rule in `docs/store-team/ad-owner-notes.md`, and for Meta the M1
+to M7 table. Ask of every headline: is this a catchy line about this product, or a flat description
+of a trust signal or a plain fact? Outside Search the second one is rewritten or dropped. Anything that fails is rewritten once, then
 dropped with a `decision` event (one line, naming the rule).
 
 ### Step 5. File

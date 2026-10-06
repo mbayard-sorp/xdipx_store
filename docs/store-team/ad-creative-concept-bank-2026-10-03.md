@@ -252,6 +252,11 @@ holds it against her skin or hands it to her.
 
 ### 2.7 Statement Reads XDIPX (discretion as the product)
 
+**Owner correction (2026-10-05, ad-owner-notes rule 1).** The three lines in the table below are
+retired as written. The owner turned down "Billing Reads XDIPX" and creatives carrying "The box says
+nothing. You won't be quiet." A replacement leads with a catchy line about the product and keeps the
+discretion fact to a second clause or a supporting line, run through the humanizer before it ships.
+
 **Idea:** sell the thing every first-time buyer is worried about: the box, the label, the bank line.
 
 **Visual system:** typographic plus one prop. A plain shipping box on a coral-soft field, shot like
