@@ -17,7 +17,7 @@
  * round-trip contract as the rest of `HomepagePayloadB`.
  */
 
-import type { DiscoveryProduct } from '~/types/discovery'
+import type { DiscoveryProduct, StorefrontCardProduct } from '~/types/discovery'
 import type { ProductTypeDial } from '~/types'
 
 /** Always exactly six visible cards, every breakpoint — the zero-CLS contract. */
@@ -114,5 +114,29 @@ export interface CuriosityShelfData {
    * impression changes too. An index into `lanes`; the component's initial state
    * must match this so the server renders the final, unflashed default.
    */
+  defaultLane: number
+}
+
+/** `ResolvedLane`, projected to the storefront homepage's lean card shape (ticket #13341). */
+export interface LeanResolvedLane {
+  label: string
+  key: string
+  emmaLine: string
+  seeAllHref: string | null
+  deck: StorefrontCardProduct[]
+}
+
+/**
+ * `CuriosityShelfData`, projected to the storefront homepage's lean card
+ * shape. `hydrateStorefrontPayloadB` projects `HomepagePayloadB.curiosityShelf`
+ * down to this on every read; the KV-stored blob keeps the full
+ * `CuriosityShelfData` shape unchanged, same pattern as `leanNotebookPosts`.
+ */
+export interface LeanCuriosityShelfData {
+  eyebrow: string
+  heading: string
+  emphasis: string
+  emmaLine: string
+  lanes: LeanResolvedLane[]
   defaultLane: number
 }

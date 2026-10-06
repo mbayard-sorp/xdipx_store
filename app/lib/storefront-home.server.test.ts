@@ -272,13 +272,92 @@ describe('hydrateStorefrontPayloadB', () => {
     expect(data.featured.filter(p => p.handle === 'a')).toHaveLength(1)
   })
 
-  it('passes rails, total and curiosity shelf through untouched', () => {
+  it('passes total through untouched, and a null curiosity shelf stays null', () => {
     const p = payload({ total: 42 })
     const data = hydrateStorefrontPayloadB(p)
     expect(data.total).toBe(42)
     expect(data.variant).toBe('b')
     expect(data.rails).toHaveLength(2)
     expect(data.curiosityShelf).toEqual(p.curiosityShelf)
+  })
+
+  // Ticket #13341, split off #13147: StorefrontProductCard reads 12 fields
+  // (handle/title/price/priceMax/compareAtPrice/mapPrice/imageUrl/imageAlt/
+  // category/subcategory/brand, plus id for the React key). mood/audience/
+  // matters/colorValues/sizeValues/totalInventory/productType/productTypeDial/
+  // defaultVariantId ride in the stored HomepagePayloadB blob (so the
+  // discovery index and other DiscoveryProduct consumers keep the full shape)
+  // but must never reach the served StorefrontData/turbo-stream payload.
+  function fullDiscoveryProduct(handle: string): DiscoveryProduct {
+    return {
+      id: `gid://shopify/Product/${handle}`,
+      handle,
+      title: handle,
+      defaultVariantId: 'gid://shopify/ProductVariant/1',
+      price: 29.99,
+      priceMax: 39.99,
+      compareAtPrice: 34.99,
+      mapPrice: 32.99,
+      colorValues: ['Red', 'Black'],
+      sizeValues: ['Small', 'Large'],
+      imageUrl: 'https://cdn.shopify.com/x.jpg',
+      imageAlt: 'A product',
+      category: 'Pleasure',
+      subcategory: 'Vibrators',
+      brand: 'Wicked',
+      mood: ['playful'],
+      audience: ['solo'],
+      matters: ['body-safe'],
+      totalInventory: 50,
+      productType: 'Vibrator',
+      productTypeDial: 'vibrator',
+    } as DiscoveryProduct
+  }
+
+  const STOREFRONT_CARD_KEYS = [
+    'id', 'handle', 'title', 'price', 'priceMax', 'compareAtPrice', 'mapPrice',
+    'imageUrl', 'imageAlt', 'category', 'subcategory', 'brand',
+  ].sort()
+
+  it('projects each rail product down to the 12 StorefrontCardProduct fields', () => {
+    const rich = fullDiscoveryProduct('rich-product')
+    const data = hydrateStorefrontPayloadB(payload({
+      rails: [{ category: 'Pleasure', score: 1, total: 1, items: [{ product: rich, score: 1 }] } as unknown as Rail],
+    }))
+    const projected = data.rails[0]!.items[0]!.product
+    expect(Object.keys(projected).sort()).toEqual(STOREFRONT_CARD_KEYS)
+    expect(projected).toEqual({
+      id: rich.id, handle: rich.handle, title: rich.title, price: rich.price,
+      priceMax: rich.priceMax, compareAtPrice: rich.compareAtPrice, mapPrice: rich.mapPrice,
+      imageUrl: rich.imageUrl, imageAlt: rich.imageAlt, category: rich.category,
+      subcategory: rich.subcategory, brand: rich.brand,
+    })
+    const keys = Object.keys(projected)
+    for (const dead of ['mood', 'audience', 'matters', 'colorValues', 'sizeValues', 'totalInventory', 'productType', 'productTypeDial', 'defaultVariantId']) {
+      expect(keys).not.toContain(dead)
+    }
+  })
+
+  it('projects featured down to the same 12 fields, pin included', () => {
+    const pinned = fullDiscoveryProduct('pinned-rich')
+    const data = hydrateStorefrontPayloadB(payload({ pinnedProduct: pinned }))
+    expect(Object.keys(data.featured[0]!).sort()).toEqual(STOREFRONT_CARD_KEYS)
+  })
+
+  it('projects every curiosity-shelf lane deck down to the same 12 fields', () => {
+    const deckProduct = fullDiscoveryProduct('shelf-product')
+    const shelf = {
+      eyebrow: 'eyebrow', heading: 'heading', emphasis: 'emphasis', emmaLine: 'emma line',
+      defaultLane: 0,
+      lanes: [{ label: 'Lane', key: 'lane-1', emmaLine: 'lane emma line', seeAllHref: null, deck: [deckProduct] }],
+    } as unknown as HomepagePayloadB['curiosityShelf']
+    const data = hydrateStorefrontPayloadB(payload({ curiosityShelf: shelf }))
+    const projected = data.curiosityShelf!.lanes[0]!.deck[0]!
+    expect(Object.keys(projected).sort()).toEqual(STOREFRONT_CARD_KEYS)
+    // Non-product lane/shelf fields pass through verbatim.
+    expect(data.curiosityShelf!.eyebrow).toBe('eyebrow')
+    expect(data.curiosityShelf!.lanes[0]!.label).toBe('Lane')
+    expect(data.curiosityShelf!.lanes[0]!.seeAllHref).toBeNull()
   })
 
   // Ticket #13147: the homepage payload diet. heroLqip (~7.6 KB base64 per

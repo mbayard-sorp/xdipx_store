@@ -193,6 +193,51 @@ export interface Rail {
   relaxedReason?: string
 }
 
+/**
+ * The exact fields `StorefrontProductCard.tsx` reads (handle/title/price/
+ * priceMax/compareAtPrice/mapPrice/imageUrl/imageAlt/brand/subcategory),
+ * plus `id` (the React key everywhere the card is listed) and `category`
+ * (read by `toGA4Item` in `StorefrontHome.tsx` alongside the card) — 12
+ * fields total (ticket #13341, split off #13147's homepage payload diet).
+ * mood/audience/matters/colorValues/sizeValues/totalInventory/productType/
+ * productTypeDial/defaultVariantId are dead on the storefront homepage.
+ * `hydrateStorefrontPayloadB` (`storefront-home.server.ts`) projects the
+ * full `DiscoveryProduct`/`Rail`/`CuriosityShelfData` shapes it stores down
+ * to this on every read, the same way `leanNotebookPosts` already does for
+ * the Notebook rail.
+ */
+export type StorefrontCardProduct = Pick<
+  DiscoveryProduct,
+  | 'id'
+  | 'handle'
+  | 'title'
+  | 'price'
+  | 'priceMax'
+  | 'compareAtPrice'
+  | 'mapPrice'
+  | 'imageUrl'
+  | 'imageAlt'
+  | 'category'
+  | 'subcategory'
+  | 'brand'
+>
+
+/** `ScoredProduct`, projected to the storefront homepage's lean card shape. */
+export interface LeanScoredProduct {
+  product: StorefrontCardProduct
+  score:   number
+}
+
+/** `Rail`, projected to the storefront homepage's lean card shape. */
+export interface LeanRail {
+  category: Category
+  score:    number
+  total:    number
+  items:    LeanScoredProduct[]
+  relaxed?: boolean
+  relaxedReason?: string
+}
+
 // ---------------------------------------------------------------------------
 // Discovery rules
 // ---------------------------------------------------------------------------

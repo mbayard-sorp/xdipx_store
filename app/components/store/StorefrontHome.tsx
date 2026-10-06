@@ -56,7 +56,7 @@ import {
   type GA4Item,
 } from '~/lib/analytics.client'
 import type { StorefrontData } from '~/lib/storefront-home.server'
-import type { DiscoveryProduct, Rail } from '~/types/discovery'
+import type { DiscoveryProduct, Rail, LeanRail, StorefrontCardProduct } from '~/types/discovery'
 import type {
   EmmaHeroSettings,
   WayfinderMosaicBlock,
@@ -288,7 +288,7 @@ function Hero({
   sensationDial,
   trustBar,
 }: {
-  featured: DiscoveryProduct[]
+  featured: StorefrontCardProduct[]
   emmaHero?: EmmaHeroSettings | null
   /** Pinned hero product's dial, or null. Null renders no readout at all. */
   sensationDial?: SensationDialV2 | null
@@ -585,7 +585,7 @@ function ProductGrid({
   seeAllHref,
   seeAllLabel = 'See all →',
 }: {
-  rail: Rail
+  rail: LeanRail
   eyebrow?: string
   heading?: string
   // `string | undefined` (not just `?`) so callers may pass an explicit
@@ -957,7 +957,7 @@ function FindYourWayIn({ block }: { block?: WayfinderMosaicBlock | undefined } =
    merchandiser reorders/swaps these as content; the shell stays fixed. */
 
 /** Maps a DiscoveryProduct into the GA4 item shape shared with the PDP's add_to_cart call. */
-function toGA4Item(product: DiscoveryProduct, index: number, listId: string, listName: string): GA4Item {
+function toGA4Item(product: StorefrontCardProduct, index: number, listId: string, listName: string): GA4Item {
   return {
     item_id: product.id,
     item_name: product.title,
@@ -986,7 +986,7 @@ function Rail({
   eyebrow: string
   heading: string
   emphasis: string
-  rail: Rail
+  rail: LeanRail
   /** Stable rail key for GA4 item_list_id/item_list_name (e.g. "bestsellers", "emmas-edit"). */
   listKey: string
   leadPriority?: boolean
@@ -1044,7 +1044,7 @@ function Rail({
  *  one rail has products). The best-of anchor rail (rails[0]) is promoted to
  *  the Nº 03 static grid above, so this section only needs the "second"
  *  curated set to avoid rendering the same products twice in a row. */
-function EmmasEdit({ rails }: { rails: Rail[] }) {
+function EmmasEdit({ rails }: { rails: LeanRail[] }) {
   const populated = rails.filter(r => r.items.length > 0)
   if (!populated.length) return null
   const edit = populated[1] ?? populated[0]!
@@ -1155,7 +1155,7 @@ function Couples({
   rail,
 }: {
   block?: PlayTogetherBannerBlock | undefined
-  rail?: Rail | undefined
+  rail?: LeanRail | undefined
 }) {
   const seenRef = useSectionSeen('couples')
   return (
