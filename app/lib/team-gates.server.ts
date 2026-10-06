@@ -170,7 +170,7 @@ function charterFor(addendum: VoiceGateAddendum): string {
   return addendum === 'linkedin' ? EMMA_VOICE_LINKEDIN : EMMA_VOICE_SOCIAL
 }
 
-const VOICE_GATE_SYSTEM_PREFIX = `You are the independent voice gate for xdipx.com's social drafts, standing in
+export const VOICE_GATE_SYSTEM_PREFIX = `You are the independent voice gate for xdipx.com's social drafts, standing in
 for emma-empathy-reviewer where no subagent can be spawned. You do not know why the drafter
 believes this caption is compliant; judge it cold, as a stranger reading it for the first time.
 
@@ -186,6 +186,15 @@ or graphic narrated acts / arousal-state description where the charter's registe
 REVISE for anything fixable that falls short of the charter's register or closes wrong but is not
 a hard-rule violation. PASS only when the caption would clear every rule below on a strict reading.
 
+A close call on where sensation-promised-by-implication ends and mechanism-on-body narration
+begins is a REVISE-class register judgment, never a BLOCK-class one, and resolves against the live
+precedents you are given below, when any are given: those captions PASSED this gate and stayed
+live, so a caption whose construction matches a given precedent's shape and charge is not a fresh
+REVISE for that same construction. If your reading would also condemn a given precedent, the
+reading is miscalibrated and that check passes instead. This never loosens an actual hard-rule
+violation from the BLOCK list above; it only stops the register call itself from re-deriving a
+different answer each time with nothing new to go on.
+
 Charter (core + addendum):
 `
 
@@ -194,6 +203,22 @@ export async function runVoiceGateCheck(input: VoiceGateInput): Promise<VoiceGat
   if (!text) throw new Response('Bad Request: text required', { status: 400 })
   const addendum = input.addendum && VOICE_GATE_ADDENDA.includes(input.addendum) ? input.addendum : 'social'
   const platform = input.platform && VOICE_GATE_PLATFORMS.includes(input.platform) ? input.platform : undefined
+
+  // Live-precedent calibration for the register call (ticket #13890). Mirrors
+  // the publish gate's own `describePrecedents`/`recentPostedCaptions` use:
+  // without it, this call has no visibility into a caption construction that
+  // already PASSED and stayed live, and re-derives the mechanism-vs-sensation
+  // line from scratch every call, with no record of what it decided last
+  // time. '' (no platform, or the lookup failed) reproduces the pre-#13890
+  // prompt exactly.
+  let precedentsBlock = ''
+  if (platform) {
+    try {
+      precedentsBlock = describePrecedents(await recentPostedCaptions(platform, 12))
+    } catch (err) {
+      console.error(`[voice-gate] recentPostedCaptions failed for ${platform} (treating as no precedents):`, err)
+    }
+  }
 
   const system = `${VOICE_GATE_SYSTEM_PREFIX}${charterFor(addendum)}`
   const msg = await client.messages.create({
@@ -208,7 +233,7 @@ export async function runVoiceGateCheck(input: VoiceGateInput): Promise<VoiceGat
     // task, not one where call-to-call variety is a feature.
     temperature: 0,
     system: cacheableSystem(system),
-    messages: [{ role: 'user', content: buildVoiceGateUserContent({ text, platform }) }],
+    messages: [{ role: 'user', content: buildVoiceGateUserContent({ text, platform, precedentsBlock }) }],
   })
   void logTokens('voice-gate', msg.usage)
   const block = msg.content[0]
@@ -222,9 +247,19 @@ export async function runVoiceGateCheck(input: VoiceGateInput): Promise<VoiceGat
  * (ticket #8853) is unit-testable without a network call: with no platform
  * given the output is byte-identical to the pre-#8853 prompt.
  */
-export function buildVoiceGateUserContent(input: { text: string; platform?: VoiceGatePlatform | undefined }): string {
+export function buildVoiceGateUserContent(input: {
+  text: string
+  platform?: VoiceGatePlatform | undefined
+  /**
+   * Live-precedent calibration block from `describePrecedents` (ticket
+   * #13890), or '' / omitted when there is none (no platform, or the lookup
+   * failed) — the prompt is then byte-identical to the pre-#13890 shape.
+   */
+  precedentsBlock?: string | undefined
+}): string {
   const platformLine = input.platform ? `Platform: ${input.platform}\n\n` : ''
-  return `${platformLine}Caption to review:\n\n${input.text}`
+  const precedents = input.precedentsBlock ? `\n\n${input.precedentsBlock}` : ''
+  return `${platformLine}Caption to review:\n\n${input.text}${precedents}`
 }
 
 /** Pure parse of the model's raw text into a verdict, so the contract is unit-testable directly. */
@@ -1453,7 +1488,7 @@ function toStoredFinding(f: GateFinding): PublishGateFinding {
   return { check: f.check, verdict, note: f.detail }
 }
 
-async function recentPostedCaptions(platform: GatePlatform, limit: number): Promise<string[]> {
+async function recentPostedCaptions(platform: GatePlatform | VoiceGatePlatform, limit: number): Promise<string[]> {
   const { listSocialPosts } = await import('./team.server')
   const posted = await listSocialPosts('posted', 60)
   return posted
