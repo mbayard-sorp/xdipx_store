@@ -36,7 +36,20 @@
  *       -> { url, assetId, filename, visionVerdict }. The typographic
  *          save-close slide: same renderer as packshot-card, no product
  *          image.
+ *   { op: 'rehost', sourceUrl, slug, aspect?: '4:5'|'16:9', caller?, runId? }
+ *       -> { url, assetId, visionVerdict } (ticket #13370). Lets the social
+ *          lane reuse a Notebook post's own hero image as its Instagram/X
+ *          echo post image instead of generating a fresh frame: fetches
+ *          `sourceUrl` (refused unless it is on cdn.sanity.io or
+ *          cdn.shopify.com), optionally `cover`-crops it to the requested
+ *          feed shape, rehosts to Shopify Files as
+ *          `social-notebook-<slug>-<aspect?>-<date>.jpg`, writes the
+ *          `social_media_assets` row (provenance on `tags`:
+ *          `source:notebook-hero`, `blog-slug:<slug>`), and runs the vision
+ *          gate on the result like any other image that reaches a live feed.
+ *          No AI model call, so no `social-images` spend row.
  *
+
  * THE SCENE AXES, on both ops (tickets #10479/#10480): bodyZone, contactMode,
  * cropScale and sceneLocation, each optional, each validated against the
  * single-source vocabulary in `app/lib/social-scene-vocab.ts` and stamped
@@ -77,7 +90,7 @@
 
 import type { ActionFunctionArgs } from 'react-router'
 import { assertTeamAuth, gate, recordEvent } from '~/lib/team.server'
-import { SOCIAL_ARCHETYPES, type SocialArchetype } from '~/lib/social-media.server'
+import { SOCIAL_ARCHETYPES, type SocialArchetype, type SocialRehostAspect } from '~/lib/social-media.server'
 import { apiError } from '~/lib/api-error.server'
 import { logImageCost } from '~/lib/token-log.server'
 import { applyNonSkinAxisDefaults, parseSceneAxes, requireSceneAxesForGeneration } from '~/lib/social-scene-vocab'
@@ -86,6 +99,7 @@ import { Sentry } from '~/lib/sentry.server'
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 const ONLY_VALUES = ['atlas', 'fal', 'imagen'] as const
 const CARD_TONE_VALUES = ['coral', 'plum', 'paper'] as const
+const REHOST_ASPECT_VALUES = ['4:5', '16:9'] as const
 
 function str(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined
@@ -181,6 +195,51 @@ async function handleSocialCardOp(op: 'packshot-card' | 'plate', b: Record<strin
   })
 }
 
+/**
+ * rehost (ticket #13370): validates sourceUrl/slug/aspect and defers the
+ * fetch + crop + rehost + ingest + vision-gate work to `rehostSocialImage`
+ * (`app/lib/social-media.server.ts`). No `prompt`/`mood`/`date`/scene axes —
+ * this reuses an existing picture rather than generating one, same reasoning
+ * as `handleSocialCardOp` above.
+ */
+async function handleRehostOp(b: Record<string, unknown>): Promise<Response> {
+  const sourceUrl = str(b['sourceUrl'])
+  if (!sourceUrl) return new Response('Bad Request: sourceUrl required', { status: 400 })
+  const slug = str(b['slug'])
+  if (!slug) return new Response('Bad Request: slug required', { status: 400 })
+  const aspectRaw = str(b['aspect'])
+  if (aspectRaw && !(REHOST_ASPECT_VALUES as readonly string[]).includes(aspectRaw)) {
+    return new Response(`Bad Request: aspect must be one of ${REHOST_ASPECT_VALUES.join('|')}`, { status: 400 })
+  }
+  const aspect = aspectRaw as SocialRehostAspect | undefined
+  const caller = str(b['caller']) ?? 'social-media-manager'
+  const runId = num(b['runId'])
+
+  // Money gate, defense-in-depth (see handleSocialCardOp's own comment
+  // above): this op bills no AI image generation, but the vision gate it
+  // still runs calls the Anthropic API, so a direct team-token caller
+  // looping this route is not free.
+  const gateResult = await gate('social', runId)
+  if (!gateResult.ok) {
+    return Response.json({ error: 'gated', reason: gateResult.reason, gate: gateResult }, { status: 403 })
+  }
+
+  const { rehostSocialImage } = await import('~/lib/social-media.server')
+  try {
+    const result = await rehostSocialImage({ sourceUrl, slug, ...(aspect ? { aspect } : {}), caller })
+    return Response.json({ url: result.url, assetId: result.assetId, visionVerdict: result.visionVerdict })
+  } catch (err) {
+    // The host allowlist and a failed upstream fetch are caller errors
+    // (a bad or unreachable sourceUrl), not a server defect — 400, not 500,
+    // so the drafting routine can tell "fix your input" from "retry later".
+    const message = err instanceof Error ? err.message : String(err)
+    if (message.includes('is not on the allowlist') || message.includes('is not a valid URL') || message.includes('fetch sourceUrl failed')) {
+      return new Response(`Bad Request: ${message}`, { status: 400 })
+    }
+    throw err
+  }
+}
+
 export async function action({ request }: ActionFunctionArgs) {
   assertTeamAuth(request)
   if (request.method !== 'POST') return new Response('Method Not Allowed', { status: 405 })
@@ -200,6 +259,12 @@ export async function action({ request }: ActionFunctionArgs) {
     // only in the CLI.
     if (op === 'packshot-card' || op === 'plate') {
       return await handleSocialCardOp(op, b)
+    }
+
+    // Ticket #13370: reuses an existing picture (a Notebook post's hero),
+    // same "not a billed generation" reasoning as packshot-card/plate above.
+    if (op === 'rehost') {
+      return await handleRehostOp(b)
     }
 
     if (op !== 'generate' && op !== 'cast') return new Response('Bad Request', { status: 400 })

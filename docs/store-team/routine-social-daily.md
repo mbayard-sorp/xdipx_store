@@ -370,9 +370,14 @@ is on the record with a ticket the team can act on tomorrow.
      against `x_publish_max_spend_usd_month` and takes one of the day's X slots; the echo
      outranks a product companion for that slot, because the owner asked for it by name.
    - **Imagery is reuse-first.** The row's hero image is the article's own picture, but it lives on
-     Sanity's CDN and fails the Step 5 provenance test until it is a library asset; until a rehost
-     op exists, use a library frame on the article's subject (`social-asset-query` `op:'search'`)
-     and generate only when the library has nothing. Atlas is licensed for it.
+     Sanity's CDN and fails the Step 5 provenance test until it is a library asset. Rehost it with
+     `POST /api/team/social-image {"op":"rehost","sourceUrl":"<the row's hero image URL>","slug":"<the
+     post's slug>","aspect":"4:5"}` for the Instagram echo (`"aspect":"16:9"` for the X echo) — it
+     fetches the hero, crops it to the requested feed shape, rehosts it to Shopify Files, writes the
+     library row, and vision-gates the result like any other image that reaches a live feed
+     (ticket #13370). Fall back to a library frame on the article's subject (`social-asset-query`
+     `op:'search'`) or generate only when the rehost fails (a dead or non-Sanity/Shopify hero URL).
+     Atlas is licensed for the fallback generation.
    - **Respect the eligibility verdict, with one adjustment.** `eligible`: both echoes as above.
      `generic-angle`: the Instagram caption teaches the transferable topic and may still carry the
      URL when the slug itself is clean; when the slug names a category Instagram cannot run (a
