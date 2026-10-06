@@ -118,6 +118,22 @@ plus the retired-route denylist stand.
   **named failure**: state why in the run summary (turn budget, tooling blocker, etc.) rather than
   letting the skip pass silently — three unexplained skips in a row read as a milestone with no
   owner, not as a traffic problem.
+- **Standing step: a `/admin/socials` design-critic pass every 4 weeks (replaces #5232).** #5232
+  asked for a one-time design-critic *run* against the Social Studio v2 Composer/Analytics/Calendar
+  screens, which is not a docs edit and so could never be implemented by the apply pass; it sat
+  approved for six weeks before being dismissed in favor of this standing instruction. Once every 4
+  weeks, capture `/admin/socials` (index, compose, analytics) at 375px and at desktop width with:
+
+  ```bash
+  npx tsx scripts/design-snapshots.ts --base https://xdipx.com --routes /admin/socials --viewport doctrine
+  ```
+
+  and post the `design-critic` verdict as an `/event` row (`eventType:'decision'`,
+  `agentRole:'design-critic'`) scored against `docs/design-doctrine.md` and the design direction in
+  `docs/store-team/social-studio-plan.md` §4, so the milestone probe (`p7-design` in
+  `docs/store-team/trackers/social-studio-v2.md`) passes on live evidence instead of staying
+  perpetually unactionable. A REVISE or BLOCK verdict files its own follow-up ticket rather than
+  blocking this routine's own PR.
 - **Multi-axis discovery instrument build-readiness is gated on the CROSS-PRODUCT of its options,
   not the options themselves (run 646, `concepts/either-or.md`).** A concept with N binary/multi-way
   axes is not buildable just because every individual pole clears the `>=2` product-count floor:
