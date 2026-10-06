@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from 'express'
 import crypto from 'node:crypto'
-import { ga4PurchaseOutbox, orderAttribution, orderLineItems, productCopurchase, referrals } from '../db/schema.js'
+import { ga4PurchaseOutbox, googleClickConversions, orderAttribution, orderLineItems, productCopurchase, referrals } from '../db/schema.js'
 import { eq, sql } from 'drizzle-orm'
 import { canonicalDedupeKey } from '../app/lib/dedupe-key.js'
 
@@ -372,6 +372,40 @@ async function handleOrderCreated(order: ShopifyOrder): Promise<void> {
     }).onConflictDoNothing({ target: orderAttribution.shopifyOrderId })
   } catch (err) {
     console.error('[webhook:order-created] order_attribution insert failed:', err)
+  }
+
+  // Capture the Google click id for offline-conversion export (#3422/#3535).
+  // attribution-cart.server.ts stamps _gclid / _gclid_type / _gclid_captured_at
+  // / _marketing_consent as cart attributes, which Shopify copies onto the
+  // order's note_attributes. Gated on stored marketing consent: an offline
+  // upload to Google is itself an ad-data share. Best-effort, same as the
+  // acquisition-attribution insert above: a write failure here costs the
+  // Google Ads export, never the order.
+  try {
+    const attrOf = (name: string): string | undefined =>
+      order.note_attributes?.find(a => a.name === name)?.value
+    const gclid            = attrOf('_gclid')
+    const gclidType        = attrOf('_gclid_type')
+    const gclidCapturedAt  = attrOf('_gclid_captured_at')
+    const marketingConsent = attrOf('_marketing_consent') === 'true'
+    if (gclid && gclidType && marketingConsent) {
+      await db.insert(googleClickConversions)
+        .values({
+          orderId:   String(order.id),
+          gclid,
+          gclidType,
+          value:     order.total_price,
+          currency:  order.currency || 'USD',
+          clickTime: gclidCapturedAt ? new Date(gclidCapturedAt) : new Date(order.created_at ?? Date.now()),
+          orderTime: order.created_at ? new Date(order.created_at) : new Date(),
+        })
+        .onConflictDoNothing({ target: googleClickConversions.orderId })
+    } else if (gclid && !marketingConsent) {
+      // Under-reporting must be visible, not silent (ticket #3422 DONE WHEN).
+      console.warn(`[webhook:order-created] order ${order.id} carried a _gclid but no marketing consent; excluded from Google Ads export`)
+    }
+  } catch (err) {
+    console.error('[webhook:order-created] google_click_conversions insert failed:', err)
   }
 
   // Capture referral code from note_attributes (stamped as `_ref_code` by the

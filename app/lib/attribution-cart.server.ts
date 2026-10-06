@@ -21,6 +21,7 @@ import {
   getStoredRefCode,
   getStoredUTM,
 } from './attribution.server'
+import { getMarketingConsent } from './consent.server'
 import { setCartAttributes, getCustomerProfile } from './shopify.server'
 import { getCustomerToken } from './customer-session.server'
 
@@ -49,6 +50,12 @@ export function attributionCartAttrs(request: Request): CartAttr[] {
   if (gclid) {
     attrs.push({ key: '_gclid', value: gclid.id })
     attrs.push({ key: '_gclid_type', value: gclid.type })
+    attrs.push({ key: '_gclid_captured_at', value: gclid.capturedAt })
+    // The order webhook has no Request/cookies (see the "We don't have the
+    // original Request here" comment in server/webhooks.ts), so consent has
+    // to ride along as its own attribute if the offline-conversion export is
+    // going to gate on it, the same way the click id itself rides along.
+    attrs.push({ key: '_marketing_consent', value: getMarketingConsent(request) ? 'true' : 'false' })
   }
   if (utm?.source)   attrs.push({ key: '_utm_source',   value: utm.source })
   if (utm?.medium)   attrs.push({ key: '_utm_medium',   value: utm.medium })

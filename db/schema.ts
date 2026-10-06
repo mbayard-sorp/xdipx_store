@@ -562,6 +562,26 @@ export const orderAttribution = pgTable('order_attribution', {
   createdAtIdx:    index('idx_order_attribution_created_at').on(t.createdAt),
 }))
 
+// Migration 117: Google Ads offline-conversion ledger. Persists the
+// _gclid / _gclid_type captured by attribution.server.ts and stamped onto
+// the cart by attribution-cart.server.ts, once the order webhook reads it
+// off note_attributes. Ticket #3422/#3535.
+export const googleClickConversions = pgTable('google_click_conversions', {
+  id:          serial('id').primaryKey(),
+  orderId:     varchar('order_id', { length: 64 }).notNull(),
+  gclid:       varchar('gclid', { length: 256 }).notNull(),
+  gclidType:   varchar('gclid_type', { length: 16 }).notNull(), // gclid | wbraid | gbraid
+  value:       decimal('value', { precision: 10, scale: 2 }).notNull(),
+  currency:    varchar('currency', { length: 8 }).notNull(),
+  clickTime:   timestamp('click_time').notNull(),
+  orderTime:   timestamp('order_time').notNull(),
+  exportedAt:  timestamp('exported_at'),
+  createdAt:   timestamp('created_at').defaultNow().notNull(),
+}, t => ({
+  orderIdUnique: uniqueIndex('google_click_conversions_order_id_uniq').on(t.orderId),
+  unexportedIdx: index('idx_google_click_conversions_unexported').on(t.createdAt),
+}))
+
 export const wishlists = pgTable('wishlists', {
   id:          serial('id').primaryKey(),
   customerGid: varchar('customer_gid', { length: 60 }).notNull(),
