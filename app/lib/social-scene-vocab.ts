@@ -164,6 +164,20 @@ export function isSceneLocation(v: unknown): boolean {
   return slug.length > 0 && slug.length <= SCENE_LOCATION_MAX
 }
 
+/**
+ * Body zones retired for new on-skin bodyscape briefs (owner decision
+ * 2026-10-02, `docs/store-team/imagery-owner-notes.md` entry 3: "We should
+ * stop doing forearm concept shots, they almost always don't make sense.").
+ * Still members of `BODY_ZONES` so historical rows keep parsing (ticket
+ * #13739); rejected only at write time, by whichever of `requireSceneAxesForGeneration`
+ * (generation) or a direct `isRetiredBodyZone` check (drafting) a caller runs.
+ */
+export const RETIRED_BODY_ZONES: readonly string[] = ['forearm']
+
+export function isRetiredBodyZone(v: unknown): boolean {
+  return typeof v === 'string' && RETIRED_BODY_ZONES.includes(v)
+}
+
 /** The five axes, as one optional bag. Every field is independently optional. */
 export interface SceneAxes {
   bodyZone?: string | undefined
@@ -276,6 +290,19 @@ export function requireSceneAxesForGeneration(axes: SceneAxes): { ok: true } | {
   if ((axes.cropScale === 'macro' || axes.cropScale === 'close') && (!axes.bodyZone || !axes.contactMode)) {
     return { ok: false, error: `bodyZone and contactMode are required when cropScale is ${axes.cropScale}` }
   }
+  // Ticket #13739: rejected here, not in validateSceneAxis, because `forearm`
+  // must stay a valid BODY_ZONES member for historical rows to keep parsing.
+  // This is the one shared pre-spend call site for both api.team.social-image.tsx
+  // ops (generate and cast both call it before branching).
+  if (isRetiredBodyZone(axes.bodyZone)) {
+    return {
+      ok: false,
+      error:
+        'bodyZone "forearm" is retired for on-skin bodyscape briefs (imagery-owner-notes.md entry 3: ' +
+        'owner said forearm concept shots "almost always don\'t make sense"). Use a different ' +
+        '§3.2a/§3.2b mid-tier zone instead (inner-wrist, nape, behind-knee).',
+    }
+  }
   return { ok: true }
 }
 
@@ -374,4 +401,29 @@ export function mergeSceneAxes(supplied: SceneAxes, fallback: SceneAxes): SceneA
  */
 export function hasAllSceneAxes(axes: SceneAxes): boolean {
   return SCENE_AXIS_KEYS.every(k => typeof axes[k] === 'string' && axes[k] !== '')
+}
+
+// --- Writers Room story line (ticket #13739) --------------------------------
+
+/**
+ * Does an imageBrief carry a Writers Room story-line block (owner direction
+ * 2026-10-05, `docs/store-team/imagery-owner-notes.md` entry 4; format in
+ * `.claude/agents/episode-writer.md` `<stills_story_line>`, rule in
+ * `docs/store-team/instagram-campaigns.md` §3.2g)? Checks structure only — a
+ * `STORY LINE` header plus non-empty `Moment:`/`Set:`/`Cue:` lines — never
+ * the creative content of those lines, which is episode-writer's and the
+ * art director's job, not this route's.
+ */
+export function hasStoryLine(imageBrief: string | null | undefined): boolean {
+  if (!imageBrief) return false
+  if (!/^\s*STORY LINE\b/m.test(imageBrief)) return false
+  const hasField = (label: string): boolean => {
+    // `[ \t]`, not `\s`, between the colon and the content: `\s` matches `\n`
+    // too, which let an empty "Label:" line's trailing `\s*` swallow the
+    // newline and match the NEXT line's content instead of failing closed.
+    const re = new RegExp(`^[ \\t]*${label}:[ \\t]*(\\S.*)$`, 'm')
+    const m = imageBrief.match(re)
+    return !!m && m[1]!.trim().length > 0
+  }
+  return hasField('Moment') && hasField('Set') && hasField('Cue')
 }

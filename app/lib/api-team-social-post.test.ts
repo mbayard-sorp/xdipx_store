@@ -174,6 +174,71 @@ describe('draft op — alt-text preflight (#5486)', () => {
   })
 })
 
+// Ticket #13739: a product-featuring Instagram/X draft with no Writers Room
+// story line is "a cast member holding a product up in an empty room" —
+// exactly what rows 384/395 shipped with an empty imageBrief.
+describe('draft op — Writers Room story-line preflight (ticket #13739)', () => {
+  const igMedia = ['https://cdn.shopify.com/files/ig-scene.jpg']
+  const altText = 'A cast member holds the toy in warm light.'
+  const storyLine =
+    'STORY LINE womanizer-next-sage, jade\n' +
+    '  Moment: ANTICIPATION. Jade is about to start her evening wind-down.\n' +
+    '  Set: her bed, with a warm lamp and a half-folded throw blanket.\n' +
+    '  Cue: the lamp light.\n'
+
+  it('rejects a product-featuring Instagram draft with no imageBrief at all', async () => {
+    const res = await post({
+      op: 'draft', platform: 'instagram', tweetText: 'IG caption', voiceGate, mediaUrls: igMedia, altText,
+      shopifyProductId: 'gid://shopify/Product/1',
+    })
+    expect(res.status).toBe(400)
+    expect(await res.text()).toMatch(/STORY LINE/)
+    expect(createDraftMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects a product-featuring X draft whose imageBrief has no STORY LINE block', async () => {
+    const res = await post({
+      op: 'draft', platform: 'x', tweetText: 'X caption', voiceGate, mediaUrls: igMedia, altText,
+      shopifyProductId: 'gid://shopify/Product/1', imageBrief: 'a cast member holding the toy in a kitchen',
+    })
+    expect(res.status).toBe(400)
+    expect(createDraftMock).not.toHaveBeenCalled()
+  })
+
+  it('accepts a product-featuring Instagram draft with a well-formed STORY LINE block', async () => {
+    const res = await post({
+      op: 'draft', platform: 'instagram', tweetText: 'IG caption', voiceGate, mediaUrls: igMedia, altText,
+      shopifyProductId: 'gid://shopify/Product/1', imageBrief: storyLine,
+    })
+    expect(res.status).toBe(200)
+    expect(createDraftMock).toHaveBeenCalled()
+  })
+
+  it('does not require a story line on a non-product draft', async () => {
+    const res = await post({ op: 'draft', platform: 'instagram', tweetText: 'no product here', voiceGate, mediaUrls: igMedia, altText })
+    expect(res.status).toBe(200)
+    expect(createDraftMock).toHaveBeenCalled()
+  })
+
+  it('does not require a story line on a video-fanout draft (videoJobId set)', async () => {
+    const res = await post({
+      op: 'draft', platform: 'instagram', tweetText: 'video clip still', voiceGate, mediaUrls: igMedia, altText,
+      shopifyProductId: 'gid://shopify/Product/1', videoJobId: 42,
+    })
+    expect(res.status).toBe(200)
+    expect(createDraftMock).toHaveBeenCalled()
+  })
+
+  it('does not require a story line on other platforms (LinkedIn)', async () => {
+    const res = await post({
+      op: 'draft', platform: 'linkedin', tweetText: 'LI post', voiceGate, mediaUrls: igMedia,
+      shopifyProductId: 'gid://shopify/Product/1',
+    })
+    expect(res.status).toBe(200)
+    expect(createDraftMock).toHaveBeenCalled()
+  })
+})
+
 // Ticket #11311 (split from #11302): a drafted url that resolves to no real
 // social_media_assets row must be refused at write time, not discovered days
 // later as a confusing vision-verdict gate block. Row 306's actual failure
@@ -258,6 +323,10 @@ describe('draft op — shopifyProductId pass-through', () => {
     const res = await post({
       op: 'draft', platform: 'instagram', tweetText: 'A fresh line about the wand', voiceGate,
       shopifyProductId: 'gid://shopify/Product/123',
+      // Ticket #13739: a product-featuring IG/X draft now requires a Writers
+      // Room story line; irrelevant to what this test asserts, so supplied
+      // just to clear that preflight.
+      imageBrief: 'STORY LINE wand, jade\n  Moment: ANTICIPATION.\n  Set: her bed.\n  Cue: the lamp light.\n',
     })
     expect(res.status).toBe(200)
     expect(createDraftMock).toHaveBeenCalledWith(expect.objectContaining({
@@ -484,6 +553,17 @@ describe('draft op, scene-axis vocabulary (#10480)', () => {
     })
     expect(res.status).toBe(200)
     expect(createDraftMock).toHaveBeenCalled()
+  })
+
+  // Ticket #13739: forearm stays a valid BODY_ZONES member (so a historical
+  // row with it still reads back fine), but is refused at write time.
+  it('400s a draft carrying the retired forearm body zone', async () => {
+    const res = await post({
+      op: 'draft', platform: 'instagram', tweetText: 'forearm again', voiceGate, bodyZone: 'forearm',
+    })
+    expect(res.status).toBe(400)
+    expect(await res.text()).toMatch(/forearm/)
+    expect(createDraftMock).not.toHaveBeenCalled()
   })
 })
 

@@ -941,6 +941,83 @@ describe('reworkSocialPost (#4351)', () => {
     expect(writes).toHaveLength(1)
   })
 
+  // Ticket #13739: the Writers Room story-line requirement, judged on the
+  // effective row (rework input falling back to the stored row), same shape
+  // as the altText check above.
+  const STORY_LINE =
+    'STORY LINE womanizer-next-sage, jade\n' +
+    '  Moment: ANTICIPATION. Jade is about to start her evening wind-down.\n' +
+    '  Set: her bed, with a warm lamp and a half-folded throw blanket.\n' +
+    '  Cue: the lamp light.\n'
+
+  it('400s a product-featuring IG rework that leaves imageBrief with no STORY LINE (row had none, rework supplies none)', async () => {
+    const { repo, writes } = fakeReworkRepo(
+      row({ reviewStatus: 'needs_changes', altText: 'existing alt text', shopifyProductId: 'gid://shopify/Product/1', imageBrief: null }),
+    )
+    const r = await reworkSocialPost(7, { mediaUrls: [`${CDN}/reworked-lead.jpg`] }, { repo })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.status).toBe(400)
+    expect(writes).toHaveLength(0)
+  })
+
+  it('accepts the same rework once it supplies a STORY LINE imageBrief', async () => {
+    const { repo, writes } = fakeReworkRepo(
+      row({ reviewStatus: 'needs_changes', altText: 'existing alt text', shopifyProductId: 'gid://shopify/Product/1', imageBrief: null }),
+    )
+    const r = await reworkSocialPost(7, { mediaUrls: [`${CDN}/reworked-lead.jpg`], imageBrief: STORY_LINE }, { repo })
+    expect(r.ok).toBe(true)
+    expect(writes[0]!.patch.imageBrief).toBe(STORY_LINE)
+  })
+
+  it('accepts a copy-only rework when the stored row already carries a STORY LINE', async () => {
+    const { repo, writes } = fakeReworkRepo(
+      row({ reviewStatus: 'needs_changes', altText: 'existing alt text', shopifyProductId: 'gid://shopify/Product/1', imageBrief: STORY_LINE }),
+    )
+    const r = await reworkSocialPost(7, { tweetText: 'a cleaner line' }, { repo })
+    expect(r.ok).toBe(true)
+    expect(writes).toHaveLength(1)
+  })
+
+  it('does not require a STORY LINE on a non-product row', async () => {
+    const { repo, writes } = fakeReworkRepo(
+      row({ reviewStatus: 'needs_changes', altText: 'existing alt text', shopifyProductId: null, imageBrief: null }),
+    )
+    const r = await reworkSocialPost(7, { tweetText: 'a cleaner line' }, { repo })
+    expect(r.ok).toBe(true)
+    expect(writes).toHaveLength(1)
+  })
+
+  it('does not require a STORY LINE on a video-fanout row (videoJobId set)', async () => {
+    const { repo, writes } = fakeReworkRepo(
+      row({ reviewStatus: 'needs_changes', altText: 'existing alt text', shopifyProductId: 'gid://shopify/Product/1', imageBrief: null, videoJobId: 42 }),
+    )
+    const r = await reworkSocialPost(7, { tweetText: 'a cleaner line' }, { repo })
+    expect(r.ok).toBe(true)
+    expect(writes).toHaveLength(1)
+  })
+
+  // Ticket #13739: forearm stays a valid BODY_ZONES value but is rejected at
+  // rework write time too.
+  it('400s a rework that sets bodyZone to the retired forearm zone', async () => {
+    const { repo, writes } = fakeReworkRepo(row({ reviewStatus: 'needs_changes', altText: 'existing alt text' }))
+    const r = await reworkSocialPost(7, { mediaUrls: [`${CDN}/reworked-lead.jpg`], bodyZone: 'forearm' }, { repo })
+    expect(r.ok).toBe(false)
+    if (!r.ok) {
+      expect(r.status).toBe(400)
+      expect(r.error).toContain('forearm')
+    }
+    expect(writes).toHaveLength(0)
+  })
+
+  it('400s a rework that leaves a stored forearm bodyZone unchanged', async () => {
+    const { repo, writes } = fakeReworkRepo(
+      row({ reviewStatus: 'needs_changes', altText: 'existing alt text', bodyZone: 'forearm' }),
+    )
+    const r = await reworkSocialPost(7, { tweetText: 'a cleaner line' }, { repo })
+    expect(r.ok).toBe(false)
+    expect(writes).toHaveLength(0)
+  })
+
   it('404s on a post that does not exist', async () => {
     const { repo, writes } = fakeReworkRepo(null)
     const r = await reworkSocialPost(7, { mediaUrls: [`${CDN}/x.jpg`] }, { repo })

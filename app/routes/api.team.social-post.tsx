@@ -149,7 +149,7 @@ import { parseVoiceGateVerdict } from '~/lib/social-voice-gate.server'
 import { applyPublishGateVerdict, parsePublishGateVerdict, reworkSocialPost, parseReworkInput, markStaleSocialPostRejected } from '~/lib/social-publish-approve.server'
 import { captureSocialEngagement, captureInstagramAccount, rankBySaves } from '~/lib/social-engagement.server'
 import { getSocialMixReport, formatSocialMixReportLines } from '~/lib/social-mix-report.server'
-import { parseSceneAxes } from '~/lib/social-scene-vocab'
+import { hasStoryLine, isRetiredBodyZone, parseSceneAxes } from '~/lib/social-scene-vocab'
 
 export async function action({ request }: ActionFunctionArgs) {
   assertTeamAuth(request)
@@ -205,6 +205,24 @@ export async function action({ request }: ActionFunctionArgs) {
         { status: 400 },
       )
     }
+    // Fail-closed Writers Room story-line requirement (ticket #13739, owner
+    // direction 2026-10-05, imagery-owner-notes.md entry 4). Rows 384/395
+    // (2026-10-04/05) shipped with an empty imageBrief: "a cast member
+    // holding a product up in an empty room ... meaningless to our
+    // customers." A video-fanout row (videoJobId/episodeId set) is exempt —
+    // its story lives in the script, not a stills brief.
+    const isVideoFanout = typeof b['videoJobId'] === 'number' || typeof b['episodeId'] === 'number'
+    if ((b['platform'] === 'instagram' || b['platform'] === 'x') &&
+        typeof b['shopifyProductId'] === 'string' && b['shopifyProductId'].length > 0 &&
+        !isVideoFanout &&
+        !hasStoryLine(typeof b['imageBrief'] === 'string' ? b['imageBrief'] : undefined)) {
+      return new Response(
+        'Bad Request: a product-featuring Instagram or X draft requires an imageBrief carrying a Writers Room ' +
+        'STORY LINE block with non-empty Moment:/Set:/Cue: lines (owner direction 2026-10-05, ' +
+        'imagery-owner-notes.md entry 4; format in .claude/agents/episode-writer.md <stills_story_line>)',
+        { status: 400 },
+      )
+    }
     const posterUrl = typeof b['posterUrl'] === 'string' ? b['posterUrl'] : undefined
     // Fail-closed library-membership requirement (#11311): see the op header
     // comment. Checked here, before any write, because this is the only point
@@ -239,6 +257,17 @@ export async function action({ request }: ActionFunctionArgs) {
     const parsedAxes = parseSceneAxes(b)
     if (!parsedAxes.ok) return new Response(parsedAxes.error, { status: 400 })
     const sceneAxes = parsedAxes.axes
+    // Ticket #13739: forearm stays a valid BODY_ZONES member (so a historical
+    // row with it still parses) but is rejected at write time, same as the
+    // generation-time check in requireSceneAxesForGeneration.
+    if (isRetiredBodyZone(sceneAxes.bodyZone)) {
+      return new Response(
+        'Bad Request: bodyZone "forearm" is retired for on-skin bodyscape briefs (imagery-owner-notes.md ' +
+        'entry 3: owner said forearm concept shots "almost always don\'t make sense"). Use a different ' +
+        '§3.2a/§3.2b mid-tier zone instead (inner-wrist, nape, behind-knee).',
+        { status: 400 },
+      )
+    }
 
     // Idempotency guard (#4069): a same-platform, same-caption row still open
     // for the same campaign day comes back as `deduped:true` with the
