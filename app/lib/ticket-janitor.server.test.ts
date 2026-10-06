@@ -364,7 +364,8 @@ describe('ROUTINE_CADENCES', () => {
     // No two lanes share an identity (guards the silent-drop-one merge hazard).
     expect(new Set(keys).size).toBe(keys.length)
     expect([...keys].sort()).toEqual([
-      'ads|ads',
+      'ads|ads-ideas',
+      'ads|ads-render',
       'email|email',
       'homepage|design',
       'content|content',
@@ -423,13 +424,16 @@ describe('ROUTINE_CADENCES', () => {
     expect(scout?.team).toBe('social')
     expect(scout?.kind).toBe('weekly')
     expect(scout?.maxGapHours).toBe(194)
-    // Ads Proposals (manifest row 4, Tue 13:00) has a liveness watch; team and
-    // runType match the POST /api/team/run call in routine-ads-weekly.md.
-    const ads = ROUTINE_CADENCES.find(c => c.runType === 'ads')
-    expect(ads).toBeDefined()
-    expect(ads?.team).toBe('ads')
-    expect(ads?.kind).toBe('weekly')
-    expect(ads?.maxGapHours).toBe(194)
+    // The retired weekly Ads Proposals lane (runType 'ads') is no longer
+    // watched; the two daily passes (manifest rows 27 and 28) are, with team
+    // and runType matching routine-ads-daily.md.
+    expect(ROUTINE_CADENCES.find(c => c.runType === 'ads')).toBeUndefined()
+    for (const runType of ['ads-ideas', 'ads-render']) {
+      const ads = ROUTINE_CADENCES.find(c => c.runType === runType)
+      expect(ads).toBeDefined()
+      expect(ads?.team).toBe('ads')
+      expect(ads?.kind).toBe('daily')
+    }
     // Email Briefs (manifest row 5, Tue 15:00) has a liveness watch; team and
     // runType match the POST /api/team/run call in routine-email-weekly.md.
     const email = ROUTINE_CADENCES.find(c => c.runType === 'email')
