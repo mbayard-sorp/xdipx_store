@@ -1,5 +1,5 @@
 import crypto from 'node:crypto'
-import type { Deal, Product, VaultDeal, Cart, CartLine, ProductImage, ProductVideo, ProductScore, ProductTypeDial, SellingPlan, SellingPlanGroup, SensationDial, SensationDialV2, SensationDialItem, DialValue, CareInstructions, EmmaHeroCopy } from '~/types'
+import type { Deal, Product, VaultDeal, Cart, CartLine, CartUpsell, ProductImage, ProductVideo, ProductScore, ProductTypeDial, SellingPlan, SellingPlanGroup, SensationDial, SensationDialV2, SensationDialItem, DialValue, CareInstructions, EmmaHeroCopy } from '~/types'
 import { toHTML } from '@portabletext/to-html'
 import { cached, invalidateCache, kvGet, kvSet, KV_KEYS } from '~/lib/kv.server'
 import { isOperationalTag, editorialTagsOnly } from '~/lib/tag-normalize'
@@ -2774,6 +2774,28 @@ export async function getAccessoryProducts(ids: string[]): Promise<Product[]> {
     const data = await storefront<Record<string, ShopifyProductNode | null>>(`query { ${queries} }`)
     return Object.values(data).filter((n): n is ShopifyProductNode => n !== null).map(n => nodeToProduct(n))
   })
+}
+
+/**
+ * Projects a fetched `Product` down to the lean shape the cart drawer's
+ * upsell rail actually reads (ticket #13340). `/api/cart` already fetches
+ * the full `Product[]` via `getAccessoryProducts` to derive Emma's pairing
+ * context (which needs `tags`/`price`/full variants); this reuses that same
+ * fetch rather than querying Shopify twice, and only trims what goes out
+ * over the wire in the JSON response.
+ */
+export function toCartUpsell(product: Product): CartUpsell {
+  const variant = product.variants[0]
+  const image = product.images[0]
+  return {
+    handle: product.handle,
+    title: product.title,
+    price: product.price,
+    image: image ? { url: image.url, altText: image.altText ?? null } : null,
+    variantId: variant?.id ?? '',
+    variantAvailableForSale: variant?.availableForSale ?? false,
+    hasMultipleVariants: product.variants.length > 1,
+  }
 }
 
 // ─── Admin Product Search (for admin pickers) ─────────────────────────────

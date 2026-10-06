@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router'
 import { getCartIdFromCookie, setCartCookie } from '~/lib/cart.server'
-import { addToCart, addLinesToCart, createCart, getCart, getCustomerProfile, getAccessoryProducts, removeFromCart, updateCartLine } from '~/lib/shopify.server'
+import { addToCart, addLinesToCart, createCart, getCart, getCustomerProfile, getAccessoryProducts, removeFromCart, toCartUpsell, updateCartLine } from '~/lib/shopify.server'
 import { getBundleByHandle, bundleCartLines } from '~/lib/bundles.server'
 import { checkRateLimit, rateLimited } from '~/lib/rate-limit.server'
 import { getCustomerToken } from '~/lib/customer-session.server'
@@ -31,7 +31,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const emma = deriveEmmaCartContext({ cart, profile, upsells })
 
   return Response.json(
-    { cart, emma },
+    { cart, emma, upsells: upsells.map(toCartUpsell) },
     { headers: { 'Cache-Control': 'private, no-store' } },
   )
 }
