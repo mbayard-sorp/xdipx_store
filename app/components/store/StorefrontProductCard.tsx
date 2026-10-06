@@ -10,14 +10,14 @@
 import { Link } from 'react-router'
 import { OptimizedImage } from '~/components/store/OptimizedImage'
 import { showDiscountBadge, formatDiscountBadge, mapAllowsDiscountDisplay } from '~/lib/discount-badge'
-import type { DiscoveryProduct } from '~/types/discovery'
+import type { StorefrontCardProduct } from '~/types/discovery'
 
 function fmt(n: number): string {
   return `$${n % 1 === 0 ? n.toFixed(0) : n.toFixed(2)}`
 }
 
 interface StorefrontProductCardProps {
-  product: DiscoveryProduct
+  product: StorefrontCardProduct
   /** Eager-load the first row of the first rail for a better LCP. */
   priority?: boolean
   /** Fired on click, before navigation — used for GA4 select_item attribution. */

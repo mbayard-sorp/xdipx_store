@@ -24,7 +24,7 @@ import { Link } from 'react-router'
 import { StorefrontProductCard } from '~/components/store/StorefrontProductCard'
 import { Reveal } from '~/components/motion/Reveal'
 import { SHELF_SLOTS } from '~/types/curiosity'
-import type { CuriosityShelfData, ResolvedLane } from '~/types/curiosity'
+import type { LeanCuriosityShelfData, LeanResolvedLane } from '~/types/curiosity'
 
 const MONO = { fontFamily: 'var(--font-mono)' } as const
 const DISPLAY = { fontFamily: 'var(--font-display)', fontWeight: 400 } as const
@@ -39,14 +39,14 @@ function splitEmphasis(heading: string, emphasis: string): [string, string, stri
 }
 
 /** page0 = deck[0..5]; page1 = deck[6..11] when the lane shipped a full deck. */
-function pageSlice(lane: ResolvedLane, page: number) {
+function pageSlice(lane: LeanResolvedLane, page: number) {
   return lane.deck.slice(page * SHELF_SLOTS, page * SHELF_SLOTS + SHELF_SLOTS)
 }
-function hasSecondPage(lane: ResolvedLane): boolean {
+function hasSecondPage(lane: LeanResolvedLane): boolean {
   return lane.deck.length >= SHELF_SLOTS * 2
 }
 
-export function CuriosityShelf({ data }: { data: CuriosityShelfData }) {
+export function CuriosityShelf({ data }: { data: LeanCuriosityShelfData }) {
   const { lanes, eyebrow, heading, emphasis, emmaLine, defaultLane } = data
   const [sel, setSel] = useState({ lane: Math.min(defaultLane, lanes.length - 1), page: 0 })
   // `interacted` gates the restock crossfade: the server renders the final state,

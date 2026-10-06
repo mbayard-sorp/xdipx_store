@@ -25,13 +25,13 @@ import {
   type HomepagePayloadB,
 } from '~/lib/homepage-payload.server'
 import { getCuriosityShelfData } from '~/lib/curiosity-shelf.server'
-import type { CuriosityShelfData } from '~/types/curiosity'
+import type { CuriosityShelfData, LeanCuriosityShelfData } from '~/types/curiosity'
 import { getProductByHandle } from '~/lib/shopify.server'
 import type { SensationDialV2 } from '~/types'
 import { getEmmaHeroSettings, getBlogPosts, getEditor, getStorefrontHomeLayout } from '~/lib/sanity.server'
 import { getPanelDeck } from '~/lib/panel-deck.server'
 import { withTimeout } from '~/lib/with-timeout.server'
-import { EMPTY_STATE, type DiscoveryProduct, type Rail } from '~/types/discovery'
+import { EMPTY_STATE, type DiscoveryProduct, type Rail, type LeanRail, type StorefrontCardProduct } from '~/types/discovery'
 import type { LeanCardProduct } from '~/types'
 import type { EmmaHeroSettings, BlogPostCard, NotebookCardLean, StorefrontHomeLayout, ResolvedPanelDeck } from '~/types/cms'
 
@@ -60,8 +60,13 @@ const EMPTY_CONTENT_BLOCKS: HomeContentBlocksLean = { sections: [], carouselProd
 
 export interface StorefrontData {
   variant: 'b'
-  /** Discovery category rails (Pleasure/Play/Body/Wear) — "best of" per category. */
-  rails: Rail[]
+  /**
+   * Discovery category rails (Pleasure/Play/Body/Wear) — "best of" per
+   * category. Lean (ticket #13341, split off #13147): `hydrateStorefrontPayloadB`
+   * projects the stored full `Rail[]` down to `LeanRail[]` on every read (see
+   * `leanRails` below), same pattern as `notebookPosts`.
+   */
+  rails: LeanRail[]
   /**
    * Products for the promoted Nº 03 anchor grid, from the team's curated
    * `anchorCollectionHandle` collection (default best-sellers), resolved at
@@ -71,8 +76,12 @@ export interface StorefrontData {
    * the discovery best-of (`rails[0]`), i.e. the prior behaviour.
    */
   anchorProducts: LeanCardProduct[]
-  /** Top hero feature set — the lead product from each populated rail. */
-  featured: DiscoveryProduct[]
+  /**
+   * Top hero feature set — the lead product from each populated rail. Lean
+   * (ticket #13341): `StorefrontProductCard` and the hero only ever read the
+   * `StorefrontCardProduct` fields.
+   */
+  featured: StorefrontCardProduct[]
   /** Total products surfaced across the rails (a soft "X products" signal). */
   total: number
   /**
@@ -160,8 +169,12 @@ export interface StorefrontData {
    * fully-resolved lanes (each a shelf of six real products). Null on a cold
    * index or when fewer than three lanes can fill six, in which case
    * StorefrontHome skips the band. The band never fetches at runtime.
+   *
+   * Lean (ticket #13341): `hydrateStorefrontPayloadB` projects each lane's
+   * stored full `DiscoveryProduct[]` deck down to `StorefrontCardProduct[]`
+   * on every read (see `leanCuriosityShelf` below).
    */
-  curiosityShelf: CuriosityShelfData | null
+  curiosityShelf: LeanCuriosityShelfData | null
   /**
    * Band order + per-band chrome overrides from `singleton.storefrontHome`.
    * Null means render the shipped order, which is the normal state and what
@@ -283,6 +296,60 @@ function leanNotebookPosts(posts: BlogPostCard[]): NotebookCardLean[] {
 }
 
 /**
+ * Project a full `DiscoveryProduct` down to the 12 fields
+ * `StorefrontProductCard.tsx` (plus `toGA4Item`'s `category` read) actually
+ * use (ticket #13341, split off #13147). Applied at hydrate time, same as
+ * `leanNotebookPosts` above.
+ */
+function toStorefrontCardProduct(p: DiscoveryProduct): StorefrontCardProduct {
+  return {
+    id: p.id,
+    handle: p.handle,
+    title: p.title,
+    price: p.price,
+    priceMax: p.priceMax,
+    compareAtPrice: p.compareAtPrice,
+    mapPrice: p.mapPrice ?? null,
+    imageUrl: p.imageUrl,
+    imageAlt: p.imageAlt,
+    category: p.category,
+    subcategory: p.subcategory,
+    brand: p.brand,
+  }
+}
+
+/** `Rail[]`, projected to the storefront homepage's lean card shape. */
+function leanRails(rails: Rail[]): LeanRail[] {
+  return rails.map(r => ({
+    category: r.category,
+    score: r.score,
+    total: r.total,
+    items: r.items.map(it => ({ score: it.score, product: toStorefrontCardProduct(it.product) })),
+    ...(r.relaxed !== undefined ? { relaxed: r.relaxed } : {}),
+    ...(r.relaxedReason !== undefined ? { relaxedReason: r.relaxedReason } : {}),
+  }))
+}
+
+/** `CuriosityShelfData`, projected to the storefront homepage's lean card shape. */
+function leanCuriosityShelf(shelf: CuriosityShelfData | null): LeanCuriosityShelfData | null {
+  if (!shelf) return null
+  return {
+    eyebrow: shelf.eyebrow,
+    heading: shelf.heading,
+    emphasis: shelf.emphasis,
+    emmaLine: shelf.emmaLine,
+    defaultLane: shelf.defaultLane,
+    lanes: shelf.lanes.map(l => ({
+      label: l.label,
+      key: l.key,
+      emmaLine: l.emmaLine,
+      seeAllHref: l.seeAllHref,
+      deck: l.deck.map(toStorefrontCardProduct),
+    })),
+  }
+}
+
+/**
  * Turn a stored blob into the loader's `StorefrontData`. Pure and synchronous —
  * no upstream reads at all, which is the whole point of the precompute.
  *
@@ -318,7 +385,7 @@ export function hydrateStorefrontPayloadB(
 
   return {
     variant: 'b',
-    rails,
+    rails: leanRails(rails),
     // Curated collection order is merchandising, not a rotation set, so it is
     // passed through verbatim (no per-bucket reshuffle like `rails`).
     anchorProducts: payload.anchorProducts ?? [],
@@ -329,7 +396,7 @@ export function hydrateStorefrontPayloadB(
     heroSensationDial: pinned ? payload.pinnedSensationDial ?? null : null,
     emmaPhotoUrl: payload.emmaPhotoUrl,
     emmaPhotoAlt: payload.emmaPhotoAlt,
-    featured,
+    featured: featured.map(toStorefrontCardProduct),
     total: payload.total,
     // Already resolved at build time. PR #322 established that this must be a
     // RESOLVED value rather than a streamed promise (a deferred one never
@@ -338,7 +405,7 @@ export function hydrateStorefrontPayloadB(
     // removes the Sanity round-trip from the request path entirely.
     contentBlocks: payload.contentBlocks,
     notebookPosts: leanNotebookPosts(payload.notebookPosts),
-    curiosityShelf: payload.curiosityShelf,
+    curiosityShelf: leanCuriosityShelf(payload.curiosityShelf),
     // Resolved at build time for the same reason contentBlocks is: the shell
     // cannot decide what to render from a value that arrives after it flushes.
     layout: payload.layout ?? null,
