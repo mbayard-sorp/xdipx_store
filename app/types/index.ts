@@ -602,6 +602,25 @@ export interface EmmaCartContext {
   }
 }
 
+/**
+ * The cart drawer's pinned-upsell rail (`CartDrawer.tsx`'s `EmmaRecommends`/
+ * `EmptyCart`) only ever reads a product's title, handle, price, first
+ * image, first variant's id/availability, and whether it has more than one
+ * variant — never the full `Product` shape (ticket #13340, split off
+ * #13147's homepage payload diet). `toCartUpsell` in `shopify.server.ts`
+ * projects a fetched `Product` down to this shape for `/api/cart`'s
+ * response.
+ */
+export interface CartUpsell {
+  handle: string
+  title: string
+  price: number
+  image: { url: string; altText: string | null } | null
+  variantId: string
+  variantAvailableForSale: boolean
+  hasMultipleVariants: boolean
+}
+
 // ─── Nalpac Feed ──────────────────────────────────────────────────────────
 
 export interface NalpacProduct {

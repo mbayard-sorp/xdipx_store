@@ -2,7 +2,7 @@ import type { RefObject } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import { Link, useFetcher } from 'react-router'
 import { AnimatePresence, motion } from 'motion/react'
-import type { Cart, CartLine, EmmaCartContext, Product } from '~/types'
+import type { Cart, CartLine, CartUpsell, EmmaCartContext } from '~/types'
 import type { EmmaPersona } from '~/types/cms'
 import { trackViewCart, trackRemoveFromCart, trackBeginCheckout, type GA4Item } from '~/lib/analytics.client'
 import { AgeGatePanel, type VerificationLevel } from '~/components/store/AgeGate'
@@ -12,7 +12,7 @@ import { FREE_SHIPPING_THRESHOLD } from '~/lib/shipping'
 interface CartDrawerProps {
   cart: Cart | null
   emma?: EmmaCartContext | null
-  upsells?: Product[]
+  upsells?: CartUpsell[]
   emmaPersona?: EmmaPersona | null
   ageGateLevel?: VerificationLevel
   panelRef?: RefObject<HTMLDivElement | null>
@@ -264,8 +264,8 @@ function upsellsIntroCopy(emma: EmmaCartContext): string {
   }
 }
 
-function EmmaRecommends({ products, emma }: { products: Product[]; emma: EmmaCartContext }) {
-  const available = products.filter(p => p.variants[0]?.availableForSale).slice(0, 4)
+function EmmaRecommends({ products, emma }: { products: CartUpsell[]; emma: EmmaCartContext }) {
+  const available = products.filter(p => p.variantAvailableForSale).slice(0, 4)
   if (available.length === 0) return null
   const intro = upsellsIntroCopy(emma)
 
@@ -282,7 +282,7 @@ function EmmaRecommends({ products, emma }: { products: Product[]; emma: EmmaCar
       </p>
       <ul className="divide-y divide-line/70">
         {available.map(p => (
-          <li key={p.id} className="py-3 first:pt-0 last:pb-0">
+          <li key={p.handle} className="py-3 first:pt-0 last:pb-0">
             <EmmaRecommendRow product={p} />
           </li>
         ))}
@@ -291,7 +291,7 @@ function EmmaRecommends({ products, emma }: { products: Product[]; emma: EmmaCar
   )
 }
 
-function EmmaRecommendRow({ product }: { product: Product }) {
+function EmmaRecommendRow({ product }: { product: CartUpsell }) {
   const fetcher       = useFetcher()
   const wasSubmitting = useRef(false)
   const [added, setAdded] = useState(false)
@@ -314,13 +314,12 @@ function EmmaRecommendRow({ product }: { product: Product }) {
     }
   }, [fetcher.state, fetcher.data])
 
-  const variant = product.variants[0]
-  const image   = product.images[0]
-  if (!variant) return null
-  // Multi-variant (color/size) upsells can't be quick-added — `variant` is only
-  // the first variant, so adding it blindly would drop the wrong SKU. Send the
-  // shopper to the PDP to pick instead.
-  const hasMultipleVariants = product.variants.length > 1
+  const image = product.image
+  if (!product.variantId) return null
+  // Multi-variant (color/size) upsells can't be quick-added — adding the
+  // first variant blindly would drop the wrong SKU. Send the shopper to the
+  // PDP to pick instead.
+  const hasMultipleVariants = product.hasMultipleVariants
 
   return (
     <div className="flex items-center gap-3">
@@ -357,7 +356,7 @@ function EmmaRecommendRow({ product }: { product: Product }) {
       ) : (
         <fetcher.Form method="post" action="/api/cart">
           <input type="hidden" name="intent"    value="add-item" />
-          <input type="hidden" name="variantId" value={variant.id} />
+          <input type="hidden" name="variantId" value={product.variantId} />
           <button
             type="submit"
             disabled={isPending || added}
@@ -518,8 +517,8 @@ function CartLineItem({ line }: { line: CartLine }) {
   )
 }
 
-function EmptyCart({ onClose, upsells = [] }: { onClose: () => void; upsells?: Product[] }) {
-  const available = upsells.filter(p => p.variants[0]?.availableForSale).slice(0, 3)
+function EmptyCart({ onClose, upsells = [] }: { onClose: () => void; upsells?: CartUpsell[] }) {
+  const available = upsells.filter(p => p.variantAvailableForSale).slice(0, 3)
   return (
     <div className="flex flex-col items-center justify-center h-full px-8 text-center gap-4 py-10">
       <div className="w-16 h-16 rounded-full bg-cream-2 flex items-center justify-center">
@@ -555,7 +554,7 @@ function EmptyCart({ onClose, upsells = [] }: { onClose: () => void; upsells?: P
           </p>
           <div className="space-y-3">
             {available.map(product => (
-              <EmptyCartTile key={product.id} product={product} />
+              <EmptyCartTile key={product.handle} product={product} />
             ))}
           </div>
         </div>
@@ -564,8 +563,8 @@ function EmptyCart({ onClose, upsells = [] }: { onClose: () => void; upsells?: P
   )
 }
 
-function EmptyCartTile({ product }: { product: Product }) {
-  const image = product.images[0]
+function EmptyCartTile({ product }: { product: CartUpsell }) {
+  const image = product.image
   return (
     <Link to={`/products/${product.handle}`} className="flex items-center gap-3 text-left hover:opacity-90 transition-opacity">
       <div className="w-12 h-12 rounded-lg overflow-hidden bg-cream-2 shrink-0">

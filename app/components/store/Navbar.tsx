@@ -6,7 +6,7 @@ import type { VerificationLevel } from '~/components/store/AgeGate'
 import { DesktopMegaMenu, MobileMegaMenu } from '~/components/store/MegaMenu'
 import { SearchBar } from '~/components/store/SearchBar'
 import { useSession } from '~/lib/session-context'
-import type { Cart, EmmaCartContext, Product } from '~/types'
+import type { Cart, CartUpsell, EmmaCartContext } from '~/types'
 import type { EmmaPersona, MegaMenuBanner } from '~/types/cms'
 import type { ShopifyMenuItem } from '~/lib/shopify.server'
 
@@ -15,18 +15,20 @@ interface NavbarProps {
   logoAlt?: string
   menuItems?: ShopifyMenuItem[]
   megaMenuBanners?: MegaMenuBanner[]
-  upsells?: Product[]
   emmaPersona?: EmmaPersona | null
   ageGateLevel?: VerificationLevel
 }
 
 
-export function Navbar({ logoUrl, logoAlt = 'xdipx', menuItems = [], megaMenuBanners = [], upsells = [], emmaPersona = null, ageGateLevel = 'click_through' }: NavbarProps) {
+export function Navbar({ logoUrl, logoAlt = 'xdipx', menuItems = [], megaMenuBanners = [], emmaPersona = null, ageGateLevel = 'click_through' }: NavbarProps) {
   const { isCustomerLoggedIn, customerFirstName, wishlistCount, isLoaded: isSessionLoaded } = useSession()
   // Cart is loaded per-user via fetcher (keeps parent HTML/data edge-cacheable).
-  const cartFetcher = useFetcher<{ cart: Cart | null; emma?: EmmaCartContext }>()
+  // The pinned-upsell rail rides this same fetch (ticket #13340) instead of
+  // the layout loader shipping the full Product[] inline on every page.
+  const cartFetcher = useFetcher<{ cart: Cart | null; emma?: EmmaCartContext; upsells?: CartUpsell[] }>()
   const cart: Cart | null = cartFetcher.data?.cart ?? null
   const emma = cartFetcher.data?.emma ?? null
+  const upsells = cartFetcher.data?.upsells ?? []
   const cartCount = cart?.totalQuantity ?? 0
   useEffect(() => {
     if (cartFetcher.state === 'idle' && cartFetcher.data === undefined) {

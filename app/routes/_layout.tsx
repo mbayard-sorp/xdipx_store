@@ -18,12 +18,10 @@ import { AnnouncementBar } from '~/components/cms/AnnouncementBar'
 import { OrganizationStructuredData } from '~/components/seo/OrganizationStructuredData'
 import { WebsiteStructuredData }      from '~/components/seo/WebsiteStructuredData'
 import { getEmmaPersona, getHomepageSections, getSiteSettings, isPreviewRequest } from '~/lib/sanity.server'
-import { getAccessoryProducts, getMainMenu } from '~/lib/shopify.server'
+import { getMainMenu } from '~/lib/shopify.server'
 import type { ShopifyMenuItem } from '~/lib/shopify.server'
-import { getPinnedAccessoryIds } from '~/lib/kv.server'
 import { SessionProvider } from '~/lib/session-context'
 import { withTimeout } from '~/lib/with-timeout.server'
-import type { Product } from '~/types'
 import type { AnnouncementBarBlock, MegaMenuBanner, SocialLink, FooterColumn, FooterQuickLink, SiteBanner as SiteBannerData } from '~/types/cms'
 
 // Every storefront page routes through this layout loader, so a hung upstream
@@ -33,16 +31,10 @@ const LAYOUT_TIMEOUT_MS = 8000
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const preview  = isPreviewRequest(request)
-  // pinnedIds live in KV and resolve in ~1–5ms — fetch them outside the main
-  // Promise.all so we can fan accessories in parallel with everything else.
-  const pinnedIds = (await getPinnedAccessoryIds()) ?? []
-  const [cms, settings, menuItems, upsells, emmaPersona] = await Promise.all([
+  const [cms, settings, menuItems, emmaPersona] = await Promise.all([
     withTimeout(getHomepageSections(preview), LAYOUT_TIMEOUT_MS, null, 'getHomepageSections(layout)'),
     withTimeout(getSiteSettings(), LAYOUT_TIMEOUT_MS, null, 'getSiteSettings'),
     withTimeout(getMainMenu(), LAYOUT_TIMEOUT_MS, [] as ShopifyMenuItem[], 'getMainMenu'),
-    pinnedIds.length
-      ? withTimeout(getAccessoryProducts(pinnedIds.slice(0, 4)), LAYOUT_TIMEOUT_MS, [] as Product[], 'getAccessoryProducts')
-      : Promise.resolve<Product[]>([]),
     withTimeout(getEmmaPersona(), LAYOUT_TIMEOUT_MS, null, 'getEmmaPersona'),
   ])
 
@@ -63,11 +55,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const footerDisclaimer = settings?.footerDisclaimer ?? null
   const buyButtonText = settings?.buyButtonText || "I'll take it ♥"
   const siteBanner: SiteBannerData | null = settings?.siteBanner ?? null
-  return { announcementBar, socialLinks, megaMenuBanners, logoUrl, logoAlt, footerColumns, footerBrandLinks, footerCategoryLinks, footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer, buyButtonText, siteBanner, preview, menuItems, upsells, emmaPersona }
+  return { announcementBar, socialLinks, megaMenuBanners, logoUrl, logoAlt, footerColumns, footerBrandLinks, footerCategoryLinks, footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer, buyButtonText, siteBanner, preview, menuItems, emmaPersona }
 }
 
 export default function StoreLayout() {
-  const { announcementBar, socialLinks, megaMenuBanners, logoUrl, logoAlt, footerColumns, footerBrandLinks, footerCategoryLinks, footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer, buyButtonText, siteBanner, preview, menuItems, upsells, emmaPersona } = useLoaderData<typeof loader>()
+  const { announcementBar, socialLinks, megaMenuBanners, logoUrl, logoAlt, footerColumns, footerBrandLinks, footerCategoryLinks, footerTagline, footerDiscreetHeading, footerDiscreetBody, footerCopyright, footerDisclaimer, buyButtonText, siteBanner, preview, menuItems, emmaPersona } = useLoaderData<typeof loader>()
   const { pathname } = useLocation()
   const rootData = useRouteLoaderData<{ ENV?: { GA4_ID?: string; AGE_GATE_LEVEL?: string } }>('root')
   const ga4Id = rootData?.ENV?.GA4_ID ?? ''
@@ -98,7 +90,7 @@ export default function StoreLayout() {
           )}
 
           {announcementBar && <AnnouncementBar block={announcementBar} />}
-          <Navbar logoUrl={logoUrl ?? undefined} logoAlt={logoAlt} menuItems={menuItems} megaMenuBanners={megaMenuBanners} upsells={upsells} emmaPersona={emmaPersona} ageGateLevel={ageGateLevel} />
+          <Navbar logoUrl={logoUrl ?? undefined} logoAlt={logoAlt} menuItems={menuItems} megaMenuBanners={megaMenuBanners} emmaPersona={emmaPersona} ageGateLevel={ageGateLevel} />
           <SiteBanner banner={siteBanner} />
           <main className="flex-1">
             <Outlet context={{ buyButtonText }} />
