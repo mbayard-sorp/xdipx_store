@@ -78,6 +78,35 @@ describe('buildVoiceGateUserContent (ticket #8853)', () => {
   })
 })
 
+describe('buildVoiceGateUserContent precedent calibration (ticket #13890)', () => {
+  it('omits the precedents block, byte-identical to the pre-#13890 prompt, when none is given', () => {
+    const out = buildVoiceGateUserContent({ text: 'ig caption', platform: 'instagram' })
+    expect(out).toBe('Platform: instagram\n\nCaption to review:\n\nig caption')
+  })
+
+  it('appends a non-empty precedents block after the caption', () => {
+    const out = buildVoiceGateUserContent({
+      text: 'ig caption',
+      platform: 'instagram',
+      precedentsBlock: 'Live precedents on this platform...',
+    })
+    expect(out).toBe('Platform: instagram\n\nCaption to review:\n\nig caption\n\nLive precedents on this platform...')
+  })
+
+  it('treats an empty-string precedents block the same as omitting it', () => {
+    expect(buildVoiceGateUserContent({ text: 'x', precedentsBlock: '' })).toBe('Caption to review:\n\nx')
+  })
+})
+
+describe('VOICE_GATE_SYSTEM_PREFIX register-call calibration (ticket #13890)', () => {
+  it('names the mechanism-vs-sensation register call as REVISE-class, calibrated against live precedents', async () => {
+    const { VOICE_GATE_SYSTEM_PREFIX } = await import('./team-gates.server')
+    expect(VOICE_GATE_SYSTEM_PREFIX).toContain('mechanism-on-body narration')
+    expect(VOICE_GATE_SYSTEM_PREFIX).toContain('REVISE-class')
+    expect(VOICE_GATE_SYSTEM_PREFIX).toContain('miscalibrated')
+  })
+})
+
 describe('parsePublishGateModelOutput', () => {
   it('parses a PASS with findings', () => {
     const raw = JSON.stringify({
