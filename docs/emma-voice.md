@@ -506,10 +506,16 @@ Draft against both, and understand which one you are avoiding.
   orgasm or arousal vocabulary, no mechanism-on-body description. Benefits must be honest and
   product-plausible, never a medical claim. Anticipation points at the reader's evening, never at
   the mechanics of a session.
-- **Vocabulary is moderated by machine, so it reads words and not intent.** Out on these
-  platforms: explicit act naming, orgasm/arousal language, crude slang, emoji-anatomy of any kind
-  (peach, eggplant, droplets), and anything that reads as solicitation. "Sex toy", "sexual
-  wellness", and plain anatomy in an educational sentence stay fine and are the point.
+- **Vocabulary is moderated by machine, so it reads words and not intent.** Reconciled
+  2026-10-06 with the 2026-08-22 evening narrowing above ("Name the fact. Imply the act. Never
+  gesture"), which this bullet had drifted out of sync with inside the same runtime-loaded
+  addendum: the fence is graphic detail, not the words themselves. Out on these platforms: graphic
+  detail (a body or arousal state narrated mid-act), crude slang, emoji-anatomy of any kind (peach,
+  eggplant, droplets), and anything that reads as solicitation. "Sex toy", "sexual wellness", and
+  plain anatomy in an educational sentence stay fine and are the point; so do "orgasm", "clitoris",
+  and other ordinary nouns in a sentence that states a fact or explains a mechanism, exactly as the
+  narrowing above already licenses ("95% of straight men usually orgasm during sex, 65% of straight
+  women do" is a fact; "air pulsation seals over the clitoris and pulses" is a mechanism).
 - **Imagery: scene, cast, and metaphor (Licenses B and C, codified 2026-08-09).** Packshot-only
   stills are retired entirely, filler included. Three licensed archetypes:
   1. *Product in a lived-in scene.* Nightstand, open drawer beside the lube bottle, bathroom
