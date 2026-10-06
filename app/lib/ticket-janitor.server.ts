@@ -550,7 +550,11 @@ export const ROUTINE_CADENCES: readonly RoutineCadence[] = [
   { routine: 'Apply pass (agent-editor)', team: 'strategy', runType: 'apply', kind: 'twice-weekly', schedule: 'Mon and Thu 22:00', maxGapHours: TWICE_WEEKLY_GAP },
   { routine: 'Cost review', team: 'strategy', runType: 'cost-review', kind: 'weekly', schedule: 'Mon 21:00', maxGapHours: WEEKLY_GAP },
   { routine: 'Weekly off-site scout', team: 'strategy', runType: 'offsite', kind: 'weekly', schedule: 'Tue 16:00', maxGapHours: WEEKLY_GAP },
-  { routine: 'Ads Proposals', team: 'ads', runType: 'ads', kind: 'weekly', schedule: 'Tue 13:00', maxGapHours: WEEKLY_GAP },
+  // The weekly Ads Proposals routine (runType 'ads', Tue 13:00) was retired
+  // 2026-10-03 and its trigger deleted 2026-10-06. The two daily passes that
+  // replaced it are watched here instead (routine-ads-daily.md).
+  { routine: 'Ads Ideas (daily pass 1)', team: 'ads', runType: 'ads-ideas', kind: 'daily', schedule: '14:30 daily', maxGapHours: DAILY_GAP },
+  { routine: 'Ads Render (daily pass 2)', team: 'ads', runType: 'ads-render', kind: 'daily', schedule: '20:30 daily', maxGapHours: DAILY_GAP },
   { routine: 'Email Briefs', team: 'email', runType: 'email', kind: 'weekly', schedule: 'Tue 15:00', maxGapHours: WEEKLY_GAP },
   { routine: 'Design Cycle (Routine B)', team: 'homepage', runType: 'design', kind: 'weekly', schedule: 'Wed 14:00', maxGapHours: WEEKLY_GAP },
   { routine: 'Weekly SEO curation', team: 'content', runType: 'seo-curation', kind: 'weekly', schedule: 'Sun 19:00', maxGapHours: WEEKLY_GAP },
