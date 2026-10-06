@@ -152,7 +152,20 @@ Notebook post, but the separate `_type:comparison` Sanity doc that powers `/comp
 at zero (milestone `p1-2-compare` is RED for lack of content, not code). Until 3-5 are live, when the
 Sunday comparison slot's head-to-head is a clean, in-stock, both-sides-real match, plan it as a
 `comparison` doc for the content lane to author (ItemList/FAQ-shaped, `.md` twin) instead of only the
-Notebook post. No honest head-to-head available a given week -> skip and say so; never fabricate one.
+Notebook post.
+
+**Before skipping a week with no fresh head-to-head, use the restructuring-source path first
+(#13507).** The quota's fresh-cluster path and the Sunday Notebook post depend on the SAME
+non-duplicative-cluster check, so a week with nothing new in the brief queue failed both at once for
+seven straight weeks even though a second, independent path already exists and needs no new
+research: `routine-content-daily.md`'s comparison-doc procedure lists ten already-published Notebook
+comparison posts as restructuring source material (wand-vs-bullet-vibrator and nine others, named
+there). When the fresh-cluster check has nothing non-duplicative, plan the Sunday slot from that list
+instead of skipping: pick the oldest not-yet-seeded entry, confirm both sides are still in stock, and
+queue it the same way (`plannedFor` the Sunday date) for the content lane to build per
+`routine-content-daily.md`'s existing restructuring procedure. Only skip and say so when every entry
+on that list is already seeded or a stock check fails all of them; never fabricate a head-to-head
+either way.
 
 Eligible clusters: `status == 'active'`, approved count ≥ 3, not covered (no published brief
 references it), no queued brief already. Category inference from the cluster's keyword shapes
