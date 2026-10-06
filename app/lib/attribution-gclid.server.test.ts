@@ -130,4 +130,42 @@ describe('attributionCartAttrs', () => {
     expect(attrs.find(a => a.key === '_gclid')).toBeUndefined()
     expect(attrs.find(a => a.key === '_gclid_type')).toBeUndefined()
   })
+
+  // #3422/#3535: the order webhook has no Request, so the click's capture
+  // time and the visitor's marketing-consent state both have to ride to the
+  // order as their own cart attributes, same boundary as the click id itself.
+  it('rides capturedAt and marketing consent alongside the click id', () => {
+    const stored = encodeURIComponent(JSON.stringify({
+      id: 'EAIaIQabc', type: 'gclid', capturedAt: new Date(NOW).toISOString(),
+    }))
+    const consent = encodeURIComponent(JSON.stringify({ marketing: true }))
+    const attrs = attributionCartAttrs(
+      req('https://xdipx.com/', { Cookie: `__xdipx_gclid=${stored}; __xdipx_consent=${consent}` }),
+    )
+    expect(attrs).toEqual(expect.arrayContaining([
+      { key: '_gclid_captured_at', value: new Date(NOW).toISOString() },
+      { key: '_marketing_consent', value: 'true' },
+    ]))
+  })
+
+  it('reports marketing consent false by default, never silently omitted', () => {
+    const stored = encodeURIComponent(JSON.stringify({
+      id: 'EAIaIQabc', type: 'gclid', capturedAt: new Date(NOW).toISOString(),
+    }))
+    const attrs = attributionCartAttrs(
+      req('https://xdipx.com/', { Cookie: `__xdipx_gclid=${stored}` }),
+    )
+    expect(attrs).toEqual(expect.arrayContaining([
+      { key: '_marketing_consent', value: 'false' },
+    ]))
+  })
+
+  it('emits no gclid-derived attributes at all when no click id was captured', () => {
+    const consent = encodeURIComponent(JSON.stringify({ marketing: true }))
+    const attrs = attributionCartAttrs(
+      req('https://xdipx.com/', { Cookie: `__xdipx_consent=${consent}` }),
+    )
+    expect(attrs.find(a => a.key === '_marketing_consent')).toBeUndefined()
+    expect(attrs.find(a => a.key === '_gclid_captured_at')).toBeUndefined()
+  })
 })
