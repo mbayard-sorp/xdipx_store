@@ -2588,6 +2588,33 @@ legible "VeDO" wordmark baked into the wand HANDLE (not the control face).
 
 ---
 
+## Notebook §0-H keeper — content run 1278, "Does Scheduling Sex Actually Work? Yes, When the Problem Is That Nobody Starts."
+
+`cast: marcus` + Wearable We-Vibe Sync Go Turquoise Couples Vibrator (`we-vibe-sync-go-turquoise`),
+`blogPost-is-scheduling-sex-a-good-idea` (`real-talk`, not † health-adjacent; levity license available,
+expression played big, scale kept faithful). Gesture per the "Is this normal? / Is it just me?" row.
+**Casting override:** brief proposed `priya`, but she ran the 09-25 travel hero, third back; last five
+human heroes were `sofia` 10-02, `jade` 10-01, `priya` 09-25, `vivian` 09-24, `maya` 09-22, so she was
+inside no-repeat-within-5. `marcus` (last 09-15) and `diego` were free; chose `marcus` (emotionTags
+`relaxed`, `warm`; a calm, hopeful-unsure read), which also breaks a run of five women. No `editorialPhoto`,
+fell back to `referencePhoto`. Route: `gen-notebook-art.ts --cast marcus --feature content-blog --run-id 1278`,
+`composeSceneFrame()` Atlas `seedream-4.5-edit`, composite rung, anatomy gate PASS, product-fidelity PASS.
+Placed asset `image-a6176cd83379d584cf9c0679e70bbae507876fad-1200x900-png`.
+- **Reference:** this SKU's only Shopify media is `89243A.jpg` (box + device + travel case); `89243B`-`F` 404, so
+  no glyph-free lettered-suffix plate exists. The composite's packaging-strip plate plus a prompt naming the
+  surface "plain smooth, nothing printed, nothing embossed" rendered no invented wordmark on either candidate.
+- **Round 1 (rendered clean, discarded on the embed checker, not pixels):** `check-hero-embed-match.ts` flagged
+  `we-vibe-sync-go-light` (matched sync, light, wearable, travel, case). Sources: "plain light sofa",
+  "no light beam", "no travel case". Fix: "pale sand-coloured sofa", "no beam", "no pouch", then regenerated
+  (imagePrompt must be the prompt that made the pixels). Product is the larger/bolder read in round 1; round 2
+  has it smaller but legible at eye level.
+- **Keeper prompt traits that worked:** single plain near-white wall, soft diffuse window daylight, explicit "no
+  calendar, no pictures, no writing", expression "one brow sharply raised, mouth caught mid-question". No
+  saturated-wall block, no spotlight patch.
+- `check-hero-embed-match.ts --slug is-scheduling-sex-a-good-idea` exit 0.
+
+---
+
 *Seeded 2026-07-17 from the doctrine §4 directives and the mission-brief §2 image rules.
 Owner: `media-manager` (append keepers/rejects each run); pruned monthly.*
 
