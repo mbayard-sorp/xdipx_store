@@ -5,7 +5,12 @@ The playbook for the two daily ads passes. Entry agent: `ads-manager`. It replac
 §5 Automation, §6 PR-B).
 
 **You propose ideas and request renders. You never upload to any platform, never touch a valve, never
-spend media money.** Every idea is a row the owner rates on his phone. Every render is requested
+spend media money.** Every idea is a row the owner rates on his phone.
+
+**The daily loop (owner direction 2026-10-06).** Every day brings new ideas and new creatives. The
+owner rates and notes them when there is time, sometimes days behind, and the slate does not shrink
+for it. The next morning's pass reads the ratings and notes before drafting. Creatives do not wait
+for a heart: Pass 2 renders the team's own picks from today's slate as well as every hearted idea. Every render is requested
 through the render API and gated there. What happens to a hearted creative after that (export,
 paused draft, launch) is not yours, and no step in this playbook may be added that does it.
 
@@ -14,7 +19,7 @@ Runs on the **Max subscription**. Two passes a day:
 | Pass | Cron (UTC) | `runType` | Feature label | What it does |
 |---|---|---|---|---|
 | 1, ideas | `30 14 * * *` | `ads-ideas` | `ads-ideas` | Read ratings, file 10 to 20 ideas |
-| 2, render | `30 20 * * *` | `ads-render` | `ads-render` | Enqueue renders for hearted ideas, run metrics and rules |
+| 2, render | `30 20 * * *` | `ads-render` | `ads-render` | Render every hearted idea plus up to 5 auto picks from today's slate, run metrics and rules |
 
 Both count against `ads_team_max_runs` (2). A skipped run still burns a slot, so the cap is exactly
 the schedule and a manual re-fire needs the owner to raise it.
@@ -148,6 +153,9 @@ Apply exactly like social Step 7b:
 
 - Every UP carrying `more-like-this` (or any UP with a `strong-hook` or `product-fit` chip) is a live
   positive precedent. Cite it by `idea_id` or `creative_id` in the idea it informs.
+- Every **note** is the owner's own words and outranks the chips. Apply each note to every idea it
+  touches, and quote the note (with its idea or creative id) in the summary line that says how it was
+  applied.
 - Every DOWN reason constrains the one lever it names, and the lever is named in the brief for that
   idea: `off-policy` to the `policy_check` rule and the register tier, `too-tame` to the tier within
   its destination's ceiling, `weak-hook` to the hook formula, `wrong-product` to product selection,
@@ -155,11 +163,22 @@ Apply exactly like social Step 7b:
 - A reason seen on **2 or more rows** across runs is promoted to a numbered rule in
   `docs/store-team/ad-owner-notes.md` through an `instructions` suggestion row in the retro (the
   agent-editor opens the PR, never this run). Until the file has rules, it is read as empty.
+- A **note that gives a direction** ("don't", "never", "revise", "more of", "stop") is promoted the
+  same way the first time it is seen. The owner's word does not need a second row. Check the ledger
+  first: a note already carried by a numbered rule is not filed again.
 - The run summary states which feedback rows were applied and how, or "no new feedback since
   <SINCE>". Silence is not a report.
-- Feedback older than `<SINCE>` is not re-read here, so its lessons live only in
-  `ad-owner-notes.md`. Read the ledger's rules before drafting every pass, and name in the summary
-  which numbered rules each idea was checked against.
+- **Notes and thumbs-down do not expire after one run.** Every pass also pulls the last 30 days:
+
+  ```bash
+  bash scripts/team-api.sh POST team/ad-feedback '{"op":"list","since":"<30 days ago iso>"}'
+  ```
+
+  From the 30-day pull, apply every row that carries a note and every DOWN, whether or not it is
+  newer than `<SINCE>`, until a numbered ledger rule carries it. Hearts older than `<SINCE>` are
+  precedents to cite, not new signal to count again.
+- Read the ledger's rules before drafting every pass, and name in the summary which numbered rules
+  each idea was checked against.
 
 ### Step 4. Draft 10 to 20 ideas
 
@@ -286,12 +305,38 @@ Same as Pass 1 with `runType:"ads-render"`. On `ok:false`, finish skipped and st
 ### Step 2. Find hearted ideas
 
 ```bash
-bash scripts/team-api.sh POST team/ad-ideas '{"op":"list","status":"hearted","since":"<last ads-render run start iso>"}'
+bash scripts/team-api.sh POST team/ad-ideas '{"op":"list","status":"hearted"}'
 ```
 
-On the first run use 24 hours ago. Re-check each idea's products for stock before enqueueing; an
-idea whose product has gone out of stock is passed over with a `decision` event, and the owner sees
-that in the summary.
+No `since`. The list filter's `since` is the idea's creation time, not when the owner rated it, so a
+`since` here drops every idea the owner hearts a day or more after it was filed, which is most of them.
+`hearted` already means "not rendered yet": the render path moves an idea to `rendered` once its
+creatives settle. Page with `cursor` until `nextCursor` is null.
+
+Re-check each idea's products for stock before enqueueing; an idea whose product has gone out of
+stock is passed over with a `decision` event, and the owner sees that in the summary.
+
+### Step 2b. Auto picks: creatives every day
+
+Owner direction 2026-10-06: creatives arrive every day, rated or not. From the ideas filed by today's
+Pass 1 (`{"op":"list","status":"proposed","since":"<today's ads-ideas run start iso>"}`), pick **up to
+5** to render. Hearted ideas still have first claim on the day's budget.
+
+- Prefer ideas that cite a hearted or `more-like-this` precedent, then spread across lanes and
+  products. No two picks on one product.
+- Skip text-only lanes (`google`, `microsoft`): they have no image to render.
+- Skip any idea whose products fail the stock re-check.
+- If today's Pass 1 filed nothing (gate skipped), take the newest unrated ideas from the last 3 days
+  instead, same rules.
+
+Enqueue them in one call with `autoPick` (the server takes at most 5 per call and leaves the idea
+`proposed`, so the owner still rates it):
+
+```bash
+bash scripts/team-api.sh POST team/ad-render '{"op":"enqueue","ideaIds":[<id>,<id>],"autoPick":true}'
+```
+
+Then render the returned creative ids in Step 3 with the hearted ones, hearted first.
 
 ### Step 3. Enqueue renders
 
@@ -299,12 +344,20 @@ that in the summary.
 bash scripts/team-api.sh POST team/ad-render '{"op":"enqueue","runId":<RUN_ID>,"ideaIds":[<id>,<id>]}'
 ```
 
-PR-C ships this endpoint (`app/routes/api.team.ad-render.tsx`). Its response is `{enqueued:[{ideaId,
-jobId,sizes}], refused:[{ideaId,reason}]}`; it picks the plate archetype and sizes by lane, runs the
+Then render the creatives it returns, at most 12 ids per call, hearted ideas first and auto picks
+after:
+
+```bash
+bash scripts/team-api.sh POST team/ad-render '{"op":"render","creativeIds":[<id>,<id>]}'
+```
+
+A `budget` skip on an auto pick is a valid outcome: hearted renders already had first claim on the
+day's `ads_team_daily_cents`. PR-C ships this endpoint (`app/routes/api.team.ad-render.tsx`). Its
+enqueue response is `{created:[{ideaId,creativeId,format,slogan,existing}], skipped:[{ideaId,reason}]}`; it picks the plate archetype and sizes by lane, runs the
 vision, product-fidelity and voice gates, and writes `ad_creatives` rows. You do not generate images
 yourself in this lane. Until the endpoint exists, a 404 is not an error: post a `step` event with
 `summary:"skipped: render_api_not_live"`, `eventType:"step"`, `phase:"render"`, and continue. A
-`refused` row is posted as a `decision` event and left hearted for the next pass unless the reason is
+`skipped` row is posted as a `decision` event and left hearted for the next pass unless the reason is
 terminal (`out_of_stock`, `policy_blocked`), in which case say so in the summary.
 
 ### Step 4. Metrics and rules
@@ -335,7 +388,8 @@ op (text in `ref`), status unchanged.
 ### Step 6. Spend and finish
 
 Log tokens under feature `ads-render`. The summary carries: ideas hearted (since last pass),
-renders enqueued, renders refused (with reasons), the rules that fired (or `metrics not live`), and
+hearted ideas still waiting from earlier days, auto picks (ids and why each was chosen), creatives
+produced today, renders refused (with reasons), the rules that fired (or `metrics not live`), and
 `simulation: on|off`.
 
 ## Definition of done
@@ -344,9 +398,11 @@ renders enqueued, renders refused (with reasons), the rules that fired (or `metr
   10 filed with the gate open finishes `failed` with `error:'ideas-under-floor:<n>'` and the reason
   (API rejections, stock pool, policy drops) in the summary. A run that files 9 and reports success
   has lied.
-- **Pass 2 succeeds** when every hearted idea in scope has a render enqueued, or the not-live
-  fallback was recorded for that step (`render_api_not_live`), or the idea was passed over with a
-  named `decision` event. Zero hearted ideas is a success with "0 hearted" stated.
+- **Pass 2 succeeds** when every hearted idea has a render enqueued, or the not-live fallback was
+  recorded for that step (`render_api_not_live`), or the idea was passed over with a named `decision`
+  event, **and** at least one auto pick was enqueued or the summary names why none could be (no
+  image-lane ideas, stock, budget). Zero hearted ideas is fine when stated. Zero creatives produced
+  on a day with an open gate and budget left is not a success.
 - Neither pass ever finishes with a platform upload, a valve write, or media spend on its record. If a
   step would need one, post a `decision` event and stop that step.
 

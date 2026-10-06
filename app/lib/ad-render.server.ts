@@ -16,6 +16,7 @@
 import { and, asc, desc, eq, gte, inArray, isNotNull, ne, sql } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
 import { adCreatives, adIdeas, mediaAssets, type AdIdeaProduct } from '../../db/schema'
+import { enqueueSkipReason } from '~/lib/ad-render-eligibility'
 import { LANE_FORMATS, PLATE_IMAGE_SIZE, TEXT_FORMAT_ID, getAdFormat, isTextFormat, type AdFormat } from '~/lib/ad-formats'
 import {
   AdLaneCeilingError, GATE_ORDER, aggregateGates, buildExportPayload, buildPlatePrompt, chooseLayout,
@@ -221,15 +222,19 @@ async function recentSlogans(excludeIdeaId: number): Promise<Set<string>> {
  * Create one draft creative per (idea, format) for hearted ideas. Idempotent:
  * an idea that already has a row for a format returns that row. Ideas that are
  * not hearted (or already rendered, for a top-up) are skipped with the reason.
+ * `autoPick` also lets unrated (proposed) ideas through, so the daily render
+ * pass can produce creatives before the owner rates (owner direction
+ * 2026-10-06). The idea keeps its status; only the owner's heart moves it.
  */
-export async function enqueueRenders(ideaIds: readonly number[], actor: string): Promise<EnqueueResult> {
+export async function enqueueRenders(ideaIds: readonly number[], actor: string, opts: { autoPick?: boolean } = {}): Promise<EnqueueResult> {
   const result: EnqueueResult = { created: [], skipped: [] }
   const { createAdCampaign } = await import('~/lib/team.server')
   for (const ideaId of [...new Set(ideaIds)]) {
     const [idea] = await db.select().from(adIdeas).where(eq(adIdeas.id, ideaId)).limit(1)
     if (!idea) { result.skipped.push({ ideaId, reason: 'idea_not_found' }); continue }
-    if (idea.status !== 'hearted' && idea.status !== 'rendered') {
-      result.skipped.push({ ideaId, reason: `idea_${idea.status}` })
+    const notEligible = enqueueSkipReason(idea.status, opts)
+    if (notEligible) {
+      result.skipped.push({ ideaId, reason: notEligible })
       continue
     }
     const formatIds = LANE_FORMATS[idea.lane] ?? []
@@ -287,7 +292,7 @@ export async function enqueueRenders(ideaIds: readonly number[], actor: string):
         height: format?.height ?? null,
         hookCopy: slogan,
         exportPayload: buildExportPayload({ lane: idea.lane, format: formatId, slogan, headlines: idea.headlines ?? [], destinationUrl: idea.destinationUrl ?? null }),
-        renderJson: { state: 'queued', enqueuedBy: actor, enqueuedAt: new Date().toISOString() },
+        renderJson: { state: 'queued', enqueuedBy: actor, enqueuedAt: new Date().toISOString(), ...(opts.autoPick ? { autoPick: true } : {}) },
       }).returning({ id: adCreatives.id })
       if (!row) { result.skipped.push({ ideaId, format: formatId, reason: 'creative_insert_failed' }); continue }
       result.created.push({ ideaId, creativeId: row.id, format: formatId, slogan, existing: false })

@@ -1,8 +1,10 @@
 /**
  * POST /api/team/ad-render (Ad Studio v2, PR-C). Team-token guarded.
  *
- * { op: 'enqueue', ideaIds: number[] (1 to 50) }
+ * { op: 'enqueue', ideaIds: number[] (1 to 50), autoPick?: true }
  *   One draft creative per (idea, format) for hearted ideas. Idempotent.
+ *   autoPick: true also takes unrated (proposed) ideas, at most AUTO_PICK_MAX
+ *   per call: the team's daily picks so creatives arrive before the owner rates.
  *   -> { ok, created: [{ ideaId, creativeId, format, slogan, existing }], skipped: [{ ideaId, format?, reason }] }
  * { op: 'render', creativeIds: number[] (1 to 12 per call) }
  *   Renders sequentially: plate, composite, five gates, upload. Honors the ads
@@ -19,6 +21,7 @@ import type { ActionFunctionArgs } from 'react-router'
 import { assertTeamAuth } from '~/lib/team.server'
 import { apiError } from '~/lib/api-error.server'
 import { enqueueRenders, getCreativeStatus, renderCreatives, RENDER_CALL_CAP } from '~/lib/ad-render.server'
+import { AUTO_PICK_MAX } from '~/lib/ad-render-eligibility'
 
 const ENQUEUE_MAX = 50
 const WALL_CLOCK_MS = 240_000
@@ -44,7 +47,9 @@ export async function action({ request }: ActionFunctionArgs) {
       const ids = intList(b['ideaIds'])
       if (!ids || ids.length === 0) return bad('ideaIds must be a non-empty array of integers')
       if (ids.length > ENQUEUE_MAX) return bad(`At most ${ENQUEUE_MAX} ideas per call`)
-      const res = await enqueueRenders(ids, 'agent')
+      const autoPick = b['autoPick'] === true
+      if (autoPick && ids.length > AUTO_PICK_MAX) return bad(`At most ${AUTO_PICK_MAX} ideas per autoPick call`)
+      const res = await enqueueRenders(ids, autoPick ? 'agent:auto-pick' : 'agent', { autoPick })
       return Response.json({ ok: true, ...res })
     }
 

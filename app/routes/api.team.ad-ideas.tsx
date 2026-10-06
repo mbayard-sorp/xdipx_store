@@ -1,7 +1,7 @@
 /**
  * POST /api/team/ad-ideas (Ad Studio v2, PR-A). Team-token guarded.
  *
- * { op: 'create', ideas: Idea[] (1 to 50), run_id? }
+ * { op: 'create', ideas: Idea[] (1 to 50), run_id? (runId also accepted) }
  *   Each idea: concept_slug, lane (meta|google|microsoft|snap|adult|newsletter|owned),
  *   register_tier (3-4|4-5|6-7|7-9|9|10), title, one_liner?, products[], headlines[],
  *   body[], audience?, destination_url (must carry utm_content), break_even_json?,
@@ -44,7 +44,9 @@ export async function action({ request }: ActionFunctionArgs) {
       const raw = b['ideas']
       if (!Array.isArray(raw) || raw.length === 0) return bad('ideas must be a non-empty array')
       if (raw.length > BATCH_MAX) return bad(`At most ${BATCH_MAX} ideas per batch`)
-      const batchRun = b['run_id']
+      // runId is what the routine playbook sends; 2026-10-06 run 1277 lost its
+      // run link because only run_id was read.
+      const batchRun = b['run_id'] ?? b['runId']
       if (batchRun != null && (typeof batchRun !== 'number' || !Number.isInteger(batchRun))) return bad('run_id must be an integer')
       const inputs = raw.map((r, i) => {
         const idea = validateIdea(r, i)
