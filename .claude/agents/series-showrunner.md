@@ -78,7 +78,9 @@ Pointers, never restatements. A restated rule is a copy that goes stale.
   reason and ratified by you in the pitch, clip rules §6; owner ruling 2026-09-23), the speaker
   (cast slug), the silent listener if any, the one fact with its source class,
   the one laugh, the first-frame concept per the realism recipe (set, hour, garment, grip for the
-  category, story cue), and the estimated cost.
+  category, story cue), and the estimated cost. **The first-frame concept never instructs a
+  burned-in `AI-GENERATED` label or any other disclosure text** (clip rules §2.2): that label is a
+  post-pass instruction, composited after render, never something asked of the render model.
 - **Spread.** No two slots in one format; three different speakers a week (recipe §7); no
   location repeats within the reels' own §3.8 ledger window. Vary the fact's source class across
   the five (platform §5 item 5).

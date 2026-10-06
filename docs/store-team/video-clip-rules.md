@@ -77,12 +77,23 @@ solicitation)." Any of the five BLOCKs. The euphemism is a rule 6 fail, not a sa
 - **`script-doctor`** confirms the render brief carries the label instruction before any spend.
 - **`social-publish-gate`** confirms the label is on the row before anything posts.
 
+**The label is a post-pass instruction, never a first-frame or motion-prompt instruction.**
+"The render brief carries the label instruction" above means the brief records that the post pass
+must burn it in; it does not mean the label text belongs inside a frame or motion prompt handed to
+a diffusion or video model. A first-frame or motion-prompt concept must never ask the render model to render the
+`AI-GENERATED` text (or any disclosure wording) into the frame itself: `docs/emma-voice.md`'s video
+addendum already bans text generated into frames ("captions and overlays land in post so one
+master serves every platform"), and the disclosure kicker is exactly that, composited after render,
+not drawn by the model. `script-doctor`'s check at this line is that a first-frame concept contains
+no such instruction, not that it does.
+
 Per platform:
 
 - **Instagram:** platform AI flag set plus the burned-in kicker.
 - **X:** no flag exists, the burned-in kicker is the only disclosure and its absence BLOCKs.
 
-A missing label at any point BLOCKs.
+A missing label at any point BLOCKs. A label instruction inside a first-frame or motion prompt is
+also a defect, caught here rather than at the post pass.
 
 ## 3. The read-aloud gate, operationally
 
