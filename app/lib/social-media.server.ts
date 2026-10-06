@@ -28,6 +28,7 @@
  *    positively recognise as generated social art is not publishable.
  */
 
+import sharp from 'sharp'
 import { generateImage } from './generate-image.server'
 import { uploadMoodImageToShopifyFilesWithId } from './shopify.server'
 import { tryIngestSocialAsset } from './social-asset-library.server'
@@ -554,6 +555,116 @@ export async function tagIncompleteVisionVerdict(assetId: number | null | undefi
   } catch (err) {
     console.error(`[social-media] failed to tag incomplete vision verdict on asset ${assetId}`, err)
   }
+}
+
+/** Hosts a Notebook echo's `sourceUrl` may come from (ticket #13370). */
+export const REHOST_ALLOWED_HOSTS = ['cdn.sanity.io', 'cdn.shopify.com']
+
+export type SocialRehostAspect = '4:5' | '16:9'
+
+/**
+ * Pixel targets for the two live social-stills shapes: 4:5 matches
+ * `renderSocialCard`'s own Instagram-grid canvas (`app/lib/og-card.server.ts`,
+ * ticket #13368); 16:9 is X's standard landscape still.
+ */
+const REHOST_ASPECT_DIMENSIONS: Record<SocialRehostAspect, { width: number; height: number }> = {
+  '4:5': { width: 1080, height: 1350 },
+  '16:9': { width: 1920, height: 1080 },
+}
+
+export interface RehostSocialImageOpts {
+  /** The Notebook post's hero image, on cdn.sanity.io or cdn.shopify.com — see REHOST_ALLOWED_HOSTS. */
+  sourceUrl: string
+  /** The blogPost slug, used in the filename and recorded as provenance. */
+  slug: string
+  /** Crop to a feed shape via `sharp`'s `cover` fit. Omit to rehost at the source's own shape. */
+  aspect?: SocialRehostAspect
+  caller?: string
+}
+
+export interface RehostSocialImageResult {
+  url: string
+  assetId: number | null
+  visionVerdict: VisionVerdict
+}
+
+/**
+ * Reuse a Notebook post's own hero image as its social echo's post image
+ * (ticket #13370, owner all-hands 2026-10-03). The content routine already
+ * passes the hero URL in the `notebook-promo` ticket row
+ * (`routine-content-daily.md` Step 6 item 4), but that url lives on
+ * cdn.sanity.io and `social-publish-gate.server.ts`'s image-provenance check
+ * only passes a Shopify Files url under a recognized filename (`social-`/
+ * `ig-` prefix, `isGeneratedSocialAsset`) or a `social_media_assets` library
+ * row — neither of which a bare Sanity hero url satisfies — so without this,
+ * the social lane had to generate a fresh frame for every echo instead of
+ * reusing the article's own picture.
+ *
+ * Mirrors the same rehost + ingest + vision-gate contract every other
+ * generated social asset goes through (`renderAndUploadSocialCard`,
+ * `generateAndUploadSocialImage`): fetch the source bytes, optionally
+ * `cover`-crop to the requested feed shape, upload to Shopify Files under a
+ * `social-notebook-` filename (which also satisfies `isGeneratedSocialAsset`'s
+ * legacy prefix check directly), write the library row with provenance tags,
+ * and run the vision gate on the result like any other image that reaches a
+ * live feed.
+ */
+export async function rehostSocialImage(opts: RehostSocialImageOpts): Promise<RehostSocialImageResult> {
+  let host: string
+  try {
+    host = new URL(opts.sourceUrl).hostname
+  } catch {
+    throw new Error(`rehostSocialImage: sourceUrl is not a valid URL: ${opts.sourceUrl}`)
+  }
+  if (!REHOST_ALLOWED_HOSTS.includes(host)) {
+    throw new Error(
+      `rehostSocialImage: sourceUrl host "${host}" is not on the allowlist (${REHOST_ALLOWED_HOSTS.join(', ')})`,
+    )
+  }
+
+  const res = await fetch(opts.sourceUrl)
+  if (!res.ok) throw new Error(`rehostSocialImage: fetch sourceUrl failed: HTTP ${res.status}`)
+  const original = Buffer.from(await res.arrayBuffer())
+
+  const dims = opts.aspect ? REHOST_ASPECT_DIMENSIONS[opts.aspect] : undefined
+  const buffer = dims
+    ? await sharp(original).resize(dims.width, dims.height, { fit: 'cover', position: 'centre' }).jpeg().toBuffer()
+    : await sharp(original).jpeg().toBuffer()
+
+  const day = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+  const slug = slugFragment(opts.slug, 'post')
+  const aspectPart = opts.aspect ? `-${opts.aspect.replace(':', 'x')}` : ''
+  const filename = `social-notebook-${slug}${aspectPart}-${day}.jpg`
+
+  const { url, fileId } = await uploadMoodImageToShopifyFilesWithId(buffer, filename)
+
+  // `source: 'upload'` is the closest fit of the three (an asset introduced
+  // into the library from an existing picture, not an AI generation or a
+  // video poster frame); the real provenance — it came from a Notebook
+  // post's hero, and which post — rides on `tags`, the same `key:value`
+  // convention the scene-axis tags already use.
+  const asset = await tryIngestSocialAsset({
+    buffer,
+    filename,
+    contentType: 'image/jpeg',
+    url,
+    shopifyFileId: fileId,
+    ...(opts.aspect ? { aspect: opts.aspect } : {}),
+    source: 'upload',
+    archetype: 'notebook-echo',
+    tags: ['source:notebook-hero', `blog-slug:${slug}`],
+    isPicked: false,
+    createdBy: opts.caller ?? 'social-media-manager',
+  })
+
+  const { runVisionGate, recordVisionVerdict } = await import('./social-vision-gate.server')
+  const verdict = await runVisionGate(url)
+  if (asset?.id != null) {
+    await recordVisionVerdict(asset.id, verdict)
+    await tagIncompleteVisionVerdict(asset.id, verdict)
+  }
+
+  return { url, assetId: asset?.id ?? null, visionVerdict: verdict }
 }
 
 /**
