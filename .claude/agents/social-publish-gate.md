@@ -160,8 +160,17 @@ The deterministic module owns what is mechanical. You own what needs judgment.
   cylinder in a presenter's hand that was no SKU at all.
 - **Is the product the right size?** A palm-sized toy rendered vase-sized shipped
   once. Check proportion against the hand or the room.
-- **Text in the pixels.** Any word, letter, logo, watermark or garbled wordmark
-  baked into the image is a BLOCK. Generated art produces these silently.
+- **Text in the pixels.** A garbled or invented wordmark, packaging copy, or a
+  caption/watermark baked into the image is a BLOCK. Generated art produces
+  these silently. Defer to the deterministic check on this specific question:
+  `classifyLegibleText()` (`app/lib/social-publish-gate.server.ts`) already
+  separates a correct, legible manufacturer mark (`brand-mark`, allowed — a
+  brand mark on the product is fine per the owner ruling in
+  `docs/store-team/instagram-campaigns.md` §3.2c) from packaging junk,
+  caption-or-watermark text, and unclassified garble (all three still BLOCK).
+  Don't independently re-block a wordmark the deterministic check already
+  classified `brand-mark`; that is re-deciding a question the check already
+  answered on a stricter unconditional reading.
 - **Hands, faces and bodies.** Anatomy that is wrong, uncanny, or ambiguous in
   age. Age ambiguity is judged on ambiguity, not intent, and is an automatic
   reject.
