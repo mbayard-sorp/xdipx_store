@@ -269,6 +269,24 @@ describe('generate', () => {
     const res = await post({ ...validGenerate, cropScale: 'wide' })
     expect(res.status).toBe(200)
   })
+
+  // Ticket #13739: forearm stays a valid BODY_ZONES member (so a historical
+  // row still parses) but is refused at generation time, the one shared
+  // pre-spend call site for both the generate and cast ops.
+  it('rejects bodyZone "forearm" (imagery-owner-notes.md entry 3), before the money gate runs', async () => {
+    const res = await post({ ...validGenerate, cropScale: 'close', bodyZone: 'forearm', contactMode: 'resting' })
+    expect(res.status).toBe(400)
+    expect(await res.text()).toMatch(/forearm/)
+    expect(genMock).not.toHaveBeenCalled()
+    expect(gateMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects bodyZone "forearm" on the cast op too', async () => {
+    const res = await post({ ...validCast, bodyZone: 'forearm' })
+    expect(res.status).toBe(400)
+    expect(await res.text()).toMatch(/forearm/)
+    expect(castMock).not.toHaveBeenCalled()
+  })
 })
 
 describe('generate spend', () => {
@@ -623,10 +641,16 @@ describe('cast: derived scale cue from real dimensions (#10981)', () => {
       images: [{ url: 'https://cdn/product.jpg', altText: 'Chorus' }],
       specifications: ['Length: 3.5 inches'],
     })
-    const res = await post({ ...validCast, bodyZone: 'forearm' })
+    // Ticket #13739: forearm is retired for new briefs (imagery-owner-notes.md
+    // entry 3; the retirement itself has its own dedicated describe block
+    // below), so this uses inner-wrist instead. scaleCueFromLengthInches'
+    // forearm branch is zone-specific ("as wide as the forearm"); every other
+    // zone, inner-wrist included, gets the generic hand-relative phrasing —
+    // asserted here by the derived length figure instead of a zone name.
+    const res = await post({ ...validCast, bodyZone: 'inner-wrist' })
     expect(res.status).toBe(200)
     expect(castMock).toHaveBeenCalledWith(expect.objectContaining({
-      prompt: expect.stringContaining('forearm'),
+      prompt: expect.stringContaining('3.5 inches'),
     }))
     // The caller's own free-text scale still rides through unchanged
     // (additive, not replaced) — `withProductScale` applies it downstream.
@@ -641,7 +665,7 @@ describe('cast: derived scale cue from real dimensions (#10981)', () => {
       images: [{ url: 'https://cdn/womanizer.jpg', altText: 'Womanizer Beauty' }],
       specifications: ['Length: 3.9 inches'],
     })
-    const res = await post({ ...validCast, handle: 'womanizer-beauty-lilac', bodyZone: 'forearm' })
+    const res = await post({ ...validCast, handle: 'womanizer-beauty-lilac', bodyZone: 'inner-wrist' })
     const body = await res.json() as { derivedLengthInches?: number; derivedScaleCue?: string }
     expect(res.status).toBe(200)
     expect(body.derivedLengthInches).toBe(3.9)

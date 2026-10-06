@@ -74,7 +74,7 @@ import {
   type GatePlatform,
 } from './social-publish-gate.server'
 import { findingToStored, type GateStatusValue, type StoredGateFinding } from './social-gate-status'
-import { parseSceneAxes } from './social-scene-vocab'
+import { hasStoryLine, isRetiredBodyZone, parseSceneAxes } from './social-scene-vocab'
 
 /**
  * Platforms this gate may verdict.
@@ -1085,6 +1085,36 @@ export async function reworkSocialPost(
           `Rework refused: a media-bearing ${post.platform} post requires a non-empty altText ` +
           `(hard rule since 2026-08-22). Supply rework.altText, or the pre-publish gate REVISEs it a run later.`,
       }
+    }
+
+    // Fail-closed Writers Room story-line requirement (ticket #13739), judged
+    // on the EFFECTIVE row after this rework, same shape as the altText check
+    // above. Rework cannot change platform/shopifyProductId/videoJobId/
+    // episodeId, so those always come from the loaded row.
+    const isVideoFanout = post.videoJobId != null || post.episodeId != null
+    const effectiveBrief = input.imageBrief ?? post.imageBrief
+    if (post.shopifyProductId && !isVideoFanout && !hasStoryLine(effectiveBrief)) {
+      return {
+        ok: false,
+        status: 400,
+        error:
+          `Rework refused: a product-featuring ${post.platform} post requires an imageBrief carrying a Writers ` +
+          'Room STORY LINE block with non-empty Moment:/Set:/Cue: lines (owner direction 2026-10-05, ' +
+          'imagery-owner-notes.md entry 4). Supply rework.imageBrief.',
+      }
+    }
+  }
+
+  // Ticket #13739: forearm stays a valid BODY_ZONES member but is rejected at
+  // write time, judged on the effective bodyZone after this rework.
+  const effectiveBodyZone = input.bodyZone ?? post.bodyZone
+  if (isRetiredBodyZone(effectiveBodyZone)) {
+    return {
+      ok: false,
+      status: 400,
+      error:
+        'Rework refused: bodyZone "forearm" is retired for on-skin bodyscape briefs (imagery-owner-notes.md ' +
+        'entry 3). Supply rework.bodyZone with a different §3.2a/§3.2b mid-tier zone.',
     }
   }
 

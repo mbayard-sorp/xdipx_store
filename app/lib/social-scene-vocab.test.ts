@@ -11,6 +11,8 @@ import {
   WARDROBE_COVERAGE_CLASSES,
   applyNonSkinAxisDefaults,
   hasAllSceneAxes,
+  hasStoryLine,
+  isRetiredBodyZone,
   mergeSceneAxes,
   parseSceneAxes,
   parseSceneAxisTags,
@@ -215,6 +217,71 @@ describe('requireSceneAxesForGeneration', () => {
     expect(requireSceneAxesForGeneration({
       sceneLocation: 'bedroom-loft', cropScale: 'close', bodyZone: 'hip-hollow', contactMode: 'resting',
     })).toEqual({ ok: true })
+  })
+
+  // Ticket #13739: forearm stays a valid BODY_ZONES member (historical rows
+  // still parse) but is rejected here, the one shared pre-spend call site for
+  // both api.team.social-image.tsx ops.
+  it('refuses the retired forearm body zone even when otherwise fully supplied', () => {
+    const result = requireSceneAxesForGeneration({
+      sceneLocation: 'bedroom-loft', cropScale: 'close', bodyZone: 'forearm', contactMode: 'resting',
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error).toContain('forearm')
+      expect(result.error).toContain('imagery-owner-notes.md entry 3')
+    }
+  })
+
+  it('still passes a non-retired body zone', () => {
+    expect(requireSceneAxesForGeneration({
+      sceneLocation: 'bedroom-loft', cropScale: 'close', bodyZone: 'inner-wrist', contactMode: 'resting',
+    })).toEqual({ ok: true })
+  })
+})
+
+describe('isRetiredBodyZone', () => {
+  it('flags forearm and nothing else', () => {
+    expect(isRetiredBodyZone('forearm')).toBe(true)
+    expect(isRetiredBodyZone('inner-wrist')).toBe(false)
+    expect(isRetiredBodyZone(undefined)).toBe(false)
+    expect(isRetiredBodyZone(null)).toBe(false)
+  })
+})
+
+describe('hasStoryLine (ticket #13739)', () => {
+  const validBrief = [
+    'STORY LINE womanizer-next-sage, jade',
+    '  Moment: ANTICIPATION. Jade is about to start her evening wind-down.',
+    '  Set: her bed, with a warm lamp and a half-folded throw blanket.',
+    '  Cue: the lamp light.',
+    '  Sensation: pulse-air suction reads as a held breath.',
+    '  Gaze: on the product.',
+    '  Hand: right hand, side grip, resting at her hip.',
+  ].join('\n')
+
+  it('accepts a well-formed STORY LINE block', () => {
+    expect(hasStoryLine(validBrief)).toBe(true)
+  })
+
+  it('rejects empty, null, or undefined briefs', () => {
+    expect(hasStoryLine('')).toBe(false)
+    expect(hasStoryLine(null)).toBe(false)
+    expect(hasStoryLine(undefined)).toBe(false)
+  })
+
+  it('rejects a brief with no STORY LINE header at all', () => {
+    expect(hasStoryLine('A cast member holding the product up in her kitchen.')).toBe(false)
+  })
+
+  it.each(['Moment', 'Set', 'Cue'])('rejects a STORY LINE block with an empty %s line', (label) => {
+    const broken = validBrief.replace(new RegExp(`^  ${label}:.*$`, 'm'), `  ${label}:`)
+    expect(hasStoryLine(broken)).toBe(false)
+  })
+
+  it('rejects a STORY LINE block missing a required line entirely', () => {
+    const missingCue = validBrief.split('\n').filter(l => !l.trim().startsWith('Cue:')).join('\n')
+    expect(hasStoryLine(missingCue)).toBe(false)
   })
 })
 
