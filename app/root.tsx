@@ -265,11 +265,26 @@ export function Layout({ children }: { children: React.ReactNode }) {
     (!gtmId && ga4Id)
       ? `inject('https://www.googletagmanager.com/gtag/js?id=${ga4Id}');gtag('js',new Date());gtag('config','${ga4Id}',{send_page_view:false});`
       : '',
-    pixelId ? `inject('https://connect.facebook.net/en_US/fbevents.js');` : '',
   ].join('')
 
-  const analyticsLoader = deferredLoads
-    ? `(function(){var done=false;function inject(src){var s=document.createElement('script');s.async=true;s.src=src;document.head.appendChild(s)}function go(){if(done)return;done=true;${deferredLoads}}['pointerdown','keydown','touchstart','scroll'].forEach(function(e){addEventListener(e,go,{once:true,passive:true})});function idle(){'requestIdleCallback' in window?requestIdleCallback(go,{timeout:3000}):setTimeout(go,2000)}document.readyState==='complete'?idle():addEventListener('load',idle);setTimeout(go,8000);})();`
+  // fbevents.js (ticket #13339, split from #13146): 110KB and a 226ms long
+  // task, the worst TBT item on PSI, loaded on every visitor regardless of
+  // consent even though the bootstrap above boots it 'revoke'd. Consent is
+  // read straight out of localStorage rather than waiting on the Analytics
+  // component (CookieConsent.tsx's own source of truth, same key/shape it
+  // writes), so this script never depends on React having hydrated.
+  // `loadPixel` is called from the SAME trigger set GTM/GA4 already use
+  // (first interaction / idle / 8s timeout) when consent is already granted,
+  // AND from the `xdipx:consent-update` event CookieConsent dispatches on
+  // every accept/reject, so a mid-session grant loads it immediately rather
+  // than waiting for another trigger. GA4/GTM's own loading above is
+  // unchanged.
+  const pixelLoad = pixelId
+    ? `function loadPixel(){if(window.__xdipxPixelLoaded)return;var c;try{c=JSON.parse(localStorage.getItem('xdipx_consent')||'null')}catch(e){return}if(!c||c.type!=='all')return;window.__xdipxPixelLoaded=true;fbq('consent','grant');inject('https://connect.facebook.net/en_US/fbevents.js')}addEventListener('xdipx:consent-update',loadPixel);`
+    : ''
+
+  const analyticsLoader = (deferredLoads || pixelLoad)
+    ? `(function(){var done=false;function inject(src){var s=document.createElement('script');s.async=true;s.src=src;document.head.appendChild(s)}${pixelLoad}function go(){if(done)return;done=true;${deferredLoads}${pixelId ? 'loadPixel();' : ''}}['pointerdown','keydown','touchstart','scroll'].forEach(function(e){addEventListener(e,go,{once:true,passive:true})});function idle(){'requestIdleCallback' in window?requestIdleCallback(go,{timeout:3000}):setTimeout(go,2000)}document.readyState==='complete'?idle():addEventListener('load',idle);setTimeout(go,8000);})();`
     : ''
 
   return (
