@@ -237,6 +237,7 @@ describe('record-only mode (ticket #13524)', () => {
     productPhysics: 'not_applicable',
     handDigitCounts: [],
     backAnatomyRead: '',
+    frontWaistbandRead: '',
   }
 
   it('(a) accepts a well-formed pre-computed verdict, records it, and never calls the model', async () => {

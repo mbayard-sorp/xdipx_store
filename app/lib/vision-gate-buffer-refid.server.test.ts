@@ -41,6 +41,7 @@ const CLEAN_VERDICT = {
   productPhysics: 'not_applicable',
   handDigitCounts: [],
   backAnatomyRead: '',
+  frontWaistbandRead: '',
 }
 
 afterEach(() => {
