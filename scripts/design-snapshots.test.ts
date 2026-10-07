@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
+  abortIsRenderCritical,
   looksLikeEdgeBlock,
   parseCurlHeaderDump,
   parseViewports,
@@ -184,5 +185,43 @@ describe('parseCurlHeaderDump', () => {
 
   it('survives a dump with no headers at all', () => {
     expect(parseCurlHeaderDump('HTTP/2 204\r\n')).toEqual({ status: 204, headers: [] })
+  })
+})
+
+/**
+ * QA gate, run 1298. The agent proxy drops connections intermittently (a bare
+ * curl of the homepage through it reset on 1 of 6 attempts, with no script
+ * involved). Two captures in that gate's own testing wrote a PNG and exited 0
+ * while having aborted `entry.client`, `motion` and other JS bundles — so the
+ * page never hydrated and nothing said so. Because Reveal renders its final
+ * state on the server, the screenshot still looked plausible. That is the same
+ * silent wrong answer the curl rewrite exists to prevent, one layer down.
+ */
+describe('abortIsRenderCritical', () => {
+  it('treats a dropped script as render-critical', () => {
+    // With entry.client aborted the page never hydrates and the PNG still
+    // looks fine, which is exactly why this cannot be shrugged off.
+    expect(abortIsRenderCritical('https://xdipx.com/assets/entry.client-eDgH7t3O.js', 'script')).toBe(true)
+    expect(abortIsRenderCritical('https://xdipx.com/assets/motion-DYP7mUpq.js', 'script')).toBe(true)
+  })
+
+  it('treats the document and stylesheets as render-critical', () => {
+    expect(abortIsRenderCritical('https://xdipx.com/', 'document')).toBe(true)
+    expect(abortIsRenderCritical('https://xdipx.com/assets/app-x.css', 'stylesheet')).toBe(true)
+  })
+
+  it('does not fail a capture over a dropped image, font or video', () => {
+    // A missing image leaves a visible gap the critic can see and judge, so it
+    // degrades the capture honestly rather than silently.
+    expect(abortIsRenderCritical('https://cdn.shopify.com/s/files/1/0/53906B.jpg', 'image')).toBe(false)
+    expect(abortIsRenderCritical('https://xdipx.com/assets/newsreader.woff2', 'font')).toBe(false)
+    expect(abortIsRenderCritical('https://xdipx.com/hero.mp4', 'media')).toBe(false)
+  })
+
+  it('does not fail a capture over analytics beacons and XHR', () => {
+    // The original doc comment's own case: a third-party beacon that will not
+    // load must not blank the page or fail the run.
+    expect(abortIsRenderCritical('https://www.google-analytics.com/g/collect', 'xhr')).toBe(false)
+    expect(abortIsRenderCritical('https://xdipx.com/api/x', 'fetch')).toBe(false)
   })
 })

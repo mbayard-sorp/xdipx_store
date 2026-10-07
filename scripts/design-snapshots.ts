@@ -170,6 +170,9 @@ function routeName(route: string): string {
  * promises, but do not use `page.url()` here to discover where a route landed
  * (the repo still has 301s on `/for-him` and `/for-her`).
  */
+/** Render-critical requests this capture could not serve. Reset per capture. */
+const criticalAborts: string[] = []
+
 async function fulfilFromNodeFetch(route: Route): Promise<void> {
   const request = route.request()
   try {
@@ -185,6 +188,9 @@ async function fulfilFromNodeFetch(route: Route): Promise<void> {
       body: response.body,
     })
   } catch (err) {
+    if (abortIsRenderCritical(request.url(), request.resourceType())) {
+      criticalAborts.push(`${request.resourceType()} ${request.url()}`)
+    }
     process.stderr.write(`  via-fetch abort ${request.url()}: ${(err as Error).message}\n`)
     await route.abort().catch(() => {})
   }
@@ -267,12 +273,46 @@ export async function curlFetch(req: {
       args.push('--data-binary', `@${postPath}`)
     }
     args.push('--url', req.url)
-    await execFileAsync('curl', args, { maxBuffer: 1024 * 1024 })
-    const { status, headers } = parseCurlHeaderDump(readFileSync(headerPath, 'utf8'))
-    return { status, headers, body: readFileSync(bodyPath) }
+    // The agent proxy drops connections intermittently: a plain curl of the
+    // homepage through it returned a reset on 1 of 6 bare attempts, with no
+    // involvement from this script. Retry the transport-level failures only
+    // (7 could-not-connect, 35 recv failure, 52 empty reply, 56 recv error) —
+    // an HTTP error is a real answer and curl exits 0 for it, so nothing here
+    // retries a 403 or a 404.
+    const RETRYABLE = new Set([7, 35, 52, 56])
+    let lastErr: unknown
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        await execFileAsync('curl', args, { maxBuffer: 1024 * 1024 })
+        const { status, headers } = parseCurlHeaderDump(readFileSync(headerPath, 'utf8'))
+        return { status, headers, body: readFileSync(bodyPath) }
+      } catch (err) {
+        lastErr = err
+        const code = (err as { code?: number }).code
+        if (typeof code !== 'number' || !RETRYABLE.has(code)) throw err
+        await new Promise(r => setTimeout(r, 150 * (attempt + 1)))
+      }
+    }
+    throw lastErr
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
+}
+
+/**
+ * Whether an aborted sub-resource can change what the screenshot shows.
+ *
+ * A dropped image leaves a gap the critic can see and judge. A dropped script
+ * does not: with `entry.client` aborted the page never hydrates, and because
+ * the Reveal primitive renders its final state on the server the PNG still
+ * looks plausible. The capture would exit 0 on a page that never ran, which is
+ * the same silent-wrong-answer this transport was rewritten to stop. Found by
+ * the QA gate on run 1298, which saw real captures abort `entry.client`,
+ * `motion`, `OptimizedImage` and others and still write a file and exit 0.
+ */
+export function abortIsRenderCritical(url: string, resourceType: string): boolean {
+  if (resourceType === 'image' || resourceType === 'font' || resourceType === 'media') return false
+  return resourceType === 'document' || resourceType === 'script' || resourceType === 'stylesheet'
 }
 
 /**
@@ -330,6 +370,7 @@ async function preparedContext(width: number, height: number): Promise<BrowserCo
 }
 
 async function capture(context: BrowserContext, route: string, file: string): Promise<void> {
+  criticalAborts.length = 0
   const page = await context.newPage()
   try {
     const response = await page.goto(`${BASE}${route}`, { waitUntil: 'networkidle', timeout: 60_000 })
@@ -362,6 +403,13 @@ async function capture(context: BrowserContext, route: string, file: string): Pr
     })
     await page.waitForLoadState('networkidle').catch(() => {})
     await page.waitForTimeout(300)
+    if (criticalAborts.length) {
+      throw new Error(
+        `${criticalAborts.length} render-critical request(s) could not be served, so this ` +
+        `page did not fully load and its screenshot would misrepresent it:\n` +
+        criticalAborts.map(u => `         ${u}`).join('\n'),
+      )
+    }
     await page.screenshot({ path: file, fullPage: true })
     process.stdout.write(`${file}\n`)
   } finally {

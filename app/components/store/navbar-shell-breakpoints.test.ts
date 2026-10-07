@@ -78,16 +78,17 @@ describe('Navbar shell breakpoints — #11083 item B (fourth non-doctrine contai
  * defect is which font family the nav inherits, which is a question about the
  * shipped markup rather than a behavior a render assertion exercises.
  */
-describe('MegaMenu typography — nav inherits font-body (#12612 defect 1)', () => {
-  const src = read('./MegaMenu.tsx')
+describe('Nav typography — every nav entry inherits font-body (#12612 defect 1)', () => {
+  const mega = read('./MegaMenu.tsx')
+  const navbar = read('./Navbar.tsx')
 
-  it('carries no inline display-font override anywhere in the nav', () => {
-    expect(src).not.toContain("fontFamily: 'var(--font-display)'")
+  it('leaves no inline display-font override anywhere in MegaMenu', () => {
+    expect(mega).not.toContain("fontFamily: 'var(--font-display)'")
   })
 
   it('still renders the nav items it did before, so this was a font change only', () => {
-    expect(src).toContain('{NEW_ARRIVALS.title}')
-    expect(src).toContain('{item.title}')
+    expect(mega).toContain('{NEW_ARRIVALS.title}')
+    expect(mega).toContain('{item.title}')
   })
 
   it('boxes the childless nav Link like its button siblings', () => {
@@ -95,6 +96,34 @@ describe('MegaMenu typography — nav inherits font-body (#12612 defect 1)', () 
     // one rendered as an <a>. An inline <a> drops vertical padding out of
     // layout while a <button> is inline-block and keeps it, which left one nav
     // entry boxed differently from the other seven.
-    expect(src).toContain("'inline-flex items-center px-3 py-1.5 rounded-full text-sm font-medium transition-all'")
+    expect(mega).toContain("'inline-flex items-center px-3 py-1.5 rounded-full text-sm font-medium transition-all'")
+  })
+
+  /**
+   * The QA gate on run 1298 caught this one: fixing MegaMenu alone left the
+   * mobile drawer MIXED, because Navbar.tsx renders "Home" above the drawer's
+   * category accordion and "Search" below it, and both still carried the
+   * inline serif. The drawer read serif, sans, serif — worse than the
+   * consistent serif it started from. Whatever else this guard does, it has to
+   * span BOTH files, because the defect lives in the seam between them.
+   */
+  it('leaves no inline display-font override on the drawer nav entries', () => {
+    for (const label of ['Home', 'Search']) {
+      const at = navbar.indexOf(`>\n                    ${label}\n`)
+      expect(at, `drawer "${label}" link not found`).toBeGreaterThan(-1)
+      // The style prop, when present, sits within the element's opening tag,
+      // i.e. in the ~400 characters before the label text.
+      expect(navbar.slice(Math.max(0, at - 400), at)).not.toContain('var(--font-display)')
+    }
+  })
+
+  it('keeps the display font on the wordmark and the account heading, deliberately', () => {
+    // Doctrine line 95 assigns Newsreader to "Headlines, pull-quotes,
+    // editorial display". The logo lockup is a brand mark and the account
+    // dropdown's "Hi, <name>" is a heading; neither is a nav entry, so both
+    // keep the serif. Pinned so a future sweep does not strip them as though
+    // they were part of this fix.
+    expect(navbar).toContain("fontFamily: 'var(--font-display)'")
+    expect(navbar.match(/fontFamily: 'var\(--font-display\)'/g)).toHaveLength(3)
   })
 })
