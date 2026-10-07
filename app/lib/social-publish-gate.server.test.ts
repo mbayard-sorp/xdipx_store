@@ -1453,6 +1453,47 @@ describe('legible text baked into the image', () => {
       )).toBe('unclassified')
     })
   })
+
+  // Ticket #13985. Social posts #403 (Instagram) and #404 (X) BLOCKed on
+  // vision-legible-text over the we-vibe-sync-go-turquoise Notebook-echo
+  // stills, both real-photography hero images reused per ticket #13370 (not
+  // AI generations). Verified directly against the two real stored vision
+  // verdicts (social_media_assets #1027, #1028), both scored pass:true on
+  // every anatomy/exposure check, with only this classifier's keyword list
+  // missing the "not legible at this resolution" phrasing.
+  describe('control labels illegible at resolution, on a real product photo (ticket #13985)', () => {
+    it('asset #1027 (4:5, post #403): small silver buttons not legible at this resolution is not a brand-mark misread', () => {
+      expect(classifyLegibleText(
+        'Small silver buttons visible on the product face; shapes suggest control labels but individual characters ' +
+        'are not legible at this resolution.',
+      )).toBe('none')
+    })
+
+    it('the full pipeline no longer blocks the post #403 candidate', async () => {
+      const r = await run(
+        'Small silver buttons visible on the product face; shapes suggest control labels but individual characters ' +
+        'are not legible at this resolution.',
+      )
+      expect(checks(r)).not.toContain('vision-legible-text')
+      expect(r.blocked).toBe(false)
+    })
+
+    it('asset #1028 (16:9, post #404): control markings not clearly legible at this resolution, with no other text in frame, is not a brand-mark misread', () => {
+      expect(classifyLegibleText(
+        'Small buttons/control markings on the product surface are not clearly legible at this resolution; no other ' +
+        'text visible in frame.',
+      )).toBe('none')
+    })
+
+    it('the full pipeline no longer blocks the post #404 candidate', async () => {
+      const r = await run(
+        'Small buttons/control markings on the product surface are not clearly legible at this resolution; no other ' +
+        'text visible in frame.',
+      )
+      expect(checks(r)).not.toContain('vision-legible-text')
+      expect(r.blocked).toBe(false)
+    })
+  })
 })
 
 // Ticket #13368: the New-in carousel's packshot card and the typographic
