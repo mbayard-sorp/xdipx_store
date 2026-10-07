@@ -12,6 +12,16 @@
  * deliberately absent: they are a Sanity-only field, not a Shopify metafield
  * (see emma-orchestrator.server.ts), so they are not a "metafield/tag" this
  * view can measure.
+ *
+ * `full_story` used to be one of these metafields and is now gone (ticket
+ * #13673): the current enricher never writes it, it rewrites the product's
+ * own Shopify description (body_html) instead, alongside `tagline` and
+ * `specifications`. A per-metafield row keyed on `full_story` always read 0%
+ * and wrongly flagged every recently-enriched product as story-less, which
+ * is what made inventory-sentinel report a genuinely enriched product as
+ * unenriched. The PDP itself was never affected — `shopify.server.ts` has
+ * always read `full_story || description` — only this coverage signal was
+ * stale. See `hasEnrichedStory` below for the replacement.
  */
 
 export type FieldKind = 'text' | 'list' | 'json'
@@ -32,7 +42,7 @@ export interface EnrichmentFieldDef {
  */
 export const ENRICHMENT_FIELDS: readonly EnrichmentFieldDef[] = [
   { key: 'tagline',             label: 'Tagline',           kind: 'text' },
-  { key: 'full_story',          label: 'Full story',        kind: 'text' },
+  { key: 'specifications',      label: 'Specifications',    kind: 'json' },
   { key: 'seo_meta_description',label: 'SEO meta desc',     kind: 'text' },
   { key: 'works_for_him',       label: 'Works for him',     kind: 'text' },
   { key: 'works_for_her',       label: 'Works for her',     kind: 'text' },
@@ -67,6 +77,13 @@ export interface CoverageProductNode {
   id: string
   /** `metafields(identifiers: [...])` returns nulls for absent keys. */
   metafields: ({ key: string; value: string | null } | null)[]
+  /**
+   * The product's own Shopify description (body_html, read as the `description`
+   * field — same source the PDP falls back to via `full_story || description`
+   * in shopify.server.ts). Optional so existing callers/fixtures that only
+   * cared about metafields keep compiling; absent is scored the same as empty.
+   */
+  description?: string | null
 }
 
 /** A list.text metafield is a JSON array; tolerate legacy comma-separated too. */
@@ -112,6 +129,26 @@ export function isFieldPresent(kind: FieldKind, value: string | null | undefined
 }
 
 /**
+ * The enriched-story signal (ticket #13673), replacing the stale `full_story`
+ * metafield row. The current enricher's story output is three things landing
+ * together: `tagline`, `specifications`, and a real rewrite of the product's
+ * own Shopify description (body_html) — no single metafield carries it alone
+ * any more, so this reads all three and requires every one present. Any one
+ * missing means the enrichment pass has not actually completed for this
+ * product, same standard a `full_story` check was trying to apply.
+ */
+export function hasEnrichedStory(
+  byKey: ReadonlyMap<string, string | null>,
+  description: string | null | undefined,
+): boolean {
+  return (
+    isFieldPresent('text', byKey.get('tagline')) &&
+    isFieldPresent('json', byKey.get('specifications')) &&
+    !!description && description.trim() !== ''
+  )
+}
+
+/**
  * Pure tally: given the scanned product nodes, count per-field presence and
  * compute percentages. No I/O, no clock — the caller stamps `builtAt`.
  */
@@ -119,6 +156,7 @@ export function tallyCoverage(nodes: CoverageProductNode[]): Omit<EnrichmentCove
   const total = nodes.length
   const covered = new Map<string, number>()
   for (const field of ENRICHMENT_FIELDS) covered.set(field.key, 0)
+  let storyCovered = 0
 
   for (const node of nodes) {
     const byKey = new Map<string, string | null>()
@@ -130,6 +168,7 @@ export function tallyCoverage(nodes: CoverageProductNode[]): Omit<EnrichmentCove
         covered.set(field.key, (covered.get(field.key) ?? 0) + 1)
       }
     }
+    if (hasEnrichedStory(byKey, node.description)) storyCovered++
   }
 
   const fields: FieldCoverage[] = ENRICHMENT_FIELDS.map(f => {
@@ -141,6 +180,17 @@ export function tallyCoverage(nodes: CoverageProductNode[]): Omit<EnrichmentCove
       total,
       pct: total === 0 ? 0 : Math.round((c / total) * 100),
     }
+  })
+
+  // Derived, not a single metafield — see hasEnrichedStory above. Appended
+  // rather than slotted into ENRICHMENT_FIELDS because it needs `description`,
+  // which the per-metafield loop above never reads.
+  fields.push({
+    key: 'story',
+    label: 'Enriched story (tagline + specs + body)',
+    covered: storyCovered,
+    total,
+    pct: total === 0 ? 0 : Math.round((storyCovered / total) * 100),
   })
 
   return { totalProducts: total, fields }

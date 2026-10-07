@@ -373,7 +373,10 @@ owner's script approval.
 `product-manager` and `inventory-sentinel` (with `nalpac-feed-analyst` for feed stock and
 `merch-calendar` for the week's theme) for 8 to 12 products. Hard gates, all required: available
 in Shopify with inventory above 3, AND in stock in the Nalpac feed; a bare-product image present;
-an enriched story present. Rank the survivors on margin, deal score, never-posted-on-social first
+an enriched story present — read this as `hasEnrichedStory` in `app/lib/enrichment-coverage.ts`
+(tagline + specifications + a rewritten product description all present), not the retired
+`full_story` metafield, which the current enricher no longer writes and which always reads 0% on a
+genuinely enriched product (ticket #13673). Rank the survivors on margin, deal score, never-posted-on-social first
 (most of the catalog has zero social posts), and calendar fit. Spread the list across categories so
 every one of the seven clip formats in `docs/store-team/video-clip-rules.md` has a candidate (until
 that file is on main, use `docs/store-team/video-content-strategy-2026-09-23.md` §4.2 and say so in

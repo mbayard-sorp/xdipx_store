@@ -8,9 +8,11 @@
  * the products live on the storefront, which enrichment metafields are set
  * (ticket #3891).
  *
- * Source of truth is Shopify itself — the actual metafields on `status:active`
- * products — not the AI-generation cache (`product_enrichment_cache`), which can
- * hold a cached generation whose write to Shopify never landed.
+ * Source of truth is Shopify itself — the actual metafields (plus, since
+ * ticket #13673, the product's own `description`/body_html, which the
+ * derived "enriched story" signal needs) on `status:active` products — not
+ * the AI-generation cache (`product_enrichment_cache`), which can hold a
+ * cached generation whose write to Shopify never landed.
  *
  * The live paginated Shopify walk is too heavy for a page loader, so the loader
  * reads a KV-cached snapshot and an admin "Refresh" action recomputes it. The
@@ -37,6 +39,7 @@ const COVERAGE_PAGE_QUERY = /* GraphQL */ `
       pageInfo { hasNextPage endCursor }
       nodes {
         id
+        description
         metafields(identifiers: [
             ${IDENTIFIERS}
         ]) { key value }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   ENRICHMENT_FIELDS,
+  hasEnrichedStory,
   isFieldPresent,
   tallyCoverage,
   type CoverageProductNode,
@@ -48,10 +49,11 @@ describe('isFieldPresent — json', () => {
   })
 })
 
-function node(id: string, mf: Record<string, string | null>): CoverageProductNode {
+function node(id: string, mf: Record<string, string | null>, description: string | null = null): CoverageProductNode {
   return {
     id,
     metafields: Object.entries(mf).map(([key, value]) => ({ key, value })),
+    description,
   }
 }
 
@@ -59,7 +61,8 @@ describe('tallyCoverage', () => {
   it('reports zeroed fields and 0% for an empty catalog without dividing by zero', () => {
     const result = tallyCoverage([])
     expect(result.totalProducts).toBe(0)
-    expect(result.fields).toHaveLength(ENRICHMENT_FIELDS.length)
+    // ENRICHMENT_FIELDS plus the one derived 'story' row appended in tallyCoverage.
+    expect(result.fields).toHaveLength(ENRICHMENT_FIELDS.length + 1)
     for (const f of result.fields) {
       expect(f.covered).toBe(0)
       expect(f.total).toBe(0)
@@ -113,5 +116,72 @@ describe('tallyCoverage', () => {
     const tagline = result.fields.find((f: FieldCoverage) => f.key === 'tagline')!
     expect(tagline.covered).toBe(1)
     expect(tagline.pct).toBe(100)
+  })
+})
+
+// Ticket #13673: full_story is a metafield the current enricher no longer
+// writes (it rewrites the product's own description/body_html instead,
+// alongside tagline and specifications), so a per-metafield row keyed on it
+// always read 0% and wrongly flagged every recently-enriched product as
+// unenriched (inventory-sentinel reported Gush 2 this way on 2026-10-05). The
+// PDP itself was unaffected (shopify.server.ts already reads
+// full_story || description); only this coverage signal was stale.
+describe('hasEnrichedStory (ticket #13673)', () => {
+  const byKey = (mf: Record<string, string | null>) => new Map(Object.entries(mf))
+
+  it('counts as enriched with tagline + specifications + a rewritten description, and NO full_story metafield at all', () => {
+    const fields = byKey({ tagline: 'Made for slow evenings', specifications: '["Material: Silicone","Length: 6in"]' })
+    expect(hasEnrichedStory(fields, 'A slow, deliberate design for couples who like to take their time.')).toBe(true)
+  })
+
+  it('tolerates the legacy HTML <ul><li> specifications shape, not only the new JSON-array shape', () => {
+    const fields = byKey({ tagline: 'Made for slow evenings', specifications: '<ul><li>Material: Silicone</li></ul>' })
+    expect(hasEnrichedStory(fields, 'A slow, deliberate design.')).toBe(true)
+  })
+
+  it('is false when tagline is missing even if specifications and description are present', () => {
+    const fields = byKey({ specifications: '["Material: Silicone"]' })
+    expect(hasEnrichedStory(fields, 'A slow, deliberate design.')).toBe(false)
+  })
+
+  it('is false when specifications is missing or empty even if tagline and description are present', () => {
+    expect(hasEnrichedStory(byKey({ tagline: 'Made for slow evenings' }), 'A slow design.')).toBe(false)
+    expect(hasEnrichedStory(byKey({ tagline: 'Made for slow evenings', specifications: '[]' }), 'A slow design.')).toBe(false)
+  })
+
+  it('is false when the description is missing, empty, or whitespace, even with tagline and specifications present', () => {
+    const fields = byKey({ tagline: 'Made for slow evenings', specifications: '["Material: Silicone"]' })
+    expect(hasEnrichedStory(fields, null)).toBe(false)
+    expect(hasEnrichedStory(fields, undefined)).toBe(false)
+    expect(hasEnrichedStory(fields, '   ')).toBe(false)
+  })
+
+  it('a product with no metafields at all but a description is not enriched (description alone is every raw import, not a signal)', () => {
+    expect(hasEnrichedStory(byKey({}), 'Whatever Shopify imported from the vendor feed.')).toBe(false)
+  })
+})
+
+describe('tallyCoverage story row (ticket #13673)', () => {
+  it('counts a product with tagline + specifications + description as enriched, with no full_story field in the fixture at all', () => {
+    const nodes: CoverageProductNode[] = [
+      node('enriched', { tagline: 'Made for slow evenings', specifications: '["Material: Silicone"]' }, 'A full rewritten description.'),
+      node('bare-import', {}, 'Vendor-supplied copy, never touched by enrichment.'),
+    ]
+    const result = tallyCoverage(nodes)
+    const story = result.fields.find((f: FieldCoverage) => f.key === 'story')!
+    expect(story.covered).toBe(1)
+    expect(story.pct).toBe(50)
+    // full_story no longer appears in ENRICHMENT_FIELDS at all.
+    expect(result.fields.find((f: FieldCoverage) => f.key === 'full_story')).toBeUndefined()
+    expect(ENRICHMENT_FIELDS.some(f => f.key === 'full_story')).toBe(false)
+  })
+
+  it('a node with no description field at all (an older fixture shape) scores the story row as not covered, not as a crash', () => {
+    const nodes: CoverageProductNode[] = [
+      { id: 'legacy-fixture', metafields: [{ key: 'tagline', value: 'Set the mood' }, { key: 'specifications', value: '["x"]' }] },
+    ]
+    const result = tallyCoverage(nodes)
+    const story = result.fields.find((f: FieldCoverage) => f.key === 'story')!
+    expect(story.covered).toBe(0)
   })
 })
