@@ -169,6 +169,11 @@ On-skin block (MANDATORY on every product post while the standing order below is
   Metal: <the cast member's closet metal, or "none"; gold is not the default>
 
   Craft rules, binding on the words you write (§3.2b, the 40-frame review):
+  - **Check `bodyscape-shot-bank.md` for a matching bodyZone+contactMode entry before briefing an
+    improvised framing.** A reliable or borderline-reliable bank entry is cheaper and safer than a
+    new one: brief it, swapping only the product, cast, and story cue. Write a framing the bank has
+    never tried only when no entry matches, and treat it as unproven until it clears the bank's
+    two-candidate validation loop (`instagram-campaigns.md`, shot-bank section) at full volume.
   - Write the frame, never the exclusion. Name positively what FILLS it and what CLOSES it.
   - Use an inanimate closer, or a limb named by the action it is performing. Never a limb described by region.
   - Never brief the supine-from-above composition with breasts in frame. Change the camera, not the sentence.
