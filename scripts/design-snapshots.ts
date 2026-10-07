@@ -382,6 +382,24 @@ async function main(): Promise<number> {
       return 2
     }
   }
+  // The proxied transport is curl, so say so once and plainly. Without this a
+  // missing binary surfaces as one "spawn curl ENOENT" abort per request and
+  // then a bare net::ERR_FAILED from goto(), which reads like the site is down
+  // rather than like a missing dependency. Deliberately no fallback to Node
+  // fetch: it is the thing Vercel 403s, and falling back would reintroduce the
+  // silent wrong-capture that `looksLikeEdgeBlock` exists to prevent.
+  if (VIA_FETCH) {
+    try {
+      await execFileAsync('curl', ['--version'])
+    } catch {
+      process.stderr.write(
+        'ERROR: the via-fetch transport needs the curl binary on PATH.\n' +
+        '       Install curl, or pass --no-via-fetch to let chromium fetch directly\n' +
+        '       (which needs chromium to trust your proxy CA).\n',
+      )
+      return 2
+    }
+  }
 
   mkdirSync(OUT, { recursive: true })
   process.stderr.write(`capturing ${ROUTES.length} route(s) x ${viewports.length} viewport(s) from ${BASE} -> ${OUT}\n`)
