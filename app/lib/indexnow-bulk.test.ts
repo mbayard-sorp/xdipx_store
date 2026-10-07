@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { batchIdForDay, selectPushableUrls } from '~/lib/indexnow-bulk.server'
+import { batchIdForDay, mergeUniqueUrls, selectPushableUrls } from '~/lib/indexnow-bulk.server'
 import {
   INDEXNOW_MAX_URLS_PER_REQUEST, chunkUrls, isRetryableStatus, normalizeUrls, publishBatchId,
 } from '~/lib/search-ping.server'
@@ -45,6 +45,30 @@ describe('selectPushableUrls', () => {
 
   it('handles an empty candidate set', () => {
     expect(selectPushableUrls([], new Set(), 100)).toEqual({ pushable: [], suppressed: 0 })
+  })
+})
+
+// Ticket #13662: staleUrls() now unions getUrlHealth().stale with
+// getUndiscoveredUrls(), and this is the dedupe that union runs through.
+describe('mergeUniqueUrls', () => {
+  it('keeps the primary list in order and appends only new secondary entries', () => {
+    expect(mergeUniqueUrls([u(1), u(2)], [u(2), u(3)])).toEqual([u(1), u(2), u(3)])
+  })
+
+  it('drops every secondary URL already present in the primary list', () => {
+    expect(mergeUniqueUrls([u(1), u(2), u(3)], [u(1), u(2), u(3)])).toEqual([u(1), u(2), u(3)])
+  })
+
+  it('handles an empty primary list', () => {
+    expect(mergeUniqueUrls([], [u(1), u(2)])).toEqual([u(1), u(2)])
+  })
+
+  it('handles an empty secondary list', () => {
+    expect(mergeUniqueUrls([u(1), u(2)], [])).toEqual([u(1), u(2)])
+  })
+
+  it('handles both lists empty', () => {
+    expect(mergeUniqueUrls([], [])).toEqual([])
   })
 })
 
