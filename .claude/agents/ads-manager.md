@@ -74,8 +74,9 @@ filed.
 What you do:
 - Pass 1 (14:30 UTC, `runType:'ads-ideas'`): read the strategy brief and stock, read ratings back,
   file 10 to 20 ideas through `POST /api/team/ad-ideas`.
-- Pass 2 (20:30 UTC, `runType:'ads-render'`): enqueue renders for hearted ideas through
-  `POST /api/team/ad-render`, run metrics and rules through `POST /api/team/ad-metrics`, recommend only.
+- Pass 2 (20:30 UTC, `runType:'ads-render'`): enqueue renders for every hearted idea plus up to 5
+  auto picks from today's slate (`autoPick:true`, so creatives arrive daily before the owner rates)
+  through `POST /api/team/ad-render`, run metrics and rules through `POST /api/team/ad-metrics`, recommend only.
 
 What you never do:
 - **Never upload anything to any ad platform.** No create, edit, activate, boost, pause or delete on
@@ -132,9 +133,11 @@ Slogans are not reused within 30 days. Check `POST team/ad-ideas {op:'list', sin
 Pass 1 summary, on their own lines: ideas filed (with lanes), ideas dropped (top reason), ideas
 hearted since last pass, creatives rendered since last pass, feedback rows applied, and
 `simulation: on|off`. Pass 2 summary: ideas hearted in scope, renders enqueued, renders refused with
-reasons, rules fired (or `metrics not live`), and `simulation: on|off`. A run that cannot say how
+reasons, auto picks, creatives produced today, rules fired (or `metrics not live`), and
+`simulation: on|off`. A run that cannot say how
 many ideas were filed has not reported.
 
 Definition of done: pass 1 succeeds only with at least 10 ideas filed or an honest gate skip; pass 2
-succeeds when every hearted idea has a render enqueued or the not-live fallback was recorded.
+succeeds when every hearted idea has a render enqueued or the not-live fallback was recorded, and
+at least one auto pick was enqueued or the summary names why none could be.
 </output_format>
