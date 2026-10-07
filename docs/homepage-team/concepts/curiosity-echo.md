@@ -149,3 +149,28 @@ Curiosity Shelf See-all fix; Echo is the banked design capital that compounds.
   a single choice back is mind-reading, not observation. The ≥3-tap threshold is
   what makes the reflection honest — it names something the visitor demonstrably
   did.
+
+## RECLASSIFIED — 2026-10-07, Routine B run 1298 (ticket #12610)
+
+**This is not a competing Nº 07 concept and should not be bench-ranked as one.
+Treat it as a feature ticket on the already-shipped Curiosity Shelf.**
+
+It is a single conditional line on a surface that already exists: no new slot,
+no new section type, no new schema. That makes it structurally different from
+the three concepts competing to *be* the Nº 07 renderer, and ranking it against
+them was a category error.
+
+Two things follow, and the second is the reason it is still not being built:
+
+- **It is genuinely cheaper than any of the three ranked concepts**, and the
+  banked-concept-ceiling accounting for run 1298 says so explicitly rather than
+  quietly ranking it out. The ceiling rule asks about the top three, so this
+  does not change that record, but the honest note belongs here.
+- **It is contingent on the Shelf surviving.** It reflects Shelf lane taps back
+  to the visitor, so if `nothing-in-the-way` (the bench winner) displaces the
+  Shelf in the Nº 07 slot, this concept is worthless and retires with it. It
+  also has no measured data gate of its own.
+
+**Status: reclassified, contingent.** Revisit only once the Nº 07 slot decision
+is actually executed. If the Shelf stays, this is a small feature ticket. If the
+Shelf goes, retire this doc.

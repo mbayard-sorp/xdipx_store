@@ -35,3 +35,43 @@ describe('PanelSquareRow.tsx — every possible column class survives Tailwind\'
     }
   })
 })
+
+/**
+ * #12612 defect 3 (design-critic, run 1298). The cases above were written for
+ * #8419, where a short row on a fixed 4-column grid stranded "Last Chance" and
+ * "Couples" beside empty cells. The `default:` arm reproduced that same defect
+ * above 4: the live deck serves SIX squares, so row 1 took four and row 2 took
+ * two, leaving a measured 589x232px void of bare paper-2 at 1440 — stranding
+ * the same two tiles, one row down.
+ */
+describe('panelSquareRowMdColsClass — rows longer than 4 (#12612 defect 3)', () => {
+  it('splits six squares into two complete rows of three, not 4+2', () => {
+    expect(panelSquareRowMdColsClass(6)).toBe('md:grid-cols-3')
+  })
+
+  it('keeps a clean 4-up for counts that already divide by four', () => {
+    expect(panelSquareRowMdColsClass(4)).toBe('md:grid-cols-4')
+    expect(panelSquareRowMdColsClass(8)).toBe('md:grid-cols-4')
+    expect(panelSquareRowMdColsClass(12)).toBe('md:grid-cols-4')
+  })
+
+  it('prefers 3-up for other multiples of three', () => {
+    expect(panelSquareRowMdColsClass(9)).toBe('md:grid-cols-3')
+  })
+
+  it('leaves 5 and 7 at 4-up rather than inventing a thin 5-column row', () => {
+    // No even divisor at 3 or 4 exists, and md:grid-cols-5 would render ~150px
+    // tiles at 768. Mission brief §11c caps the deck at 4 squares, so these
+    // counts are already over the cap; the grid degrades toward the rule.
+    expect(panelSquareRowMdColsClass(5)).toBe('md:grid-cols-4')
+    expect(panelSquareRowMdColsClass(7)).toBe('md:grid-cols-4')
+  })
+
+  it('returns only literal Tailwind classes, so the JIT scanner sees every branch', () => {
+    const emitted = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 12].map(panelSquareRowMdColsClass))
+    for (const cls of emitted) {
+      expect(cls).toMatch(/^md:grid-cols-[1-4]$/)
+      expect(cls).not.toContain('[')
+    }
+  })
+})

@@ -1901,3 +1901,270 @@ the above as design capital. The only spend proposed is **one content pass**
 (adopted item 2: rail curation plus one href, on an existing block with an
 existing renderer). No generated imagery, no new machinery, no new section
 types, no shell PR from this step.
+
+---
+
+## Delta — 2026-10-07 (Routine B design cycle, run 1298)
+
+**Captures (real, this run):** `www.sextoy.com`, `spectrumboutique.com`,
+`www.tootimid.com`, `inthegroove.com`, `www.bettystoybox.com`,
+`www.peepshowtoys.com`, `vushstimulation.com`, `dame.com`, `unboundbabes.com`,
+and our own `xdipx.com` plus four of its PDPs. Those are the only sites reported
+below. Three are firsts for this document: **Betty's Toy Box**, **Peepshow
+Toys** and **Vush**. The first two are direct multi-vendor competitors carrying
+substantially our catalog, which is why they were chosen for this week's lens;
+Vush is a doctrine §7 bench row that has never been captured here, because
+`vush.com` is not its storefront.
+
+Capture provenance, stated per host:
+
+- **Raw `curl -L` 200, every quoted string re-verified by `grep` against the raw
+  bytes:** `www.sextoy.com` (400,718 B), `spectrumboutique.com` (478,813 B),
+  `www.tootimid.com` (705,261 B), `inthegroove.com` (392,676 B),
+  `www.bettystoybox.com` (788,861 B), `www.peepshowtoys.com` (739,519 B),
+  `vushstimulation.com` (434,642 B), `dame.com` (1,106,509 B),
+  `unboundbabes.com` (401,442 B), `xdipx.com` (278,831 B). Every quoted string,
+  filename and count below comes from this tier unless marked otherwise.
+- **WebFetch 200 as an independent second read** on `www.peepshowtoys.com`. Its
+  extraction agreed with the raw bytes on card grammar and vendor lines.
+- **Image bytes fetched and viewed, not inferred.** Three product frames were
+  downloaded from `cdn.shopify.com` and looked at directly, plus one house
+  asset. This is a new provenance tier for this document, and it is why the
+  "Applied to our page" section can say what a card actually *shows* rather
+  than what its filename suggests.
+- **`vush.com` and `www.vush.com` are not the storefront.** Both rejected at the
+  egress proxy. `vushstimulation.com` serves the brand, 200 first attempt.
+  Doctrine §7's Vush row should carry the working host.
+
+**Refusals and blocks, recorded as results:**
+
+| Host | Result this run | History |
+|---|---|---|
+| `www.lovehoney.com` | HTTP **403** (1,622 B body) | 403 on 09-02, 09-09, 09-16, 09-23, 09-30. **Sixth consecutive.** |
+| `www.aesop.com` | HTTP **403** (5,660 B body) | 403 on 09-09, 09-16, 09-23, 09-30. **Fifth consecutive.** |
+| `maude.com` | **301 → a parked GoDaddy site**, then tunnel closed, 0 bytes | Same parked mode as 08-26, 09-16, 09-23, 09-30. **Five cycles parked.** |
+| `vush.com`, `www.vush.com` | **rejected at the egress proxy**, 0 bytes, both hosts | **First attempt recorded here**, resolved via `vushstimulation.com`. |
+
+Nothing is reported for Lovehoney, Aesop or Maude beyond the refusal itself. No
+competitor copy is quoted from memory anywhere in this delta.
+
+**Bench maintenance.** Lovehoney and Aesop should read **prior-knowledge-only**
+in doctrine §7 at six and five consecutive refusals; Maude carries the parked
+note at five cycles. Three rows move the other way: **Vush is captured for the
+first time and its row should name `vushstimulation.com`**, and **Peepshow Toys
+and Betty's Toy Box earn new rows**. That annotation is an `agent-editor` pass
+on the doctrine; this document does not own it and does not action it here.
+
+**The lens this run:** what the field does for product card art when the
+manufacturer supplies only packaging photography, and what, if anything,
+survives being rendered as bare product data in a marketplace app. Both halves
+are chosen off live money signal: ticket #12611 (BLOCK) says most of our
+merchandising card images are retail cartons, and 10 of our 13 lifetime orders
+arrived through the Shop app, which never renders a line of this team's markup.
+
+### The finding: nobody reshoots. They pick a better frame out of the kit they were already sent, and the ones that look expensive wrote down which frame to pick.
+
+- **Peepshow Toys is the best-photographed store in the set, and its filenames
+  are an art-direction brief.** 40 cards, each with a
+  `grid-product__secondary-image`. Those secondary filenames are house-written
+  sentences: `Thane_XXL_silicone_plug_inflated_size_vs._12oz._can_for_scale.jpg`,
+  `Selfie_of_woman_holding_Whirlwind_rotating_dildo_to_show_size`,
+  `Fairydew_G-spot_vibrator_covered_in_water_droplets`,
+  `Lap_Strap_harness_as_suction_cup_dildo_mount_on_pillow_-_dildo_not_included`.
+  Counted across those 40: **7 name a hand, fingers, a selfie or an explicit
+  scale reference; 3 are motion**. That is doctrine §4 archetypes A and D, shot
+  by a competitor, in our category, labelled in plain English in the filename.
+- **And Peepshow proves the realistic ceiling is not 100%.** Of the same 40,
+  **7 are raw supplier codes** and one is literally
+  `NSN-0561-55-INYA-package-front-lowres.jpg`, a manufacturer's low-resolution
+  package front, on the grid, today. The best-photographed store in the field
+  shoots its head and lets the tail carry supplier frames.
+- **sextoy.com runs the cheapest tier and names the tool:**
+  `rose-inbloom-rosales-sucking-vibrator-427916-PhotoRoom.png`, a commercial
+  background remover's output filename shipped unedited. Its `og:image`, the
+  share card for the entire brand, is a free Unsplash stock photo.
+- **Betty's Toy Box normalises every master to `_875x875`** across all 11 unique
+  product masters. Two things matter in that list. A `WMZ_NextLiberty_Hand_...`
+  file shows that **manufacturers already ship in-hand lifestyle frames inside
+  their asset kits**, so archetype A is sometimes a selection problem rather
+  than a generation problem. And its only homepage hero is
+  `grok-image-ea9e7523-....jpg` with `alt=""`: a direct competitor shipping an
+  AI-generated hero under the generator's own filename.
+- **Spectrum Boutique's answer is a naming convention, which is governance
+  rather than photography:** `{product}_{main}_{colour}_spectrum_boutique`. Its
+  defect is in the alt text, where four cards carry
+  `alt="#variant_id=48004616061161"`.
+- **In The Groove is the ungoverned end:** raw supplier codes interleaved with
+  **four Canva default exports** (`untitled-design33.png` and siblings), with
+  alt text that is the category label and nothing else.
+- **Vush is the control case:** own brand, no supplier problem, and the
+  consequence is visible in the naming (`VUSH-MUSE-ECOMM-01.jpg`), one render
+  language and one numbered slot per SKU, under a strict
+  `{Name} - {Category descriptor}` title grammar across 11 SKUs. **Peepshow
+  uses the same title grammar without being single-brand**, which makes it
+  convergence across three independent sites rather than a brand quirk.
+
+**Longitudinal re-checks, all re-measured:** TooTimid's derived review count is
+**30,139** (29,954 on 09-23, 30,050 on 09-30), a third consecutive datapoint
+showing the mechanism works unattended. Dame's out-of-season Black Friday string
+is a **fourth consecutive capture**. In The Groove still serves two 2025-named
+Halloween files, desktop and mobile, a second consecutive week.
+
+**The cross-site rule:** the *look* tracks the written-down-ness, not the spend.
+Peepshow writes the choice into the filename, Spectrum into a slot convention,
+Betty's into a master size, sextoy.com into a background remover; In The Groove
+writes nothing down and ships Canva exports. That is doctrine §4's "consistency,
+not budget" observed from a new angle.
+
+### Applied to our page (measured against the live 200, 278,831 B, four PDPs and four downloaded image files)
+
+**Our imagery is two surfaces with opposite health, and the sick one is free to
+treat.**
+
+1. **Sanity-sourced imagery is compliant; Shopify-sourced card art is not.** The
+   homepage serves **25 unique Sanity images** and **40 unique Shopify files**.
+   The Sanity set is art-directed and its alt text proves it ("Purple
+   dual-ended vibrator on a pale blush ground"). Of 58 unique alt strings on the
+   page only **16** describe a ground, a hand, a surface or a crop. **Alt text
+   is a free, machine-checkable proxy for this defect and nobody has used it as
+   one.**
+2. **The filename census locates the risk.** Of those 40 Shopify files: **20 are
+   `<sku>A`**, 10 are `<sku>B`, 4 unlettered, 4 house `-nobg.png`, 1
+   `ai-generated-`. Ticket #11028 already records image A being the retail
+   carton on 7 of 8 manually checked SKUs.
+3. **Confirmed visually on one SKU.** `53906A` is the frame our live card
+   renders for the Magic Wand Original, and it is **the retail carton lying
+   beside the wand** with "LEGENDARY PLUG-IN POWER" printed across it. Its PDP
+   media list runs A through G, and `53906B` is **the bare wand alone on white**.
+   The defect and its fix are two files apart in the same media list, at zero
+   cost, and the compliant one is already on our CDN. White ground is `paper`,
+   so frame B is ground-lock compliant as shot.
+4. **Calibration, honestly: the A letter is a risk signal, not a verdict.** Two
+   other A-frames were fetched and viewed and both are bare bottles, not
+   cartons. So **#12611's "~28 of ~34" needs re-adjudicating** against doctrine
+   §4 item 4's cases, because a lube bottle's own printed label is arguably case
+   1 (product body) while a retail carton is unambiguously case 2.
+5. **The selection code exists, is unit-tested, and had zero production
+   callers.** `pickBareProductImage()` walks a media list, skips frames whose
+   alt or filename names packaging, and flags when it cannot confirm a bare
+   frame. Card art never called it: it goes through `gateCardImages()`, which
+   only *suppresses* on `card_art_blocked` and never reorders, then takes
+   `images[0]`.
+6. **And this is the half that reaches the Shop app.** `mood_image_url` and
+   `card_art_blocked` are `xdipx`-namespace metafields read by our own loaders,
+   so **every imagery fix built so far is invisible on the lane carrying 10 of
+   13 orders.** Reordering a product's Shopify `media` so the bare frame is
+   position 1 is the only imagery fix that lands on both lanes at once.
+
+**Carry-forward defects, all re-measured, all still open:** the `/discover`
+two-link cap is **still breached at exactly 3**, a third consecutive week; the
+"Surprise me" chip still points at `/collections/best-sellers`; the door tiles
+still render bare nouns with empty `emmaAside`; the apparel rail's See-all is
+still the narrow `/collections/strap-on-harnesses`; `bg-cream` survives in
+`app/root.tsx` at lines 291 and 413. New and free: the page carries **4
+`alt=""`**, one of them on the "Last Chance" door tile, a content image.
+
+### Adopted
+
+1. **Choose the frame before you generate one: route card art through
+   `pickBareProductImage`.** One conversion point, a function that already
+   exists with tests. Surface: every rail and grid card on the locked shell. No
+   new section type, no Sanity schema, no new URL, no asset generation.
+2. **Repair `NALPAC_UNLABELED_FIRST_FRAME_RE`** so it matches UUID-suffixed and
+   letter-prefixed Nalpac frames. **Shipped this cycle** — 15 live A-frames,
+   including the proven carton, were walking past the doubt heuristic written
+   for exactly them.
+3. **Reorder Shopify `media` so position 1 is the bare frame**, starting with
+   the homepage SKUs. The only imagery fix that also lands in the Shop app.
+   Catalog work, routed to `product-manager`; touches no homepage surface.
+4. **Alt text is the free audit for #12611 and becomes a standing
+   `design-critic` measurement.** A card alt that is exactly the product title
+   is an unexamined supplier packshot. We score 16 of 58 today. Costs one grep
+   against a capture the gate already takes.
+5. **Write the art direction into the asset name.** Peepshow's sentences,
+   Spectrum's slot convention and Vush's numbered slots are the same artifact: a
+   written-down rule that survives staff turnover. Adopted as a naming
+   convention for `media-manager` uploads, adding the archetype letter and the
+   scene. A rule, not a build.
+6. **`{Name} - {Category descriptor}` is the title grammar**, and it is the only
+   copy we write that reaches a marketplace. Routed to `emma-copywriter` under
+   the voice gate, executed on Shopify product data.
+7. **Background removal is a legitimate tier and we are already in it** (four
+   `-nobg.png` files are live). Adopted as the default treatment for a SKU whose
+   only bare frame has a busy background: remove to `paper`, which is ground-lock
+   compliant by definition. Cheaper than generation, and it keeps the real
+   product.
+
+### Rejected, with reasons, so they are not re-proposed
+
+- **Reshooting the catalog, in any form.** The best-photographed store in the
+  field still ships a `package-front-lowres` frame and seven raw supplier codes
+  out of 40. A traffic-gated store with no studio cannot beat that, and the
+  attempt would spend the entire image budget on the tail. This is what makes
+  adopted item 1 the right shape: selection first, generation last.
+- **An AI-generated homepage hero in Betty's shape.** Not rejected on the
+  technique, which doctrine §4 already licenses, but on the execution: the
+  generator's filename and `alt=""`. And our hero is the LCP frame, which is
+  never wrapped and never experimental.
+- **Vush's per-SKU "Benefits" graphic as a second card frame.** Clean idea for a
+  single-brand store, and a direct breach of doctrine §4 item 4 case 3: copy
+  baked into pixels. Our version of that content is markup, which is also the
+  version a screen reader can read. Hard reject.
+- **The hover flip as the delivery mechanism for a second frame.** Peepshow's is
+  marked `small--hide`, so it does not render on mobile at all. On a store
+  designed at 375px first, a desktop-only hover buys nothing on the surface that
+  matters. Backlog item 16 is not killed but re-scoped: the second frame earns
+  its place only with a touch equivalent.
+- **Motion GIFs as card art.** The idea is already backlog item 15, but a GIF is
+  an unbounded-weight autoplaying asset in a grid, it cannot respect
+  `prefers-reduced-motion`, and it arrives on the hover we just rejected. If
+  product motion ships it is the `hero_video` metafield on the PDP,
+  reduced-motion-gated, never on the homepage.
+- **Unsplash and other free stock as brand imagery.** Genuinely tempting: zero
+  cost, clean licence. Rejected because a stock frame is by construction not
+  *our* product in *our* ground, which is the one thing doctrine §4 item 1 will
+  not trade away, and because the largest-name domain in the category using it
+  for its brand share card is a warning rather than a recommendation.
+- **Canva default exports and any asset shipped under a tool's filename.**
+  Standing reject, and the negative image of adopted item 5.
+- **A store stamp inside the asset name.** The convention is adopted; the stamp
+  is rejected as noise, since every file on our CDN is ours. Spend those
+  characters on the archetype and the scene.
+- **Uniform square masters as a doctrine rule.** Real discipline, but we already
+  get the same outcome from fixed aspect ratios in markup, which is a zero-CLS
+  non-negotiable regardless. Recorded because it confirms the ratio discipline
+  is field-standard.
+- **Discount chrome, coupon codes, loyalty banners, tenure claims, press rows,
+  rented quizzes, scarcity-as-fact.** Standing rejects, all re-measured present
+  in this capture set, all unchanged.
+
+### The one thing we will do that none of them do
+
+**Pick the right frame automatically, every time, and let it reach the
+marketplace too.** Peepshow picks well because a person picks, one SKU at a
+time, and even then one card is a low-res package front. Spectrum picks well
+because a naming convention reminds a human what to upload. In The Groove does
+not pick at all. Not one site in this set has a rule *in code* that refuses to
+show a carton. We already wrote that rule and never called it. This cycle
+repaired the regex that was letting our own proven carton through it; wiring the
+selector into card art is the follow-on ticket, and then we do the thing none of
+them can attempt, which is pushing the same choice back into Shopify's media
+order so the Shop app sees the product instead of the box.
+
+### IA fence check
+
+Adopted items 4 to 7 are standing rules or measurements that change no markup.
+Adopted items 1 and 2 are a single code change at one existing conversion point
+that alters *which* image URL an existing card renders: no new section type, no
+Sanity schema change, no new URL or route, no change to the locked Nº 01 to
+Nº 11 shell. Adopted items 3 and 6 are catalog-side work on Shopify product data
+and touch no homepage surface. Nothing here implies a new route, so nothing goes
+to `tech-architect` this cycle. The two-link `/discover` cap is re-measured and
+**still breached at three**, a third consecutive week, re-handed to
+`homepage-ia` and Routine A; this delta adds no `/discover` link. The
+retired-route denylist is untouched. The doctrine §4 item 4 boundary question in
+"Applied to our page" item 4, whether a product's own printed label is case 1 or
+case 2, is raised as a question for the doctrine owner and is not resolved here.
+
+With GA4 far below the 300-sessions/week threshold, this cycle banks the
+imagery-generation items as design capital and spends only on the certain fixes.

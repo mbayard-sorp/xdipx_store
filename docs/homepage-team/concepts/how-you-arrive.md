@@ -119,3 +119,26 @@ payoff, `ctaLink` to `/products/{handle}`.
 Proposal only. Not scheduled. Filed so the next design cycle can adopt it (or a
 better idea it provokes) with the IA spec and additive schema already scoped
 here. No code, no route, no schema written this cycle.
+
+## RETIRED — 2026-10-07, Routine B run 1298 (ticket #12610)
+
+**This concept is retired. Do not build it, and do not count it against the
+banked-concept ceiling.**
+
+1. **Its sliders imply interpolation the data does not have.** A tempo × touch
+   slider promises a continuous space; the discovery index is discrete tags with
+   no ordering between them, so every intermediate position would have to be
+   faked or snapped. That is a fabricated-proof problem, not a UI detail.
+2. **It never passed a build-readiness data gate.** The other concepts on the
+   bench were all measured against live per-tag and per-combination counts; this
+   one never was, so it has no evidence it lands on products at all.
+3. **Its tempo axis has already been absorbed.** It became Q1 of
+   `either-or.md` — and that axis was then *weakened* from Pace to Register on
+   measurement, which is itself evidence that tempo is not a dimension this
+   catalog supports cleanly.
+
+A one-line note on the tempo vocabulary is folded into `either-or.md`, which is
+the doc that owns that axis now.
+
+Retained as a record of the reasoning, per the mission brief §9 requirement to
+log rejected concepts with reasons so ambition compounds instead of resetting.

@@ -61,3 +61,69 @@ describe('Navbar shell breakpoints — #11083 item B (fourth non-doctrine contai
     expect(src).not.toContain('max-w-6xl mx-auto px-4 h-14')
   })
 })
+
+/**
+ * #12612 defect 1 half A (design-critic, run 1298): every one of the eight
+ * desktop nav items rendered with an inline
+ * `style={{ fontFamily: 'var(--font-display)' }}`, putting the primary
+ * navigation in Newsreader. design-doctrine.md line 95 assigns Newsreader to
+ * "Headlines, pull-quotes, editorial display, italic emphasis" and gives
+ * DM Sans (`font-body`) "Body copy, **nav**, labels, CTA text".
+ *
+ * The mobile drawer carried the same five inline styles. Fixing only the
+ * desktop branches would have corrected the serif on the minority surface of a
+ * mobile-first storefront, so all eight sites go together.
+ *
+ * Source-text assertion, same precedent as the breakpoint guards above: the
+ * defect is which font family the nav inherits, which is a question about the
+ * shipped markup rather than a behavior a render assertion exercises.
+ */
+describe('Nav typography — every nav entry inherits font-body (#12612 defect 1)', () => {
+  const mega = read('./MegaMenu.tsx')
+  const navbar = read('./Navbar.tsx')
+
+  it('leaves no inline display-font override anywhere in MegaMenu', () => {
+    expect(mega).not.toContain("fontFamily: 'var(--font-display)'")
+  })
+
+  it('still renders the nav items it did before, so this was a font change only', () => {
+    expect(mega).toContain('{NEW_ARRIVALS.title}')
+    expect(mega).toContain('{item.title}')
+  })
+
+  it('boxes the childless nav Link like its button siblings', () => {
+    // Notebook is the only item without mega-menu children, so it is the only
+    // one rendered as an <a>. An inline <a> drops vertical padding out of
+    // layout while a <button> is inline-block and keeps it, which left one nav
+    // entry boxed differently from the other seven.
+    expect(mega).toContain("'inline-flex items-center px-3 py-1.5 rounded-full text-sm font-medium transition-all'")
+  })
+
+  /**
+   * The QA gate on run 1298 caught this one: fixing MegaMenu alone left the
+   * mobile drawer MIXED, because Navbar.tsx renders "Home" above the drawer's
+   * category accordion and "Search" below it, and both still carried the
+   * inline serif. The drawer read serif, sans, serif — worse than the
+   * consistent serif it started from. Whatever else this guard does, it has to
+   * span BOTH files, because the defect lives in the seam between them.
+   */
+  it('leaves no inline display-font override on the drawer nav entries', () => {
+    for (const label of ['Home', 'Search']) {
+      const at = navbar.indexOf(`>\n                    ${label}\n`)
+      expect(at, `drawer "${label}" link not found`).toBeGreaterThan(-1)
+      // The style prop, when present, sits within the element's opening tag,
+      // i.e. in the ~400 characters before the label text.
+      expect(navbar.slice(Math.max(0, at - 400), at)).not.toContain('var(--font-display)')
+    }
+  })
+
+  it('keeps the display font on the wordmark and the account heading, deliberately', () => {
+    // Doctrine line 95 assigns Newsreader to "Headlines, pull-quotes,
+    // editorial display". The logo lockup is a brand mark and the account
+    // dropdown's "Hi, <name>" is a heading; neither is a nav entry, so both
+    // keep the serif. Pinned so a future sweep does not strip them as though
+    // they were part of this fix.
+    expect(navbar).toContain("fontFamily: 'var(--font-display)'")
+    expect(navbar.match(/fontFamily: 'var\(--font-display\)'/g)).toHaveLength(3)
+  })
+})

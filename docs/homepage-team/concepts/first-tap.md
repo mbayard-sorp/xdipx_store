@@ -131,3 +131,14 @@ provokes, with the IA spec and additive schema already scoped here. No code, no
 route, no schema written this cycle. This cycle's shipped work is the separate,
 cheap-and-certain hardening of the same `/social` surface (in-stock featured
 pin, attributed primary PDP link, retired-tic hero copy) in the accompanying PR.
+
+## Bench-rank note — 2026-10-07, Routine B run 1298 (ticket #12610)
+
+**Kept banked, and explicitly NOT counted against the Nº 07 banked-concept
+ceiling.** This concept lives on `/social`, the Instagram arrival surface, and
+does not compete for the homepage Nº 07 discovery-instrument slot that
+`nothing-in-the-way`, `either-or` and `whos-holding-it` were ranked for. It is
+tracked separately.
+
+Unchanged blocker: it waits on Instagram traffic reaching the measurement floor.
+Nothing about the Nº 07 ranking advances or delays it.

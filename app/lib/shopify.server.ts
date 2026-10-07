@@ -595,7 +595,26 @@ export function looksLikePackaging(image: { url: string; altText?: string | null
  * a fine bare shot), only that nothing here confirms it, so it must not win
  * over a frame that carries no such doubt.
  */
-const NALPAC_UNLABELED_FIRST_FRAME_RE = /^\d+a\.[a-z0-9]+$/i
+/*
+ * Two shapes escaped the original `/^\d+a\.[a-z0-9]+$/i` and both are live
+ * (counted on the served homepage, 2026-10-07, run 1298):
+ *
+ *  - `53906A_b99c0cc4-868d-4e02-8564-5b63e28e43e1.jpg` — Shopify appends a
+ *    dedupe UUID when a filename collides on upload, which broke the `$`
+ *    anchor. 13 frames on the homepage carry one, and the frame proven to be
+ *    a retail carton (the Magic Wand Original: `53906A` is the box beside the
+ *    wand with "LEGENDARY PLUG-IN POWER" printed on it, `53906B` is the bare
+ *    wand) is one of them. The heuristic written to doubt exactly this frame
+ *    was passing it.
+ *  - `A01765A.jpg` — some Nalpac SKUs carry a letter prefix, which broke the
+ *    leading `\d`. 2 on the homepage.
+ *
+ * Still deliberately narrow: this says only that nothing CONFIRMS the frame is
+ * bare, never that it is packaging, so it must not outrank a frame carrying no
+ * such doubt. Widening it to any `<something>A.<ext>` would start doubting
+ * house assets like `jo-h2o-...-nobg.png`, which are confirmed bare.
+ */
+const NALPAC_UNLABELED_FIRST_FRAME_RE = /^[a-z]?\d+a(?:_[0-9a-f-]{8,})?\.[a-z0-9]+$/i
 
 function isUnconfirmedNalpacFirstFrame(image: { url: string; altText?: string | null }): boolean {
   if (image.altText && image.altText.trim()) return false
