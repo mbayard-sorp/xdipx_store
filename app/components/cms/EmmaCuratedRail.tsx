@@ -33,7 +33,12 @@ export function EmmaCuratedRail({ block, products, ground }: EmmaCuratedRailProp
         <div className={`${bgClass} pt-10`}>
           <div className="mx-auto max-w-[1320px] px-6 md:px-16">
             <p
-              className={`text-sm italic ${dark ? 'text-white/70' : 'text-ink-3'}`}
+              // max-w-[46ch] (ticket #14124): matches the hero body's measure
+              // cap. Without it this line takes the full 1320px band container
+              // (minus padding), which design-doctrine.md section 2 caps body
+              // text at ~60ch — measured live at ~175 characters per line
+              // across four published rails before this fix.
+              className={`max-w-[46ch] text-sm italic ${dark ? 'text-white/70' : 'text-ink-3'}`}
               style={{ fontFamily: 'var(--font-body)' }}
             >
               ♥ <span>{block.emmaAside}</span>

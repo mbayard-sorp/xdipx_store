@@ -1263,17 +1263,31 @@ function HomeNotebookRail({ posts }: { posts: NotebookCardLean[] }) {
     <section className="bg-paper py-16 md:py-20">
       <div className="mx-auto max-w-[1200px] px-6 md:px-16">
         <SectionNumeral n="10" className="mb-3 block" />
+        {/* Eyebrow + doctrine-scale H2 rendered here instead of inside
+            NotebookRail (ticket #14124): this is the only section on the page
+            with a numeral and no kicker, and the shared component's own
+            fixed text-xl heading is off the shipped H2 scale every other
+            section uses. "The xdipx Notebook" is not new copy — it is the
+            Notebook index page's own default kicker
+            (_layout.notebook._index.tsx), reused verbatim rather than
+            freshly voice-gated. */}
+        <p className="mb-3 text-[11px] uppercase tracking-[0.18em] text-ink-4" style={MONO}>
+          The xdipx Notebook
+        </p>
+        <h2 className="mb-4 text-[1.9rem] leading-[1.1] tracking-[-0.01em] text-ink md:text-[2.9rem]" style={DISPLAY}>
+          From the <em className="em">Notebook</em>
+        </h2>
         {/* The Notebook is ~21% of sessions with ~20 minutes of dwell and sold
             nothing: no way deeper into the archive, no way across to a product.
             It now shows six posts, a real see-all link, and a product chip on
             any post that embeds one. No urgency, just an open door. */}
         <NotebookRail
           posts={posts}
-          heading="From the Notebook"
           className=""
           seeAllHref="/notebook"
           seeAllLabel="More from the Notebook →"
           showProductChips
+          hideHeading
         />
       </div>
     </section>

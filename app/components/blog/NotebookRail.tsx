@@ -22,6 +22,7 @@ export function NotebookRail({
   seeAllHref = '/notebook',
   seeAllLabel,
   showProductChips = false,
+  hideHeading = false,
 }: {
   posts: NotebookCardLean[]
   heading?: string
@@ -36,18 +37,29 @@ export function NotebookRail({
    * inside it (nested anchors are invalid HTML).
    */
   showProductChips?: boolean
+  /**
+   * Skip this component's own compact `<h2>` (ticket #14124). For a caller
+   * that renders its own doctrine-scale eyebrow + heading immediately above
+   * (the homepage's `HomeNotebookRail` is the one call site that does), this
+   * component's fixed `text-xl` heading would be a second, off-scale heading
+   * for the same section. Default false, so every other call site (PDP,
+   * collections) is unchanged.
+   */
+  hideHeading?: boolean
 }) {
   if (!posts.length) return null
 
   return (
-    <section className={className} aria-labelledby="notebook-rail-heading">
-      <h2
-        id="notebook-rail-heading"
-        className="text-xl font-bold text-ink mb-4"
-        style={{ fontFamily: 'var(--font-display)' }}
-      >
-        {heading}
-      </h2>
+    <section className={className} {...(hideHeading ? {} : { 'aria-labelledby': 'notebook-rail-heading' })}>
+      {!hideHeading && (
+        <h2
+          id="notebook-rail-heading"
+          className="text-xl font-bold text-ink mb-4"
+          style={{ fontFamily: 'var(--font-display)' }}
+        >
+          {heading}
+        </h2>
+      )}
       <ul className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
         {posts.map(post => (
           <li key={post._id}>
