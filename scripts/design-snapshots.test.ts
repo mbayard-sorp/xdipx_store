@@ -198,30 +198,51 @@ describe('parseCurlHeaderDump', () => {
  * silent wrong answer the curl rewrite exists to prevent, one layer down.
  */
 describe('abortIsRenderCritical', () => {
-  it('treats a dropped script as render-critical', () => {
+  const SITE = 'https://xdipx.com'
+  const crit = (u: string, t: string) => abortIsRenderCritical(u, t, SITE)
+
+  it('treats a dropped first-party script as render-critical', () => {
     // With entry.client aborted the page never hydrates and the PNG still
     // looks fine, which is exactly why this cannot be shrugged off.
-    expect(abortIsRenderCritical('https://xdipx.com/assets/entry.client-eDgH7t3O.js', 'script')).toBe(true)
-    expect(abortIsRenderCritical('https://xdipx.com/assets/motion-DYP7mUpq.js', 'script')).toBe(true)
+    expect(crit('https://xdipx.com/assets/entry.client-eDgH7t3O.js', 'script')).toBe(true)
+    expect(crit('https://xdipx.com/assets/motion-DYP7mUpq.js', 'script')).toBe(true)
   })
 
   it('treats the document and stylesheets as render-critical', () => {
-    expect(abortIsRenderCritical('https://xdipx.com/', 'document')).toBe(true)
-    expect(abortIsRenderCritical('https://xdipx.com/assets/app-x.css', 'stylesheet')).toBe(true)
+    expect(crit('https://xdipx.com/', 'document')).toBe(true)
+    expect(crit('https://xdipx.com/assets/app-x.css', 'stylesheet')).toBe(true)
   })
 
-  it('does not fail a capture over a dropped image, font or video', () => {
+  it('treats a dropped font as render-critical, because the typeface is the thing being scored', () => {
+    // app.css defines metric-adjusted fallback faces, so a missing Newsreader
+    // renders a plausible page in the wrong typeface. Doctrine §2 is a
+    // judgement about typefaces, so that is a silently wrong capture.
+    expect(crit('https://xdipx.com/assets/newsreader-latin-wght-normal.woff2', 'font')).toBe(true)
+  })
+
+  it('does not fail a capture over a dropped image or video', () => {
     // A missing image leaves a visible gap the critic can see and judge, so it
     // degrades the capture honestly rather than silently.
-    expect(abortIsRenderCritical('https://cdn.shopify.com/s/files/1/0/53906B.jpg', 'image')).toBe(false)
-    expect(abortIsRenderCritical('https://xdipx.com/assets/newsreader.woff2', 'font')).toBe(false)
-    expect(abortIsRenderCritical('https://xdipx.com/hero.mp4', 'media')).toBe(false)
+    expect(crit('https://cdn.shopify.com/s/files/1/0/53906B.jpg', 'image')).toBe(false)
+    expect(crit('https://xdipx.com/hero.mp4', 'media')).toBe(false)
+  })
+
+  it('does not fail a capture over a THIRD-PARTY script', () => {
+    // gtag, GTM and Klaviyo are resourceType 'script' but change nothing the
+    // critic scores, so failing the gate on an analytics bundle would only
+    // make it flaky.
+    expect(crit('https://www.googletagmanager.com/gtag/js?id=G-X', 'script')).toBe(false)
+    expect(crit('https://static.klaviyo.com/onsite/js/klaviyo.js', 'script')).toBe(false)
+    expect(crit('https://cdn.sanity.io/x.css', 'stylesheet')).toBe(false)
   })
 
   it('does not fail a capture over analytics beacons and XHR', () => {
-    // The original doc comment's own case: a third-party beacon that will not
-    // load must not blank the page or fail the run.
-    expect(abortIsRenderCritical('https://www.google-analytics.com/g/collect', 'xhr')).toBe(false)
-    expect(abortIsRenderCritical('https://xdipx.com/api/x', 'fetch')).toBe(false)
+    expect(crit('https://www.google-analytics.com/g/collect', 'xhr')).toBe(false)
+    expect(crit('https://xdipx.com/api/x', 'fetch')).toBe(false)
+  })
+
+  it('treats an unparseable url as non-critical rather than throwing', () => {
+    expect(crit('data:text/javascript,void 0', 'script')).toBe(false)
+    expect(crit('not a url', 'document')).toBe(false)
   })
 })

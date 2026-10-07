@@ -280,6 +280,10 @@ export async function curlFetch(req: {
     // an HTTP error is a real answer and curl exits 0 for it, so nothing here
     // retries a 403 or a 404.
     const RETRYABLE = new Set([7, 35, 52, 56])
+    // Only idempotent methods. Exits 52 and 56 can occur after the server has
+    // already seen the request, so retrying a POST (an analytics beacon fired
+    // during the page load) could deliver it twice to production.
+    const idempotent = req.method === 'GET' || req.method === 'HEAD'
     let lastErr: unknown
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
@@ -289,7 +293,7 @@ export async function curlFetch(req: {
       } catch (err) {
         lastErr = err
         const code = (err as { code?: number }).code
-        if (typeof code !== 'number' || !RETRYABLE.has(code)) throw err
+        if (!idempotent || typeof code !== 'number' || !RETRYABLE.has(code)) throw err
         await new Promise(r => setTimeout(r, 150 * (attempt + 1)))
       }
     }
@@ -310,9 +314,26 @@ export async function curlFetch(req: {
  * the QA gate on run 1298, which saw real captures abort `entry.client`,
  * `motion`, `OptimizedImage` and others and still write a file and exit 0.
  */
-export function abortIsRenderCritical(url: string, resourceType: string): boolean {
-  if (resourceType === 'image' || resourceType === 'font' || resourceType === 'media') return false
-  return resourceType === 'document' || resourceType === 'script' || resourceType === 'stylesheet'
+export function abortIsRenderCritical(url: string, resourceType: string, base: string = BASE): boolean {
+  if (resourceType === 'image' || resourceType === 'media') return false
+  // Third-party scripts (gtag, GTM, Klaviyo) are `script` too, and none of them
+  // changes what the critic scores, so failing the capture over an analytics
+  // bundle would just make the gate flaky. First-party only.
+  if (!isSameOrigin(url, base)) return false
+  // Fonts are critical despite being an asset: app.css defines metric-adjusted
+  // fallback faces, so a dropped Newsreader renders a plausible page in the
+  // wrong typeface, and the typeface IS what doctrine §2 is judging. Same
+  // "looks fine, silently wrong" class as a dropped script.
+  return resourceType === 'document' || resourceType === 'script'
+    || resourceType === 'stylesheet' || resourceType === 'font'
+}
+
+function isSameOrigin(url: string, base: string): boolean {
+  try {
+    return new URL(url).origin === new URL(base).origin
+  } catch {
+    return false
+  }
 }
 
 /**
@@ -451,7 +472,7 @@ async function main(): Promise<number> {
 
   mkdirSync(OUT, { recursive: true })
   process.stderr.write(`capturing ${ROUTES.length} route(s) x ${viewports.length} viewport(s) from ${BASE} -> ${OUT}\n`)
-  process.stderr.write(`transport: ${VIA_FETCH ? 'node fetch (via-fetch)' : 'chromium direct'}\n`)
+  process.stderr.write(`transport: ${VIA_FETCH ? 'curl (via-fetch)' : 'chromium direct'}\n`)
 
   let failures = 0
   for (const vp of viewports) {
