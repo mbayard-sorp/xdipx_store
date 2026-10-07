@@ -148,3 +148,56 @@ describe('pickBareProductImage: unlabeled Nalpac first frame (#11028)', () => {
     expect(pick.fellBack).toBe(false)
   })
 })
+
+/**
+ * #12612 / teardown run 1298. `NALPAC_UNLABELED_FIRST_FRAME_RE` was
+ * `/^\d+a\.[a-z0-9]+$/i`, which two live filename shapes walked straight past.
+ * Counted on the served homepage 2026-10-07: 13 frames carry a Shopify dedupe
+ * UUID and 2 carry a letter prefix, so 15 of the A-frames the heuristic exists
+ * to doubt were being treated as confidently bare.
+ *
+ * The anchor case is the Magic Wand Original, verified by downloading both
+ * frames this run: 53906A is the retail carton lying beside the wand with
+ * "LEGENDARY PLUG-IN POWER" printed across it, and 53906B is the bare wand on
+ * white. The defect and its fix were two files apart in one media list.
+ */
+describe('unlabeled Nalpac first frame — filename shapes that escaped the doubt (#12612)', () => {
+  const frame = (url: string) => ({ url: `https://cdn.shopify.com/s/files/1/0/${url}`, altText: null })
+
+  it('doubts a UUID-suffixed A frame and picks the B sibling instead', () => {
+    const got = pickBareProductImage([
+      frame('53906A_b99c0cc4-868d-4e02-8564-5b63e28e43e1.jpg'),
+      frame('53906B_a65aa18f-1111-4e02-8564-5b63e28e43e1.jpg'),
+    ])
+    expect(got.url).toContain('53906B')
+    expect(got.fellBack).toBe(false)
+  })
+
+  it('doubts a letter-prefixed A frame and picks the B sibling instead', () => {
+    const got = pickBareProductImage([frame('A01765A.jpg'), frame('A01765B.jpg')])
+    expect(got.url).toContain('A01765B')
+    expect(got.fellBack).toBe(false)
+  })
+
+  it('still flags the fallback when the doubted A frame is all there is', () => {
+    const got = pickBareProductImage([frame('53906A_b99c0cc4-868d-4e02-8564-5b63e28e43e1.jpg')])
+    expect(got.url).toContain('53906A')
+    expect(got.fellBack).toBe(true)
+  })
+
+  it('does not doubt a UUID-suffixed B frame, which is the bare-product convention', () => {
+    const got = pickBareProductImage([
+      frame('53906B_a65aa18f-1111-4e02-8564-5b63e28e43e1.jpg'),
+      frame('53906C_cccccccc-2222-4e02-8564-5b63e28e43e1.jpg'),
+    ])
+    expect(got.url).toContain('53906B')
+    expect(got.fellBack).toBe(false)
+  })
+
+  it('does not doubt a house asset whose name merely ends in a letter', () => {
+    // Widening the pattern to any <something>A.<ext> would start doubting
+    // confirmed-bare house exports like the background-removed lube bottles.
+    const got = pickBareProductImage([frame('jo-h2o-original-water-based-lubricant-4-oz-nobg.png')])
+    expect(got.fellBack).toBe(false)
+  })
+})

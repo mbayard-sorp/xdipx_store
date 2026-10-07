@@ -602,3 +602,58 @@ The count-check gate is **CLOSED**. Remaining, in order:
 Net: Either/Or moves from "axes unverified" to **"axes verified against live data,
 one axis corrected, architecture simplified, gate closed"** — blocked now only on an IA
 slot decision and copy, neither of which needs another data probe.
+
+## Bench-rank decision — 2026-10-07, Routine B run 1298 (ticket #12610)
+
+**Ranked SECOND (runner-up) of the three concepts competing for the single
+Nº 07 discovery-instrument slot**, behind `nothing-in-the-way.md` and ahead of
+`whos-holding-it.md`. The winner holds the slot; this doc is the named fallback.
+
+**What it won on.** It is the cheapest of the three on data and copy (~11
+voice-gated strings against the winner's ~14 and `whos-holding-it`'s ~28) and it
+has the best-documented architecture of the three — its 2026-09-02 build spec
+already removed the resource route and `useFetcher` and resolves all eight
+outcome sets at payload-build time, which is the correction the winner still
+needs applied to its own spec.
+
+**Why it lost, in order:**
+
+1. It duplicates the incumbent Curiosity Shelf's input, which is appetite. The
+   winner takes the visitor's hesitation instead, so it adds a capability rather
+   than re-skinning one.
+2. It needs the only genuinely new interaction pattern of the three: a stateful
+   stepper (question stage, progress dots, reveal, reset).
+3. Its Q1 was weakened from Pace to Register, so Sensual versus Bold is no
+   longer a real duality, and the card copy has to stay honest to intensity.
+4. It leans on the same unaudited `In-Charge` / `Surrendered` tags as
+   `whos-holding-it`.
+
+**Gate durability: mid.** 8 of 8 combinations pass, but three cells sit at
+exactly 5, all on the thinnest Solo arm, and the probe dates from 2026-09-02
+against a ~4,954-product index now at ~5,250. This gate has already failed once
+on a co-occurrence it did not foresee (`Slow-And-Intimate` returned 0), which
+makes it the proven-fragile kind rather than the untested kind.
+
+**Fence finding that binds any build of this concept.** Its "See the full fit"
+link to a `fallbackCollection` **breaks the owner's destination-continuity rule**
+(mission brief §1, all-hands 2026-07-30): no collection contains the three
+revealed products, because nothing holds "Sensual and solo and surrendered". A
+See-all whose destination does not contain the module's own set is a
+definition-of-done failure. **Build it with no See-all** — the other two concepts
+already ship none.
+
+**Promotion trigger.** This doc takes the Nº 07 slot if the winner's pre-build
+re-measure leaves more than one cell under 4, or if `emma-empathy-reviewer`
+rejects the winner's worry-framing.
+
+**Outstanding before any build:** the slot sign-off (open since 2026-09-02),
+copy through the voice gate, a re-run of the combination matrix with dedupe, and
+the shared `In-Charge`/`Surrendered` tag audit below.
+
+**Shared audit, run it once.** This doc's Q3 and `whos-holding-it`'s stance axis
+both depend on `In-Charge` and `Surrendered`. A single 20-product audit of those
+two tags either unblocks or kills both concepts.
+
+**Also folded in here (2026-10-07):** `how-you-arrive.md` is retired, and its
+tempo-vocabulary thinking belongs to this doc's Q1, which is the axis that
+absorbed it.

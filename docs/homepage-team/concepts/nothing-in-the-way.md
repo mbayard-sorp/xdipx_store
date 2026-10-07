@@ -421,3 +421,70 @@ generated images written this cycle. The build-readiness gate is **passed on
 data**: 30 reachable states measured, 30 PASS, one candidate pole excluded on
 measurement. Next step if adopted is a named spec through `homepage-ia`, then an
 additive `worryShelf` block, then `rr7-engineer` behind the reviewed-PR path.
+
+## 13. Bench-rank decision — 2026-10-07, Routine B run 1298 (ticket #12610)
+
+**Ranked FIRST of the three concepts competing for the single Nº 07
+discovery-instrument slot.** `homepage-ia` bench-ranked this doc against
+`either-or.md` and `whos-holding-it.md` because all three had passed their
+build-readiness data gates and all three proposed to be the second renderer in
+the same slot, where only one can ever render. Ranking a winner is what stops a
+later cycle building whichever concept happened to be measured last.
+
+**Why it won.** It is the only one of the three whose input is the visitor's
+hesitation rather than their appetite, so it is orthogonal to the shipped
+Curiosity Shelf instead of a re-skin of it (the Shelf's five lanes are all
+appetite). It has the most durable gate: 30 of 30 reachable states pass, only
+one cell is under 10, and its poles are product-attribute `matters` tags rather
+than editorial mood adjectives. It has the simplest additive schema of the three.
+
+**The honest case against it, recorded so the build inherits it and not just the
+verdict:**
+
+- The chips are negative-framed. Worry copy on an owned channel running
+  desire-forward at 9 is a real voice risk, and `emma-empathy-reviewer` must
+  rule on the framing before any build, not after.
+- Most `matters` poles barely narrow anything: `Easy To Clean` is ~42% of the
+  catalog, `Beginner-Friendly` ~31%. For those poles the shelf is mostly the
+  scorer's ranking, not the tag. This doc charges that same defect to
+  `whos-holding-it` (§11.2) and did not charge it to itself.
+- The per-pole mechanics sentence is a fabricated-proof trap: it must be sourced
+  from real product data, yet one sentence per pole cannot be evidenced per
+  product. The honest version is vaguer than the pitch.
+- `Discreet` is a packaging/appearance claim and the chip says "nowhere to keep
+  it" — the tag semantics are unverified against the label's promise.
+- It displaces a working incumbent with no evidence the incumbent
+  underperforms, and nothing here is GA4-measurable below 300 sessions/week.
+- The thinnest pole (`Whisper-Quiet`, ~100 products) is also the most
+  emotionally resonant chip, so the best chip is the first to break.
+
+**Fallback trigger.** Promote `either-or` to the slot if the pre-build
+re-measure leaves more than one cell under 4, or if the voice gate rejects
+worry-framing.
+
+**Spec corrections carried by this ranking:**
+
+1. **Pre-resolve all 30 states server-side at SSR**, the way
+   `whos-holding-it.md` and the shipped Curiosity Shelf already do. That removes
+   the `/api/discovery` fetch-on-tap this doc sketched, which is the only "new
+   machinery" it imposed, along with its fetcher, loading and error states. Cost
+   is a payload of roughly 60-90 deduped products, comparable to the shipped
+   shelf.
+2. **The ground rule in this doc is worded too tightly and is not a blocker.**
+   It says the band must not sit adjacent to `plum-soft` or `paper-2`; Nº 06 is
+   `paper-2`, so read literally Nº 07 fails. Doctrine §1 only forbids two
+   *adjacent* sections sharing the same ground, so inheriting Nº 07's
+   `plum-soft` between `paper-2` and `paper-3` is compliant. Fix the wording,
+   not the slot.
+3. **Re-measure the thin cells with dedupe before build.** The matrix counts
+   items at max score across 4 rails capped at 12 per rail and does not state
+   that the count is of *distinct* products. Every cell at 3-5 needs a deduped
+   re-measure.
+4. **The probe is stale.** The 30-state matrix dates from 2026-09-16 against a
+   ~4,954-product index; the index is now ~5,250 and moves with imports and
+   stock. Step one of any build is re-running the matrix.
+
+**Not scheduled, and not prototyped this cycle.** Per the banked-concept-ceiling
+accounting in the same run, the cycle's code budget went to the #12612 doctrine
+fixes (a few lines each, against a live page the critic gate scored REVISE) and
+the traffic gate stands. See `routine-design-cycle.md` §1.

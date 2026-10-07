@@ -33,7 +33,23 @@ export function panelSquareRowMdColsClass(itemCount: number): string {
     case 1: return 'md:grid-cols-1'
     case 2: return 'md:grid-cols-2'
     case 3: return 'md:grid-cols-3'
-    default: return 'md:grid-cols-4'
+    // Above 4, a fixed 4-up reproduces the very defect the cases above fix,
+    // one row down (ticket #12612 defect 3, design-critic run 1298): the live
+    // deck serves SIX squares, so row 1 takes four and row 2 takes two,
+    // leaving a measured 589x232px void of bare paper-2 at 1440 — and the two
+    // tiles stranded in it are "Last Chance" and "Couples", the same pair this
+    // function's own comment names as the original #8419 symptom. Nothing
+    // backfills the hole: two further grids sit below it. So pick the widest
+    // column count that divides the row evenly rather than assuming 4.
+    // 5 and 7 have no even divisor at 3 or 4 and still strand one tile; they
+    // stay 4-up deliberately rather than being special-cased into a thin
+    // 5-column row that would render ~150px tiles at md. Mission brief §11c
+    // caps the deck at 4 squares anyway, so every count above 4 is already
+    // over the cap and the grid is degrading toward the rule, not encoding a
+    // new one.
+    default: return itemCount % 4 === 0 ? 'md:grid-cols-4'
+      : itemCount % 3 === 0 ? 'md:grid-cols-3'
+      : 'md:grid-cols-4'
   }
 }
 

@@ -60,6 +60,7 @@ import { EMMA_VOICE_SOCIAL, EMMA_VOICE_LINKEDIN } from './emma-voice.server'
 import { runDeterministicPublishChecks, type GatePlatform, type GateFinding } from './social-publish-gate.server'
 import { stripUrlQuery } from './social-asset-library.server'
 import { getAssetAdjudication, type AssetAdjudicationRow } from './social-asset-adjudication.server'
+import { getSocialMixReport, formatSocialMixReportLines } from './social-mix-report.server'
 import { SOCIAL_PLATFORMS } from './team-keys'
 import { getProductHandleById, getProductByHandle } from './shopify.server'
 import { logApiTokens } from './token-log.server'
@@ -512,6 +513,22 @@ export function describeAssetAdjudications(adjudications: readonly AssetAdjudica
   )
 }
 
+/**
+ * Labels the row's `imageBrief` (which, on a product post, should open with
+ * a Writers Room STORY LINE block) and `subject` for the gate brief (ticket
+ * #14110). `'' ` when neither is set, so the caller's optional-block pattern
+ * omits it cleanly rather than printing an empty heading.
+ */
+export function describeImageBrief(imageBrief: string | null, subject: string | null): string {
+  if (!imageBrief && !subject) return ''
+  return (
+    'IMAGE BRIEF (the `imageBrief`/`subject` fields stored on this row, verbatim). On a product post this ' +
+    'should open with a STORY LINE block (Moment/Set/Cue); judge the frame against it per the `no-story` check:\n' +
+    `${subject ? `Subject: ${subject}\n` : ''}` +
+    `${imageBrief ?? '(no imageBrief set)'}`
+  )
+}
+
 export const PUBLISH_GATE_SYSTEM = `You are the independent pre-publish gate for one xdipx.com social post, standing
 in for social-publish-gate where no subagent can be spawned. You are adversarial by design: find
 the reason this should not ship, not confirmation that it is fine. You do not know why the drafter
@@ -821,6 +838,12 @@ export async function preparePublishGate(
       tweetText: socialPosts.tweetText,
       mediaUrls: socialPosts.mediaUrls,
       altText: socialPosts.altText,
+      // #14110: the brief handed to a spawned social-publish-gate subagent
+      // must carry the row's own imageBrief/subject so its `no-story` and
+      // `subject-not-depicted` checks (which read these fields per the
+      // agent definition) have something real to read instead of nothing.
+      imageBrief: socialPosts.imageBrief,
+      subject: socialPosts.subject,
       status: socialPosts.status,
       reviewStatus: socialPosts.reviewStatus,
       shopifyProductId: socialPosts.shopifyProductId,
@@ -978,6 +1001,13 @@ export async function preparePublishGate(
     )
   }
 
+  // #14110: the rolling mix report, as real per-platform data (never a
+  // "supplied above" placeholder sentence). getSocialMixReport() never
+  // throws; a read failure degrades to an UNKNOWN bundle, which still
+  // prints real lines rather than nothing.
+  const mixReportBundle = await getSocialMixReport()
+  const mixReportBlock = formatSocialMixReportLines(mixReportBundle[platform]).join('\n')
+
   const content = buildPublishGateUserContent({
     platform,
     tweetText: post.tweetText,
@@ -990,6 +1020,8 @@ export async function preparePublishGate(
     packshotUrl,
     assetPrecedentBlock: describeAssetReusePrecedent(assetPrecedent),
     adjudicationBlock: describeAssetAdjudications(adjudications),
+    storyLineBlock: describeImageBrief(post.imageBrief, post.subject),
+    mixReportBlock,
   })
 
   return {
@@ -1276,6 +1308,21 @@ export function buildPublishGateUserContent(input: {
   assetPrecedentBlock?: string
   /** Owner-adjudication grounding block (ticket #10503), or '' when there is none on file. */
   adjudicationBlock?: string
+  /**
+   * The row's `imageBrief`/`subject`, labeled (ticket #14110), or '' when
+   * neither is set. `social-publish-gate.md`'s `no-story` and
+   * `subject-not-depicted` checks read these fields by name; without this
+   * block the subagent brief carried nothing for either check to judge.
+   */
+  storyLineBlock?: string
+  /**
+   * The rolling mix report for this platform, as real formatted lines
+   * (ticket #14110), or '' when unavailable. The agent definition's
+   * too-tame/close-crop guidance tells the reviewer to "read the rolling
+   * mix before ruling on charge or crop" — this is that data, not a
+   * "supplied above" placeholder sentence.
+   */
+  mixReportBlock?: string
 }): Anthropic.ContentBlockParam[] {
   const packshotNote = input.featuresProduct
     ? input.packshotUrl
@@ -1300,6 +1347,8 @@ export function buildPublishGateUserContent(input: {
         `${packshotNote ? `${packshotNote}\n\n` : ''}` +
         `${input.assetPrecedentBlock ? `${input.assetPrecedentBlock}\n\n` : ''}` +
         `${input.adjudicationBlock ? `${input.adjudicationBlock}\n\n` : ''}` +
+        `${input.storyLineBlock ? `${input.storyLineBlock}\n\n` : ''}` +
+        `${input.mixReportBlock ? `${input.mixReportBlock}\n\n` : ''}` +
         `${input.mediaUrls.length} generated candidate image(s) follow${input.packshotUrl ? ' after the packshot' : ''}.`,
     },
     ...(input.packshotUrl

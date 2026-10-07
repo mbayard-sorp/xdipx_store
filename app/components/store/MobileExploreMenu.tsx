@@ -248,9 +248,13 @@ export function MobileExploreMenu({ menuItems }: MobileExploreMenuProps) {
         )}
       </AnimatePresence>
 
-      {/* Tab bar — always visible, anchored to the bottom edge */}
+      {/* Tab bar — always visible, anchored to the bottom edge. px-6 (ticket
+          #14124): the doctrine's standard band inset every other element on
+          the page respects — without it the first tab's label sits flush
+          against the viewport edge at 375px (measured trimmed bbox x=0 to
+          x=357, no gutter at all). */}
       <nav
-        className="fixed inset-x-0 bottom-0 z-[55] flex items-stretch border-t border-line bg-paper"
+        className="fixed inset-x-0 bottom-0 z-[55] flex items-stretch border-t border-line bg-paper px-6"
         style={{
           height: `calc(${TAB_BAR_HEIGHT}px + env(safe-area-inset-bottom))`,
           paddingBottom: 'env(safe-area-inset-bottom)',

@@ -411,7 +411,6 @@ export function Navbar({ logoUrl, logoAlt = 'xdipx', menuItems = [], megaMenuBan
                         ? 'bg-cream-2 text-sage font-semibold'
                         : 'text-ink hover:bg-cream-2 hover:text-sage',
                     ].join(' ')}
-                    style={{ fontFamily: 'var(--font-display)' }}
                   >
                     Home
                   </Link>
@@ -427,7 +426,6 @@ export function Navbar({ logoUrl, logoAlt = 'xdipx', menuItems = [], megaMenuBan
                     to="/search"
                     onClick={() => setDrawerOpen(false)}
                     className="flex items-center gap-2 py-3 text-base font-medium text-ink/80 hover:text-sage transition-colors"
-                    style={{ fontFamily: 'var(--font-display)' }}
                   >
                     Search
                   </Link>
