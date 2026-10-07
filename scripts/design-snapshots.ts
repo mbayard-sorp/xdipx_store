@@ -43,9 +43,14 @@
  */
 
 import 'dotenv/config'
-import { existsSync, mkdirSync } from 'node:fs'
+import { execFile } from 'node:child_process'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { promisify } from 'node:util'
 import { chromium, type BrowserContext, type Route } from '@playwright/test'
+
+const execFileAsync = promisify(execFile)
 
 const argv = process.argv.slice(2)
 function flag(name: string): string | undefined {
@@ -168,21 +173,117 @@ function routeName(route: string): string {
 async function fulfilFromNodeFetch(route: Route): Promise<void> {
   const request = route.request()
   try {
-    const response = await fetch(request.url(), {
+    const response = await curlFetch({
+      url: request.url(),
       method: request.method(),
       headers: request.headers(),
-      body: request.postDataBuffer() ?? undefined,
-      redirect: 'follow',
+      body: request.postDataBuffer(),
     })
     await route.fulfill({
       status: response.status,
       headers: sanitizeResponseHeaders(response.headers),
-      body: Buffer.from(await response.arrayBuffer()),
+      body: response.body,
     })
   } catch (err) {
     process.stderr.write(`  via-fetch abort ${request.url()}: ${(err as Error).message}\n`)
     await route.abort().catch(() => {})
   }
+}
+
+/**
+ * Request headers we never forward to curl. `host` and the `content-length`
+ * family describe a connection and a body curl re-derives itself; forwarding
+ * them produces a request that contradicts the one actually sent.
+ * `accept-encoding` is dropped so curl negotiates its own and `--compressed`
+ * hands back decoded bytes, which is the state `sanitizeResponseHeaders`
+ * already assumes when it strips `content-encoding` off the response.
+ */
+const DROPPED_REQUEST_HEADERS = /^(host|content-length|accept-encoding|connection|keep-alive|upgrade|proxy-.*)$/i
+
+/** Parse curl's `-D` dump into the last response's status and headers. */
+export function parseCurlHeaderDump(dump: string): { status: number; headers: [string, string][] } {
+  // `-L` appends one block per hop; the capture is the final hop's.
+  const blocks = dump.split(/\r?\n\r?\n/).map(b => b.trim()).filter(Boolean)
+  const last = blocks[blocks.length - 1] ?? ''
+  const lines = last.split(/\r?\n/)
+  const statusLine = lines.shift() ?? ''
+  const status = Number(/^HTTP\/[\d.]+\s+(\d{3})/.exec(statusLine)?.[1] ?? 0)
+  const headers: [string, string][] = []
+  for (const line of lines) {
+    const idx = line.indexOf(':')
+    if (idx > 0) headers.push([line.slice(0, idx).trim().toLowerCase(), line.slice(idx + 1).trim()])
+  }
+  return { status, headers }
+}
+
+/**
+ * One request, served by the `curl` binary instead of Node's `fetch`.
+ *
+ * Why this is not `fetch` (run 1298, 2026-10-07). The previous implementation
+ * called Node's built-in fetch (undici). Vercel's bot protection now answers
+ * undici with a 403 "This request was blocked" edge page, while `curl` from the
+ * same machine, through the same agent proxy, gets a clean 200. Reproduced
+ * directly and it is independent of `user-agent` and `accept` (both were
+ * forwarded verbatim and still 403'd), so it is a TLS-fingerprint block that no
+ * header can talk its way past.
+ *
+ * The failure mode is the reason this matters more than it looks: chromium
+ * rendered the 403 page and the CLI wrote three PNGs and printed `done`, so a
+ * blocked capture is indistinguishable from a successful one unless somebody
+ * opens the file. Run 1298 handed three such PNGs to the design-critic gate
+ * before noticing they were 98.5% white. `assertNotBlocked` below now fails the
+ * capture loudly instead, because a silent wrong answer costs a whole cycle.
+ *
+ * curl also already trusts the agent-proxy CA, which is the same reason the
+ * via-fetch transport exists at all: chromium's own stack cannot (see
+ * `shouldUseFetchTransport`).
+ */
+export async function curlFetch(req: {
+  url: string
+  method: string
+  headers: Record<string, string>
+  body?: Buffer | null
+}): Promise<{ status: number; headers: [string, string][]; body: Buffer }> {
+  const dir = mkdtempSync(join(tmpdir(), 'design-snap-'))
+  const bodyPath = join(dir, 'body')
+  const headerPath = join(dir, 'headers')
+  const postPath = join(dir, 'post')
+  try {
+    const args = [
+      '--silent', '--show-error',
+      '--location', '--max-redirs', '10',
+      '--compressed',
+      '--max-time', '60',
+      '--output', bodyPath,
+      '--dump-header', headerPath,
+      '--request', req.method,
+    ]
+    for (const [k, v] of Object.entries(req.headers)) {
+      if (!DROPPED_REQUEST_HEADERS.test(k)) args.push('--header', `${k}: ${v}`)
+    }
+    if (req.body?.length) {
+      const { writeFileSync } = await import('node:fs')
+      writeFileSync(postPath, req.body)
+      args.push('--data-binary', `@${postPath}`)
+    }
+    args.push('--url', req.url)
+    await execFileAsync('curl', args, { maxBuffer: 1024 * 1024 })
+    const { status, headers } = parseCurlHeaderDump(readFileSync(headerPath, 'utf8'))
+    return { status, headers, body: readFileSync(bodyPath) }
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+}
+
+/**
+ * Edge-block signature of a captured document (run 1298). Vercel's bot wall
+ * answers with a ~7 KB HTML page carrying this exact heading, and chromium
+ * renders it perfectly happily, so without this check the CLI reports success
+ * and writes a screenshot of an error page.
+ */
+export function looksLikeEdgeBlock(status: number, html: string): boolean {
+  if (status === 200) return false
+  return /This request was blocked|\b403 FORBIDDEN\b/i.test(html)
 }
 
 async function launchBrowser() {
@@ -221,12 +322,8 @@ async function preparedContext(width: number, height: number): Promise<BrowserCo
     )
   })
   if (VIA_FETCH) {
-    // Node only honours HTTPS_PROXY in the global fetch dispatcher when this is
-    // set, and it is read when that dispatcher is first built. Setting it here
-    // is still before this process's first fetch (nothing fetches until a page
-    // requests something) and keeps the module free of import-time side
-    // effects, so the test file can import it cleanly.
-    process.env['NODE_USE_ENV_PROXY'] ??= '1'
+    // The transport is curl, which reads the proxy environment itself, so the
+    // NODE_USE_ENV_PROXY shim the old undici path needed is gone with it.
     await context.route('**/*', fulfilFromNodeFetch)
   }
   return context
@@ -235,7 +332,18 @@ async function preparedContext(width: number, height: number): Promise<BrowserCo
 async function capture(context: BrowserContext, route: string, file: string): Promise<void> {
   const page = await context.newPage()
   try {
-    await page.goto(`${BASE}${route}`, { waitUntil: 'networkidle', timeout: 60_000 })
+    const response = await page.goto(`${BASE}${route}`, { waitUntil: 'networkidle', timeout: 60_000 })
+    // A bot wall renders fine, so a blocked document would otherwise be written
+    // out as a perfectly valid screenshot of an error page and reported as a
+    // success (run 1298 handed three of those to the design-critic gate). Fail
+    // the capture instead: a missing file is obvious, a wrong one is not.
+    const status = response?.status() ?? 0
+    if (looksLikeEdgeBlock(status, await page.content())) {
+      throw new Error(
+        `${BASE}${route} answered ${status} with an edge block page, not the site. ` +
+        `The capture transport is being refused upstream; no screenshot written.`,
+      )
+    }
     // Kill residual animation noise.
     await page.addStyleTag({
       content: '*,*::before,*::after{animation-duration:0s!important;transition-duration:0s!important}',
