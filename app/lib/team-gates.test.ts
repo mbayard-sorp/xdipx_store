@@ -14,6 +14,7 @@ import {
   computePublishGateContentHash,
   describeAssetAdjudications,
   describeAssetReusePrecedent,
+  describeImageBrief,
   formatProductIdentityLogLine,
   isImageLevelFinding,
   parsePublishGateModelOutput,
@@ -423,6 +424,65 @@ describe('buildPublishGateUserContent (ticket #8823, product-identity hallucinat
 
     const withoutAdjudication = buildPublishGateUserContent({ ...base, featuresProduct: true, packshotUrl: null })
     expect((withoutAdjudication[0] as { text: string }).text).not.toContain('OWNER_ADJUDICATION_BLOCK')
+  })
+
+  // Ticket #14110: the brief handed to a spawned social-publish-gate subagent
+  // omitted the row's imageBrief/subject (the STORY LINE block the agent
+  // definition's no-story/subject-not-depicted checks read by name) and the
+  // mix report, even though the drafting-routine instruction text implied
+  // this data was "supplied above". These assert both are now real data in
+  // postText when supplied, and cleanly absent when not.
+  it('includes the STORY LINE / imageBrief block (ticket #14110) when supplied, omits it entirely when not', () => {
+    const withStoryLine = buildPublishGateUserContent({
+      ...base,
+      featuresProduct: true,
+      packshotUrl: null,
+      storyLineBlock: 'STORY_LINE_BLOCK',
+    })
+    expect((withStoryLine[0] as { text: string }).text).toContain('STORY_LINE_BLOCK')
+
+    const withoutStoryLine = buildPublishGateUserContent({ ...base, featuresProduct: true, packshotUrl: null })
+    expect((withoutStoryLine[0] as { text: string }).text).not.toContain('STORY_LINE_BLOCK')
+  })
+
+  it('includes the mix-report block (ticket #14110) when supplied, omits it entirely when not', () => {
+    const withMixReport = buildPublishGateUserContent({
+      ...base,
+      featuresProduct: true,
+      packshotUrl: null,
+      mixReportBlock: 'MIX_REPORT_BLOCK',
+    })
+    expect((withMixReport[0] as { text: string }).text).toContain('MIX_REPORT_BLOCK')
+
+    const withoutMixReport = buildPublishGateUserContent({ ...base, featuresProduct: true, packshotUrl: null })
+    expect((withoutMixReport[0] as { text: string }).text).not.toContain('MIX_REPORT_BLOCK')
+  })
+})
+
+describe('describeImageBrief (ticket #14110)', () => {
+  it('returns "" when neither imageBrief nor subject is set, so the caller omits the block cleanly', () => {
+    expect(describeImageBrief(null, null)).toBe('')
+  })
+
+  it('labels the imageBrief verbatim, including a Writers Room STORY LINE block', () => {
+    const storyLine = 'STORY LINE womanizer-next-sage, jade\n  Moment: ANTICIPATION.\n  Set: her bed.\n  Cue: the lamp light.\n'
+    const block = describeImageBrief(storyLine, null)
+    expect(block).toContain(storyLine)
+    expect(block).toContain('STORY LINE')
+    expect(block).not.toContain('Subject:')
+  })
+
+  it('includes the subject line when set, ahead of the imageBrief', () => {
+    const block = describeImageBrief('a cast member holding the toy in a kitchen', 'toy care')
+    expect(block).toContain('Subject: toy care')
+    expect(block).toContain('a cast member holding the toy in a kitchen')
+    expect(block.indexOf('Subject:')).toBeLessThan(block.indexOf('a cast member holding the toy in a kitchen'))
+  })
+
+  it('states plainly when imageBrief is unset but subject is', () => {
+    const block = describeImageBrief(null, 'toy care')
+    expect(block).toContain('Subject: toy care')
+    expect(block).toContain('(no imageBrief set)')
   })
 })
 
