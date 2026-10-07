@@ -44,7 +44,7 @@
 
 import 'dotenv/config'
 import { execFile } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
@@ -268,7 +268,6 @@ export async function curlFetch(req: {
       if (!DROPPED_REQUEST_HEADERS.test(k)) args.push('--header', `${k}: ${v}`)
     }
     if (req.body?.length) {
-      const { writeFileSync } = await import('node:fs')
       writeFileSync(postPath, req.body)
       args.push('--data-binary', `@${postPath}`)
     }
