@@ -118,22 +118,38 @@ plus the retired-route denylist stand.
   **named failure**: state why in the run summary (turn budget, tooling blocker, etc.) rather than
   letting the skip pass silently — three unexplained skips in a row read as a milestone with no
   owner, not as a traffic problem.
-- **Standing step: a `/admin/socials` design-critic pass every 4 weeks (replaces #5232).** #5232
-  asked for a one-time design-critic *run* against the Social Studio v2 Composer/Analytics/Calendar
-  screens, which is not a docs edit and so could never be implemented by the apply pass; it sat
-  approved for six weeks before being dismissed in favor of this standing instruction. Once every 4
-  weeks, capture `/admin/socials` (index, compose, analytics) at 375px and at desktop width with:
+- **Standing step: a `/admin/socials` design-critic pass every 4 weeks (replaces #5232), owner-run
+  capture — corrected 2026-10-07 (ticket #14120).** #5232 asked for a one-time design-critic *run*
+  against the Social Studio v2 Composer/Analytics/Calendar screens, which is not a docs edit and so
+  could never be implemented by the apply pass; it sat approved for six weeks before being dismissed
+  in favor of this standing instruction. The instruction as first written told a cloud routine to run
+  `scripts/design-snapshots.ts --routes /admin/socials` directly, and that cannot work: every
+  `/admin/socials*` route is gated by `requireAdmin` (session cookie), never a team-token path
+  (`app/routes/admin.socials.library.$assetId.tsx`'s `#11551` comment is the standing decision —
+  admin routes do not get a team-token bypass, and building one here would be exactly that). A cloud
+  routine holds a team token, not an admin session, so every attempt 302-redirected to
+  `/admin/login` and the capture script dutifully screenshotted the login page three times — worse
+  than failing loud, because the PNGs look plausible. Run 1298 found this is the mechanical reason
+  milestone `p7-design` (`docs/store-team/trackers/social-studio-v2.md`) has carried a verdict-less
+  AMBER since 2026-08-24: the step asked for something no cloud routine could ever produce, silently.
 
-  ```bash
-  npx tsx scripts/design-snapshots.ts --base https://xdipx.com --routes /admin/socials --viewport doctrine
-  ```
+  The corrected step is an owner-attended capture, not a cloud-routine one. Once every 4 weeks:
 
-  and post the `design-critic` verdict as an `/event` row (`eventType:'decision'`,
-  `agentRole:'design-critic'`) scored against `docs/design-doctrine.md` and the design direction in
-  `docs/store-team/social-studio-plan.md` §4, so the milestone probe (`p7-design` in
-  `docs/store-team/trackers/social-studio-v2.md`) passes on live evidence instead of staying
-  perpetually unactionable. A REVISE or BLOCK verdict files its own follow-up ticket rather than
-  blocking this routine's own PR.
+  1. **An owner-attended session** (not a scheduled cloud routine) logs into `/admin` and runs the
+     same recipe locally against the live session, or simply opens `/admin/socials` (index, compose,
+     analytics) in a browser at 375px and at desktop width and saves three screenshots.
+  2. Hand those three screenshots to `design-critic` for the same scored rubric (hierarchy, spacing
+     rhythm, type, color, imagery, motion, overall) against `docs/design-doctrine.md` and the design
+     direction in `docs/store-team/social-studio-plan.md` §4, exactly as the per-defect flow above
+     does for homepage screenshots it was handed.
+  3. Post the verdict as an `/event` row (`eventType:'decision'`, `agentRole:'design-critic'`)
+     referencing `/admin/socials`, so the milestone probe (`p7-design`) passes on live evidence
+     instead of staying perpetually unactionable. A REVISE or BLOCK verdict files its own follow-up
+     ticket rather than blocking this routine's own PR.
+
+  A cloud-routine pass over this step still has a job: check whether 4 weeks have elapsed since the
+  last `agent_role='design-critic'` event referencing `/admin/socials`, and if so, file (or renew) an
+  owner blocker asking for the three screenshots, rather than attempting the capture itself.
 - **Multi-axis discovery instrument build-readiness is gated on the CROSS-PRODUCT of its options,
   not the options themselves (run 646, `concepts/either-or.md`).** A concept with N binary/multi-way
   axes is not buildable just because every individual pole clears the `>=2` product-count floor:
