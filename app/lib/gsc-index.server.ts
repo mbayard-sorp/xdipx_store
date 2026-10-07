@@ -31,6 +31,33 @@ const sql = neon(process.env['DATABASE_URL']!)
  */
 export const DEAD_VERDICT_STATES = ['Not found (404)', 'Soft 404', 'Server error (5xx)']
 
+/**
+ * Coverage states where Google has not meaningfully looked at a URL yet --
+ * never seen it, seen it in a sitemap/link but not crawled it, or crawled it
+ * but not indexed it -- as opposed to BAD_VERDICT_STATES / DEAD_VERDICT_STATES
+ * above, which are a quality or dead-page verdict on a URL Google already
+ * evaluated and rejected. Ticket #13662: 82 Notebook posts sat on these three
+ * states for weeks (evidence, gsc_url_inspections 2026-10-05, Notebook URLs
+ * only: 43 'Discovered - currently not indexed', 37 'URL is unknown to
+ * Google', 2 'Crawled - currently not indexed') while the daily IndexNow push
+ * (indexnow-bulk.server.ts, scope 'stale') never once requested a crawl for
+ * any of them, because its candidate set is sourced from getUrlHealth() in
+ * sitemap.server.ts, which only reads BAD_VERDICT_STATES. Passive lastmod
+ * alone was already shown (indexnow-bulk.server.ts's own module comment) to
+ * produce zero newly-indexed URLs/day, so a URL stuck in one of these states
+ * had no active lever asking Google to look again -- this is that lever's
+ * missing candidate set, not a new one with different semantics. Matches
+ * `classifyCoverage`'s own bucketing above (crawled_not_indexed /
+ * discovered_not_indexed / other_not_indexed), spelled out as literal
+ * `coverage_state` strings because the IndexNow query below has no verdict
+ * column to re-derive the bucket from.
+ */
+export const NOT_YET_DISCOVERED_STATES = [
+  'URL is unknown to Google',
+  'Discovered - currently not indexed',
+  'Crawled - currently not indexed',
+]
+
 const INSPECT_URL = 'https://searchconsole.googleapis.com/v1/urlInspection/index:inspect'
 const DAILY_QUOTA_CEILING = 1900
 const DEFAULT_RUN_BUDGET = 200
@@ -117,6 +144,30 @@ export function classifyCoverage(verdict: string | null, coverageState: string |
   if (cs.startsWith('Crawled')) return 'crawled_not_indexed'
   if (cs.startsWith('Discovered')) return 'discovered_not_indexed'
   return 'other_not_indexed'
+}
+
+/**
+ * Every URL currently in the sitemap (`in_sitemap`) whose last inspection
+ * landed on one of NOT_YET_DISCOVERED_STATES -- the IndexNow candidate set
+ * this sweep's own data has always had and nothing read until ticket #13662.
+ * Scoped to `in_sitemap` so a URL the sitemap's own rotation has since
+ * dropped (sitemap-selection.ts) does not keep getting pushed on a stale
+ * verdict forever; `fetchSitemapEntries`/`runGscIndexSweep` above are what
+ * keep that flag current. Guarded the same way `getUrlHealth` is in
+ * sitemap.server.ts: a missing table or failed query degrades to an empty
+ * set rather than throwing in front of a cron.
+ */
+export async function getUndiscoveredUrls(): Promise<string[]> {
+  try {
+    const rows = await sql`
+      SELECT url FROM gsc_url_inspections
+      WHERE in_sitemap AND coverage_state = ANY(${NOT_YET_DISCOVERED_STATES}::text[])
+    ` as unknown as Array<{ url: string }>
+    return rows.map(r => r.url)
+  } catch (err) {
+    console.error('[gsc-index] getUndiscoveredUrls failed:', err)
+    return []
+  }
 }
 
 interface IndexStatusResult {
