@@ -88,7 +88,27 @@ under a professional lens.
 
 Per topic: 2-4 claims, each with `sourceUrl`, `sourceName`, `retrievedAt` (today), and an honest
 `confidence` flag; a one-sentence `suggestedAngle`; a `whyItMatters` reader note. Status `pending`,
-`targetPlatform:'strategy'`, `createdBy` = run id, `createIfNotExists`. Max 3 briefs, hard cap.
+`targetPlatform:'strategy'`, `createdBy` = run id, `createIfNotExists`.
+
+**Publish every brief — a draft is invisible to the only reader.** (ticket #13669) `status:'pending'`
+is this doc type's entire approval gate; there is no owner review step for a research brief, so a
+brief that lands as a Sanity *draft* (the default write shape unless the publish step is taken
+explicitly) is not "pending", it is unreadable. `routine-weekly-strategy.md`'s Step 2 query runs
+against the published perspective on purpose — store-strategist has no Sanity write access and no
+way to tell a draft from a real doc, so a draft silently never reaches it. Two 2026-10-01 briefs
+(`researchBrief-halloween-record-spending-adult-costumes-2026-10-01`,
+`researchBrief-sexual-wellness-retail-consolidation-2026-10-01`) sat as drafts for a week this way,
+one of them load-bearing on the store's one dated seasonal opportunity. After `createIfNotExists`,
+publish the document (`npx tsx scripts/sanity-content-cli.ts publish --id <id>` is the sanctioned
+HTTP-transport path for a scheduled run; the Sanity MCP connector's own publish call works the same
+way when available) so it exists only at its real `_id`, never at `drafts.<_id>`. Max 3 briefs, hard
+cap, same as before — this changes how a brief is written, not how many.
+
+**Catch up any already-stuck draft before writing new ones.** Query
+`*[_type=="researchBrief" && _id in path("drafts.**")]{_id}` (the drafts perspective). Publish every
+result the same way. This is a one-time repair for briefs written before this fix landed; once every
+brief this routine writes is published at creation, the query should always return empty, and an
+empty result is the expected steady state, not a sign anything is wrong.
 
 ## Step 5 — Finish
 

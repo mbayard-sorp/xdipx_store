@@ -580,10 +580,13 @@ export function createCronRoutes() {
   /**
    * GET|POST /cron/indexnow-push
    * Schedule: daily 04:40 UTC — bulk IndexNow submission.
-   * ?scope=stale (default) pushes exactly the cached-bad-verdict URLs that need
-   * a recrawl signal (~1,565 today: noindex + duplicate-canonical leftovers
-   * from the May outage, minus the dead ones we trust). ?scope=all pushes the
-   * whole sitemap. ?limit=N caps the run.
+   * ?scope=stale (default) pushes the cached-bad-verdict URLs that need a
+   * recrawl signal (~1,565 today: noindex + duplicate-canonical leftovers
+   * from the May outage, minus the dead ones we trust), union the sitemap
+   * URLs Google has not meaningfully looked at yet at all (ticket #13662:
+   * "URL is unknown to Google" / "Discovered - currently not indexed" /
+   * "Crawled - currently not indexed", read from gsc_url_inspections).
+   * ?scope=all pushes the whole sitemap. ?limit=N caps the run.
    * URLs pushed in the last 14 days are excluded; a 429/5xx stops the run and
    * records nothing, so the next pass is a clean retry. Read-only with respect
    * to the sitemap and gsc_url_inspections: no lastmod is ever bumped.

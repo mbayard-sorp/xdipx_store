@@ -8,6 +8,15 @@
  * has produced literally zero newly-indexed URLs per day. IndexNow is the one
  * lever that actively asks an engine to come back and look again.
  *
+ * Ticket #13662 widened the default `stale` candidate set to a second,
+ * distinct problem: a URL Google has not meaningfully looked at yet at all
+ * (gsc-index.server.ts's NOT_YET_DISCOVERED_STATES), not one it looked at and
+ * rejected. 82 published Notebook posts sat on exactly these states for
+ * weeks with zero IndexNow requests ever sent for them, because the only
+ * candidate source this file read (`getUrlHealth()`) only ever covered the
+ * bad-verdict case above. Same lever, same push mechanism, a second source
+ * for who needs it.
+ *
  * ── Design constraints, all deliberate ────────────────────────────────────
  *
  *  1. READ-ONLY with respect to the sitemap and gsc_url_inspections. This
@@ -89,16 +98,34 @@ export function batchIdForDay(d: Date = new Date()): string {
 }
 
 /**
- * The stale set: exactly the cached-bad-verdict URLs that need a recrawl
- * signal. `getUrlHealth().stale` is already "bad verdict, minus the dead ones
- * we trust", which is the set the sitemap floors the lastmod on. Reusing it
- * (rather than re-deriving a parallel definition) keeps one source of truth
- * for what "stale verdict" means. This is a read; nothing is mutated.
+ * Dedupe two URL lists while preserving the first list's order (and its
+ * entries' positions), so a URL appearing in both the bad-verdict and the
+ * not-yet-discovered sets is only ever pushed once. Pulled out as a pure
+ * function so the merge is unit-testable without a database.
+ */
+export function mergeUniqueUrls(primary: readonly string[], secondary: readonly string[]): string[] {
+  const seen = new Set(primary)
+  return [...primary, ...secondary.filter(u => !seen.has(u))]
+}
+
+/**
+ * The stale set: the cached-bad-verdict URLs that need a recrawl signal,
+ * union the sitemap URLs Google has not meaningfully looked at yet at all
+ * (ticket #13662). `getUrlHealth().stale` is already "bad verdict, minus the
+ * dead ones we trust", which is the set the sitemap floors the lastmod on;
+ * `getUndiscoveredUrls()` is gsc-index.server.ts's own inspection data for
+ * the never-crawled/never-indexed case, which is a different problem
+ * (discovery, not quality) and deliberately NOT folded into `getUrlHealth`,
+ * whose lastmod-flooring logic exists specifically for a page Google already
+ * evaluated and got wrong. Reusing both (rather than re-deriving a parallel
+ * definition) keeps one source of truth for each. This is a read; nothing is
+ * mutated.
  */
 async function staleUrls(): Promise<string[]> {
   const { getUrlHealth } = await import('~/lib/sitemap.server')
-  const health = await getUrlHealth()
-  return Array.from(health.stale.keys())
+  const { getUndiscoveredUrls } = await import('~/lib/gsc-index.server')
+  const [health, undiscovered] = await Promise.all([getUrlHealth(), getUndiscoveredUrls()])
+  return mergeUniqueUrls(Array.from(health.stale.keys()), undiscovered)
 }
 
 /** Every URL currently in the sitemap, via the existing index-aware fetcher. */

@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { classifyCoverage, fetchSitemapEntries, parseSitemapIndex, parseSitemapUrls } from '~/lib/gsc-index.server'
+import {
+  classifyCoverage, fetchSitemapEntries, NOT_YET_DISCOVERED_STATES, parseSitemapIndex, parseSitemapUrls,
+} from '~/lib/gsc-index.server'
 
 describe('parseSitemapUrls', () => {
   it('extracts url + lastmod pairs and dedupes', () => {
@@ -108,5 +110,27 @@ describe('classifyCoverage', () => {
     expect(classifyCoverage('NEUTRAL', 'URL is unknown to Google')).toBe('other_not_indexed')
     expect(classifyCoverage('FAIL', "Excluded by 'noindex' tag")).toBe('other_not_indexed')
     expect(classifyCoverage(null, null)).toBe('other_not_indexed')
+  })
+})
+
+// Ticket #13662: these three raw coverage_state strings are the IndexNow
+// candidate set indexnow-bulk.server.ts's staleUrls() unions in via
+// getUndiscoveredUrls(). Pinned here so a GSC wording change (classifyCoverage
+// matches by prefix; this list matches by exact string, since the IndexNow
+// query has no verdict column to re-derive the bucket from) is a visible
+// test failure instead of a silently-shrinking candidate set.
+describe('NOT_YET_DISCOVERED_STATES', () => {
+  it('names exactly the three discovery-gap states, not a quality verdict', () => {
+    expect(NOT_YET_DISCOVERED_STATES).toEqual([
+      'URL is unknown to Google',
+      'Discovered - currently not indexed',
+      'Crawled - currently not indexed',
+    ])
+  })
+
+  it('every listed state classifies as not-yet-discovered, never as indexed', () => {
+    for (const coverageState of NOT_YET_DISCOVERED_STATES) {
+      expect(classifyCoverage('NEUTRAL', coverageState)).not.toBe('indexed')
+    }
   })
 })
