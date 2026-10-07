@@ -180,3 +180,29 @@ between the wayfinder (§05) and couples (§07) bands.
   v2 — data not indexed.* The per-dimension 1–5 metafield is PDP-level today;
   shipping it as v1 would silently require an index change. Kept as the explicit
   v2 upgrade path above so the ambition is real but the sequencing is honest.
+
+## RETIRED — 2026-10-07, Routine B run 1298 (ticket #12610)
+
+**This concept is retired. Do not build it, and do not count it against the
+banked-concept ceiling.**
+
+Three independent reasons, each sufficient on its own:
+
+1. **The shipped Sensation Map was already retired on 2026-08-18** (#3532). Its
+   route and supporting libs are gone from the repo, so this doc describes a
+   surface that no longer exists to extend.
+2. **Its resource-route architecture is obsolete.** Every live discovery surface
+   now resolves server-side at payload-build time; a fetch-on-tap resource route
+   is the pattern the Nº 07 bench has moved away from, and `either-or.md`'s own
+   spec removed it deliberately.
+3. **Its one durable idea already shipped elsewhere.** The type-dial concept
+   lives inside the Curiosity Shelf's `typeDial` backfill.
+
+The v2 upgrade path this doc kept open — a true slider on real `sensation_dial`
+data — is still blocked on the same thing it was always blocked on: the
+per-dimension 1-5 metafield is PDP-level and unindexed, so there is nothing to
+build against. If that index ever lands, it is a fresh concept against the
+then-current shell, not a revival of this doc.
+
+Retained as a record of the reasoning, per the mission brief §9 requirement to
+log rejected concepts with reasons so ambition compounds instead of resetting.

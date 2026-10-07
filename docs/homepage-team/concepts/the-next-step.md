@@ -163,3 +163,26 @@ standalone `/next-step` surface is ever proposed, which this wire does not.
   profitability at 35% (charter, Emma no-incentive note), so an auto "next step"
   would read as an upsell, not a guide. The step must be an honest editorial
   judgment the team can defend, exactly like a rail pick.
+
+## Bench-rank note — 2026-10-07, Routine B run 1298 (ticket #12610)
+
+**Kept banked.** Not ranked for the Nº 07 slot this cycle, and not retired.
+
+The reason it survives the bench cleanup that retired `sensation-map` and
+`how-you-arrive`: its input — what the visitor already owns — is genuinely
+distinct from every other concept on the bench. The three ranked concepts all
+take appetite or hesitation; this one takes possession, which nothing else on
+the homepage does.
+
+What it owes before it can be ranked at all:
+
+- **No data gate yet.** It has never been measured against live product counts,
+  so it has no evidence it lands on products.
+- **The editorial adjacency pairs have to be defined first**, by hand. This doc
+  already rejects auto-generating them from the scorer, correctly: the scorer
+  weights profitability at 35%, so an auto "next step" would read as an upsell
+  rather than a guide.
+
+After the 2026-10-07 cleanup the bench is three ranked concepts competing for
+Nº 07, plus this one as the single distinct unranked proposal, plus `first-tap`
+tracked separately on `/social`.

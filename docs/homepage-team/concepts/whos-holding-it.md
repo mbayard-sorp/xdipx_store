@@ -499,3 +499,48 @@ moves with imports and stock; `Long-Distance` is the pole to re-measure first.
 Next step if adopted is a bench ranking, then a named spec through `homepage-ia`,
 then an additive `roomStanceBand` document, then `rr7-engineer` behind the
 reviewed-PR path.
+
+## Bench-rank decision — 2026-10-07, Routine B run 1298 (ticket #12610)
+
+**Ranked THIRD of the three concepts competing for the single Nº 07
+discovery-instrument slot**, behind `nothing-in-the-way.md` (winner) and
+`either-or.md` (runner-up and named fallback). This doc asked for exactly this
+ranking in its own §11.7 — that the bench be ranked rather than that this
+concept jump the queue — so the ranking is the answer to its own request.
+
+**Why it placed third:**
+
+1. **Highest copy burden of the three: ~28 voice-gated strings** (8 chips plus
+   20 per-state reads), against ~14 for the winner and ~11 for the runner-up.
+   Every one of them is a customer-facing string that must clear the voice gate.
+2. **Thinnest cells.** Two states (`Long-Distance` × `Surrendered` and
+   `Long-Distance` × `Tender`) sit at exactly 3 against a render count of 3,
+   which is zero spare. `Date-Night` × `Tender` is 4. The headline
+   "not in the same bed tonight" story rests on ~278 products.
+3. **Two unresolved pre-build gates**, neither of which is a data probe: an
+   `emma-empathy-reviewer` ruling on the kink-coded stance axis (this doc's own
+   §11.4 concedes the register may read as further along than a cautious
+   first-timer is), and a 20-product audit of the unaudited `In-Charge` /
+   `Surrendered` tags.
+4. **Its room axis barely narrows anything** (Solo ~3,970, Couples ~3,344), so
+   most of the specificity has to come from the stance axis, which is the
+   unaudited one.
+5. Like the runner-up, it asks about appetite and stance, so it is a variation
+   on what the shipped Curiosity Shelf already does rather than a new capability.
+
+**What it got right, and the winner inherits.** This doc correctly reads
+doctrine §1 as forbidding only *adjacent* sections sharing a ground, which is
+why inheriting Nº 07's `plum-soft` between `paper-2` and `paper-3` is compliant —
+the winner's own doc had worded that rule too tightly and is corrected on this
+doc's reading. It also pre-resolves all states server-side, which is the
+architecture the winner is now told to adopt.
+
+**Shared audit, run it once.** This doc's stance axis and `either-or`'s Q3 both
+depend on `In-Charge` and `Surrendered`. One 20-product audit of those two tags
+either unblocks or kills both concepts.
+
+**Status: banked, third in the queue.** Not retired — the room × stance input is
+genuinely distinct from the winner's hesitation input — but it does not get the
+Nº 07 slot, and it is not the fallback either. Any build of it would have to
+wait for the winner and the runner-up to be ruled out, and would still owe the
+register ruling and the tag audit first.
