@@ -311,6 +311,23 @@ const EXPLICIT_NO_TEXT_PATTERNS: readonly RegExp[] = [
   // defect-pattern guard as the rest of this list: a mixed report that also
   // hedges toward a real garbled attempt still falls through and blocks.
   /\bno other (readable|legible) (text|words?|letters?)\b/i,
+  // Ticket #13985, verified against the two real stored verdicts this fix
+  // was filed against (social_media_assets #1027, #1028, both the
+  // we-vibe-sync-go-turquoise Notebook-echo stills behind social posts #403
+  // and #404): "Small silver buttons visible on the product face; shapes
+  // suggest control labels but individual characters are not legible at
+  // this resolution" and "Small buttons/control markings on the product
+  // surface are not clearly legible at this resolution; no other text
+  // visible in frame." Both are a real product's own molded control labels
+  // read off a real, reused photo (not an AI generation) and photographed
+  // too small to resolve, which is a resolution limit, not a transcription
+  // the model is hedging on. Distinct from the "exact text not cleanly
+  // legible" / "not fully legible" hedges in the #13534 block below, which
+  // still name a specific attempted reading and must keep blocking: this
+  // pattern requires the model to say the marks are not legible AT A
+  // RESOLUTION/SIZE, i.e. a camera-and-distance limit, not a garbled guess.
+  // Same defect-pattern guard as the rest of this list.
+  /\bnot (clearly )?legible at (this|that|the) (resolution|size|scale|distance)\b/i,
 ]
 const ATTEMPTED_TEXT_DEFECT_PATTERNS: readonly RegExp[] = [
   /\bgarbled\b/i,
