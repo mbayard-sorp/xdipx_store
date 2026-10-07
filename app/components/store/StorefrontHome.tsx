@@ -879,11 +879,25 @@ function FindYourWayIn({ block }: { block?: WayfinderMosaicBlock | undefined } =
                           <span className="not-italic text-sage">♥</span> {t.emmaAside}
                         </p>
                       )}
-                      <span
-                        className="mt-auto inline-flex items-center gap-1 pt-4 text-[11px] uppercase tracking-[0.18em] text-ink-4 transition-transform duration-[var(--duration-fast)] group-hover:translate-x-0.5"
-                        style={MONO}
-                      >
-                        Take a peek <span aria-hidden="true">→</span>
+                      {/* Doctrine §6 CTA: rounded-full, font-body, 15px,
+                          ghost secondary. These rendered as 11px uppercase
+                          mono kicker labels with no button and no underline,
+                          so they read as metadata rather than as the action
+                          the whole tile performs (#12612 defect 6), while the
+                          Discover You promo directly below carried a proper
+                          coral pill — two CTA languages inside one section.
+                          Ghost, not coral: the coral budget is one primary per
+                          viewport (doctrine §3) and the promo pill already
+                          spends it. The tile itself is the <Link>, so this is
+                          a span styled as the affordance, never a nested
+                          anchor. */}
+                      <span className="mt-auto block pt-4">
+                        <span
+                          className="inline-flex items-center gap-1.5 rounded-full border border-line-2 px-4 py-2 text-[15px] font-medium text-ink transition-colors duration-[var(--duration-fast)] group-hover:border-ink-3"
+                          style={BODY}
+                        >
+                          Take a peek <span aria-hidden="true">→</span>
+                        </span>
                       </span>
                     </div>
                   </Link>

@@ -67,7 +67,6 @@ export function DesktopMegaMenu({ items, banners = [] }: { items: ShopifyMenuIte
         to={NEW_ARRIVALS.path}
         prefetch="intent"
         className="px-3 py-1.5 rounded-full text-sm font-medium text-ink/70 hover:text-sage transition-all"
-        style={{ fontFamily: 'var(--font-display)' }}
       >
         {NEW_ARRIVALS.title}
       </Link>
@@ -90,7 +89,6 @@ export function DesktopMegaMenu({ items, banners = [] }: { items: ShopifyMenuIte
                       ? 'text-sage font-semibold'
                       : 'text-ink/70 hover:text-sage',
                 ].join(' ')}
-                style={{ fontFamily: 'var(--font-display)' }}
                 aria-expanded={activeIndex === idx}
                 aria-haspopup="true"
                 onFocus={() => open(idx)}
@@ -105,12 +103,22 @@ export function DesktopMegaMenu({ items, banners = [] }: { items: ShopifyMenuIte
                 to={toRelativePath(item.url)}
                 prefetch="intent"
                 className={[
-                  'px-3 py-1.5 rounded-full text-sm font-medium transition-all',
+                  // inline-flex, not the default inline: a <button> is
+                  // inline-block so its py-1.5 expands its box to ~32px, while
+                  // an inline <a> drops vertical padding out of layout
+                  // entirely and leaves its wrapper ~20px tall. Notebook is
+                  // the only childless item, so it was the only nav entry
+                  // boxed differently from its seven siblings (#12612 defect
+                  // 1, second half). The critic could not reproduce a visible
+                  // baseline shift at rest and the defect is NOT claimed
+                  // fixed here; this removes the one structural asymmetry that
+                  // could produce one, and it corrects the hover/focus pill
+                  // geometry either way.
+                  'inline-flex items-center px-3 py-1.5 rounded-full text-sm font-medium transition-all',
                   isAccent
                     ? 'text-plum hover:text-plum-2 font-semibold'
                     : 'text-ink/70 hover:text-sage',
                 ].join(' ')}
-                style={{ fontFamily: 'var(--font-display)' }}
               >
                 {item.title}
               </Link>
@@ -185,7 +193,6 @@ function MegaMenuColumns({
               to={toRelativePath(col.url)}
               onClick={onNavigate}
               className="text-xs font-semibold uppercase tracking-wider text-ink/50 mb-3 block hover:text-sage transition-colors"
-              style={{ fontFamily: 'var(--font-display)' }}
             >
               {col.title}
             </Link>
@@ -279,7 +286,6 @@ export function MobileMegaMenu({ items, onNavigate }: { items: ShopifyMenuItem[]
           to={NEW_ARRIVALS.path}
           onClick={onNavigate}
           className="w-full flex items-center px-4 py-3 rounded-xl text-base font-medium text-ink hover:bg-cream-2 hover:text-sage transition-all"
-          style={{ fontFamily: 'var(--font-display)' }}
         >
           {NEW_ARRIVALS.title}
         </Link>
@@ -301,7 +307,6 @@ export function MobileMegaMenu({ items, onNavigate }: { items: ShopifyMenuItem[]
                     ? 'text-coral font-semibold'
                     : 'text-ink hover:bg-cream-2 hover:text-sage',
                 ].join(' ')}
-                style={{ fontFamily: 'var(--font-display)' }}
               >
                 {item.title}
               </Link>
@@ -321,7 +326,6 @@ export function MobileMegaMenu({ items, onNavigate }: { items: ShopifyMenuItem[]
                     ? 'bg-cream-2 text-sage font-semibold'
                     : 'text-ink hover:bg-cream-2 hover:text-sage',
               ].join(' ')}
-              style={{ fontFamily: 'var(--font-display)' }}
               aria-expanded={isOpen}
             >
               {item.title}
@@ -336,7 +340,6 @@ export function MobileMegaMenu({ items, onNavigate }: { items: ShopifyMenuItem[]
                       to={toRelativePath(col.url)}
                       onClick={onNavigate}
                       className="text-xs font-semibold uppercase tracking-wider text-ink/40 px-3 mb-1.5 block hover:text-sage transition-colors"
-                      style={{ fontFamily: 'var(--font-display)' }}
                     >
                       {col.title}
                     </Link>

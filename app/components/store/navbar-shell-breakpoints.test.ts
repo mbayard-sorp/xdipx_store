@@ -61,3 +61,40 @@ describe('Navbar shell breakpoints — #11083 item B (fourth non-doctrine contai
     expect(src).not.toContain('max-w-6xl mx-auto px-4 h-14')
   })
 })
+
+/**
+ * #12612 defect 1 half A (design-critic, run 1298): every one of the eight
+ * desktop nav items rendered with an inline
+ * `style={{ fontFamily: 'var(--font-display)' }}`, putting the primary
+ * navigation in Newsreader. design-doctrine.md line 95 assigns Newsreader to
+ * "Headlines, pull-quotes, editorial display, italic emphasis" and gives
+ * DM Sans (`font-body`) "Body copy, **nav**, labels, CTA text".
+ *
+ * The mobile drawer carried the same five inline styles. Fixing only the
+ * desktop branches would have corrected the serif on the minority surface of a
+ * mobile-first storefront, so all eight sites go together.
+ *
+ * Source-text assertion, same precedent as the breakpoint guards above: the
+ * defect is which font family the nav inherits, which is a question about the
+ * shipped markup rather than a behavior a render assertion exercises.
+ */
+describe('MegaMenu typography — nav inherits font-body (#12612 defect 1)', () => {
+  const src = read('./MegaMenu.tsx')
+
+  it('carries no inline display-font override anywhere in the nav', () => {
+    expect(src).not.toContain("fontFamily: 'var(--font-display)'")
+  })
+
+  it('still renders the nav items it did before, so this was a font change only', () => {
+    expect(src).toContain('{NEW_ARRIVALS.title}')
+    expect(src).toContain('{item.title}')
+  })
+
+  it('boxes the childless nav Link like its button siblings', () => {
+    // Notebook is the only item without mega-menu children, so it is the only
+    // one rendered as an <a>. An inline <a> drops vertical padding out of
+    // layout while a <button> is inline-block and keeps it, which left one nav
+    // entry boxed differently from the other seven.
+    expect(src).toContain("'inline-flex items-center px-3 py-1.5 rounded-full text-sm font-medium transition-all'")
+  })
+})
