@@ -73,6 +73,11 @@ neither has shipped in weeks even though the publisher builds both (`instagram.s
   (the evening run owns this on a met day; see the recovery-run paragraph below). "Not attempted,
   time budget" is the run summary line this rule retires: it has appeared on three consecutive
   runs while the floor read 0/14.
+  **Persistent breach escalation.** When `mixReport` reads the rolling-14 carousel count at 0 for
+  3 or more consecutive runs, the debt has aged past an ordinary deferral: the first run after that
+  point with budget left once the day's live-post floor is met builds the carousel before
+  attempting anything else, including a fresh single-product draft. The debt does not keep queuing
+  behind new single-product work once it has run this long.
 - **Reel obligation.** At least one Instagram Reel `posted` per rolling 7 days. The social run
   never makes a Reel itself (Step 2.8: reels arrive from the video lane's owner-approved renders),
   so this obligation is reported, not filled: the summary names the Reel's post id for the week, or
