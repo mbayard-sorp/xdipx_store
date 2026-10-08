@@ -6,10 +6,13 @@
  *       -> GenerateSocialImageResult { url, filename, provider, model }
  *   { op: 'cast', prompt, handle, mood, date, slide?, presenterImageUrl?,
  *     castSlug?, castSlugs?, productImageUrl?, extraImageUrls?, scale,
- *     count?, caller?, runId?, + the scene axes }
+ *     count?, caller?, runId?, faceInFrame?, + the scene axes }
  *       -> GenerateCastCompositeResult { urls, filenames, costs, requestIds, plateRequestId? }
- *          plus bodyReferenceMissing?/handReferenceMissing?/warning?
- *          (#10336, #10341, #11476). A handle whose bare-product reference
+ *          plus bodyReferenceMissing?/handReferenceMissing?/dualReferenceMissing?/warning?
+ *          (#10336, #10341, #11476, #13740). `faceInFrame:true` sends both the
+ *          body and portrait references instead of just the one the crop
+ *          scale would otherwise pick, for instagram-campaigns.md §3.2g item 5.
+ *          A handle whose bare-product reference
  *          (xdipx.bare_product_reference) is unresolved is resolved live, once
  *          (#12875); a handle whose reference resolves (live or already
  *          stored) to no bare frame 400s instead of falling back to
@@ -352,12 +355,17 @@ export async function action({ request }: ActionFunctionArgs) {
       let castPrompt = prompt
       let bodyReferenceMissing = false
       let handReferenceMissing = false
+      let dualReferenceMissing = false
       let warning: string | undefined
       // Ticket #11476: the cast member's own hand reference, attached
       // automatically for a held contact mode via extraImageUrls, alongside
       // (never instead of) whatever the caller passes explicitly.
       let castExtraReferenceUrls: string[] = []
       const scale = str(b['scale'])
+      // Ticket #13740: owner 2026-10-05 licensed a face entering a
+      // close/medium bodyscape at the frame edge, which needs both the body
+      // and portrait references at once. Default false.
+      const faceInFrame = b['faceInFrame'] === true
 
       // Presenter reference selection (ticket #10336). Same decision the CLI
       // makes since PR #1233, shared through social-cast-reference.server:
@@ -383,11 +391,14 @@ export async function action({ request }: ActionFunctionArgs) {
         if (!member) {
           return new Response(`Bad Request: castSlug "${castSlug}" is not an approved cast member`, { status: 400 })
         }
-        const resolved = resolveCastReference({ member, cropScale, prompt, contactMode: sceneAxes.contactMode })
+        const resolved = resolveCastReference({
+          member, cropScale, prompt, contactMode: sceneAxes.contactMode, faceInFrame,
+        })
         presenterImageUrl = resolved.presenterImageUrl
         castPrompt = resolved.prompt
         bodyReferenceMissing = resolved.bodyReferenceMissing
         handReferenceMissing = resolved.handReferenceMissing
+        dualReferenceMissing = resolved.dualReferenceMissing
         warning = resolved.warning
         castExtraReferenceUrls = resolved.extraReferenceUrls
       }
@@ -569,7 +580,7 @@ export async function action({ request }: ActionFunctionArgs) {
       // product-image case is no longer in this list: ticket #11474 made it
       // a pre-generation refusal instead of a post-hoc fallback warning, so
       // it never reaches this point at all.)
-      if (bodyReferenceMissing || handReferenceMissing) {
+      if (bodyReferenceMissing || handReferenceMissing || dualReferenceMissing) {
         const parts = warning ? [warning] : []
         const summary = `[social-image:cast] ${handle}: ${parts.join(' ')}`
         if (runId != null) {
@@ -600,6 +611,7 @@ export async function action({ request }: ActionFunctionArgs) {
         ...(billedButEmpty ? { ok: false, reason: dropReason } : {}),
         ...(bodyReferenceMissing ? { bodyReferenceMissing: true } : {}),
         ...(handReferenceMissing ? { handReferenceMissing: true } : {}),
+        ...(dualReferenceMissing ? { dualReferenceMissing: true } : {}),
         ...(warning ? { warning } : {}),
         // Ticket #10981: echoed so the run summary can quote what anchored
         // the prompt, and so a caller can assert against it in a test.

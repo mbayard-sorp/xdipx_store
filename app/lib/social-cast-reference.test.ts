@@ -154,3 +154,48 @@ describe('resolveCastReference', () => {
     expect(r.warning).not.toContain(String.fromCharCode(8212))
   })
 })
+
+/**
+ * Ticket #13740: instagram-campaigns.md §3.2g item 5 (owner 2026-10-05) now
+ * licenses a face entering a close/medium bodyscape at the frame edge, which
+ * needs both the body and portrait references at once instead of the single
+ * reference every other call wants.
+ */
+describe('resolveCastReference: faceInFrame (#13740)', () => {
+  it('sends both references for a close crop when the member has both', () => {
+    const r = resolveCastReference({ member: withBody, cropScale: 'close', prompt: PROMPT, faceInFrame: true })
+    expect(r.presenterImageUrl).toBe(BODY)
+    expect(r.extraReferenceUrls).toEqual([PORTRAIT])
+    expect(r.dualReferenceMissing).toBe(false)
+    expect(r.warning).toBeUndefined()
+  })
+
+  it('sends both references for a medium crop when the member has both', () => {
+    const r = resolveCastReference({ member: withBody, cropScale: 'medium', prompt: PROMPT, faceInFrame: true })
+    expect(r.presenterImageUrl).toBe(PORTRAIT)
+    expect(r.extraReferenceUrls).toEqual([BODY])
+    expect(r.dualReferenceMissing).toBe(false)
+  })
+
+  it('does not add an extra reference when faceInFrame is false or omitted', () => {
+    const r = resolveCastReference({ member: withBody, cropScale: 'close', prompt: PROMPT })
+    expect(r.extraReferenceUrls).toEqual([])
+    expect(r.dualReferenceMissing).toBe(false)
+  })
+
+  it('sends the one reference that exists and flags dualReferenceMissing when the body reference is absent', () => {
+    const r = resolveCastReference({ member: withoutBody, cropScale: 'close', prompt: PROMPT, faceInFrame: true })
+    expect(r.presenterImageUrl).toBe(PORTRAIT)
+    expect(r.extraReferenceUrls).toEqual([])
+    expect(r.dualReferenceMissing).toBe(true)
+    expect(r.warning).toContain('bodyReferencePhoto')
+    expect(r.warning).not.toContain(String.fromCharCode(8212))
+  })
+
+  it('combines with the hand-reference extra when both apply', () => {
+    const r = resolveCastReference({
+      member: withBody, cropScale: 'close', prompt: PROMPT, faceInFrame: true, contactMode: 'self-held',
+    })
+    expect(r.extraReferenceUrls).toEqual([HAND, PORTRAIT])
+  })
+})

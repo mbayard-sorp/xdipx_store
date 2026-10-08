@@ -71,6 +71,12 @@ export interface CastReferenceResolution {
   extraReferenceUrls: string[]
   /** True when a held contact mode had no handReferencePhotoUrl to draw on. */
   handReferenceMissing: boolean
+  /**
+   * True when `faceInFrame` was requested but the member has only one of
+   * bodyReferencePhoto/photoUrl, so the two-reference call this flag asks for
+   * could not be made (ticket #13740).
+   */
+  dualReferenceMissing: boolean
 }
 
 /**
@@ -90,8 +96,16 @@ export function resolveCastReference(opts: {
   cropScale: string | null | undefined
   prompt: string
   contactMode?: string | null | undefined
+  /**
+   * instagram-campaigns.md §3.2g item 5 (owner 2026-10-05): a face is now
+   * allowed to enter a close/medium bodyscape at the frame edge. That needs
+   * BOTH references at once (the body plate and the portrait), where every
+   * other call wants exactly one. Default false, so today's single-reference
+   * behaviour is unchanged unless a caller opts in.
+   */
+  faceInFrame?: boolean | null | undefined
 }): CastReferenceResolution {
-  const { member, cropScale, prompt, contactMode } = opts
+  const { member, cropScale, prompt, contactMode, faceInFrame } = opts
   const wantsBody = needsBodyReference(cropScale)
   const bodyReferenceMissing = wantsBody && !member.bodyReferencePhotoUrl
   const presenterImageUrl = presenterPhotoUrlForCrop(member, cropScale)
@@ -99,6 +113,19 @@ export function resolveCastReference(opts: {
   const wantsHand = needsHandReference(contactMode)
   const handReferenceMissing = wantsHand && !member.handReferencePhotoUrl
   const extraReferenceUrls = wantsHand && member.handReferencePhotoUrl ? [member.handReferencePhotoUrl] : []
+
+  // `faceInFrame`: send whichever of body/portrait presenterImageUrl did NOT
+  // already pick, as a second reference, so the composite has both the body
+  // and the face to draw on instead of inventing one from the other.
+  let dualReferenceMissing = false
+  if (faceInFrame) {
+    const other = presenterImageUrl === member.bodyReferencePhotoUrl ? member.photoUrl : member.bodyReferencePhotoUrl
+    if (other) {
+      extraReferenceUrls.push(other)
+    } else {
+      dualReferenceMissing = true
+    }
+  }
 
   const warnings: string[] = []
   if (bodyReferenceMissing) {
@@ -126,6 +153,13 @@ export function resolveCastReference(opts: {
       'To unblock: npx tsx scripts/generate-cast-hand-references.ts, owner picks, upload to castMember.handReferencePhoto.',
     )
   }
+  if (dualReferenceMissing) {
+    const missingField = member.bodyReferencePhotoUrl ? 'photoUrl' : 'bodyReferencePhoto'
+    warnings.push(
+      `${member.name} has no ${missingField}, so this faceInFrame request could only send one reference instead of two. ` +
+      'Generated from the one that exists.',
+    )
+  }
 
   return {
     presenterImageUrl,
@@ -134,6 +168,7 @@ export function resolveCastReference(opts: {
     bodyReferenceMissing,
     extraReferenceUrls,
     handReferenceMissing,
+    dualReferenceMissing,
     ...(warnings.length ? { warning: warnings.join(' ') } : {}),
   }
 }
