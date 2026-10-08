@@ -23,13 +23,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
   let body: string
   if (kind === 'orders') {
     const orders = inputs.orders.filter(o => o.day >= range.from && o.day <= range.to).sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-    body = ordersCsv(orders, inputs.fulfillmentPerOrder)
+    body = ordersCsv(orders, inputs.handlingFeePerOrder)
   } else {
     const months = monthlyColumns(inputs, range.from, range.to)
     const cols = months.length > 1
       ? [...months.map(m => ({ label: m.partial ? `${m.from} to ${m.to}` : m.month, totals: m.totals })), { label: 'Total', totals: totalsFor(inputs, range.from, range.to) }]
       : [{ label: `${range.from} to ${range.to}`, totals: totalsFor(inputs, range.from, range.to) }]
-    body = statementCsv(cols, inputs.fulfillmentPerOrder != null)
+    body = statementCsv(cols)
   }
   const filename = `xdipx-${kind === 'orders' ? 'orders' : 'pnl'}-${range.from}-to-${range.to}.csv`
   return new Response(body, {

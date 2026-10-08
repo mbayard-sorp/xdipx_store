@@ -3,7 +3,7 @@
 // the statement is proven to foot against what Shopify actually sends.
 import { describe, expect, it } from 'vitest'
 import {
-  PNL_EPOCH, adPlatformRows, bucketOf, dayInTz, fixedCostForDay, goalStatus, monthlyColumns, orderBreakdown,
+  NALPAC_SHIPPING_RATES, PNL_EPOCH, adPlatformRows, shippingTierFor, bucketOf, dayInTz, fixedCostForDay, goalStatus, monthlyColumns, orderBreakdown,
   orderToFact, ordersCsv, productBreakdown, ratiosFor, resolveRange, seriesFor, statementCsv, statementRows,
   totalsFor, waterfallSteps, type CostLineFn, type PnlInputs, type ShopifyPnlOrder,
 } from '~/lib/pnl-core'
@@ -28,6 +28,8 @@ function order(p: Partial<ShopifyPnlOrder> & { name: string }): ShopifyPnlOrder 
     customerJourneySummary: { customerOrderIndex: 1 },
     totalPriceSet: m(0), totalTaxSet: m(0), totalShippingPriceSet: m(0), totalDiscountsSet: m(0),
     currentTotalPriceSet: m(0), currentTotalTaxSet: m(0), currentSubtotalPriceSet: m(0),
+    shippingAddress: { countryCodeV2: 'US', provinceCode: 'AZ' },
+    shippingLines: { nodes: [{ title: 'Standard US Shipping' }] },
     metafields: { nodes: [] },
     lineItems: { nodes: [] },
     transactions: [],
@@ -43,7 +45,7 @@ const line = (title: string, qty: number, total: number, unitCost: number | null
 
 // #1012: $204.95 of product, shipping $14.99 discounted to zero.
 const o1012 = order({
-  name: '#1012', createdAt: '2026-10-04T14:31:00Z',
+  name: '#1012', createdAt: '2026-10-04T14:31:00Z', shippingLines: { nodes: [{ title: 'Expedited Shipping' }] },
   totalPriceSet: m(204.95), totalTaxSet: m(0), totalShippingPriceSet: m(14.99), totalDiscountsSet: m(14.99),
   currentTotalPriceSet: m(204.95), currentTotalTaxSet: m(0), currentSubtotalPriceSet: m(204.95),
   lineItems: { nodes: [line('Gush', 1, 105.99, 58.5), line('Blanket', 1, 98.96, 34.5, 1, 'Adult Game')] },
@@ -167,6 +169,26 @@ describe('orderToFact', () => {
   })
 })
 
+describe('shipping cost', () => {
+  it('prices each order at the Nalpac rate for its method and destination', () => {
+    expect(shippingTierFor('Standard US Shipping', 'US', 'TX')).toBe('standard-us')
+    expect(shippingTierFor('Standard US Shipping', 'US', 'HI')).toBe('standard-remote')
+    expect(shippingTierFor('Standard Shipping HI, AK, PR', 'PR', null)).toBe('standard-remote')
+    expect(shippingTierFor('Expedited Shipping', 'US', 'PA')).toBe('expedited')
+    expect(shippingTierFor('Standard Shipping CA', 'CA', 'ON')).toBe('canada')
+    expect(shippingTierFor('International Shipping', 'GB', null)).toBe('international')
+    expect(shippingTierFor(null, null, null)).toBe('standard-us')
+  })
+
+  it('charges shipping on free-shipping orders and not on orders that shipped nothing', () => {
+    expect(fact(o1012).shippingCost).toBe(12.5) // customer paid $0 shipping, Nalpac still bills
+    expect(fact(o1012).shippingTier).toBe('expedited')
+    const nothingShipped = fact(order({ name: '#3000', lineItems: { nodes: [line('Gone', 1, 10, 4, 0)] } }))
+    expect(nothingShipped.shippingCost).toBe(0)
+    expect(NALPAC_SHIPPING_RATES['standard-us'].cost).toBe(6.5)
+  })
+})
+
 describe('resolveRange', () => {
   const today = '2026-10-08'
 
@@ -229,14 +251,16 @@ describe('totals and the statement', () => {
       { id: 3, day: '2026-10-06', category: 'fulfillment', vendor: 'Nalpac', amount: 5, note: null },
       { id: 4, day: '2026-09-01', category: 'other', vendor: 'Outside window', amount: 999, note: null },
     ],
-    fulfillmentPerOrder: 8,
+    handlingFeePerOrder: 2,
   }
 
   it('builds every subtotal from the lines above it', () => {
     const t = totalsFor(base, '2026-10-01', '2026-10-08')
     expect(t.orders).toBe(3) // #1002 is in July
     expect(t.netRevenue).toBeCloseTo(204.95 + 0 + 26.98, 2)
-    expect(t.fulfillment).toBe(8 * 3 + 5)
+    expect(t.shippingCost).toBe(12.5 + 6.5 + 6.5) // #1012 expedited, #1017 and #1011 standard
+    expect(t.handling).toBe(2 * 3 + 5) // fee on three shipped orders plus the logged Nalpac bill
+    expect(t.fulfillment).toBe(25.5 + 11)
     expect(t.adSpend).toBe(30 + 12.5 + 50)
     expect(t.adByPlatform).toEqual({ 'Google Ads': 30, 'Shop Campaigns': 12.5, 'Newsletter X': 50 })
     expect(t.fixedCosts).toBeCloseTo(8, 2) // $31 over 31 days, 8 of them
@@ -246,12 +270,13 @@ describe('totals and the statement', () => {
     expect(t.netProfit).toBeCloseTo(t.contribution - t.aiSpend - t.fixedCosts - t.otherExpenses, 2)
   })
 
-  it('leaves fulfillment out, not at zero, when the per-order cost is unknown', () => {
-    const t = totalsFor({ ...base, fulfillmentPerOrder: null, expenses: [] }, '2026-10-01', '2026-10-08')
-    expect(t.fulfillment).toBe(0)
-    const row = statementRows(t, { fulfillmentSet: false }).find(r => r.key === 'fulfillment')!
-    expect(row.value).toBeNull()
-    expect(row.hint).toMatch(/not set/)
+  it('shows shipping on the statement and only shows handling when there is some', () => {
+    const t = totalsFor({ ...base, handlingFeePerOrder: null, expenses: [] }, '2026-10-01', '2026-10-08')
+    expect(t.handling).toBe(0)
+    const rows = statementRows(t)
+    expect(rows.find(r => r.key === 'shippingCost')?.value).toBe(25.5)
+    expect(rows.find(r => r.key === 'handling')).toBeUndefined()
+    expect(ratiosFor(t).shippingMargin).toBeCloseTo(t.shipping - 25.5, 2)
   })
 
   it('spreads a fixed cost so a whole month sums to the monthly figure', () => {
@@ -265,7 +290,7 @@ describe('totals and the statement', () => {
   })
 
   it('orders the statement and drops empty dynamic lines', () => {
-    const rows = statementRows(totalsFor(base, '2026-10-01', '2026-10-08'), { fulfillmentSet: true })
+    const rows = statementRows(totalsFor(base, '2026-10-01', '2026-10-08'))
     const keys = rows.map(r => r.key)
     expect(keys.indexOf('netRevenue')).toBeLessThan(keys.indexOf('grossProfit'))
     expect(keys.indexOf('grossProfit')).toBeLessThan(keys.indexOf('contribution'))
@@ -320,15 +345,15 @@ describe('totals and the statement', () => {
 
 describe('csv', () => {
   it('neutralizes formula injection and quotes commas', () => {
-    const csv = ordersCsv([{ ...fact(o1012), name: '=HYPERLINK("x")', channel: 'a,b' }], 8)
+    const csv = ordersCsv([{ ...fact(o1012), name: '=HYPERLINK("x")', channel: 'a,b' }], 2)
     expect(csv).toContain(`"'=HYPERLINK(""x"")"`)
     expect(csv).toContain('"a,b"')
     expect(csv.split('\n')[0]).toMatch(/^order,date,channel,source/)
   })
 
   it('writes costs as negatives in the statement export', () => {
-    const t = totalsFor({ orders: [fact(o1012)], ads: [], ai: [], fixed: [], expenses: [], fulfillmentPerOrder: null }, '2026-10-01', '2026-10-08')
-    const csv = statementCsv([{ label: 'Oct', totals: t }], false)
+    const t = totalsFor({ orders: [fact(o1012)], ads: [], ai: [], fixed: [], expenses: [], handlingFeePerOrder: null }, '2026-10-01', '2026-10-08')
+    const csv = statementCsv([{ label: 'Oct', totals: t }])
     expect(csv).toMatch(/Payment processing,-7\.47/)
     expect(csv).toMatch(/Net revenue,204\.95/)
   })

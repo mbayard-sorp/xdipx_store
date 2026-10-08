@@ -77,9 +77,9 @@ export function StatementTable({
 }
 
 /** The month-by-month P&L: one column per calendar month in the window, plus a total. */
-export function MonthlyStatement({ columns, total, fulfillmentSet }: { columns: MonthColumn[]; total: MonthColumn['totals']; fulfillmentSet: boolean }) {
-  const all = [...columns.map(c => ({ key: c.month, label: monthLabel(c.month), partial: c.partial, rows: statementRows(c.totals, { fulfillmentSet }) })),
-    { key: 'total', label: 'Total', partial: false, rows: statementRows(total, { fulfillmentSet }) }]
+export function MonthlyStatement({ columns, total }: { columns: MonthColumn[]; total: MonthColumn['totals'] }) {
+  const all = [...columns.map(c => ({ key: c.month, label: monthLabel(c.month), partial: c.partial, rows: statementRows(c.totals) })),
+    { key: 'total', label: 'Total', partial: false, rows: statementRows(total) }]
   // Row order from the total column, which has every dynamic line any month has.
   const order = all[all.length - 1]!.rows
   return (

@@ -15,7 +15,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction, ShouldRevali
 import { Form, Link, isRouteErrorResponse, useLoaderData, useNavigation, useRouteError, useSearchParams } from 'react-router'
 import { getAdminUser, requireAdmin } from '~/lib/session.server'
 import {
-  PnlInputError, addExpense, addFixedCost, deleteExpense, endFixedCost, getStoreTimezone, loadPnlData, saveFulfillmentPerOrder,
+  PnlInputError, addExpense, addFixedCost, deleteExpense, endFixedCost, getStoreTimezone, loadPnlData, saveHandlingFeePerOrder,
 } from '~/lib/pnl.server'
 import {
   PNL_EPOCH, RANGE_PRESETS, adPlatformRows, dayInTz, goalStatus, monthStart, monthlyColumns, orderBreakdown,
@@ -61,14 +61,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const cur = totalsFor(inputs, range.from, range.to)
   const prev = range.prev ? totalsFor(inputs, range.prev.from, range.prev.to) : null
-  const fulfillmentSet = inputs.fulfillmentPerOrder != null
   const series = seriesFor(inputs, range.from, range.to, range.granularity)
   const months = monthlyColumns(inputs, range.from, range.to)
   const inRange = inputs.orders.filter(o => o.day >= range.from && o.day <= range.to).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
 
   const quality: string[] = [...data.gaps]
   if (cur.cogsMissingUnits > 0) quality.push(`${cur.cogsMissingUnits} unit${cur.cogsMissingUnits === 1 ? '' : 's'} sold with no wholesale cost on file. Product cost is understated by those units.`)
-  if (!fulfillmentSet) quality.push('Fulfillment cost per order is not set, so gross and net profit leave out what Nalpac charges to ship. Set it on the Costs tab.')
   if (data.fixedAll.length === 0) quality.push('No software or subscription costs are entered, so net profit leaves out hosting, apps and the Claude Max plan. Add them on the Costs tab.')
 
   return {
@@ -80,8 +78,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     cur, prev,
     ratios: ratiosFor(cur),
     prevRatios: prev ? ratiosFor(prev) : null,
-    rows: statementRows(cur, { fulfillmentSet }),
-    prevRows: prev ? statementRows(prev, { fulfillmentSet }) : null,
+    rows: statementRows(cur),
+    prevRows: prev ? statementRows(prev) : null,
     series,
     months,
     waterfall: waterfallSteps(cur),
@@ -93,7 +91,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     customers: orderBreakdown(inputs.orders, range.from, range.to, o => (o.customerType === 'new' ? 'New customers' : o.customerType === 'returning' ? 'Returning customers' : 'Unknown')),
     platforms: adPlatformRows(inputs.ads, inputs.expenses, range.from, range.to),
     orders: inRange,
-    fulfillmentPerOrder: inputs.fulfillmentPerOrder,
+    handlingFeePerOrder: inputs.handlingFeePerOrder,
     fixed: data.fixedAll,
     expenses: data.expensesRecent,
     expensesReady: data.expensesReady,
@@ -109,8 +107,8 @@ export async function action({ request }: ActionFunctionArgs) {
   if (admin?.role !== 'owner') return { ok: false as const, error: 'Only the owner can change costs.' }
   try {
     switch (intent) {
-      case 'save-fulfillment':
-        return { ok: true as const, message: await saveFulfillmentPerOrder(form.get('amount'), 'owner') }
+      case 'save-handling':
+        return { ok: true as const, message: await saveHandlingFeePerOrder(form.get('amount'), 'owner') }
       case 'add-fixed':
         return { ok: true as const, message: await addFixedCost({ vendor: form.get('vendor'), monthly: form.get('monthly'), from: form.get('from'), note: form.get('note') }) }
       case 'end-fixed':
@@ -235,11 +233,11 @@ export default function PnlDashboard() {
         {tab === 'marketing' && <MarketingTab d={d} />}
         {tab === 'orders' && (
           <Card title="Orders" kicker={`${count(d.orders.length)} in range`}>
-            <OrdersLedger orders={d.orders} fulfillmentPerOrder={d.fulfillmentPerOrder} storeDomain={d.storeDomain} />
+            <OrdersLedger orders={d.orders} handlingFeePerOrder={d.handlingFeePerOrder} storeDomain={d.storeDomain} />
           </Card>
         )}
         {tab === 'costs' && (
-          <CostsPanel isOwner={d.isOwner} today={d.today} fulfillmentPerOrder={d.fulfillmentPerOrder} fixed={d.fixed} expenses={d.expenses} expensesReady={d.expensesReady} />
+          <CostsPanel isOwner={d.isOwner} today={d.today} handlingFeePerOrder={d.handlingFeePerOrder} fixed={d.fixed} expenses={d.expenses} expensesReady={d.expensesReady} />
         )}
       </div>
 
@@ -261,8 +259,8 @@ function Overview({ d }: { d: Data }) {
   const r = d.ratios
   const pr = d.prevRatios
   const trend = (k: 'netRevenue' | 'grossProfit' | 'adSpend' | 'netProfit' | 'orders') => (d.series.length >= 2 ? d.series.map(s => s[k]) : undefined)
-  const partialProfit = d.fulfillmentPerOrder == null || d.fixed.length === 0
-    ? 'Leaves out costs that have not been entered yet. See the notes below.'
+  const partialProfit = d.fixed.length === 0
+    ? 'Leaves out software and subscription costs, which have not been entered yet. See the notes below.'
     : undefined
 
   return (
@@ -271,7 +269,7 @@ function Overview({ d }: { d: Data }) {
         <KpiTile label="Net revenue" value={moneyHeadline(c.netRevenue)} delta={deltaPct(c.netRevenue, p?.netRevenue)} trend={trend('netRevenue')} accent="#C2350F"
           sub={`${count(c.orders)} order${c.orders === 1 ? '' : 's'}`} />
         <KpiTile label="Gross profit" value={moneyHeadline(c.grossProfit)} delta={deltaPct(c.grossProfit, p?.grossProfit)} trend={trend('grossProfit')} accent="#7A2BB8"
-          sub={`${pct(r.grossMarginPct, 0)} margin`} caveat={d.fulfillmentPerOrder == null ? 'Fulfillment cost per order is not set.' : undefined} />
+          sub={`${pct(r.grossMarginPct, 0)} margin`} />
         <KpiTile label="Ad spend" value={moneyHeadline(c.adSpend)} delta={deltaPct(c.adSpend, p?.adSpend)} goodWhenUp={false} trend={c.adSpend > 0 ? trend('adSpend') : undefined}
           sub={r.mer != null ? `${multiple(r.mer)} MER` : 'no spend recorded'} />
         <KpiTile label="Net profit" value={moneyHeadline(c.netProfit)} delta={deltaPct(c.netProfit, p?.netProfit)} trend={trend('netProfit')} accent="#7A2BB8" emphasis
@@ -284,7 +282,7 @@ function Overview({ d }: { d: Data }) {
         <MiniStat label="Units sold" value={count(c.units)} delta={deltaPct(c.units, p?.units)} />
         <MiniStat label="New customers" value={count(c.newCustomers)} sub={c.returningCustomers > 0 ? `${count(c.returningCustomers)} returning` : 'no repeat buyers yet'} />
         <MiniStat label="Blended CAC" value={r.cac == null ? '—' : money(r.cac)} sub={r.breakevenCpa != null ? `break-even ${money(r.breakevenCpa)}` : undefined} goodWhenUp={false} delta={pr?.cac != null && r.cac != null ? deltaPct(r.cac, pr.cac) : null} />
-        <MiniStat label="Discount rate" value={pct(r.discountRatePct)} sub={`refunds ${pct(r.refundRatePct)}`} goodWhenUp={false} delta={null} />
+        <MiniStat label="Shipping margin" value={money(r.shippingMargin)} sub={`discounts ${pct(r.discountRatePct, 0)} · refunds ${pct(r.refundRatePct, 0)}`} delta={null} />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[1.6fr_1fr]">
@@ -396,7 +394,7 @@ function StatementTab({ d }: { d: Data }) {
       </Card>
       {d.months.length > 1 && (
         <Card kicker="Month by month" title="Monthly P&L">
-          <MonthlyStatement columns={d.months} total={d.cur} fulfillmentSet={d.fulfillmentPerOrder != null} />
+          <MonthlyStatement columns={d.months} total={d.cur} />
         </Card>
       )}
       {d.months.length <= 1 && (

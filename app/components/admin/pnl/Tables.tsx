@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { AdPlatformRow, BreakdownRow, PnlOrderFact } from '~/lib/pnl-core'
-import { fulfillmentFor, round2 } from '~/lib/pnl-core'
+import { NALPAC_SHIPPING_RATES, fulfillmentFor, round2 } from '~/lib/pnl-core'
 import { ResponsiveTable } from '~/components/admin/ResponsiveTable'
 import { count, dayLabel, money, multiple, pct } from './format'
 
@@ -131,7 +131,7 @@ export function AdPlatformsTable({ rows, netRevenue, newCustomers }: { rows: AdP
 }
 
 /** Every order in the window with its own profit, searchable, newest first. */
-export function OrdersLedger({ orders, fulfillmentPerOrder, storeDomain }: { orders: PnlOrderFact[]; fulfillmentPerOrder: number | null; storeDomain: string | null }) {
+export function OrdersLedger({ orders, handlingFeePerOrder, storeDomain }: { orders: PnlOrderFact[]; handlingFeePerOrder: number | null; storeDomain: string | null }) {
   const [q, setQ] = useState('')
   const [page, setPage] = useState(0)
   const PAGE = 25
@@ -175,7 +175,7 @@ export function OrdersLedger({ orders, fulfillmentPerOrder, storeDomain }: { ord
           </thead>
           <tbody>
             {shown.map(o => {
-              const ful = fulfillmentFor(o, fulfillmentPerOrder)
+              const ful = fulfillmentFor(o, handlingFeePerOrder)
               const gp = round2(o.netRevenue - o.cogs - o.paymentFees - ful)
               const margin = o.netRevenue > 0 ? (gp / o.netRevenue) * 100 : null
               const numericId = o.id.split('/').pop()
@@ -198,7 +198,10 @@ export function OrdersLedger({ orders, fulfillmentPerOrder, storeDomain }: { ord
                     {money(o.cogs)}
                     {o.cogsMissingUnits > 0 && <span className="block text-[10px] text-[#A3261B]">{o.cogsMissingUnits} uncosted</span>}
                   </td>
-                  <td className={`${td} text-right text-ink-3`}>{money(o.paymentFees + ful)}</td>
+                  <td className={`${td} text-right text-ink-3`}>
+                    {money(o.paymentFees + ful)}
+                    <span className="block text-[10px] text-ink-4">{NALPAC_SHIPPING_RATES[o.shippingTier].label}</span>
+                  </td>
                   <td className={`${td} text-right font-semibold ${gp < 0 ? 'text-[#A3261B]' : 'text-ink'}`}>{money(gp)}</td>
                   <td className={`${td} text-right text-ink-3`}>{pct(margin, 0)}</td>
                 </tr>

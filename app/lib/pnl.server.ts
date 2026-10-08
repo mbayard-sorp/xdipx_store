@@ -12,7 +12,10 @@
  *   api_token_log        metered AI spend
  *   fixed_monthly_costs  software and subscriptions, spread per day
  *   pnl_expenses         one-off expenses (migration 119)
- *   pipeline_settings    pnl_fulfillment_cost_cents, the per-order fulfillment estimate
+ *   pipeline_settings    pnl_handling_fee_cents, an optional per-order handling fee
+ *
+ * Shipping cost needs no input: each order is charged Nalpac's rate for its
+ * shipping method and destination (NALPAC_SHIPPING_RATES in pnl-core.ts).
  */
 import { and, asc, desc, eq, gte, inArray, isNull, lte, sql } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
@@ -27,7 +30,7 @@ import {
   type ShopifyPnlOrder,
 } from '~/lib/pnl-core'
 
-export const FULFILLMENT_SETTING_KEY = 'pnl_fulfillment_cost_cents'
+export const HANDLING_SETTING_KEY = 'pnl_handling_fee_cents'
 const SOURCE = 'admin.pnl'
 const FALLBACK_TZ = 'America/Phoenix'
 const ORDERS_PAGE = 50
@@ -58,6 +61,8 @@ const PNL_ORDERS_QUERY = `
         currentTotalPriceSet { shopMoney { amount } }
         currentTotalTaxSet { shopMoney { amount } }
         currentSubtotalPriceSet { shopMoney { amount } }
+        shippingAddress { countryCodeV2 provinceCode }
+        shippingLines(first: 3) { nodes { title } }
         metafields(first: 25, namespace: "xdipx") { nodes { key value } }
         lineItems(first: 30) {
           nodes {
@@ -234,8 +239,8 @@ export async function listExpenses(from?: string, to?: string): Promise<ExpenseR
   }))
 }
 
-export async function getFulfillmentPerOrder(): Promise<number | null> {
-  const [row] = await db.select({ value: pipelineSettings.value }).from(pipelineSettings).where(eq(pipelineSettings.key, FULFILLMENT_SETTING_KEY))
+export async function getHandlingFeePerOrder(): Promise<number | null> {
+  const [row] = await db.select({ value: pipelineSettings.value }).from(pipelineSettings).where(eq(pipelineSettings.key, HANDLING_SETTING_KEY))
   if (!row) return null
   const cents = Number(row.value)
   return Number.isFinite(cents) && cents >= 0 ? cents / 100 : null
@@ -264,7 +269,7 @@ export async function loadPnlData(window: { from: string; to: string }, opts: { 
   const to = window.to
   const gaps: string[] = []
 
-  const [orders, ads, ai, fixedAll, expenses, fulfillmentPerOrder] = await Promise.all([
+  const [orders, ads, ai, fixedAll, expenses, handlingFeePerOrder] = await Promise.all([
     fetchOrderFacts(from, to, tz, opts),
     readAds(from, to).catch((err): AdSpendRow[] => { gaps.push('Ad spend could not be read.'); console.error('[pnl] ads', err); return [] }),
     readAi(from, to, tz).catch((err): DailyAmount[] => { gaps.push('AI spend could not be read.'); console.error('[pnl] ai', err); return [] }),
@@ -273,7 +278,7 @@ export async function loadPnlData(window: { from: string; to: string }, opts: { 
       console.error('[pnl] expenses', err)
       return { ok: false as const, rows: [] as ExpenseRow[] }
     }),
-    getFulfillmentPerOrder().catch((): null => { gaps.push('Fulfillment cost setting could not be read.'); return null }),
+    getHandlingFeePerOrder().catch((): null => { gaps.push('Handling fee setting could not be read.'); return null }),
   ])
   await attachSources(orders, gaps)
 
@@ -286,7 +291,7 @@ export async function loadPnlData(window: { from: string; to: string }, opts: { 
 
   return {
     tz, today, fixedAll, expensesRecent, gaps, expensesReady: expenses.ok,
-    inputs: { orders, ads, ai, fixed: fixedAll, expenses: expenses.rows, fulfillmentPerOrder },
+    inputs: { orders, ads, ai, fixed: fixedAll, expenses: expenses.rows, handlingFeePerOrder },
   }
 }
 
@@ -307,16 +312,12 @@ function cleanText(raw: unknown, max: number): string {
   return String(raw ?? '').replace(/\s+/g, ' ').trim().slice(0, max)
 }
 
-export async function saveFulfillmentPerOrder(raw: unknown, actor: SettingsActor): Promise<string> {
+export async function saveHandlingFeePerOrder(raw: unknown, actor: SettingsActor): Promise<string> {
   const s = String(raw ?? '').trim()
-  if (s === '') {
-    await db.delete(pipelineSettings).where(eq(pipelineSettings.key, FULFILLMENT_SETTING_KEY))
-    return 'Fulfillment estimate cleared.'
-  }
-  const usd = parseMoney(s, 'the per-order fulfillment cost', { allowZero: true })
-  await setPipelineSettingAudited(FULFILLMENT_SETTING_KEY, String(Math.round(usd * 100)), actor, SOURCE)
-  orderCache.clear()
-  return `Fulfillment set to $${usd.toFixed(2)} per order.`
+  // Blank means no fee. Stored as 0 rather than deleted so the audit log keeps the change.
+  const usd = s === '' ? 0 : parseMoney(s, 'the per-order handling fee', { allowZero: true })
+  await setPipelineSettingAudited(HANDLING_SETTING_KEY, String(Math.round(usd * 100)), actor, SOURCE)
+  return usd === 0 ? 'Handling fee cleared.' : `Handling fee set to $${usd.toFixed(2)} per order.`
 }
 
 export async function addFixedCost(input: { vendor: unknown; monthly: unknown; from: unknown; note: unknown }): Promise<string> {

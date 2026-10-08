@@ -13,6 +13,9 @@
  *  - COGS uses the same precedence as profit.server.ts (order metafield first,
  *    then the variant's inventory unit cost). The caller injects it so this
  *    module stays pure. Units nobody can cost are counted, never priced at $0.
+ *  - Shipping cost is Nalpac's average rate for the method the customer chose
+ *    and where it went (NALPAC_SHIPPING_RATES), charged whether or not the
+ *    customer paid for shipping.
  *  - Ad spend, AI spend, fixed costs and one-off expenses are joined by day.
  *
  * ACCOUNTING BASIS. Order-date: a refund issued next week lands on the day the
@@ -217,6 +220,8 @@ export interface ShopifyPnlOrder {
   currentTotalPriceSet: Money
   currentTotalTaxSet: Money
   currentSubtotalPriceSet: Money
+  shippingAddress: { countryCodeV2: string | null; provinceCode: string | null } | null
+  shippingLines: { nodes: Array<{ title: string | null }> }
   metafields: { nodes: Array<{ key: string; value: string }> }
   lineItems: { nodes: ShopifyPnlLine[] }
   transactions: Array<{ kind: string; status: string; gateway: string | null; amountSet?: Money; fees: Array<{ amount: { amount: string } }> }>
@@ -224,6 +229,38 @@ export interface ShopifyPnlOrder {
 
 /** Financial statuses where money actually moved. Pending, authorized-only, voided and expired orders are not sales. */
 export const COUNTED_FINANCIAL_STATUSES = new Set(['PAID', 'PARTIALLY_PAID', 'PARTIALLY_REFUNDED', 'REFUNDED'])
+
+/**
+ * What Nalpac charges us to ship one drop-ship order, by the Shopify rate the
+ * customer picked. Nalpac's average rates, from the owner's rate table
+ * (2026-10-08). Update here when Nalpac's rates change.
+ */
+export const NALPAC_SHIPPING_RATES = {
+  'standard-us': { label: 'Standard US', nalpac: 'Best Rate Standard', cost: 6.5 },
+  'standard-remote': { label: 'Standard HI, AK, PR', nalpac: 'Best Rate Standard', cost: 11.53 },
+  expedited: { label: 'Expedited US', nalpac: 'FedEx One Rate', cost: 12.5 },
+  canada: { label: 'Standard Canada', nalpac: 'Best Rate International', cost: 23.8 },
+  international: { label: 'International', nalpac: 'Best Rate International', cost: 44.7 },
+} as const
+export type ShippingTier = keyof typeof NALPAC_SHIPPING_RATES
+
+const REMOTE_US = new Set(['HI', 'AK', 'PR'])
+
+/**
+ * Which Nalpac rate an order ships on. Expedited is chosen by the rate name;
+ * everything else by destination, so a free-shipping promo on a Hawaii order
+ * still costs the Hawaii rate. No address (a rare draft order) is treated as
+ * Standard US, the method nearly every order uses.
+ */
+export function shippingTierFor(title: string | null | undefined, country: string | null | undefined, province: string | null | undefined): ShippingTier {
+  const t = (title ?? '').toLowerCase()
+  const c = (country ?? 'US').toUpperCase()
+  if (c === 'CA') return 'canada'
+  if (c !== 'US' && c !== 'PR') return 'international'
+  if (/expedit|express|fedex|overnight|priority|2[- ]?day/.test(t)) return 'expedited'
+  if (c === 'PR' || REMOTE_US.has((province ?? '').toUpperCase())) return 'standard-remote'
+  return 'standard-us'
+}
 
 export interface PnlLine {
   title: string
@@ -257,6 +294,9 @@ export interface PnlOrderFact {
   cogs: number
   cogsMissingUnits: number
   paymentFees: number
+  shippingTier: ShippingTier
+  /** Nalpac's charge to ship this order. Zero when nothing shipped. */
+  shippingCost: number
   /** Amount paid with Shop Cash. A tender, not a cost; shown as a memo. */
   shopCash: number
   lines: PnlLine[]
@@ -352,6 +392,11 @@ export function orderToFact(
     }
   }
 
+  const shippingTier = shippingTierFor(
+    o.shippingLines?.nodes?.[0]?.title, o.shippingAddress?.countryCodeV2, o.shippingAddress?.provinceCode,
+  )
+  const shippingCost = units > 0 ? NALPAC_SHIPPING_RATES[shippingTier].cost : 0
+
   const idx = o.customerJourneySummary?.customerOrderIndex
   const customerType: PnlOrderFact['customerType'] = idx == null ? 'unknown' : idx <= 1 ? 'new' : 'returning'
 
@@ -374,6 +419,8 @@ export function orderToFact(
     cogs: round2(cogs),
     cogsMissingUnits,
     paymentFees: round2(paymentFees),
+    shippingTier,
+    shippingCost,
     shopCash: round2(shopCash),
     lines: outLines,
   }
@@ -472,6 +519,11 @@ export interface PnlTotals {
   shopCash: number
   productCost: number
   cogsMissingUnits: number
+  /** Nalpac shipping at table rates. */
+  shippingCost: number
+  /** Optional per-order handling fee plus logged shipping & fulfillment expenses. */
+  handling: number
+  /** shippingCost + handling. */
   fulfillment: number
   paymentFees: number
   grossProfit: number
@@ -493,8 +545,8 @@ export interface PnlInputs {
   ai: readonly DailyAmount[]
   fixed: readonly FixedCostRow[]
   expenses: readonly ExpenseRow[]
-  /** Estimated fulfillment and shipping cost per shipped order, or null when the owner has not set it. */
-  fulfillmentPerOrder: number | null
+  /** Optional extra per-order fee on top of Nalpac shipping (a drop-ship or packaging fee), or null for none. */
+  handlingFeePerOrder: number | null
 }
 
 const inWindow = (day: string, from: string, to: string) => day >= from && day <= to
@@ -504,16 +556,21 @@ export function emptyTotals(): PnlTotals {
   return {
     orders: 0, units: 0, newCustomers: 0, returningCustomers: 0,
     grossSales: 0, discounts: 0, returns: 0, shipping: 0, netRevenue: 0, tax: 0, shopCash: 0,
-    productCost: 0, cogsMissingUnits: 0, fulfillment: 0, paymentFees: 0, grossProfit: 0,
+    productCost: 0, cogsMissingUnits: 0, shippingCost: 0, handling: 0, fulfillment: 0, paymentFees: 0, grossProfit: 0,
     adSpend: 0, adByPlatform: {}, contribution: 0,
     aiSpend: 0, fixedCosts: 0, fixedByVendor: {}, otherExpenses: 0, otherByCategory: {},
     operatingExpenses: 0, netProfit: 0,
   }
 }
 
-/** Fulfillment is charged per order that shipped something. */
-export function fulfillmentFor(o: PnlOrderFact, perOrder: number | null): number {
+/** Handling fee, charged per order that shipped something. */
+export function handlingFor(o: PnlOrderFact, perOrder: number | null): number {
   return perOrder != null && o.units > 0 ? perOrder : 0
+}
+
+/** Everything it cost to get one order out the door: Nalpac shipping plus any handling fee. */
+export function fulfillmentFor(o: PnlOrderFact, handlingPerOrder: number | null): number {
+  return o.shippingCost + handlingFor(o, handlingPerOrder)
 }
 
 /** Every number on the statement, for one window. */
@@ -535,7 +592,8 @@ export function totalsFor(input: PnlInputs, from: string, to: string): PnlTotals
     t.productCost += o.cogs
     t.cogsMissingUnits += o.cogsMissingUnits
     t.paymentFees += o.paymentFees
-    t.fulfillment += fulfillmentFor(o, input.fulfillmentPerOrder)
+    t.shippingCost += o.shippingCost
+    t.handling += handlingFor(o, input.handlingFeePerOrder)
   }
   for (const a of input.ads) {
     if (!inWindow(a.day, from, to) || a.spend === 0) continue
@@ -556,12 +614,13 @@ export function totalsFor(input: PnlInputs, from: string, to: string): PnlTotals
       t.adSpend += e.amount
       bump(t.adByPlatform, e.vendor || 'Other advertising', e.amount)
     } else if (e.category === 'fulfillment') {
-      t.fulfillment += e.amount
+      t.handling += e.amount
     } else {
       t.otherExpenses += e.amount
       bump(t.otherByCategory, expenseCategoryLabel(e.category), e.amount)
     }
   }
+  t.fulfillment = t.shippingCost + t.handling
   t.grossProfit = t.netRevenue - t.productCost - t.fulfillment - t.paymentFees
   t.contribution = t.grossProfit - t.adSpend
   t.operatingExpenses = t.aiSpend + t.fixedCosts + t.otherExpenses
@@ -593,6 +652,8 @@ export interface PnlRatios {
   cac: number | null
   discountRatePct: number | null
   refundRatePct: number | null
+  /** Shipping charged to customers less what Nalpac charged to ship. Negative means shipping is subsidized. */
+  shippingMargin: number
   /** Contribution per order before ads: what one order can afford to pay for itself. */
   breakevenCpa: number | null
 }
@@ -610,6 +671,7 @@ export function ratiosFor(t: PnlTotals): PnlRatios {
     cac: t.adSpend > 0 && t.newCustomers > 0 ? round2(t.adSpend / t.newCustomers) : null,
     discountRatePct: pct(t.discounts, t.grossSales),
     refundRatePct: pct(t.returns, t.grossSales),
+    shippingMargin: round2(t.shipping - t.shippingCost),
     breakevenCpa: t.orders > 0 ? round2(ratio(t.grossProfit, t.orders) ?? 0) : null,
   }
 }
@@ -640,7 +702,7 @@ export interface StatementRow {
  * ad platform, per software vendor, per expense category) appear only when they
  * carry money so the statement stays as short as the business is.
  */
-export function statementRows(t: PnlTotals, opts: { fulfillmentSet: boolean }): StatementRow[] {
+export function statementRows(t: PnlTotals): StatementRow[] {
   const rows: StatementRow[] = []
   const push = (r: StatementRow) => rows.push(r)
 
@@ -657,10 +719,12 @@ export function statementRows(t: PnlTotals, opts: { fulfillmentSet: boolean }): 
     hint: t.cogsMissingUnits > 0 ? `${t.cogsMissingUnits} unit${t.cogsMissingUnits === 1 ? '' : 's'} had no cost on file and are not included` : undefined,
   })
   push({
-    key: 'fulfillment', label: 'Fulfillment & shipping', kind: 'line', indent: 1, isCost: true,
-    value: opts.fulfillmentSet || t.fulfillment > 0 ? t.fulfillment : null,
-    hint: opts.fulfillmentSet ? 'Per-order estimate plus any logged shipping expenses' : 'Per-order cost not set yet. Set it under Costs.',
+    key: 'shippingCost', label: 'Shipping (Nalpac)', kind: 'line', indent: 1, isCost: true, value: t.shippingCost,
+    hint: 'Nalpac average rate for each order\'s shipping method',
   })
+  if (t.handling > 0) {
+    push({ key: 'handling', label: 'Handling & other fulfillment', kind: 'line', indent: 1, isCost: true, value: t.handling })
+  }
   push({ key: 'paymentFees', label: 'Payment processing', kind: 'line', indent: 1, isCost: true, value: t.paymentFees, hint: 'Actual Shopify Payments fees' })
   push({ key: 'grossProfit', label: 'Gross profit', kind: 'subtotal', indent: 0, isCost: false, value: t.grossProfit })
 
@@ -862,7 +926,7 @@ export function waterfallSteps(t: PnlTotals): WaterfallStep[] {
   const steps: WaterfallStep[] = [{ key: 'netRevenue', label: 'Net revenue', amount: t.netRevenue, kind: 'start' }]
   const costs: Array<[string, string, number]> = [
     ['productCost', 'Product cost', t.productCost],
-    ['fulfillment', 'Fulfillment', t.fulfillment],
+    ['fulfillment', 'Shipping', t.fulfillment],
     ['paymentFees', 'Payment fees', t.paymentFees],
     ['adSpend', 'Ad spend', t.adSpend],
     ['aiSpend', 'AI & API', t.aiSpend],
@@ -915,20 +979,21 @@ export function toCsv(header: readonly string[], rows: ReadonlyArray<ReadonlyArr
   return [header, ...rows].map(r => r.map(csvCell).join(',')).join('\n') + '\n'
 }
 
-export function ordersCsv(orders: readonly PnlOrderFact[], fulfillmentPerOrder: number | null): string {
+export function ordersCsv(orders: readonly PnlOrderFact[], handlingPerOrder: number | null): string {
   return toCsv(
-    ['order', 'date', 'channel', 'source', 'customer', 'status', 'units', 'gross_sales', 'discounts', 'returns', 'shipping', 'net_revenue', 'tax', 'product_cost', 'cogs_missing_units', 'payment_fees', 'fulfillment_est', 'gross_profit'],
+    ['order', 'date', 'channel', 'source', 'customer', 'status', 'units', 'gross_sales', 'discounts', 'returns', 'shipping', 'net_revenue', 'tax', 'product_cost', 'cogs_missing_units', 'payment_fees', 'shipping_method', 'shipping_cost', 'handling', 'gross_profit'],
     orders.map(o => {
-      const ful = fulfillmentFor(o, fulfillmentPerOrder)
+      const handling = handlingFor(o, handlingPerOrder)
       return [o.name, o.day, o.channel, o.source, o.customerType, o.status, o.units, o.grossSales, o.discounts, o.returns, o.shipping,
-        o.netRevenue, o.tax, o.cogs, o.cogsMissingUnits, o.paymentFees, ful, round2(o.netRevenue - o.cogs - o.paymentFees - ful)]
+        o.netRevenue, o.tax, o.cogs, o.cogsMissingUnits, o.paymentFees, NALPAC_SHIPPING_RATES[o.shippingTier].label, o.shippingCost, handling,
+        round2(o.netRevenue - o.cogs - o.paymentFees - o.shippingCost - handling)]
     }),
   )
 }
 
-export function statementCsv(columns: ReadonlyArray<{ label: string; totals: PnlTotals }>, fulfillmentSet: boolean): string {
+export function statementCsv(columns: ReadonlyArray<{ label: string; totals: PnlTotals }>): string {
   // One row per statement line, one column per window. Row keys come from the union across columns.
-  const perCol = columns.map(c => statementRows(c.totals, { fulfillmentSet }))
+  const perCol = columns.map(c => statementRows(c.totals))
   const order: Array<{ key: string; label: string; isCost: boolean }> = []
   const seen = new Set<string>()
   for (const rows of perCol) for (const r of rows) {

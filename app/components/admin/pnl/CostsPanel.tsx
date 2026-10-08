@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { useFetcher } from 'react-router'
-import { EXPENSE_CATEGORIES, expenseCategoryLabel, type ExpenseRow, type FixedCostRow } from '~/lib/pnl-core'
+import { EXPENSE_CATEGORIES, NALPAC_SHIPPING_RATES, expenseCategoryLabel, type ExpenseRow, type FixedCostRow } from '~/lib/pnl-core'
 import { ResponsiveTable } from '~/components/admin/ResponsiveTable'
 import { Card } from './Card'
 import { dayLabel, money } from './format'
@@ -30,11 +30,11 @@ function useResetOnSuccess(fetcher: { state: string; data: unknown }) {
 }
 
 export function CostsPanel({
-  isOwner, today, fulfillmentPerOrder, fixed, expenses, expensesReady,
+  isOwner, today, handlingFeePerOrder, fixed, expenses, expensesReady,
 }: {
   isOwner: boolean
   today: string
-  fulfillmentPerOrder: number | null
+  handlingFeePerOrder: number | null
   fixed: FixedCostRow[]
   expenses: ExpenseRow[]
   expensesReady: boolean
@@ -57,19 +57,44 @@ export function CostsPanel({
         <p className="text-sm text-ink-3 bg-paper-2 border border-line rounded-[10px] px-3 py-2">Only the owner can change costs. Everything here is read-only for you.</p>
       )}
 
-      <Card kicker="Cost of sales" title="Fulfillment & shipping per order">
+      <Card kicker="Cost of sales" title="Shipping">
         <p className="text-sm text-ink-3 mb-3 max-w-2xl">
-          What Nalpac bills to pick, pack and ship one drop-ship order. It is charged to every order that shipped something.
-          Shopify does not know this number, so until it is set the P&L leaves it out and says so.
+          Every order that ships is charged Nalpac&apos;s average rate for the method the customer chose and where it went.
+          The cost applies even when the customer got free shipping, since Nalpac still bills it.
+        </p>
+        <ResponsiveTable className="mb-4">
+          <table className="w-full min-w-[340px] text-sm">
+            <thead>
+              <tr>
+                <th className={`${th} text-left`}>Shopify rate</th>
+                <th className={`${th} text-left`}>Nalpac rate</th>
+                <th className={`${th} text-right`}>Our cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Object.values(NALPAC_SHIPPING_RATES).map(r => (
+                <tr key={r.label} className="border-t border-line">
+                  <td className="py-2 pr-3">{r.label}</td>
+                  <td className="py-2 pr-3 text-ink-3">{r.nalpac}</td>
+                  <td className="py-2 text-right tabular-nums">{money(r.cost)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </ResponsiveTable>
+        <p className="text-xs text-ink-4 mb-4">These rates are set in code (app/lib/pnl-core.ts). When Nalpac changes them, they get updated there.</p>
+
+        <p className="text-sm text-ink-2 font-semibold">Extra handling fee per order (optional)</p>
+        <p className="text-sm text-ink-3 mb-3 max-w-2xl">
+          Anything Nalpac or anyone else charges per order on top of shipping, such as a drop-ship or packaging fee. Leave it blank if there is none.
         </p>
         <ful.Form method="post" className="flex flex-col gap-3 md:flex-row md:items-end">
-          <input type="hidden" name="intent" value="save-fulfillment" />
+          <input type="hidden" name="intent" value="save-handling" />
           <label className="block md:w-56">
             <span className="text-xs text-ink-3">Dollars per order</span>
-            <input name="amount" inputMode="decimal" defaultValue={fulfillmentPerOrder == null ? '' : fulfillmentPerOrder.toFixed(2)} placeholder="e.g. 8.50" className={input} disabled={!isOwner} />
+            <input name="amount" inputMode="decimal" defaultValue={handlingFeePerOrder ? handlingFeePerOrder.toFixed(2) : ''} placeholder="e.g. 2.00" className={input} disabled={!isOwner} />
           </label>
           <button type="submit" className={btn} disabled={!isOwner || ful.state !== 'idle'}>{ful.state !== 'idle' ? 'Saving…' : 'Save'}</button>
-          <p className="text-xs text-ink-4 md:pb-2.5">Leave blank and save to clear it.</p>
         </ful.Form>
         <Status data={ful.data} />
       </Card>
