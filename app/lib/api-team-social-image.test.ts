@@ -548,6 +548,64 @@ describe('cast: hand reference for held contact modes (#11476)', () => {
 })
 
 /**
+ * Ticket #13740: instagram-campaigns.md §3.2g item 5 (owner 2026-10-05) now
+ * licenses a face entering a close/medium bodyscape at the frame edge, which
+ * needs both the body and portrait references at once. `faceInFrame:true`
+ * opts into that; today's single-reference behaviour stays the default.
+ */
+describe('cast: faceInFrame sends both references (#13740)', () => {
+  const castBySlug = {
+    op: 'cast',
+    prompt: 'held at the collarbone, window light',
+    handle: 'we-vibe-chorus',
+    mood: 'daylight',
+    date: '2026-08-18',
+    productImageUrl: 'https://cdn/product.jpg',
+    scale: 'palm',
+    sceneLocation: 'bedroom-loft',
+  }
+  const ON_SKIN_AXES = { bodyZone: 'hip-hollow', contactMode: 'resting' }
+
+  it('sends two reference URLs for a close crop when the member has both', async () => {
+    const res = await post({ ...castBySlug, ...ON_SKIN_AXES, castSlug: 'maya', cropScale: 'close', faceInFrame: true })
+    expect(res.status).toBe(200)
+    expect(castMock).toHaveBeenCalledWith(expect.objectContaining({
+      presenterImageUrl: 'https://cdn/maya-body.jpg',
+      extraImageUrls: ['https://cdn/maya-portrait.jpg'],
+    }))
+    expect(await res.json()).not.toHaveProperty('dualReferenceMissing')
+  })
+
+  it('does not add a second reference when faceInFrame is omitted', async () => {
+    await post({ ...castBySlug, ...ON_SKIN_AXES, castSlug: 'maya', cropScale: 'close' })
+    expect(castMock).toHaveBeenCalledWith(expect.not.objectContaining({ extraImageUrls: expect.anything() }))
+  })
+
+  it('sends the one reference that exists and returns dualReferenceMissing with a warning', async () => {
+    const res = await post({ ...castBySlug, ...ON_SKIN_AXES, castSlug: 'ruth', cropScale: 'close', faceInFrame: true })
+    expect(res.status).toBe(200)
+    const body = await res.json() as { dualReferenceMissing?: boolean; warning?: string }
+    expect(body.dualReferenceMissing).toBe(true)
+    expect(body.warning).toContain('Ruth')
+    expect(castMock).toHaveBeenCalledWith(expect.objectContaining({
+      presenterImageUrl: 'https://cdn/ruth-portrait.jpg',
+    }))
+    expect(castMock).toHaveBeenCalledWith(expect.not.objectContaining({ extraImageUrls: expect.anything() }))
+  })
+
+  it('records a run event and a Sentry message for a dualReferenceMissing fallback', async () => {
+    const res = await post({
+      ...castBySlug, ...ON_SKIN_AXES, castSlug: 'ruth', cropScale: 'close', faceInFrame: true, runId: 42,
+    })
+    expect(res.status).toBe(200)
+    expect(recordEventMock).toHaveBeenCalledWith(expect.objectContaining({
+      runId: 42, eventType: 'error', summary: expect.stringContaining('Ruth'),
+    }))
+    expect(captureMessageMock).toHaveBeenCalledWith(expect.stringContaining('Ruth'), 'warning')
+  })
+})
+
+/**
  * Ticket #10341, tightened by #11474: featuredMedia is sometimes the retail
  * carton, so the route now reads the stored, once-resolved
  * `xdipx.bare_product_reference` metafield rather than walking the media
