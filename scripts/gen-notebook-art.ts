@@ -329,6 +329,8 @@ async function generateHeroComposite(slug: string, castSlug: string, opts: {
   saveDir: string
   feature: string
   runId?: number
+  /** Ticket #14309: see `--label-tolerant` in `main()`'s usage string. */
+  labelTolerant?: boolean
 }): Promise<HeroRungResult | null> {
   const { composeSceneFrame, downloadFalAsset } = await import('~/lib/fal-video.server')
   const { logImageCost } = await import('~/lib/token-log.server')
@@ -380,7 +382,9 @@ async function generateHeroComposite(slug: string, castSlug: string, opts: {
     // secondary-scale rung still carries one, the single-figure fallback
     // below never does.
     if (!productImageUrl) return { rung, buffers: passing, provider: 'fal', model: res.costKey }
-    const fidelityVerdicts = await Promise.all(passing.map(buf => gateProductFidelityBuffer(buf, productImageUrl, undefined, opts.runId)))
+    const fidelityVerdicts = await Promise.all(
+      passing.map(buf => gateProductFidelityBuffer(buf, productImageUrl, undefined, opts.runId, undefined, opts.labelTolerant)),
+    )
     const fidelitySplit = splitByFidelity(passing, fidelityVerdicts)
     if (!fidelitySplit.passing.length) {
       throw new Error(
@@ -526,7 +530,7 @@ async function generate(surface: Surface, slug: string | undefined, opts: {
   }))
 }
 
-async function upload(surface: Surface, slug: string | undefined, filePath: string, alt: string, prompt: string, runId?: number) {
+async function upload(surface: Surface, slug: string | undefined, filePath: string, alt: string, prompt: string, runId?: number, labelTolerant?: boolean) {
   if (surface === 'spot') {
     console.error('--upload is not supported for --surface spot (spot art is placed per-post via Studio)')
     process.exit(1)
@@ -593,7 +597,7 @@ async function upload(surface: Surface, slug: string | undefined, filePath: stri
     const uploadProductHandle = await resolveHeroProductHandle(slug!)
     const uploadProductImageUrl = uploadProductHandle ? await resolveProductPhotoUrl(uploadProductHandle) : null
     if (uploadProductImageUrl) {
-      const fidelityVerdict = await gateProductFidelityBuffer(buffer, uploadProductImageUrl, undefined, runId)
+      const fidelityVerdict = await gateProductFidelityBuffer(buffer, uploadProductImageUrl, undefined, runId, undefined, labelTolerant)
       if (!productFidelityPasses(fidelityVerdict)) {
         if (!fidelityVerdict.checkCompleted) {
           console.error(`[gen-notebook-art] UPLOAD REFUSED: the product-fidelity check did not evaluate this candidate, so the upload is blocked rather than shipped unchecked.`)
@@ -707,6 +711,14 @@ async function main() {
   // own run_in_progress blocking-run check (mirrors gen-social-image.ts).
   const runIdArg = arg('run-id')
   const runId = runIdArg && /^\d+$/.test(runIdArg) ? Number(runIdArg) : undefined
+  // Ticket #14309: for a SKU the image-prompt-library already flags as
+  // label-heavy (the printed text IS the product's identity, and no
+  // generation path has ever rendered it legibly), tells the product-
+  // fidelity check to judge silhouette/colour/finish only and never fail on
+  // the brandMark dimension. Caller-selected; nothing here infers which SKUs
+  // qualify. Threaded into every gateProductFidelityBuffer() call, mid-ladder
+  // (generateHeroComposite) and at the final pre-upload check (upload()).
+  const labelTolerant = hasFlag('label-tolerant')
 
   // Ticket #12371, extended #13333: a cheap check that the hero anatomy
   // gate's AND the product-fidelity gate's Anthropic dependencies can each
@@ -722,7 +734,7 @@ async function main() {
   }
 
   if (!surface || !(surface in SURFACES)) {
-    console.error('Usage: gen-notebook-art.ts --surface masthead|category|series|hero|spot [--slug <slug>] [--prompt <p>] [--alt <a>] [--count N] [--save-dir <dir>] [--upload <file>] [--only fal|imagen] [--ref-image <url>] [--cast <castSlug>] [--run-id <n>] [--feature <f>] [--dry-run]\n   or: gen-notebook-art.ts --preflight [--run-id <n>]')
+    console.error('Usage: gen-notebook-art.ts --surface masthead|category|series|hero|spot [--slug <slug>] [--prompt <p>] [--alt <a>] [--count N] [--save-dir <dir>] [--upload <file>] [--only fal|imagen] [--ref-image <url>] [--cast <castSlug>] [--run-id <n>] [--feature <f>] [--dry-run] [--label-tolerant]\n   or: gen-notebook-art.ts --preflight [--run-id <n>]')
     process.exit(1)
   }
   if (cast && surface !== 'hero') {
@@ -757,7 +769,7 @@ async function main() {
       console.error('--alt is required with --upload (Emma-voice alt text, descriptive and non-explicit)')
       process.exit(1)
     }
-    await upload(surface, slug, uploadFile, alt, prompt, runId)
+    await upload(surface, slug, uploadFile, alt, prompt, runId, labelTolerant)
     return
   }
 
@@ -797,7 +809,7 @@ async function main() {
   // passed by the caller; without --cast the hero stays the plain text-to-image
   // path below, unchanged.
   if (surface === 'hero' && cast) {
-    const result = await generateHeroComposite(slug!, cast, { prompt, count, saveDir, feature, runId })
+    const result = await generateHeroComposite(slug!, cast, { prompt, count, saveDir, feature, runId, labelTolerant })
     if (!result) {
       console.log(JSON.stringify({
         generated: 0,

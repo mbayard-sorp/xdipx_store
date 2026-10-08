@@ -130,6 +130,41 @@ describe('remoteFidelityCallVision (ticket #13333)', () => {
     await expect(callVision({ data: 'a', mediaType: 'image/png' }, { data: 'b', mediaType: 'image/png' }))
       .rejects.toThrow('no TEAM_TOKEN/HOMEPAGE_TEAM_TOKEN/CRON_SECRET')
   })
+
+  // Ticket #14309: a scheduled sandbox with no ANTHROPIC_API_KEY (the
+  // Notebook content run's normal case) reaches the fidelity check only
+  // through this remote route, so --label-tolerant has to survive the trip.
+  it('forwards labelTolerant in the request body when the caller opts in', async () => {
+    vi.stubEnv('TEAM_TOKEN', 'test-team-token')
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(init!.body as string)
+      expect(body.labelTolerant).toBe(true)
+      return new Response(JSON.stringify({ ...CLEAN_FIDELITY_VERDICT, brandMark: 'not-applicable' }), { status: 200 })
+    })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    const callVision = remoteFidelityCallVision()
+    await callVision(
+      { data: 'rendered-b64', mediaType: 'image/png' },
+      { data: 'reference-b64', mediaType: 'image/jpeg' },
+      { labelTolerant: true },
+    )
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('omits labelTolerant from the request body when the caller does not opt in', async () => {
+    vi.stubEnv('TEAM_TOKEN', 'test-team-token')
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(init!.body as string)
+      expect(body.labelTolerant).toBeUndefined()
+      return new Response(JSON.stringify(CLEAN_FIDELITY_VERDICT), { status: 200 })
+    })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    const callVision = remoteFidelityCallVision()
+    await callVision({ data: 'rendered-b64', mediaType: 'image/png' }, { data: 'reference-b64', mediaType: 'image/jpeg' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe('fidelityDepsForEnv (ticket #13333)', () => {
@@ -296,6 +331,43 @@ describe('gateProductFidelityBuffer (ticket #13119)', () => {
     )
     expect(verdict.checkCompleted).toBe(false)
     expect(productFidelityPasses(verdict)).toBe(false)
+  })
+
+  // Ticket #14309: a label-heavy SKU's own distinguishing feature is printed
+  // text no generation path has ever rendered legibly (image-prompt-library,
+  // runs 799/807), which the strict brandMark dimension always reads as
+  // drift and productFidelityPasses then rejects outright regardless of how
+  // well the rest of the product rendered. The caller-selected labelTolerant
+  // flag threads through to callVision so the model never judges brandMark.
+  it('threads labelTolerant through to callVision as a FidelityCallOpts', async () => {
+    const callVision = vi.fn(async () => ({ silhouette: 'match', colour: 'match', finish: 'match', brandMark: 'not-applicable', notes: 'label not judged' }))
+    const verdict = await gateProductFidelityBuffer(
+      Buffer.from('label-heavy-render'),
+      'https://cdn.shopify.com/files/label-heavy-ref.jpg',
+      deps({ callVision }),
+      undefined,
+      undefined,
+      true,
+    )
+    expect(callVision).toHaveBeenCalledWith(
+      expect.objectContaining({ mediaType: 'image/jpeg' }),
+      expect.objectContaining({ mediaType: 'image/jpeg' }),
+      { labelTolerant: true },
+    )
+    expect(productFidelityPasses(verdict)).toBe(true)
+  })
+
+  it('does not pass a labelTolerant opt to callVision when the caller omits it', async () => {
+    const callVision = vi.fn(async () => ({ silhouette: 'match', colour: 'match', finish: 'match', brandMark: 'match', notes: 'faithful' }))
+    await gateProductFidelityBuffer(
+      Buffer.from('rendered-bytes'),
+      'https://cdn.shopify.com/files/ref.jpg',
+      deps({ callVision }),
+    )
+    expect(callVision).toHaveBeenCalledWith(
+      expect.objectContaining({ mediaType: 'image/jpeg' }),
+      expect.objectContaining({ mediaType: 'image/jpeg' }),
+    )
   })
 })
 

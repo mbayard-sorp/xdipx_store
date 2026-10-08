@@ -159,7 +159,7 @@ export function visionDepsForEnv(runId?: number, team?: TeamId): VisionGateDeps 
 export function remoteFidelityCallVision(runId?: number, team?: TeamId): NonNullable<ProductFidelityDeps['callVision']> {
   const BASE_URL = (process.env['BASE_URL'] ?? 'https://xdipx.com').replace(/\/$/, '')
   const TEAM_TOKEN = process.env['TEAM_TOKEN'] ?? process.env['HOMEPAGE_TEAM_TOKEN'] ?? process.env['CRON_SECRET'] ?? ''
-  return async (renderedImage, referenceImage) => {
+  return async (renderedImage, referenceImage, opts) => {
     if (!TEAM_TOKEN) throw new Error('vision-gate: no TEAM_TOKEN/HOMEPAGE_TEAM_TOKEN/CRON_SECRET in env for the remote route')
     const res = await fetch(`${BASE_URL}/api/team/vision-gate`, {
       method: 'POST',
@@ -172,6 +172,10 @@ export function remoteFidelityCallVision(runId?: number, team?: TeamId): NonNull
         referenceMediaType: referenceImage.mediaType,
         ...(runId !== undefined ? { runId } : {}),
         ...(team ? { team } : {}),
+        // Ticket #14309: forwarded to the route so a scheduled sandbox with no
+        // ANTHROPIC_API_KEY (the Notebook content run's normal case) gets the
+        // same label-tolerant judgment a local/preview run would.
+        ...(opts?.labelTolerant ? { labelTolerant: true } : {}),
       }),
     })
     if (!res.ok) throw new Error(`vision-gate route HTTP ${res.status}`)
@@ -236,6 +240,13 @@ export async function gateImageBuffer(buf: Buffer, deps?: VisionGateDeps, runId?
  * env-aware-default treatment `gateImageBuffer` already gives the anatomy
  * gate above — a scheduled sandbox with no `ANTHROPIC_API_KEY` falls back to
  * the privileged route instead of failing every fidelity check closed.
+ *
+ * `labelTolerant` (ticket #14309) is caller-selected: when true, the check
+ * judges silhouette/colour/finish as normal but never fails on the brandMark
+ * dimension, for a SKU whose own distinguishing feature is printed label
+ * text that no generation path has ever rendered legibly (see
+ * `LABEL_TOLERANT_FIDELITY_SYSTEM_PROMPT` in `social-product-fidelity
+ * .server.ts`). Nothing here infers which SKUs qualify.
  */
 export async function gateProductFidelityBuffer(
   buf: Buffer,
@@ -243,6 +254,7 @@ export async function gateProductFidelityBuffer(
   deps?: ProductFidelityDeps,
   runId?: number,
   team?: TeamId,
+  labelTolerant?: boolean,
 ): Promise<ProductFidelityVerdict> {
   const resolvedDeps = deps ?? fidelityDepsForEnv(runId, team)
   const fetchFn = resolvedDeps?.fetchImageBase64 ?? defaultFetchImageBase64
@@ -258,6 +270,7 @@ export async function gateProductFidelityBuffer(
     reference,
     resolvedDeps,
     runId?.toString(),
+    labelTolerant ? { labelTolerant: true } : undefined,
   )
 }
 

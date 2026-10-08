@@ -143,8 +143,47 @@ Respond with ONLY a JSON object, no prose before or after, in exactly this shape
 
 When in doubt on a genuine identity question (a different shape, a different mark), call it "drift"; hyperbole in scale or framing is not drift, but a different product identity is. "notes" is always present.`
 
+/**
+ * Ticket #14309. Same comparison as `PRODUCT_FIDELITY_SYSTEM_PROMPT`, for a
+ * SKU whose identifying feature is printed label text that AI image
+ * generation cannot reliably reproduce legibly at this scale (the
+ * image-prompt-library's own standing lesson from runs 799/807: "do not
+ * attempt this label again" on the composite path). The strict prompt's
+ * `brandMark` dimension requires the rendered mark to read as the same real
+ * mark, which no generated label of this kind has ever satisfied; every
+ * attempt reports `'drift'` on its own garbled pseudo-text, and
+ * `hasFidelityDrift` then rejects the candidate regardless of whether the
+ * product's actual shape, colour, and finish rendered faithfully. The only
+ * change from the strict prompt is dimension 4: the model is told not to
+ * judge the brand mark at all, and the response shape stays identical so
+ * nothing downstream (`isValidFidelityShape`, `hasFidelityDrift`) needs a
+ * special case — `brandMark: 'not-applicable'` already never counts as
+ * drift. This is a different lever from the library's "turn the label away
+ * from camera" workaround, which changes what gets generated and was found
+ * to trade a text defect for a silhouette defect; this mode changes only
+ * what the gate judges, leaving generation untouched.
+ */
+export const LABEL_TOLERANT_FIDELITY_SYSTEM_PROMPT = `You are a strict product-fidelity QA reviewer for AI-generated marketing imagery on a sexual-wellness storefront. You will be shown TWO images: first, a GENERATED photo of a person or scene featuring a product; second, the REAL BARE PRODUCT REFERENCE photo the generator was given to work from. Your job is to compare the product AS RENDERED in the first image against the real product in the second image, and report whether it stayed faithful or drifted. You are not judging the person, pose, or scene at all, only the product.
+
+Rate four dimensions, each "match" or "drift" (brandMark is NOT judged in this mode; see item 4):
+1. silhouette: the product's overall shape and geometry (for example a closed bud vs an open spiral of petals, a cylinder vs a curved wand, a rounded head vs a pointed one). Scale (how big the product looks relative to a hand or body) is NOT part of this check and some exaggeration there is expected; judge shape only.
+2. colour: the product's actual colour and saturation, not the ambient lighting of the scene.
+3. finish: the product's surface finish (matte vs glossy, smooth vs textured), as it actually is versus how it renders.
+4. brandMark: this SKU's identifying feature is printed label text that AI image generation cannot reliably reproduce legibly at this scale. Do NOT judge the brand wordmark or logo at all, whether it reads clean, garbled, or missing. Always answer "not-applicable" for this dimension regardless of what you see on the label.
+
+Respond with ONLY a JSON object, no prose before or after, in exactly this shape:
+{"silhouette": "match"|"drift", "colour": "match"|"drift", "finish": "match"|"drift", "brandMark": "not-applicable", "notes": "one or two sentences on what you saw, especially for any drift"}
+
+When in doubt on a genuine identity question (a different shape, a different mark), call it "drift"; hyperbole in scale or framing is not drift, but a different product identity is. A garbled, illegible, or missing brand mark alone is never drift in this mode. "notes" is always present.`
+
 export interface FidelityCallOpts {
   strict?: boolean
+  /**
+   * Ticket #14309. See `LABEL_TOLERANT_FIDELITY_SYSTEM_PROMPT` above. Caller-
+   * selected only: nothing here infers which SKUs are label-heavy, the
+   * caller (`gen-notebook-art.ts` via `--label-tolerant`) decides.
+   */
+  labelTolerant?: boolean
 }
 
 export interface ProductFidelityDeps {
@@ -187,12 +226,13 @@ function buildDefaultDeps(refId?: string): Required<ProductFidelityDeps> {
     const { SONNET } = await import('./models.server')
     const client = new Anthropic({ apiKey: process.env['ANTHROPIC_API_KEY']?.trim() })
     const strict = opts?.strict === true
+    const basePrompt = opts?.labelTolerant ? LABEL_TOLERANT_FIDELITY_SYSTEM_PROMPT : PRODUCT_FIDELITY_SYSTEM_PROMPT
     const msg = await client.messages.create({
       model: SONNET,
       max_tokens: 300,
       system: strict
-        ? `${PRODUCT_FIDELITY_SYSTEM_PROMPT}\n\nReply with the JSON object only. No prose, no explanation, no markdown fence: the first character of your reply must be "{" and the last must be "}".`
-        : PRODUCT_FIDELITY_SYSTEM_PROMPT,
+        ? `${basePrompt}\n\nReply with the JSON object only. No prose, no explanation, no markdown fence: the first character of your reply must be "{" and the last must be "}".`
+        : basePrompt,
       ...(strict ? { temperature: 0 } : {}),
       messages: [
         {
@@ -232,10 +272,16 @@ export async function runProductFidelityCheckOnImages(
   referenceImage: { data: string; mediaType: string },
   deps?: ProductFidelityDeps,
   refId?: string,
+  opts?: FidelityCallOpts,
 ): Promise<ProductFidelityVerdict> {
   const d = resolve(deps, refId)
   try {
-    const parsed = await d.callVision(renderedImage, referenceImage)
+    // Mirrors social-vision-gate.server.ts's own callVision idiom: omit the
+    // opts argument entirely on the common no-opts call rather than passing
+    // an explicit `undefined`, so a deps mock asserting call arguments by
+    // exact arity (as this module's own test does) is unaffected by adding
+    // this parameter.
+    const parsed = opts ? await d.callVision(renderedImage, referenceImage, opts) : await d.callVision(renderedImage, referenceImage)
     if (!isValidFidelityShape(parsed)) {
       return failClosedVerdict('Product-fidelity response did not match the expected shape; failing closed.')
     }
@@ -256,6 +302,7 @@ export async function runProductFidelityCheck(
   referenceImageUrl: string,
   deps?: ProductFidelityDeps,
   refId?: string,
+  opts?: FidelityCallOpts,
 ): Promise<ProductFidelityVerdict> {
   const d = resolve(deps, refId)
   try {
@@ -263,7 +310,7 @@ export async function runProductFidelityCheck(
       d.fetchImageBase64(renderedImageUrl),
       d.fetchImageBase64(referenceImageUrl),
     ])
-    return await runProductFidelityCheckOnImages(rendered, reference, deps, refId)
+    return await runProductFidelityCheckOnImages(rendered, reference, deps, refId, opts)
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     return failClosedVerdict(`Product-fidelity check could not complete: ${message}`)

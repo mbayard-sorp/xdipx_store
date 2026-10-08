@@ -4,7 +4,7 @@
  *   { imageUrl, assetId? } -> VisionVerdict (+ recorded:true, assetId when assetId given)
  *   { imageBase64, mediaType } -> VisionVerdict
  *   { verdict, assetId } -> VisionVerdict (+ recorded:true, assetId), record-only, no model call
- *   { mode: 'fidelity', imageBase64, mediaType, referenceImageBase64, referenceMediaType, team?, runId? } -> ProductFidelityVerdict
+ *   { mode: 'fidelity', imageBase64, mediaType, referenceImageBase64, referenceMediaType, team?, runId?, labelTolerant? } -> ProductFidelityVerdict
  *
  * Why this route exists (ticket #8989). scripts/gen-notebook-art.ts gates
  * every Notebook hero candidate through the same anatomy check the social
@@ -69,6 +69,12 @@
  * unchanged, including `checkCompleted`, the same way the anatomy branch
  * returns `VisionVerdict` unchanged.
  *
+ * `labelTolerant` (ticket #14309, fidelity mode only) is forwarded straight
+ * through to `runProductFidelityCheckOnImages` as `{ labelTolerant: true }`:
+ * the caller already decided the SKU is label-heavy
+ * (`gen-notebook-art.ts`'s `--label-tolerant`), this route just relays the
+ * choice to the check that actually builds the model prompt.
+ *
  * `verdict` (ticket #13524, split off #13397 step 1-of-5) is a record-only
  * mode: pass an already-computed `VisionVerdict` (shape-validated against the
  * same `isValidVerdictShape` contract a model response has to pass) alongside
@@ -125,17 +131,39 @@ export async function action({ request }: ActionFunctionArgs) {
       }
       const { runProductFidelityCheckOnImages } = await import('~/lib/social-product-fidelity.server')
       const fidelityRefId = runId?.toString()
-      const verdict = fidelityRefId !== undefined
-        ? await runProductFidelityCheckOnImages(
-            { data: imageBase64, mediaType },
-            { data: referenceImageBase64, mediaType: referenceMediaType },
-            undefined,
-            fidelityRefId,
-          )
-        : await runProductFidelityCheckOnImages(
-            { data: imageBase64, mediaType },
-            { data: referenceImageBase64, mediaType: referenceMediaType },
-          )
+      // Ticket #14309. Branched (rather than always passing a trailing
+      // `opts`/`refId`, possibly `undefined`) to keep this route's call to
+      // runProductFidelityCheckOnImages at the exact arity a caller had
+      // before this mode existed when neither refId nor labelTolerant is
+      // set — api-team-vision-gate.test.ts asserts the call args exactly.
+      const fidelityOpts = b['labelTolerant'] === true ? { labelTolerant: true } : undefined
+      const verdict = fidelityOpts !== undefined
+        ? fidelityRefId !== undefined
+          ? await runProductFidelityCheckOnImages(
+              { data: imageBase64, mediaType },
+              { data: referenceImageBase64, mediaType: referenceMediaType },
+              undefined,
+              fidelityRefId,
+              fidelityOpts,
+            )
+          : await runProductFidelityCheckOnImages(
+              { data: imageBase64, mediaType },
+              { data: referenceImageBase64, mediaType: referenceMediaType },
+              undefined,
+              undefined,
+              fidelityOpts,
+            )
+        : fidelityRefId !== undefined
+          ? await runProductFidelityCheckOnImages(
+              { data: imageBase64, mediaType },
+              { data: referenceImageBase64, mediaType: referenceMediaType },
+              undefined,
+              fidelityRefId,
+            )
+          : await runProductFidelityCheckOnImages(
+              { data: imageBase64, mediaType },
+              { data: referenceImageBase64, mediaType: referenceMediaType },
+            )
       return Response.json(verdict, { headers: { 'Cache-Control': 'no-store' } })
     }
 

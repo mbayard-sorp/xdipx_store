@@ -315,6 +315,28 @@ describe('fidelity mode (ticket #13333)', () => {
     expect(runVisionGateOnImageMock).not.toHaveBeenCalled()
   })
 
+  // Ticket #14309: labelTolerant is relayed to runProductFidelityCheckOnImages
+  // as a FidelityCallOpts object, the only shape that module's callVision
+  // branch recognizes.
+  it('forwards labelTolerant as a FidelityCallOpts when the caller opts in', async () => {
+    const res = await post({
+      mode: 'fidelity',
+      imageBase64: 'rendered-b64',
+      mediaType: 'image/png',
+      referenceImageBase64: 'reference-b64',
+      referenceMediaType: 'image/jpeg',
+      labelTolerant: true,
+    })
+    expect(res.status).toBe(200)
+    expect(runProductFidelityCheckOnImagesMock).toHaveBeenCalledWith(
+      { data: 'rendered-b64', mediaType: 'image/png' },
+      { data: 'reference-b64', mediaType: 'image/jpeg' },
+      undefined,
+      undefined,
+      { labelTolerant: true },
+    )
+  })
+
   it('rejects a fidelity request with no reference image', async () => {
     const res = await post({ mode: 'fidelity', imageBase64: 'rendered-b64', mediaType: 'image/png' })
     expect(res.status).toBe(400)

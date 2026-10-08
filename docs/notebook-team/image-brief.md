@@ -226,6 +226,26 @@ is unchanged; images are expression, words are claims.
   this checklist (composition, mood, product match, palette) is still the reviewer's manual
   call — this closes only the class of defect (extra/missing/merged limbs, wrong hand anatomy)
   that shipped in production because nothing but a fast human scroll was ever checking for it.
+- **Label-heavy SKUs: the product-fidelity gate has a label-tolerant escape (ticket #14309).**
+  The product-fidelity check (`app/lib/social-product-fidelity.server.ts`, enforced via
+  `gateProductFidelityBuffer`) compares a candidate against the product's real reference photo
+  on four dimensions, including `brandMark` (does the printed wordmark read as the real one).
+  For a SKU whose identifying feature IS its printed label text — the image-prompt-library's
+  own standing lesson from runs 799/807, "do not attempt this label again" — no generation path
+  has ever rendered that text legibly, so `brandMark` always reads `drift` and the gate rejects
+  every candidate on every rung before a hero can even reach the single-figure (no-product)
+  fallback. `--label-tolerant` on `scripts/gen-notebook-art.ts` tells the check to judge
+  silhouette/colour/finish as normal and never fail on `brandMark` alone. **It applies to every
+  rung of the §0-H cast-plus-product ladder that still carries a product reference** (`composite`,
+  `composite-retry`, `secondary-scale` — not `single-figure`, which has no product to compare
+  against) **and to the unconditional pre-upload check** that runs for both §0-H and §0-P. It is
+  caller-selected, never inferred: the operator (or the daily content routine) passes the flag
+  only for a SKU the prompt library already flags as label-heavy, after confirming the library's
+  own prior entry for that SKU doesn't instead call for the "turn the label away from camera" or
+  "fall back to the real Shopify photo" remedy — those are a different, already-tried lever (they
+  change what gets generated) and `--label-tolerant` does not supersede a library entry that says
+  not to retry the label at all; it only removes the structural deadlock for a SKU nobody has
+  logged that lesson against yet.
 
 ---
 
