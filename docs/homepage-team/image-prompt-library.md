@@ -2641,3 +2641,27 @@ Asset `image-c7b74057fb673e7130bb683643481bcb4d74fe81-2304x1728-jpg`.
   sunbeam, no pink glow" and "closed lace feet, no open-toe feet". Round 1 of the looser wording
   rendered light streaks, a pink glow patch, and invented open-toe feet (rejects). Avoid "keyhole" and
   "one" in prompt/alt: they trip `check-hero-embed-match.ts` against the C-ring and the O/S sibling SKU.
+
+## Notebook §0-H keeper (no-product exception, third product plan) — content run 1318, "Why Couples Stop Kissing (And How to Bring It Back)"
+
+`[cast: maya]` `blogPost-why-couples-stop-kissing` (`podcast-notes`, sincere with a wry edge, no levity, no scale exaggeration).
+Gesture per the "Is this normal? / Is it just me?" row, adapted to empty hands. Asset
+`image-9d7f9ebce8491fbc79de2f8471f1b8197e77f7ea-1200x900-png`, 4:3, `atlas/seedream-4.5-edit` via `composeSceneFrame` (presenter only).
+- **Documented no-product reason (verbatim from the caller):** the post carries zero product embeds, because it concludes in
+  its own words that mouth-on-mouth kissing does not need a product and the voice gate BLOCKed the one product beat that was tried.
+- **History, three plans:** (1) Wicked Strawberry lube: blocked, every rung rejected by the product-fidelity gate on label text
+  (structural conflict with the no-invented-text rule, run 799/807 lesson, do not retry that label). (2) Second attempt swapped the
+  embed to the label-free FemmeFunn Ultra Bullet (`femmefunn-ultra-bullet-massager-rechargeable-silicone-vibrator`): a candidate
+  passed both gates and was briefly placed (`image-bb410cf0...`), then superseded when the embed and its beat were deleted by the
+  voice gate. (3) Zero-embed no-product hero, below. Note the bullet also read as a held-to-cheek phone-call pose.
+- **Casting:** `maya` (6th back, clear of no-repeat-within-5); no `editorialPhoto`, composited on `referencePhoto`, wardrobe and
+  camera distance stated explicitly.
+- **Rounds:** the first no-product round rendered the old bullet in all 3 frames because the resolver still saw the embed (the Sanity
+  edit landed mid-run; rejected, never uploaded, lesson: re-query the embed list before a no-product round). Second round, 3
+  candidates, all passed the anatomy gate, all empty-handed, all Maya. Rejected 2 (broad smile, comic) and 3 (peach wall). Kept 1:
+  worried, wry half-smile, gaze off to the side toward the empty space where a partner would be, white walls, hands 5/5.
+  Anatomy gate pass; fidelity gate not applicable (no product plate).
+- **Keeper prompt:** `Bright warm editorial magazine photograph, soft directional window daylight, high-key, calm private sunlit room, tasteful and non-explicit. The woman from reference 1, an adult in her early 30s, keep her face, hair, skin tone and build exactly as reference 1, fully clothed in a soft plain heather-grey cotton crew-neck top, waist-up framing, generous room on both sides of the subject. Her hands are empty, nothing in them. She is caught mid-question, head tilted to one side, one brow raised, one hand open palm-up beside her asking the room, the other hand half-raised at shoulder height, fingers loose, as if asking whether it is just the two of them who quietly stopped kissing. Her gaze is not at the camera: eyes drift off to the side and slightly down, toward the empty space where a partner would be, thinking it over. Her expression is sincere with a wry edge, a quiet slightly exposed worry with real wanting underneath: lips closed or barely parted, a small pressed half-smile at most, not a grin, not a punchline, not comic. Drama in the face and the hands, never in the light. Walls plain white and very pale warm-neutral only, generous negative space on the upper left for a title overlay. Natural five-fingered hands. No object held, no product, no props. No children, no teenagers, no youthful ambiguity, no nudity, no bare torso, no sexual contact, no uncanny faces, no warped features, no extra fingers, no coral jacket, no mugs, no cups, no candles, no folded blankets, no towels, no text, no words, no letters along any edge, no logos, no grin, no toothy smile, no selfie energy, not moody, not dark, no candlelight, no orange, no amber, no gradient wall, not clinical.`
+- **Alt:** A woman with voluminous curly hair in a plain grey t-shirt stands in a bright white room, head tilted and brow raised, one hand open palm-up and the other resting at her shoulder, her gaze drifting to the side as if quietly asking whether it is just the two of them who stopped kissing
+- **Lesson:** an empty-hands cast hero holds identity and avoids the generic-person fallback when the prompt names the gaze target
+  (the empty space where a partner would be), states the gesture per hand, and lists "no coral jacket, no letters along any edge".
