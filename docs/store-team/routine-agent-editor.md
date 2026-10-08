@@ -282,6 +282,15 @@ per PR, so a full 15-PR run is ~30 minutes of Max.
    `agents: apply suggestion #<id> — <summary>`; body quotes the
    suggestion verbatim + est. savings + cx_risk + rationale for the exact edit.
 
+   **Never claim a tracking row exists in the PR body unless you actually filed it this pass
+   (ticket #13100).** Two of four apply PRs in one QA pass narrowed their own ticket scope by
+   claiming a leftover DONE WHEN item was "tracked elsewhere" — via a decision event that did not
+   exist, and via a follow-up suggestion that did not exist anywhere on the bus — and QA had to
+   disprove both claims before verifying. Either actually file the follow-up suggestion row or
+   decision event you are about to claim, in this same pass, before writing that sentence into the
+   PR body, or state plainly in the PR body that no such row exists yet and name what kind it should
+   be, rather than asserting a tracking mechanism QA then has to go looking for.
+
    **Then mark it ready for review, in the same step, before you move on:**
 
    ```bash
