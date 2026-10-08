@@ -1154,6 +1154,13 @@ PR's entry on the same line and produced real git conflicts between semantically
 naturally instead of colliding. A run that shipped a visible change without a changelog entry is
 incomplete. This is a docs append on the agent-editor allowlist; it carries no code.
 
+**A rebase right before opening is not enough on its own (ticket #14193).** Bottom-append still
+shares one insertion point, and a second changelog-append PR (Routine A's own next run, Routine B, or
+the #9503 fallback below) can merge at that exact hunk after yours opens even though yours was clean
+at rebase time. Re-check `GET /api/team/pr?number=<n>` reports `mergeable:true` right before
+considering the PR done; a dirty pure end-of-file append resolves by keeping both blocks, ordered by
+date.
+
 **If this run's dispatch forbids git branch/commit/push (ticket #9503), do not attempt the PR.**
 Run 880 (2026-09-15) hit exactly this: the scheduled dispatch explicitly forbade any git operation
 for the run, which the append instruction above does not account for, and the changelog entry for a
