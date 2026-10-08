@@ -343,22 +343,6 @@ export async function deleteSeedProfitRows(): Promise<number> {
   return deleted.length
 }
 
-export async function getDashboardStats(days = 30) {
-  const rows = await db
-    .select()
-    .from(dailyProfitSummary)
-    .orderBy(sql`${dailyProfitSummary.summaryDate} DESC`)
-    .limit(days)
-
-  const total = rows.reduce((acc, r) => ({
-    revenue: acc.revenue + parseFloat(r.totalRevenue ?? '0'),
-    profit:  acc.profit  + parseFloat(r.totalProfit ?? '0'),
-    orders:  acc.orders  + (r.totalOrders ?? 0),
-  }), { revenue: 0, profit: 0, orders: 0 })
-
-  return { rows, total }
-}
-
 /** Summary rows in a date range, oldest first. Used by the backfill reporter. */
 export async function getProfitRows(fromDate: string, toDate: string) {
   return db

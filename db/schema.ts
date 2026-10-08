@@ -116,6 +116,24 @@ export const fixedMonthlyCosts = pgTable('fixed_monthly_costs', {
   createdAt:     timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
+/**
+ * One-off expenses for the admin P&L (migration 119). Dated money out that no
+ * API reports. 'advertising' joins marketing, 'fulfillment' joins cost of
+ * sales, every other category is an operating expense.
+ */
+export const pnlExpenses = pgTable('pnl_expenses', {
+  id:          serial('id').primaryKey(),
+  expenseDate: date('expense_date').notNull(),
+  category:    varchar('category', { length: 24 }).notNull(),
+  vendor:      varchar('vendor', { length: 80 }).notNull(),
+  amountUsd:   decimal('amount_usd', { precision: 10, scale: 2 }).notNull(),
+  note:        text('note'),
+  createdBy:   varchar('created_by', { length: 255 }),
+  createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => ({
+  dateIdx: index('idx_pnl_expenses_date').on(t.expenseDate),
+}))
+
 export const dailyProfitSummary = pgTable('daily_profit_summary', {
   summaryDate:   date('summary_date').primaryKey(),
   totalOrders:   integer('total_orders'),
