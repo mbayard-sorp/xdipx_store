@@ -4,6 +4,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   FIDELITY_DIMENSIONS,
+  LABEL_TOLERANT_FIDELITY_SYSTEM_PROMPT,
   PRODUCT_FIDELITY_SYSTEM_PROMPT,
   formatFidelityTags,
   hasFidelityDrift,
@@ -189,6 +190,72 @@ describe('runProductFidelityCheckOnImages', () => {
         deps({ callVision: vi.fn(async () => { throw new Error('boom') }) }),
       ),
     ).resolves.toMatchObject({ checkCompleted: false })
+  })
+})
+
+// Ticket #14309. Label-heavy SKUs (the printed text IS the product's
+// identity) never satisfy the strict brandMark dimension, which the gate
+// then treats as a hard rejection via hasFidelityDrift. The caller-selected
+// label-tolerant mode drops that one dimension from judgment while leaving
+// silhouette/colour/finish gated exactly as before.
+describe('LABEL_TOLERANT_FIDELITY_SYSTEM_PROMPT', () => {
+  it('still judges silhouette, colour, and finish', () => {
+    expect(LABEL_TOLERANT_FIDELITY_SYSTEM_PROMPT).toContain('silhouette')
+    expect(LABEL_TOLERANT_FIDELITY_SYSTEM_PROMPT).toContain('colour')
+    expect(LABEL_TOLERANT_FIDELITY_SYSTEM_PROMPT).toContain('finish')
+  })
+
+  it('tells the model never to judge the brand mark', () => {
+    expect(LABEL_TOLERANT_FIDELITY_SYSTEM_PROMPT).toContain('Do NOT judge the brand wordmark or logo at all')
+    expect(LABEL_TOLERANT_FIDELITY_SYSTEM_PROMPT).toContain('Always answer "not-applicable"')
+  })
+
+  it('is a distinct prompt from the strict one', () => {
+    expect(LABEL_TOLERANT_FIDELITY_SYSTEM_PROMPT).not.toBe(PRODUCT_FIDELITY_SYSTEM_PROMPT)
+  })
+})
+
+describe('runProductFidelityCheckOnImages with labelTolerant', () => {
+  it('passes the labelTolerant opt through to callVision', async () => {
+    const callVision = vi.fn(async () => ({ ...CLEAN_RESPONSE, brandMark: 'not-applicable' as const }))
+    const verdict = await runProductFidelityCheckOnImages(
+      { data: 'rendered', mediaType: 'image/jpeg' },
+      { data: 'reference', mediaType: 'image/jpeg' },
+      deps({ callVision }),
+      undefined,
+      { labelTolerant: true },
+    )
+    expect(callVision).toHaveBeenCalledWith(
+      { data: 'rendered', mediaType: 'image/jpeg' },
+      { data: 'reference', mediaType: 'image/jpeg' },
+      { labelTolerant: true },
+    )
+    expect(verdict.checkCompleted).toBe(true)
+  })
+
+  it('a garbled brandMark alone no longer drifts when the model honors not-applicable', async () => {
+    // Same silhouette/colour/finish-clean shape the strict mode would also
+    // pass, but brandMark now reads not-applicable instead of drift because
+    // the label-tolerant prompt told the model never to judge it.
+    const verdict = await runProductFidelityCheckOnImages(
+      { data: 'rendered', mediaType: 'image/jpeg' },
+      { data: 'reference', mediaType: 'image/jpeg' },
+      deps({ callVision: vi.fn(async () => ({ ...CLEAN_RESPONSE, brandMark: 'not-applicable' as const })) }),
+      undefined,
+      { labelTolerant: true },
+    )
+    expect(hasFidelityDrift(verdict)).toBe(false)
+  })
+
+  it('a genuine silhouette drift still fails even in label-tolerant mode', async () => {
+    const verdict = await runProductFidelityCheckOnImages(
+      { data: 'rendered', mediaType: 'image/jpeg' },
+      { data: 'reference', mediaType: 'image/jpeg' },
+      deps({ callVision: vi.fn(async () => ({ ...ROMP_DRIFT_RESPONSE, brandMark: 'not-applicable' as const })) }),
+      undefined,
+      { labelTolerant: true },
+    )
+    expect(hasFidelityDrift(verdict)).toBe(true)
   })
 })
 
