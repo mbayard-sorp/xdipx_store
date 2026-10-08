@@ -233,6 +233,7 @@ function toLeanCardProduct(p: Product): LeanCardProduct {
   if (p.brand !== undefined) lean.brand = p.brand
   if (p.videos && p.videos.length > 0) lean.videos = [p.videos[0]!]
   if (p.totalInventory !== undefined) lean.totalInventory = p.totalInventory
+  if (p.cardImage !== undefined) lean.cardImage = p.cardImage
   return lean
 }
 

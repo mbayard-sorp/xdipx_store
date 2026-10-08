@@ -310,6 +310,24 @@ describe('getAnchorCollectionProducts — Nº 03 grid source (ticket #464)', () 
     expect(JSON.stringify(lean)).not.toContain('"variants"')
   })
 
+  it('carries cardImage through verbatim to the lean card (ticket #14190)', async () => {
+    const withCardImage: Product = {
+      ...makeFatProduct('carded'),
+      cardImage: { url: 'https://cdn/carded-bare.jpg', altText: 'bare shot', fellBack: false },
+    }
+    mockGetCollectionProducts.mockResolvedValue([withCardImage])
+    const [lean] = await getAnchorCollectionProducts('curated-picks')
+    expect(lean?.cardImage).toEqual({ url: 'https://cdn/carded-bare.jpg', altText: 'bare shot', fellBack: false })
+    // images still truncates to the first entry, unaffected by cardImage.
+    expect(lean?.images).toEqual([{ url: 'https://cdn/carded-1.jpg', altText: 'one' }])
+  })
+
+  it('omits cardImage from the lean card when the source product has none', async () => {
+    mockGetCollectionProducts.mockResolvedValue([makeFatProduct('uncarded')])
+    const [lean] = await getAnchorCollectionProducts('curated-picks')
+    expect(lean?.cardImage).toBeUndefined()
+  })
+
   it('defaults to the best-sellers collection when the handle is unset/blank', async () => {
     mockGetCollectionProducts.mockResolvedValue([makeFatProduct('x')])
     await getAnchorCollectionProducts(undefined)
