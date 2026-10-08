@@ -2633,3 +2633,11 @@ Asset `image-c7b74057fb673e7130bb683643481bcb4d74fe81-2304x1728-jpg`.
   ignores length words. Fix: crop so the hem is out of frame, or lie it front-on and compact; drop the hanger.
 - **Reject (anatomy gate):** the worn-on-body packshot (`80403.jpg` is a faceless torso crop) fails `adultUnambiguous`
   as an editorial-crop fallback. A body-worn packshot is not a usable §0-P fallback.
+
+- **Keeper (notebook hero, run 1301):** GLOW Equilibrium crotchless bodystocking queen
+  (`what-makes-lingerie-body-safe-and-how-do-you-size-it`), flat-lay, `--ref-image` = carton photo.
+  Ground wording that worked: "perfectly even, flat, uniform, almost-white blush seamless ground ...
+  completely even soft overcast diffused light, faint contact shadow", with "no light streaks, no
+  sunbeam, no pink glow" and "closed lace feet, no open-toe feet". Round 1 of the looser wording
+  rendered light streaks, a pink glow patch, and invented open-toe feet (rejects). Avoid "keyhole" and
+  "one" in prompt/alt: they trip `check-hero-embed-match.ts` against the C-ring and the O/S sibling SKU.
