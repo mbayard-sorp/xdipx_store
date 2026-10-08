@@ -101,6 +101,7 @@ import {
   CODE_EVIDENCE_RETIRE_ACTORS,
   TICKET_BLOCK_CLASSES,
   normalizeBlockClass,
+  inferBlockClassFromNote,
   listConditions,
   BOUNCE_LEASE_SEC,
   CLAIM_LEASE_DEFAULT_SEC,
@@ -1240,6 +1241,71 @@ describe('blocked transitions auto-stamp a missing reason', () => {
     seedTicket({ status: 'in_progress' })
     await transitionSuggestion(42, 'approved', 'system')
     expect(h.state.patches[0]!['lastError']).toBeUndefined()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #13678: a `blocked` transition with no recognised blockClass falls back to
+// the bracket tag the filer (almost always) already wrote into the note or
+// lastError prose, instead of leaving block_class NULL.
+// ---------------------------------------------------------------------------
+describe('inferBlockClassFromNote', () => {
+  it('reads a recognised bracket tag at the start of the text', () => {
+    expect(inferBlockClassFromNote('[no-code-work] investigated, no defect')).toBe('no-code-work')
+    expect(inferBlockClassFromNote('[owner-env] needs a Vercel secret')).toBe('owner-env')
+  })
+
+  it('finds the tag even when it is not the very first character', () => {
+    expect(inferBlockClassFromNote('Investigated: [superseded] by PR #1140')).toBe('superseded')
+  })
+
+  it('rejects an unrecognised bracket tag', () => {
+    expect(inferBlockClassFromNote('[not-a-real-class] whatever')).toBeNull()
+  })
+
+  it('ignores a bracket tag past the first 200 characters', () => {
+    const padding = 'x'.repeat(200)
+    expect(inferBlockClassFromNote(`${padding} [owner-env] too late`)).toBeNull()
+  })
+
+  it('returns null for empty, undefined, or tag-free text', () => {
+    expect(inferBlockClassFromNote('')).toBeNull()
+    expect(inferBlockClassFromNote(undefined)).toBeNull()
+    expect(inferBlockClassFromNote(null)).toBeNull()
+    expect(inferBlockClassFromNote('plain prose with no tag at all')).toBeNull()
+  })
+})
+
+describe('blocked transitions infer a missing blockClass from the note (#13678)', () => {
+  it('stamps blockClass from a bracket tag in the note when none was passed explicitly', async () => {
+    seedTicket({ status: 'in_progress' })
+    await transitionSuggestion(42, 'blocked', 'agent:rr7-engineer', {
+      note: '[no-code-work] investigated, no defect in app/lib/foo.server.ts',
+    })
+    expect(h.state.patches[0]!['blockClass']).toBe('no-code-work')
+  })
+
+  it('falls back to lastError when note carries no tag', async () => {
+    seedTicket({ status: 'in_progress' })
+    await transitionSuggestion(42, 'blocked', 'system', {
+      lastError: '[owner-env] needs SENTRY_AUTH_TOKEN in Vercel',
+    })
+    expect(h.state.patches[0]!['blockClass']).toBe('owner-env')
+  })
+
+  it('prefers an explicit blockClass over an inferred one', async () => {
+    seedTicket({ status: 'in_progress' })
+    await transitionSuggestion(42, 'blocked', 'agent:rr7-engineer', {
+      blockClass: 'dependency',
+      note: '[no-code-work] this tag should be ignored',
+    })
+    expect(h.state.patches[0]!['blockClass']).toBe('dependency')
+  })
+
+  it('leaves blockClass unset when neither the field nor the prose names one', async () => {
+    seedTicket({ status: 'in_progress' })
+    await transitionSuggestion(42, 'blocked', 'system', { note: 'no idea why, just blocked' })
+    expect(h.state.patches[0]!['blockClass']).toBeUndefined()
   })
 })
 
