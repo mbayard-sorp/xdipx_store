@@ -15,10 +15,11 @@ import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction, ShouldRevali
 import { Form, Link, isRouteErrorResponse, useLoaderData, useNavigation, useRouteError, useSearchParams } from 'react-router'
 import { getAdminUser, requireAdmin } from '~/lib/session.server'
 import {
-  PnlInputError, addExpense, addFixedCost, deleteExpense, endFixedCost, getStoreTimezone, loadPnlData, saveHandlingFeePerOrder,
+  PnlInputError, addExpense, addFixedCost, deleteExpense, deleteManualAdSpend, endFixedCost, getStoreTimezone, loadPnlData,
+  saveHandlingFeePerOrder, saveManualAdSpend,
 } from '~/lib/pnl.server'
 import {
-  PNL_EPOCH, RANGE_PRESETS, adPlatformRows, dayInTz, goalStatus, monthStart, monthlyColumns, orderBreakdown,
+  PNL_EPOCH, RANGE_PRESETS, adPlatformRows, dayInTz, manualAdOverlaps, goalStatus, monthStart, monthlyColumns, orderBreakdown,
   productBreakdown, ratiosFor, resolveRange, seriesFor, statementRows, totalsFor, waterfallSteps, deltaPct,
 } from '~/lib/pnl-core'
 import { Card } from '~/components/admin/pnl/Card'
@@ -67,6 +68,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const quality: string[] = [...data.gaps]
   if (cur.cogsMissingUnits > 0) quality.push(`${cur.cogsMissingUnits} unit${cur.cogsMissingUnits === 1 ? '' : 's'} sold with no wholesale cost on file. Product cost is understated by those units.`)
+  for (const o of manualAdOverlaps(inputs.manualAds, inputs.ads)) {
+    quality.push(`${o} has both a monthly entry and imported spend, so it is probably counted twice. Delete the monthly entry on the Costs tab once the import covers that month.`)
+  }
   if (data.fixedAll.length === 0) quality.push('No software or subscription costs are entered, so net profit leaves out hosting, apps and the Claude Max plan. Add them on the Costs tab.')
 
   return {
@@ -89,12 +93,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
     channels: orderBreakdown(inputs.orders, range.from, range.to, o => o.channel),
     sources: orderBreakdown(inputs.orders, range.from, range.to, o => o.source),
     customers: orderBreakdown(inputs.orders, range.from, range.to, o => (o.customerType === 'new' ? 'New customers' : o.customerType === 'returning' ? 'Returning customers' : 'Unknown')),
-    platforms: adPlatformRows(inputs.ads, inputs.expenses, range.from, range.to),
+    platforms: adPlatformRows(inputs.ads, inputs.expenses, range.from, range.to, inputs.manualAds),
     orders: inRange,
     handlingFeePerOrder: inputs.handlingFeePerOrder,
     fixed: data.fixedAll,
     expenses: data.expensesRecent,
     expensesReady: data.expensesReady,
+    manualAds: data.manualAdsAll,
+    manualAdsReady: data.manualAdsReady,
     quality,
   }
 }
@@ -122,6 +128,15 @@ export async function action({ request }: ActionFunctionArgs) {
         }
       case 'delete-expense':
         return { ok: true as const, message: await deleteExpense(Number(form.get('id'))) }
+      case 'save-ad-spend': {
+        const today = dayInTz(Date.now(), await getStoreTimezone())
+        return {
+          ok: true as const,
+          message: await saveManualAdSpend({ platform: form.get('platform'), month: form.get('month'), amount: form.get('amount'), note: form.get('note') }, admin.email, today),
+        }
+      }
+      case 'delete-ad-spend':
+        return { ok: true as const, message: await deleteManualAdSpend(Number(form.get('id'))) }
     }
   } catch (err) {
     if (err instanceof PnlInputError) return { ok: false as const, error: err.message }
@@ -237,7 +252,10 @@ export default function PnlDashboard() {
           </Card>
         )}
         {tab === 'costs' && (
-          <CostsPanel isOwner={d.isOwner} today={d.today} handlingFeePerOrder={d.handlingFeePerOrder} fixed={d.fixed} expenses={d.expenses} expensesReady={d.expensesReady} />
+          <CostsPanel
+            isOwner={d.isOwner} today={d.today} handlingFeePerOrder={d.handlingFeePerOrder} fixed={d.fixed}
+            expenses={d.expenses} expensesReady={d.expensesReady} manualAds={d.manualAds} manualAdsReady={d.manualAdsReady}
+          />
         )}
       </div>
 
@@ -430,6 +448,8 @@ function SalesTab({ d }: { d: Data }) {
 }
 
 function MarketingTab({ d }: { d: Data }) {
+  const [params] = useSearchParams()
+  const costsHref = (() => { const p = new URLSearchParams(params); p.set('tab', 'costs'); p.delete('fresh'); return `/admin?${p}` })()
   const r = d.ratios
   return (
     <div className="space-y-4">
@@ -439,7 +459,11 @@ function MarketingTab({ d }: { d: Data }) {
         <MiniStat label="Blended CAC" value={r.cac == null ? '—' : money(r.cac)} sub={`${count(d.cur.newCustomers)} new customers`} />
         <MiniStat label="Break-even CPA" value={money(r.breakevenCpa)} sub="gross profit per order" />
       </div>
-      <Card kicker="Imported platform spend plus logged ad expenses" title="Ad platforms">
+      <Card
+        kicker="Imported, monthly entries and logged ad expenses"
+        title="Ad platforms"
+        action={<Link to={costsHref} preventScrollReset className="text-xs font-semibold text-plum">Enter monthly ad spend →</Link>}
+      >
         <AdPlatformsTable rows={d.platforms} netRevenue={d.cur.netRevenue} newCustomers={d.cur.newCustomers} />
         <p className="text-[11px] text-ink-4 mt-3">
           Platform orders and ROAS are what each platform claims. MER and CAC use Shopify&apos;s own revenue and new-customer count, so they cannot double count.

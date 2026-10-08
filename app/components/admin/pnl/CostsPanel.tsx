@@ -1,9 +1,12 @@
 import { useEffect, useRef } from 'react'
 import { useFetcher } from 'react-router'
-import { EXPENSE_CATEGORIES, NALPAC_SHIPPING_RATES, expenseCategoryLabel, type ExpenseRow, type FixedCostRow } from '~/lib/pnl-core'
+import {
+  AD_PLATFORM_SUGGESTIONS, EXPENSE_CATEGORIES, NALPAC_SHIPPING_RATES, PNL_EPOCH, addDays, daysInMonth, expenseCategoryLabel,
+  type ExpenseRow, type FixedCostRow, type ManualAdSpendRow,
+} from '~/lib/pnl-core'
 import { ResponsiveTable } from '~/components/admin/ResponsiveTable'
 import { Card } from './Card'
-import { dayLabel, money } from './format'
+import { dayLabel, money, monthLabel } from './format'
 
 type ActionResult = { ok: boolean; message?: string; error?: string } | undefined
 
@@ -30,7 +33,7 @@ function useResetOnSuccess(fetcher: { state: string; data: unknown }) {
 }
 
 export function CostsPanel({
-  isOwner, today, handlingFeePerOrder, fixed, expenses, expensesReady,
+  isOwner, today, handlingFeePerOrder, fixed, expenses, expensesReady, manualAds, manualAdsReady,
 }: {
   isOwner: boolean
   today: string
@@ -38,6 +41,8 @@ export function CostsPanel({
   fixed: FixedCostRow[]
   expenses: ExpenseRow[]
   expensesReady: boolean
+  manualAds: ManualAdSpendRow[]
+  manualAdsReady: boolean
 }) {
   const ful = useFetcher<ActionResult>()
   const addFixed = useFetcher<ActionResult>()
@@ -56,6 +61,8 @@ export function CostsPanel({
       {!isOwner && (
         <p className="text-sm text-ink-3 bg-paper-2 border border-line rounded-[10px] px-3 py-2">Only the owner can change costs. Everything here is read-only for you.</p>
       )}
+
+      <AdSpendByMonth isOwner={isOwner} today={today} rows={manualAds} ready={manualAdsReady} />
 
       <Card kicker="Cost of sales" title="Shipping">
         <p className="text-sm text-ink-3 mb-3 max-w-2xl">
@@ -223,5 +230,116 @@ export function CostsPanel({
         )}
       </Card>
     </div>
+  )
+}
+
+/**
+ * One total per platform per month, typed in until the platform's spend is
+ * imported. Saving the same platform and month again replaces the figure.
+ */
+function AdSpendByMonth({ isOwner, today, rows, ready }: { isOwner: boolean; today: string; rows: ManualAdSpendRow[]; ready: boolean }) {
+  const save = useFetcher<ActionResult>()
+  const del = useFetcher<ActionResult>()
+  const formRef = useResetOnSuccess(save)
+  const thisMonth = today.slice(0, 7)
+
+  const months = new Map<string, ManualAdSpendRow[]>()
+  for (const r of rows) {
+    const m = r.from.slice(0, 7)
+    months.set(m, [...(months.get(m) ?? []), r])
+  }
+
+  return (
+    <Card kicker="Marketing" title="Ad spend by month">
+      <p className="text-sm text-ink-3 mb-3 max-w-2xl">
+        Until each platform is imported automatically, type what each one billed for the month. Past months are spread evenly over the month.
+        For the current month, enter the total so far: it covers the 1st through today, and entering it again later replaces it.
+      </p>
+      {!ready ? (
+        <p className="text-sm text-ink-3 bg-paper-2 border border-line rounded-[10px] px-3 py-2">
+          This arrives with migration 120, which the production build applies on the next deploy.
+        </p>
+      ) : (
+        <>
+          {isOwner && (
+            <save.Form ref={formRef} method="post" className="grid grid-cols-2 gap-3 md:grid-cols-[1.3fr_1fr_0.8fr_1.3fr_auto] md:items-end mb-2">
+              <input type="hidden" name="intent" value="save-ad-spend" />
+              <label className="block col-span-2 md:col-span-1">
+                <span className="text-xs text-ink-3">Platform</span>
+                <input name="platform" required maxLength={40} list="pnl-ad-platforms" placeholder="Meta" className={input} autoComplete="off" />
+                <datalist id="pnl-ad-platforms">
+                  {AD_PLATFORM_SUGGESTIONS.map(p => <option key={p} value={p} />)}
+                </datalist>
+              </label>
+              <label className="block">
+                <span className="text-xs text-ink-3">Month</span>
+                <input name="month" type="month" required min={PNL_EPOCH.slice(0, 7)} max={thisMonth} defaultValue={thisMonth} className={input} />
+              </label>
+              <label className="block">
+                <span className="text-xs text-ink-3">Amount</span>
+                <input name="amount" required inputMode="decimal" placeholder="250.00" className={input} />
+              </label>
+              <label className="block col-span-2 md:col-span-1">
+                <span className="text-xs text-ink-3">Note (optional)</span>
+                <input name="note" maxLength={200} placeholder="From the Meta invoice" className={input} />
+              </label>
+              <button type="submit" className={`${btn} col-span-2 md:col-span-1`} disabled={save.state !== 'idle'}>{save.state !== 'idle' ? 'Saving…' : 'Save'}</button>
+            </save.Form>
+          )}
+          <Status data={save.data} />
+          <Status data={del.data} />
+          {rows.length === 0 ? (
+            <p className="text-sm text-ink-4 mt-3">No ad spend entered yet.</p>
+          ) : (
+            <ResponsiveTable className="mt-4">
+              <table className="w-full min-w-[480px] text-sm">
+                <thead>
+                  <tr>
+                    <th className={`${th} text-left`}>Month</th>
+                    <th className={`${th} text-left`}>Platform</th>
+                    <th className={`${th} text-right`}>Amount</th>
+                    <th className={`${th} text-right`} />
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...months.entries()].map(([m, list]) => (
+                    list.map((r, i) => {
+                      const partial = r.to !== addDays(`${m}-01`, daysInMonth(`${m}-01`) - 1)
+                      return (
+                        <tr key={r.id} className={`border-t ${i === 0 ? 'border-line-2' : 'border-line'}`}>
+                          <td className="py-2 pr-3 whitespace-nowrap">
+                            {i === 0 && (
+                              <>
+                                <span className="font-semibold text-ink">{monthLabel(m)}</span>
+                                <span className="block text-[11px] text-ink-4 tabular-nums">{money(list.reduce((sum, x) => sum + x.amount, 0))} total</span>
+                              </>
+                            )}
+                          </td>
+                          <td className="py-2 pr-3">
+                            {r.platform}
+                            {partial && <span className="block text-[11px] text-ink-4">through {dayLabel(r.to)}</span>}
+                            {r.note && <span className="block text-[11px] text-ink-4">{r.note}</span>}
+                          </td>
+                          <td className="py-2 text-right tabular-nums">{money(r.amount)}</td>
+                          <td className="py-2 text-right">
+                            {isOwner && (
+                              <del.Form method="post" onSubmit={ev => { if (!confirm(`Delete ${r.platform} for ${monthLabel(m)}?`)) ev.preventDefault() }}>
+                                <input type="hidden" name="intent" value="delete-ad-spend" />
+                                <input type="hidden" name="id" value={r.id} />
+                                <button type="submit" className="text-xs font-semibold text-ink-3 hover:text-[#A3261B]">Delete</button>
+                              </del.Form>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    })
+                  ))}
+                </tbody>
+              </table>
+            </ResponsiveTable>
+          )}
+        </>
+      )}
+    </Card>
   )
 }

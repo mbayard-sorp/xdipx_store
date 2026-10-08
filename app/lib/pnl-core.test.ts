@@ -3,7 +3,7 @@
 // the statement is proven to foot against what Shopify actually sends.
 import { describe, expect, it } from 'vitest'
 import {
-  NALPAC_SHIPPING_RATES, PNL_EPOCH, adPlatformRows, shippingTierFor, bucketOf, dayInTz, fixedCostForDay, goalStatus, monthlyColumns, orderBreakdown,
+  NALPAC_SHIPPING_RATES, PNL_EPOCH, adPlatformRows, manualAdOverlaps, manualAdPeriod, manualAdShare, shippingTierFor, bucketOf, dayInTz, fixedCostForDay, goalStatus, monthlyColumns, orderBreakdown,
   orderToFact, ordersCsv, productBreakdown, ratiosFor, resolveRange, seriesFor, statementCsv, statementRows,
   totalsFor, waterfallSteps, type CostLineFn, type PnlInputs, type ShopifyPnlOrder,
 } from '~/lib/pnl-core'
@@ -243,6 +243,7 @@ describe('totals and the statement', () => {
       { day: '2026-10-04', platform: 'google', spend: 30, impressions: 1000, clicks: 40, orders: 1, attributedRevenue: 60 },
       { day: '2026-10-05', platform: 'shop', spend: 12.5, impressions: 0, clicks: 0, orders: 0, attributedRevenue: 0 },
     ],
+    manualAds: [],
     ai: [{ day: '2026-10-04', amount: 2.25 }],
     fixed: [{ id: 1, vendor: 'Vercel', note: null, monthlyUsd: 31, effectiveFrom: '2026-10-01', effectiveTo: null }],
     expenses: [
@@ -343,6 +344,42 @@ describe('totals and the statement', () => {
   })
 })
 
+describe('monthly ad spend', () => {
+  const sept = { id: 1, platform: 'Meta', from: '2026-09-01', to: '2026-09-30', amount: 300, note: null }
+  const octMtd = { id: 2, platform: 'Reddit', ...manualAdPeriod('2026-10', '2026-10-08'), amount: 80, note: null }
+
+  it('covers the whole month once it is over, and the 1st through today while it runs', () => {
+    expect(manualAdPeriod('2026-09', '2026-10-08')).toEqual({ from: '2026-09-01', to: '2026-09-30' })
+    expect(manualAdPeriod('2026-10', '2026-10-08')).toEqual({ from: '2026-10-01', to: '2026-10-08' })
+  })
+
+  it('spreads a month evenly so any window gets its share', () => {
+    expect(manualAdShare(sept, '2026-09-01', '2026-09-30')).toBeCloseTo(300, 6)
+    expect(manualAdShare(sept, '2026-09-09', '2026-10-08')).toBeCloseTo(220, 6) // 22 of 30 days
+    expect(manualAdShare(sept, '2026-10-01', '2026-10-08')).toBe(0)
+    expect(manualAdShare(octMtd, '2026-10-05', '2026-10-08')).toBeCloseTo(40, 6)
+  })
+
+  it('rolls into ad spend, the platform table, contribution, MER and CAC', () => {
+    const input: PnlInputs = {
+      orders: [o1012, o1011].map(fact), ads: [], manualAds: [sept, octMtd], ai: [], fixed: [], expenses: [], handlingFeePerOrder: null,
+    }
+    const t = totalsFor(input, '2026-10-01', '2026-10-08')
+    expect(t.adSpend).toBe(80)
+    expect(t.adByPlatform).toEqual({ Reddit: 80 })
+    expect(t.contribution).toBeCloseTo(t.grossProfit - 80, 2)
+    expect(ratiosFor(t).cac).toBe(40)
+    const rows = adPlatformRows([], [], '2026-09-01', '2026-10-08', [sept, octMtd])
+    expect(rows.map(r => [r.platform, r.spend, r.sources])).toEqual([['Meta', 300, ['monthly']], ['Reddit', 80, ['monthly']]])
+  })
+
+  it('flags a month typed in that the import also covers', () => {
+    const imported = [{ day: '2026-09-12', platform: 'meta', spend: 10, impressions: 0, clicks: 0, orders: 0, attributedRevenue: 0 }]
+    expect(manualAdOverlaps([sept], imported)).toEqual(['Meta 2026-09'])
+    expect(manualAdOverlaps([octMtd], imported)).toEqual([])
+  })
+})
+
 describe('csv', () => {
   it('neutralizes formula injection and quotes commas', () => {
     const csv = ordersCsv([{ ...fact(o1012), name: '=HYPERLINK("x")', channel: 'a,b' }], 2)
@@ -352,7 +389,7 @@ describe('csv', () => {
   })
 
   it('writes costs as negatives in the statement export', () => {
-    const t = totalsFor({ orders: [fact(o1012)], ads: [], ai: [], fixed: [], expenses: [], handlingFeePerOrder: null }, '2026-10-01', '2026-10-08')
+    const t = totalsFor({ orders: [fact(o1012)], ads: [], manualAds: [], ai: [], fixed: [], expenses: [], handlingFeePerOrder: null }, '2026-10-01', '2026-10-08')
     const csv = statementCsv([{ label: 'Oct', totals: t }])
     expect(csv).toMatch(/Payment processing,-7\.47/)
     expect(csv).toMatch(/Net revenue,204\.95/)

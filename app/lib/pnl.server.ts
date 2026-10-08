@@ -12,6 +12,7 @@
  *   api_token_log        metered AI spend
  *   fixed_monthly_costs  software and subscriptions, spread per day
  *   pnl_expenses         one-off expenses (migration 119)
+ *   pnl_ad_spend         hand-entered monthly ad spend per platform (migration 120)
  *   pipeline_settings    pnl_handling_fee_cents, an optional per-order handling fee
  *
  * Shipping cost needs no input: each order is charged Nalpac's rate for its
@@ -20,13 +21,13 @@
 import { and, asc, desc, eq, gte, inArray, isNull, lte, sql } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
 import {
-  adCreativeDailyMetrics, fixedMonthlyCosts, orderAttribution, pipelineSettings, pnlExpenses,
+  adCreativeDailyMetrics, fixedMonthlyCosts, orderAttribution, pipelineSettings, pnlAdSpend, pnlExpenses,
 } from '../../db/schema'
 import { costLineItem, costsFromOrderMetafields } from '~/lib/profit.server'
 import { setPipelineSettingAudited, type SettingsActor } from '~/lib/settings.server'
 import {
-  COUNTED_FINANCIAL_STATUSES, PNL_EPOCH, addDays, dayInTz, isExpenseCategory, isIsoDay, orderToFact, round2,
-  type AdSpendRow, type DailyAmount, type ExpenseRow, type FixedCostRow, type PnlInputs, type PnlOrderFact,
+  COUNTED_FINANCIAL_STATUSES, PNL_EPOCH, addDays, dayInTz, isExpenseCategory, isIsoDay, manualAdPeriod, orderToFact, round2,
+  type AdSpendRow, type DailyAmount, type ExpenseRow, type FixedCostRow, type ManualAdSpendRow, type PnlInputs, type PnlOrderFact,
   type ShopifyPnlOrder,
 } from '~/lib/pnl-core'
 
@@ -239,6 +240,14 @@ export async function listExpenses(from?: string, to?: string): Promise<ExpenseR
   }))
 }
 
+/** Every hand-entered ad spend row, newest month first. Small: a dozen platforms at most, one row a month. */
+export async function listManualAdSpend(): Promise<ManualAdSpendRow[]> {
+  const rows = await db.select().from(pnlAdSpend).orderBy(desc(pnlAdSpend.periodStart), asc(pnlAdSpend.platform))
+  return rows.map(r => ({
+    id: r.id, platform: r.platform, from: String(r.periodStart), to: String(r.periodEnd), amount: Number(r.amountUsd), note: r.note,
+  }))
+}
+
 export async function getHandlingFeePerOrder(): Promise<number | null> {
   const [row] = await db.select({ value: pipelineSettings.value }).from(pipelineSettings).where(eq(pipelineSettings.key, HANDLING_SETTING_KEY))
   if (!row) return null
@@ -260,6 +269,10 @@ export interface PnlData {
   gaps: string[]
   /** False until migration 119 has been applied. */
   expensesReady: boolean
+  /** Every hand-entered ad spend row, for the Costs tab. */
+  manualAdsAll: ManualAdSpendRow[]
+  /** False until migration 120 has been applied. */
+  manualAdsReady: boolean
 }
 
 export async function loadPnlData(window: { from: string; to: string }, opts: { fresh?: boolean } = {}): Promise<PnlData> {
@@ -269,7 +282,7 @@ export async function loadPnlData(window: { from: string; to: string }, opts: { 
   const to = window.to
   const gaps: string[] = []
 
-  const [orders, ads, ai, fixedAll, expenses, handlingFeePerOrder] = await Promise.all([
+  const [orders, ads, ai, fixedAll, expenses, handlingFeePerOrder, manualAds] = await Promise.all([
     fetchOrderFacts(from, to, tz, opts),
     readAds(from, to).catch((err): AdSpendRow[] => { gaps.push('Ad spend could not be read.'); console.error('[pnl] ads', err); return [] }),
     readAi(from, to, tz).catch((err): DailyAmount[] => { gaps.push('AI spend could not be read.'); console.error('[pnl] ai', err); return [] }),
@@ -279,6 +292,10 @@ export async function loadPnlData(window: { from: string; to: string }, opts: { 
       return { ok: false as const, rows: [] as ExpenseRow[] }
     }),
     getHandlingFeePerOrder().catch((): null => { gaps.push('Handling fee setting could not be read.'); return null }),
+    listManualAdSpend().then(rows => ({ ok: true as const, rows })).catch((err: unknown) => {
+      console.error('[pnl] manual ad spend', err)
+      return { ok: false as const, rows: [] as ManualAdSpendRow[] }
+    }),
   ])
   await attachSources(orders, gaps)
 
@@ -288,10 +305,12 @@ export async function loadPnlData(window: { from: string; to: string }, opts: { 
   } else {
     gaps.push('One-off expenses are not available yet (migration 119 applies on the next production deploy).')
   }
+  if (!manualAds.ok) gaps.push('Monthly ad spend entry is not available yet (migration 120 applies on the next production deploy).')
 
   return {
     tz, today, fixedAll, expensesRecent, gaps, expensesReady: expenses.ok,
-    inputs: { orders, ads, ai, fixed: fixedAll, expenses: expenses.rows, handlingFeePerOrder },
+    manualAdsAll: manualAds.rows, manualAdsReady: manualAds.ok,
+    inputs: { orders, ads, manualAds: manualAds.rows, ai, fixed: fixedAll, expenses: expenses.rows, handlingFeePerOrder },
   }
 }
 
@@ -367,4 +386,39 @@ export async function deleteExpense(id: number): Promise<string> {
   const rows = await db.delete(pnlExpenses).where(eq(pnlExpenses.id, id)).returning({ vendor: pnlExpenses.vendor })
   if (rows.length === 0) throw new PnlInputError('That expense no longer exists.')
   return `Expense to ${rows[0]!.vendor} deleted.`
+}
+
+/**
+ * Enter (or replace) one platform's ad spend for one month. Re-entering the
+ * same platform and month overwrites the figure, which is how a running month
+ * is kept current: type the month-to-date total again and the period stretches
+ * to today.
+ */
+export async function saveManualAdSpend(
+  input: { platform: unknown; month: unknown; amount: unknown; note: unknown },
+  createdBy: string | null,
+  today: string,
+): Promise<string> {
+  const platform = cleanText(input.platform, 40)
+  if (!platform) throw new PnlInputError('Name the platform.')
+  const month = String(input.month ?? '').trim()
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new PnlInputError('Pick the month.')
+  if (month < PNL_EPOCH.slice(0, 7)) throw new PnlInputError('That month is before the first sale, so it is not in the P&L.')
+  if (month > today.slice(0, 7)) throw new PnlInputError('That month has not started yet.')
+  const amount = parseMoney(input.amount, 'the amount')
+  const { from, to } = manualAdPeriod(month, today)
+  const note = cleanText(input.note, 200) || null
+  const values = { platform, periodStart: from, periodEnd: to, amountUsd: amount.toFixed(2), note, createdBy }
+  await db.insert(pnlAdSpend).values(values).onConflictDoUpdate({
+    target: [pnlAdSpend.platform, pnlAdSpend.periodStart],
+    set: { periodEnd: to, amountUsd: values.amountUsd, note, createdBy, createdAt: new Date() },
+  })
+  const running = month === today.slice(0, 7)
+  return `${platform} ${month}: $${amount.toFixed(2)}${running ? ` through ${to}` : ''} saved.`
+}
+
+export async function deleteManualAdSpend(id: number): Promise<string> {
+  const rows = await db.delete(pnlAdSpend).where(eq(pnlAdSpend.id, id)).returning({ platform: pnlAdSpend.platform, from: pnlAdSpend.periodStart })
+  if (rows.length === 0) throw new PnlInputError('That entry no longer exists.')
+  return `${rows[0]!.platform} ${String(rows[0]!.from).slice(0, 7)} deleted.`
 }

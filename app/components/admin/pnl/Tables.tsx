@@ -80,8 +80,8 @@ export function AdPlatformsTable({ rows, netRevenue, newCustomers }: { rows: AdP
       <div className="text-sm text-ink-3 space-y-2">
         <p>No ad spend is recorded for this window.</p>
         <p>
-          Platform spend arrives through the CSV import on <a href="/admin/ad-studio/spend" className="link-coral">Ad Studio → Spend</a>.
-          Spend on anything without an import (a newsletter sponsorship, an adult network) can be logged as an Advertising expense under Costs.
+          Type each platform&apos;s monthly total on the Costs tab under Ad spend by month. Google Ads and Shop Campaigns can also be imported
+          from CSV on <a href="/admin/ad-studio/spend" className="link-coral">Ad Studio → Spend</a>.
         </p>
       </div>
     )
@@ -105,7 +105,12 @@ export function AdPlatformsTable({ rows, netRevenue, newCustomers }: { rows: AdP
         <tbody>
           {rows.map(r => (
             <tr key={r.platform} className="border-t border-line">
-              <td className="py-2 pr-3 text-ink">{r.platform}</td>
+              <td className="py-2 pr-3 text-ink">
+                {r.platform}
+                <span className="block text-[10px] uppercase tracking-wide text-ink-4">
+                  {r.sources.map(s => (s === 'monthly' ? 'monthly entry' : s === 'expense' ? 'logged expense' : 'imported')).join(' + ')}
+                </span>
+              </td>
               <td className={`${td} text-right font-semibold`}>{money(r.spend)}</td>
               <td className={`${td} text-right`}>{r.impressions ? count(r.impressions) : '—'}</td>
               <td className={`${td} text-right`}>{r.clicks ? count(r.clicks) : '—'}</td>

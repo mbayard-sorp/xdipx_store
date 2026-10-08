@@ -134,6 +134,24 @@ export const pnlExpenses = pgTable('pnl_expenses', {
   dateIdx: index('idx_pnl_expenses_date').on(t.expenseDate),
 }))
 
+/**
+ * Hand-entered ad spend for the admin P&L (migration 120): one total per
+ * platform per month, spread evenly over period_start..period_end. Stands in
+ * until a platform's spend is imported into ad_creative_daily_metrics.
+ */
+export const pnlAdSpend = pgTable('pnl_ad_spend', {
+  id:          serial('id').primaryKey(),
+  platform:    varchar('platform', { length: 40 }).notNull(),
+  periodStart: date('period_start').notNull(),
+  periodEnd:   date('period_end').notNull(),
+  amountUsd:   decimal('amount_usd', { precision: 10, scale: 2 }).notNull(),
+  note:        text('note'),
+  createdBy:   varchar('created_by', { length: 255 }),
+  createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => ({
+  platformPeriodUq: uniqueIndex('pnl_ad_spend_platform_period_uniq').on(t.platform, t.periodStart),
+}))
+
 export const dailyProfitSummary = pgTable('daily_profit_summary', {
   summaryDate:   date('summary_date').primaryKey(),
   totalOrders:   integer('total_orders'),

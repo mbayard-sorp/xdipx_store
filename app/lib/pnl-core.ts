@@ -443,6 +443,56 @@ export interface AdSpendRow {
 
 export interface DailyAmount { day: string; amount: number }
 
+/** A hand-entered platform total for a period, spread evenly over its days. */
+export interface ManualAdSpendRow {
+  id: number
+  platform: string
+  from: string
+  to: string
+  amount: number
+  note: string | null
+}
+
+/** Platforms offered when typing a manual entry. Any other name is accepted. */
+export const AD_PLATFORM_SUGGESTIONS = [
+  'Google Ads', 'Microsoft Ads', 'Meta', 'Reddit', 'Snapchat', 'TikTok', 'X', 'Shop Campaigns',
+  'TrafficJunky', 'ExoClick', 'Newsletter sponsorship',
+] as const
+
+/** The part of a manual entry that falls inside [from, to]. */
+export function manualAdShare(row: ManualAdSpendRow, from: string, to: string): number {
+  const lo = row.from > from ? row.from : from
+  const hi = row.to < to ? row.to : to
+  if (lo > hi) return 0
+  return (row.amount * daysBetween(lo, hi)) / daysBetween(row.from, row.to)
+}
+
+/**
+ * The period a month's entry covers: the whole month when it is over, the 1st
+ * through `today` while it is still running (so month-to-date spend is not
+ * smeared over days that have not happened).
+ */
+export function manualAdPeriod(month: string, today: string): { from: string; to: string } {
+  const from = `${month}-01`
+  const end = addDays(from, daysInMonth(from) - 1)
+  return { from, to: end > today ? today : end }
+}
+
+/**
+ * Platforms with both a manual entry and imported spend on the same days.
+ * Both are counted, so each one here is a likely double count.
+ */
+export function manualAdOverlaps(manual: readonly ManualAdSpendRow[], ads: readonly AdSpendRow[]): string[] {
+  const out = new Set<string>()
+  for (const m of manual) {
+    const label = platformLabel(m.platform)
+    if (ads.some(a => a.spend > 0 && platformLabel(a.platform) === label && a.day >= m.from && a.day <= m.to)) {
+      out.add(`${label} ${m.from.slice(0, 7)}`)
+    }
+  }
+  return [...out]
+}
+
 export interface FixedCostRow {
   id: number
   vendor: string
@@ -542,6 +592,8 @@ export interface PnlTotals {
 export interface PnlInputs {
   orders: readonly PnlOrderFact[]
   ads: readonly AdSpendRow[]
+  /** Hand-entered monthly platform totals (migration 120). */
+  manualAds: readonly ManualAdSpendRow[]
   ai: readonly DailyAmount[]
   fixed: readonly FixedCostRow[]
   expenses: readonly ExpenseRow[]
@@ -599,6 +651,10 @@ export function totalsFor(input: PnlInputs, from: string, to: string): PnlTotals
     if (!inWindow(a.day, from, to) || a.spend === 0) continue
     t.adSpend += a.spend
     bump(t.adByPlatform, platformLabel(a.platform), a.spend)
+  }
+  for (const m of input.manualAds) {
+    const v = manualAdShare(m, from, to)
+    if (v > 0) { t.adSpend += v; bump(t.adByPlatform, platformLabel(m.platform), v) }
   }
   for (const a of input.ai) {
     if (inWindow(a.day, from, to)) t.aiSpend += a.amount
@@ -885,25 +941,44 @@ export interface AdPlatformRow {
   orders: number
   attributedRevenue: number
   roas: number | null
+  /** Where the spend came from: platform import, hand-entered monthly totals, logged expenses. */
+  sources: Array<'imported' | 'monthly' | 'expense'>
 }
 
-export function adPlatformRows(ads: readonly AdSpendRow[], expenses: readonly ExpenseRow[], from: string, to: string): AdPlatformRow[] {
+export function adPlatformRows(
+  ads: readonly AdSpendRow[],
+  expenses: readonly ExpenseRow[],
+  from: string,
+  to: string,
+  manualAds: readonly ManualAdSpendRow[] = [],
+): AdPlatformRow[] {
   const map = new Map<string, AdPlatformRow>()
   const get = (p: string) => {
     let r = map.get(p)
-    if (!r) { r = { platform: p, spend: 0, impressions: 0, clicks: 0, ctrPct: null, cpc: null, orders: 0, attributedRevenue: 0, roas: null }; map.set(p, r) }
+    if (!r) { r = { platform: p, spend: 0, impressions: 0, clicks: 0, ctrPct: null, cpc: null, orders: 0, attributedRevenue: 0, roas: null, sources: [] }; map.set(p, r) }
     return r
   }
+  const tag = (r: AdPlatformRow, s: AdPlatformRow['sources'][number]) => { if (!r.sources.includes(s)) r.sources.push(s) }
   for (const a of ads) {
     if (!inWindow(a.day, from, to)) continue
     if (a.spend === 0 && a.impressions === 0 && a.clicks === 0) continue
     const r = get(platformLabel(a.platform))
     r.spend += a.spend; r.impressions += a.impressions; r.clicks += a.clicks
     r.orders += a.orders; r.attributedRevenue += a.attributedRevenue
+    tag(r, 'imported')
+  }
+  for (const m of manualAds) {
+    const v = manualAdShare(m, from, to)
+    if (v <= 0) continue
+    const r = get(platformLabel(m.platform))
+    r.spend += v
+    tag(r, 'monthly')
   }
   for (const e of expenses) {
     if (e.category !== 'advertising' || !inWindow(e.day, from, to)) continue
-    get(e.vendor || 'Other advertising').spend += e.amount
+    const r = get(e.vendor || 'Other advertising')
+    r.spend += e.amount
+    tag(r, 'expense')
   }
   return [...map.values()].map(r => ({
     ...r,
