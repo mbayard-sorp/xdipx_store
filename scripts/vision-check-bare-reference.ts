@@ -30,6 +30,35 @@
  * briefing from a carton costs (the model invented a stalk and club that do
  * not exist).
  *
+ * WIDENED SCOPE (ticket #14292, split off #13674's landable half). #13674
+ * hand-checked 28 "confirmed bare" (`method: 'heuristic'`) references and
+ * found 14 wrong: phone-UI frames, retail-carton cards, printed-label
+ * bottles, lifestyle/hands shots, and on-model apparel, all resolving
+ * `url !== null` because nothing about them trips `resolveBareProductReference`'s
+ * text/filename signals. #13674 also asked for a filename/altText heuristic
+ * fix first; verified live against several of its own named examples
+ * (Peaches 'N Creame, Gush 2, Fantasy Lingerie, Rene Rofe, Cake Eater, the
+ * Lovehoney advent calendars) via the Shopify Admin API, every one has
+ * `altText: ""` and an opaque `<sku><letter>.jpg` filename — there is no text
+ * signal to reject on, so that half is not achievable against this catalog.
+ * This script is the only concrete lever: it now ALSO re-classifies
+ * `method: 'heuristic'` rows whose `url` is already set, sending the
+ * SPECIFIC frame the heuristic confirmed (not the product's first image —
+ * they can differ) to the same vision check. `bare-text-free` re-confirms it
+ * (same url, `method: 'vision'`, now a real verdict instead of a heuristic
+ * guess); any other label downgrades it to `url: null` with the vision
+ * reason, correcting the false positive the same safe way a never-resolved
+ * product would land.
+ *
+ * RISK, stated because it is new with this widening: every row this script
+ * touched before could only go from unconfirmed to confirmed (pure
+ * improvement). A `method: 'heuristic'` re-verify candidate can now also go
+ * from confirmed to `null` — a currently-"working" SKU loses its social-image
+ * eligibility if the vision check (correctly) disagrees with the heuristic.
+ * That is the intended fix for a false positive, not a regression, but it
+ * means `--apply` on this widened candidate set can reduce coverage as well
+ * as improve precision. Dry-run the breakdown first.
+ *
  * Dry-run by default — runs the real (cheap) classification so the per-class
  * breakdown is real, but never writes a metafield. --apply to write.
  * --limit caps the candidate set for a smoke test.
@@ -122,11 +151,18 @@ function parseArgs(argv: string[]): Args {
   }
 }
 
+/** Which gap this candidate closes — see the file header's WIDENED SCOPE
+ *  note. Carried through to the log/summary output because the two classes
+ *  have different risk profiles: 'unconfirmed' can only improve on `null`,
+ *  'reverify' can also downgrade an already-confirmed reference to `null`. */
+type CandidateClass = 'unconfirmed' | 'reverify'
+
 interface Candidate {
   gid: string
   handle: string
   title: string
   imageUrl: string
+  candidateClass: CandidateClass
 }
 
 async function fetchCandidates(): Promise<Candidate[]> {
@@ -167,16 +203,33 @@ async function fetchCandidates(): Promise<Candidate[]> {
 
     for (const node of conn.nodes) {
       if (!node.existingRef) continue
-      let parsed: { url: string | null; reason?: string } | null = null
+      let parsed: { url: string | null; reason?: string; method?: string } | null = null
       try {
         parsed = JSON.parse(node.existingRef.value)
       } catch {
         continue
       }
-      if (!parsed || parsed.url !== null || parsed.reason !== SINGLE_IMAGE_UNCONFIRMED_REASON) continue
-      const imageUrl = node.images.edges[0]?.node.url
-      if (!imageUrl) continue
-      out.push({ gid: node.id, handle: node.handle, title: node.title, imageUrl })
+      if (!parsed) continue
+
+      // Gap 1 (original scope): a null, unconfirmed single-image verdict.
+      // Still the only null reason this script targets — the other null
+      // reasons (packaging/AI-generated/no-bare-frame) are not "unconfirmed",
+      // they are already-correct refusals with no vision question to ask.
+      if (parsed.url === null && parsed.reason === SINGLE_IMAGE_UNCONFIRMED_REASON) {
+        const imageUrl = node.images.edges[0]?.node.url
+        if (!imageUrl) continue
+        out.push({ gid: node.id, handle: node.handle, title: node.title, imageUrl, candidateClass: 'unconfirmed' })
+        continue
+      }
+
+      // Gap 2 (ticket #14292, split off #13674): a heuristic-confirmed
+      // reference that has never been vision-checked. Re-classify the
+      // SPECIFIC frame the heuristic picked (parsed.url), not the product's
+      // first image — they are frequently different frames in the same
+      // media list, which is exactly how #13674 proved the false positives.
+      if (parsed.url !== null && parsed.method === 'heuristic') {
+        out.push({ gid: node.id, handle: node.handle, title: node.title, imageUrl: parsed.url, candidateClass: 'reverify' })
+      }
     }
 
     console.log(`[index] page ${page}: scanned ${conn.nodes.length}, candidates so far=${out.length}`)
@@ -208,8 +261,12 @@ async function main(): Promise<number> {
   const allCandidates = await fetchCandidates()
   const candidates = allCandidates.slice(0, args.limit)
 
+  const unconfirmedCount = allCandidates.filter(c => c.candidateClass === 'unconfirmed').length
+  const reverifyCount = allCandidates.filter(c => c.candidateClass === 'reverify').length
   console.log(
-    `[plan] ${allCandidates.length} candidate(s) with an unconfirmed single-image bare reference` +
+    `[plan] ${allCandidates.length} candidate(s): ${unconfirmedCount} unconfirmed single-image ` +
+    `(can only improve on null) + ${reverifyCount} heuristic-confirmed re-verify ` +
+    `(can also downgrade a currently-working reference to null, ticket #14292)` +
     (args.limit !== Infinity ? `, capped at ${args.limit}` : '') +
     `, ${candidates.length} to classify.`,
   )
@@ -288,6 +345,7 @@ async function main(): Promise<number> {
   }
   let errors = 0
   let wrote = 0
+  let downgraded = 0
   const usage = { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 }
 
   const stream = await client.messages.batches.results(batch.id)
@@ -310,7 +368,13 @@ async function main(): Promise<number> {
     const label = parseVisionBareReferenceLabel(raw)
     breakdown[label]++
     const decision = decideBareReferenceFromVisionLabel(label, candidate.imageUrl)
-    console.log(`${candidate.handle}: ${label} -> ${decision.url ?? 'NULL'} (raw reply: "${raw.trim()}")`)
+    const isDowngrade = candidate.candidateClass === 'reverify' && decision.url === null
+    console.log(
+      `${candidate.handle} [${candidate.candidateClass}]: ${label} -> ${decision.url ?? 'NULL'}` +
+      (isDowngrade ? ' (DOWNGRADE: false positive corrected)' : '') +
+      ` (raw reply: "${raw.trim()}")`,
+    )
+    if (isDowngrade) downgraded++
 
     if (!args.apply) continue
     try {
@@ -346,9 +410,11 @@ async function main(): Promise<number> {
     : 'dry-run (re-run with --apply to write confirmed bare references)')
   console.log(JSON.stringify({
     candidates: allCandidates.length,
+    byClass: { unconfirmed: unconfirmedCount, reverify: reverifyCount },
     classified: requests.length,
     breakdown,
     wrote,
+    downgraded,
     errors,
     applied: args.apply,
     usage,
