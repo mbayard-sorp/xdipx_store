@@ -237,6 +237,22 @@ from colliding with uncommitted work, they do not remove it.
   self-capture (PR #506). Any wrapper that must stay carries v3 chrome explicitly, and the
   quarantine's code comment should say so (that comment amendment is a code change and rides its
   own PR, not this checklist).
+- **A guard spans every file the surface spans, not just the file you edited (run 1298 retro).** A
+  fix that removes a pattern across a surface, verified by a regression test, can still ship wrong if
+  the test only reads the file that changed. Run 1298 moved the primary nav off the display serif in
+  `MegaMenu.tsx` and added a source-text guard against it there; `Navbar.tsx` renders two more
+  nav-adjacent elements (the mobile drawer's category accordion and its search row) that kept the
+  serif, so the drawer went from consistently wrong to inconsistent, and the guard could not see it
+  because it only read one file. When a fix removes a pattern, grep the WHOLE surface for that
+  pattern, not just the file you edited, and make the guard span every file the surface spans — and
+  pin the count of any deliberate remaining instances (e.g. a logo wordmark) so a later sweep does not
+  strip those as though they were part of the fix.
+- **A claim that a product, label, or price is invented is checked against the live catalog, never
+  against the repo (run 1298 retro).** CLAUDE.md keeps no product data in the repo by design (Shopify
+  is source of truth, nothing hardcoded outside `db/seed.ts`), so grepping the repo for a product name
+  returns zero for every real product, not just a fabricated one. A zero result from an instrument
+  that always returns zero is not evidence of absence. `GET /collections/<handle>` or the product page
+  is the instrument; one fetch settles it.
 - **See-all destination cross-check (ticket #4270, mandatory whenever a module ships an
   auto-generated or backfilled product set with a "See all" affordance).** Every See-all on an
   auto-generated or backfilled module must resolve to a collection that CONTAINS the module's set,
@@ -271,6 +287,15 @@ from colliding with uncommitted work, they do not remove it.
   `--viewport doctrine` is exactly the 375/768/1440 set this gate scores. Do **not** hand-roll the
   capture and do **not** run `playwright install` — the sandbox forbids it and the script does not
   need it. Routine A's Step 7.5 post-publish spot-check uses the same command with `--viewport mobile`.
+
+  **Before scoring, confirm the capture is the storefront (run 1298 retro).** A capture that silently
+  returns the wrong page is worse than one that fails, and it has happened: Vercel's bot protection
+  403'd the transport, chromium rendered the 403 page perfectly happily, the CLI wrote three PNGs and
+  printed `done`, and the gate scored three Vercel bot-wall pages before noticing (caught only by
+  measuring the images rather than trusting them — 98.5-99.6% white, mean luminance 253-254). One
+  glance at the file, or one check that it is not near-uniformly white, is the whole cost. A verdict
+  that runs clean against the wrong input is a silent wrong answer, which costs more than an absent
+  one.
 
   What the script now handles for you, and why it is worth knowing when it misbehaves: chromium
   cannot reach `xdipx.com` through the agent proxy (`page.goto()` fails at the TLS handshake with
@@ -430,6 +455,13 @@ end-of-file append marker (after the most recent existing entry), and rebase ont
 same shell PR or, when the cycle produced only content-label work, a small docs append; either way the
 changelog is on the agent-editor allowlist and gates nothing.
 
+**A rebase right before opening is not enough on its own (ticket #14193).** The file has a single
+end-of-file insertion point and more than one lane writes to it, so a second append PR can merge at
+that exact same hunk after yours opens even though yours was clean when you rebased. Re-check
+`GET /api/team/pr?number=<n>` reports `mergeable:true` right before you consider the PR done (and
+again if another changelog-append PR merges while yours is still open); a dirty pure end-of-file
+append resolves by keeping both blocks, ordered by date.
+
 **When the changelog append is its own PR (not riding a shell PR), the run that made the change opens
 it and files its ticket as `kind:'instructions'`, never `kind:'code'`.** (#4758) Only this run holds
 the Evidence data the entry format requires (the PR number and the signal or directive that drove the
@@ -438,6 +470,14 @@ file the tracking ticket as `kind:'instructions'` with `category:'docs'`, landed
 `pr` link — never a bare `kind:'code'` row, which drops into R-DEV's claim queue where R-DEV can only
 block it (#4114, #4660). The PR still merges through the release engine once QA verifies; only the lane
 changes.
+
+**After filing, read each row back by its id before citing it anywhere (run 1298 retro, ticket
+#14191).** A batched `POST /api/team/suggestion` call can return no id and fail silently; a run that
+noticed two such failures in a batch of fourteen still missed a third, and the PR body it opened
+confidently cited an id for a ticket that had never actually been filed. A create that returns no id
+is indistinguishable from one that worked until you look. Call `{"op":"get","id":<id>}` and confirm
+the row persisted before citing that id in a PR body, a decision event, or anywhere else — this bites
+hardest on a batched filing, because one silent failure shifts every later id in the batch.
 
 ## Hard rules for this routine
 
