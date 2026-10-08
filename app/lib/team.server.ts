@@ -1809,6 +1809,24 @@ export function normalizeBlockClass(value: unknown): string | null {
 }
 
 /**
+ * Fallback classifier for a `blocked` transition that did not pass a
+ * recognised `blockClass` (ticket #13678, the e1-blocked class-drain). A
+ * 2026-10-05 snapshot found 33 of 91 blocked code rows at attempt_count 0
+ * with `block_class` NULL, and every one of those rows' own notes opened
+ * with the literal bracket tag the filing conventions ask for
+ * (`[no-code-work] ...`, `[owner-env] ...`) — the filer wrote the tag into
+ * the prose and simply forgot the separate `blockClass` field on the same
+ * call. Reads only the first 200 characters, so a class word mentioned deep
+ * inside a long diagnosis is never mistaken for the filer's own
+ * classification.
+ */
+export function inferBlockClassFromNote(text: string | null | undefined): string | null {
+  if (!text) return null
+  const match = /\[([a-z-]+)\]/.exec(text.slice(0, 200))
+  return match ? normalizeBlockClass(match[1]) : null
+}
+
+/**
  * Design-kind gate on the `applied` transition (migration 106, ticket #11084:
  * "three of four tickets marked applied were not actually fixed"). A
  * design-critic finding that needs a code fix is filed at `kind:'process'`
@@ -2597,9 +2615,15 @@ export async function transitionSuggestion(
   // ticket in a worse state; the stamp just makes the silence attributable.
   // Persist the reason class alongside the prose (089). Advisory: an
   // unrecognised value is dropped rather than rejected, because a filer that
-  // cannot classify its own block must still be able to block.
+  // cannot classify its own block must still be able to block. When the
+  // caller did not pass a recognised blockClass at all, fall back to the
+  // bracket tag it (almost always) wrote into the note or lastError anyway
+  // (#13678) — this is what stops the class column from silently staying
+  // NULL on a row whose own prose already states its class.
   if (to === 'blocked') {
     const blockClass = normalizeBlockClass(opts.blockClass)
+      ?? inferBlockClassFromNote(opts.note)
+      ?? inferBlockClassFromNote(opts.lastError)
     if (blockClass) patch['blockClass'] = blockClass
   }
 
