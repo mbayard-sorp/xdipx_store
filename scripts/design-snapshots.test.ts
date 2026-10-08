@@ -8,6 +8,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   abortIsRenderCritical,
+  buildCurlArgs,
   looksLikeEdgeBlock,
   parseCurlHeaderDump,
   parseViewports,
@@ -101,6 +102,23 @@ describe('sanitizeResponseHeaders', () => {
       'x-vercel-cache': 'MISS',
     })
   })
+
+  it('merges a repeated header instead of keeping only the last value (#14119)', () => {
+    // curl's `-D` dump gives one tuple per header line, so a repeated
+    // set-cookie/link header arrives as two entries with the same key; the
+    // old Headers-object iteration this replaced merged those, and a plain
+    // assignment here was silently dropping all but the last one.
+    const headers = sanitizeResponseHeaders([
+      ['set-cookie', 'a=1'],
+      ['set-cookie', 'b=2'],
+      ['link', '</style.css>; rel=preload'],
+      ['link', '</font.woff2>; rel=preload'],
+    ])
+    expect(headers).toEqual({
+      'set-cookie': 'a=1, b=2',
+      link: '</style.css>; rel=preload, </font.woff2>; rel=preload',
+    })
+  })
 })
 
 describe('parseViewports', () => {
@@ -140,15 +158,66 @@ describe('looksLikeEdgeBlock', () => {
     expect(looksLikeEdgeBlock(403, '<h1>Forbidden</h1><p>403 FORBIDDEN</p>')).toBe(true)
   })
 
-  it('never flags a 200, however the page reads', () => {
+  it('never flags the generic phrases alone on a 200', () => {
     // The storefront legitimately ships the words "blocked" (card_art_blocked)
-    // and could ship "403" in Notebook copy. A served 200 is the site.
-    expect(looksLikeEdgeBlock(200, blockPage)).toBe(false)
+    // and could ship "403" in Notebook copy. A served 200 with no challenge
+    // ray id is the real site.
     expect(looksLikeEdgeBlock(200, '<p>This request was blocked</p>')).toBe(false)
+    expect(looksLikeEdgeBlock(200, '<p>403 FORBIDDEN</p>')).toBe(false)
+  })
+
+  it('flags the challenge-page ray id regardless of status (#14119)', () => {
+    // Vercel's challenge page can answer with 200 or 429, not only 403, and
+    // the ray id cannot appear in real site copy, so it is checked on every
+    // status rather than only non-200.
+    expect(looksLikeEdgeBlock(200, blockPage)).toBe(true)
+    expect(looksLikeEdgeBlock(429, blockPage)).toBe(true)
   })
 
   it('does not flag an ordinary 404, which is a real page worth capturing', () => {
     expect(looksLikeEdgeBlock(404, '<h1>Not found</h1><p>No such product.</p>')).toBe(false)
+  })
+})
+
+/**
+ * Ticket #14119: three debt items found by the gate on the run-1298 curl
+ * rewrite, all in how `curlFetch` builds its argv.
+ */
+describe('buildCurlArgs', () => {
+  const PATHS = { bodyPath: '/tmp/body', headerPath: '/tmp/headers', postPath: '/tmp/post' }
+
+  it('uses --head for a HEAD request instead of --request, so curl never waits on a body', () => {
+    const args = buildCurlArgs({ url: 'https://x/', method: 'HEAD', headers: {}, hasBody: false }, PATHS)
+    expect(args).toContain('--head')
+    expect(args).not.toContain('--request')
+  })
+
+  it('does not force --request for a GET or a POST, so curl can downgrade a POST redirect to GET itself', () => {
+    const get = buildCurlArgs({ url: 'https://x/', method: 'GET', headers: {}, hasBody: false }, PATHS)
+    expect(get).not.toContain('--request')
+    const post = buildCurlArgs({ url: 'https://x/', method: 'POST', headers: {}, hasBody: true }, PATHS)
+    expect(post).not.toContain('--request')
+    expect(post).toContain('--data-binary')
+  })
+
+  it('still forces --request for a method curl cannot infer on its own', () => {
+    const args = buildCurlArgs({ url: 'https://x/', method: 'PUT', headers: {}, hasBody: true }, PATHS)
+    expect(args).toEqual(expect.arrayContaining(['--request', 'PUT']))
+  })
+
+  it('forwards an ordinary header', () => {
+    const args = buildCurlArgs(
+      { url: 'https://x/', method: 'GET', headers: { 'x-custom': 'yes' }, hasBody: false }, PATHS,
+    )
+    expect(args).toEqual(expect.arrayContaining(['--header', 'x-custom: yes']))
+  })
+
+  it('drops a header whose name is not a plain token, instead of forwarding an @filename-shaped argument', () => {
+    const args = buildCurlArgs(
+      { url: 'https://x/', method: 'GET', headers: { '@/etc/passwd': 'x', 'x-ok': 'y' }, hasBody: false }, PATHS,
+    )
+    expect(args.join(' ')).not.toContain('@/etc/passwd')
+    expect(args).toEqual(expect.arrayContaining(['--header', 'x-ok: y']))
   })
 })
 

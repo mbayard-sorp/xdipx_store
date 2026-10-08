@@ -75,7 +75,11 @@ const DROPPED_RESPONSE_HEADERS =
 export function sanitizeResponseHeaders(headers: Iterable<[string, string]>): Record<string, string> {
   const out: Record<string, string> = {}
   for (const [k, v] of headers) {
-    if (!DROPPED_RESPONSE_HEADERS.test(k)) out[k] = v
+    if (DROPPED_RESPONSE_HEADERS.test(k)) continue
+    // A repeated header (set-cookie, link) used to come through the old
+    // Headers-object iteration already merged; assigning straight into the
+    // record here instead kept only the last value (#14119).
+    out[k] = k in out ? `${out[k]}, ${v}` : v
   }
   return out
 }
@@ -206,6 +210,9 @@ async function fulfilFromNodeFetch(route: Route): Promise<void> {
  */
 const DROPPED_REQUEST_HEADERS = /^(host|content-length|accept-encoding|connection|keep-alive|upgrade|proxy-.*)$/i
 
+/** A real HTTP header name. See the `--header` forwarding loop in `curlFetch`. */
+const SAFE_HEADER_NAME_RE = /^[A-Za-z0-9-]+$/
+
 /** Parse curl's `-D` dump into the last response's status and headers. */
 export function parseCurlHeaderDump(dump: string): { status: number; headers: [string, string][] } {
   // `-L` appends one block per hop; the capture is the final hop's.
@@ -220,6 +227,49 @@ export function parseCurlHeaderDump(dump: string): { status: number; headers: [s
     if (idx > 0) headers.push([line.slice(0, idx).trim().toLowerCase(), line.slice(idx + 1).trim()])
   }
   return { status, headers }
+}
+
+/**
+ * The curl argv for one request, pulled out of `curlFetch` so the method and
+ * header-forwarding decisions (#14119) are unit-testable without shelling out.
+ */
+export function buildCurlArgs(
+  req: { url: string; method: string; headers: Record<string, string>; hasBody: boolean },
+  paths: { bodyPath: string; headerPath: string; postPath: string },
+): string[] {
+  const args = [
+    '--silent', '--show-error',
+    '--location', '--max-redirs', '10',
+    '--compressed',
+    '--max-time', '60',
+    '--output', paths.bodyPath,
+    '--dump-header', paths.headerPath,
+  ]
+  // `--head` both issues HEAD and tells curl not to wait for a body that a
+  // HEAD response never sends; `--request HEAD` alone did not stop curl
+  // waiting on one (#14119, hangs until --max-time). For every other method,
+  // `--request`/`-X` overrides curl's own redirect handling (curl manual, -L:
+  // a POST is downgraded to GET on a 301/302 unless -X forces the method),
+  // which is why a POST through this transport kept re-POSTing every redirect
+  // hop `fetch` would have downgraded. So GET and POST are left for curl to
+  // infer on its own (no body => GET, --data-binary => POST) and `--request`
+  // is only forced for a method curl cannot infer.
+  if (req.method === 'HEAD') {
+    args.push('--head')
+  } else if (req.method !== 'GET' && req.method !== 'POST') {
+    args.push('--request', req.method)
+  }
+  for (const [k, v] of Object.entries(req.headers)) {
+    // A header name beginning with `@` would make curl treat the whole
+    // `--header` argument as an @filename read instead of a literal header
+    // (curl manual, -H). chromium never emits one and there is no shell
+    // involved (execFile with an argv array), so this is defence in depth
+    // rather than a live hole (#14119).
+    if (!DROPPED_REQUEST_HEADERS.test(k) && SAFE_HEADER_NAME_RE.test(k)) args.push('--header', `${k}: ${v}`)
+  }
+  if (req.hasBody) args.push('--data-binary', `@${paths.postPath}`)
+  args.push('--url', req.url)
+  return args
 }
 
 /**
@@ -255,23 +305,11 @@ export async function curlFetch(req: {
   const headerPath = join(dir, 'headers')
   const postPath = join(dir, 'post')
   try {
-    const args = [
-      '--silent', '--show-error',
-      '--location', '--max-redirs', '10',
-      '--compressed',
-      '--max-time', '60',
-      '--output', bodyPath,
-      '--dump-header', headerPath,
-      '--request', req.method,
-    ]
-    for (const [k, v] of Object.entries(req.headers)) {
-      if (!DROPPED_REQUEST_HEADERS.test(k)) args.push('--header', `${k}: ${v}`)
-    }
-    if (req.body?.length) {
-      writeFileSync(postPath, req.body)
-      args.push('--data-binary', `@${postPath}`)
-    }
-    args.push('--url', req.url)
+    if (req.body?.length) writeFileSync(postPath, req.body)
+    const args = buildCurlArgs(
+      { url: req.url, method: req.method, headers: req.headers, hasBody: Boolean(req.body?.length) },
+      { bodyPath, headerPath, postPath },
+    )
     // The agent proxy drops connections intermittently: a plain curl of the
     // homepage through it returned a reset on 1 of 6 bare attempts, with no
     // involvement from this script. Retry the transport-level failures only
@@ -336,14 +374,27 @@ function isSameOrigin(url: string, base: string): boolean {
 }
 
 /**
- * Edge-block signature of a captured document (run 1298). Vercel's bot wall
- * answers with a ~7 KB HTML page carrying this exact heading, and chromium
- * renders it perfectly happily, so without this check the CLI reports success
- * and writes a screenshot of an error page.
+ * Edge-block signatures of a captured document (run 1298, widened #14119).
+ * Vercel's bot wall answers with a ~7 KB HTML page, and chromium renders it
+ * perfectly happily, so without this check the CLI reports success and writes
+ * a screenshot of an error page.
+ *
+ * The generic phrases stay restricted to a non-200 status below: the
+ * storefront legitimately ships the words "blocked" (card_art_blocked) and
+ * could ship "403" in Notebook copy, so matching them on a 200 would flag the
+ * real site. The challenge page's own ray id (`cle1::<timestamp>-<id>`) is
+ * specific enough that it cannot appear in real content, so it is checked on
+ * any status, including the 200 and 429 the challenge page can also answer
+ * with.
  */
+const EDGE_BLOCK_SIGNATURES: { re: RegExp; anyStatus: boolean }[] = [
+  { re: /\bcle\d::\d+-[A-Za-z0-9]+\b/, anyStatus: true },
+  { re: /This request was blocked/i, anyStatus: false },
+  { re: /\b403 FORBIDDEN\b/i, anyStatus: false },
+]
+
 export function looksLikeEdgeBlock(status: number, html: string): boolean {
-  if (status === 200) return false
-  return /This request was blocked|\b403 FORBIDDEN\b/i.test(html)
+  return EDGE_BLOCK_SIGNATURES.some(({ re, anyStatus }) => (anyStatus || status !== 200) && re.test(html))
 }
 
 async function launchBrowser() {
