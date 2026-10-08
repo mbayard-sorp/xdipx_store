@@ -366,6 +366,26 @@ export interface Product {
     resolvedAt: string
     method: 'heuristic'
   }
+  /**
+   * Best-available bare-product frame for CARD ART ONLY (ticket #14190, the
+   * class-level follow-on to #12611/#9675). Computed once at the conversion
+   * point in `nodeToProduct()` via `pickBareProductImage()`, AFTER the
+   * `card_art_blocked` gate, so a blocked product's mood-image fallback (or
+   * no image) still wins. Additive and optional: absent when the product has
+   * no media at all. Rail/grid/carousel card tiles should read
+   * `cardImage ?? images[0]`; everything else (PDP gallery, cart drawer, OG
+   * tags, JSON-LD) must keep reading `images[0]` directly and never this
+   * field — `images` itself is never reordered, per tech-architect's ruling
+   * on PR #1579, because ~79 other call sites depend on its order.
+   */
+  cardImage?: {
+    url: string
+    altText: string
+    /** True when no frame was confirmed bare and this is the best-guess
+     *  fallback (still shown — card art always needs something — but not a
+     *  settled verdict). */
+    fellBack: boolean
+  }
 }
 
 /**
@@ -399,6 +419,12 @@ export interface LeanCardProduct {
   /** See `Product.totalInventory`. Carried through so curated-surface builders
    *  can apply the same out-of-stock gate `applyRules()` uses for rails. */
   totalInventory?: number | null
+  /** See `Product.cardImage`. Carried through verbatim by `toLeanCardProduct()`. */
+  cardImage?: {
+    url: string
+    altText: string
+    fellBack: boolean
+  }
 }
 
 /**

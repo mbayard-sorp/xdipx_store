@@ -532,6 +532,14 @@ function parseImages(edges: { node: { url: string; altText: string | null } }[])
  * to the reviewed mood image when one exists; otherwise the card carries no
  * image (ProductCard's existing placeholder), never the flagged photo. Does
  * not touch the PDP gallery -- that surface is out of this ticket's scope.
+ *
+ * Not the whole card-art story any more (ticket #14190): `nodeToProduct()`
+ * runs this gate's output straight back through `pickBareProductImage()`
+ * below to populate `Product.cardImage`, so that a carton-vs-bare-shot
+ * choice among the SURVIVING (non-blocked) frames also happens at this same
+ * single conversion point, rather than defaulting to whichever frame
+ * Shopify lists first. `images` itself is still never reordered or
+ * filtered beyond this gate.
  */
 function gateCardImages(
   images: ProductImage[],
@@ -986,12 +994,23 @@ function nodeToProduct(node: ShopifyProductNode): Product {
     ?? projectLegacyDial(parseMetafieldJSON<SensationDial>(mf, 'sensation_dial', {}) as SensationDial | undefined)
   const mapPriceRaw = parseFloat(parseMetafield(mf, 'map_price') ?? '')
   const bareProductReference = parseMetafieldJSON<BareProductReferenceMetafield | null>(mf, 'bare_product_reference', null)
+  // Card art's bare-frame pick (ticket #14190), same single conversion point
+  // as the card_art_blocked gate just below. `pickBareProductImage` already
+  // implements "blocked wins, mood fallback applies" internally when handed
+  // `cardArtBlocked`, so this runs against the raw media list rather than
+  // `gateCardImages`'s output (passing the gated list back through the
+  // heuristic would risk the gate's own mood-image substitute tripping the
+  // packaging/doubt checks it was never meant to be judged by).
+  const cardArtBlocked = parseMetafield(mf, 'card_art_blocked') === 'true'
+  const moodImageUrl = parseMetafield(mf, 'mood_image_url') || null
+  const bareCardImage = pickBareProductImage(parseImages(node.images.edges), { cardArtBlocked, moodImageUrl })
   return {
     id: node.id,
     handle: node.handle,
     title: node.title,
     images: gateCardImages(parseImages(node.images.edges), mf),
     videos: parseVideos(node.media),
+    ...(bareCardImage.url ? { cardImage: { url: bareCardImage.url, altText: bareCardImage.altText, fellBack: bareCardImage.fellBack } } : {}),
     ...(bareProductReference ? { bareProductReference } : {}),
     variants: node.variants.edges.map(e => ({
       id: e.node.id,

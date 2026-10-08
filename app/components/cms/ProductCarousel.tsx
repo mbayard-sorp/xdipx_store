@@ -311,7 +311,9 @@ function ProductCard({
   // Struck price is advertised-discount framing, gated on the MAP rule so a
   // MAP-locked product shows none (ticket #3675).
   const onSale  = compare != null && compare > price && mapAllowsDiscountDisplay(product.mapPrice, compare)
-  const firstImage = product.images[0]
+  // Prefer the bare-product card-art pick (ticket #14190) over whichever
+  // frame Shopify lists first.
+  const firstImage = product.cardImage ?? product.images[0]
   const firstVideo = product.videos?.[0]
   const videoSrc = firstVideo?.sources?.[0]?.url
   const video = firstVideo && videoSrc
@@ -334,7 +336,15 @@ function ProductCard({
       className={`group ${className}`}
     >
       <article className={articleClass}>
-        <div className={`relative aspect-square ${imageBgClass} overflow-hidden`}>
+        <div
+          className={`relative aspect-square ${imageBgClass} overflow-hidden`}
+          // Surfaced rather than silently swallowed (ticket #14190 DONE WHEN):
+          // marks a card whose art is a best-guess fallback (no bare frame
+          // was confirmed), inspectable by a capture/audit script.
+          {...(firstImage && 'fellBack' in firstImage && firstImage.fellBack
+            ? { 'data-card-image-fallback': 'true' }
+            : {})}
+        >
           {firstImage ? (
             <ProductTileMedia
               imageUrl={firstImage.url}

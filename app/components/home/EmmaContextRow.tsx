@@ -86,7 +86,9 @@ function EmmaCard({
   const price   = product.price
   const compare = product.compareAtPrice
   const onSale  = compare != null && compare > price
-  const firstImage = product.images[0]
+  // Prefer the bare-product card-art pick (ticket #14190) over whichever
+  // frame Shopify lists first.
+  const firstImage = product.cardImage ?? product.images[0]
   const firstVideo = product.videos?.[0]
   const videoSrc = firstVideo?.sources?.[0]?.url
   const video = firstVideo && videoSrc
@@ -99,7 +101,15 @@ function EmmaCard({
       className="group shrink-0 w-60 sm:w-64 snap-start"
     >
       <article className="bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-lg hover:shadow-sage/10 transition-all duration-300 card-lift h-full flex flex-col">
-        <div className="relative aspect-square bg-cream-2 overflow-hidden">
+        <div
+          className="relative aspect-square bg-cream-2 overflow-hidden"
+          // Surfaced rather than silently swallowed (ticket #14190 DONE WHEN):
+          // marks a card whose art is a best-guess fallback (no bare frame
+          // was confirmed), inspectable by a capture/audit script.
+          {...(firstImage && 'fellBack' in firstImage && firstImage.fellBack
+            ? { 'data-card-image-fallback': 'true' }
+            : {})}
+        >
           {firstImage ? (
             <ProductTileMedia
               imageUrl={firstImage.url}

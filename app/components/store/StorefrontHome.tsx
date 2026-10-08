@@ -531,8 +531,12 @@ function shopifyToDiscovery(p: LeanCardProduct): DiscoveryProduct {
     compareAtPrice: p.compareAtPrice && p.compareAtPrice > p.price ? p.compareAtPrice : null,
     colorValues: [],
     sizeValues: [],
-    imageUrl: p.images[0]?.url ?? null,
-    imageAlt: p.images[0]?.altText ?? null,
+    // Prefer the bare-product card-art pick (ticket #14190) over whichever
+    // frame Shopify lists first; `cardImage` is already gate-respecting
+    // (card_art_blocked wins, mood fallback applies) so there is nothing
+    // else to check here.
+    imageUrl: p.cardImage?.url ?? p.images[0]?.url ?? null,
+    imageAlt: p.cardImage?.altText ?? p.images[0]?.altText ?? null,
     category: 'Pleasure',
     // brand now has its own field on DiscoveryProduct; no longer overloaded
     // into subcategory. The card renders brand as the mono eyebrow.
