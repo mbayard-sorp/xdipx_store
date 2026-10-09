@@ -27,6 +27,7 @@ import { inArray, sql } from 'drizzle-orm'
 import { db } from './db.server'
 import { nalpacPriceHistory } from '../../db/schema'
 import { getPipelineSetting } from './feed-processor.server'
+import { isNalpacMapVerifiedBrand } from './nalpac-dropship-policy'
 import { findVariantsBySkus, updateProductMetafield } from './shopify.server'
 import { recomputeVariant } from './pricing-apply-v2.server'
 import { fileDetectionTicket, makeDedupeKey, priorityFromSeverity } from './detection-tickets.server'
@@ -166,7 +167,14 @@ export async function runNalpacCostSync(opts: {
         const mapDrop = priorMap > 0 && newMap > 0 &&
           newMap <= priorMap * (1 - dropPct)
 
-        isDrop = wholesaleDrop || mapDrop
+        // A MAP increase on a Nalpac-verified brand must reach the map_price
+        // metafield the same day, or the engine keeps flooring at the stale,
+        // lower MAP and the listing fails Nalpac's MAP verification. Any rise
+        // counts, not just a material one.
+        const contractualMapRise = priorMap > 0 && newMap > priorMap + 0.005 &&
+          isNalpacMapVerifiedBrand(snap.vendor)
+
+        isDrop = wholesaleDrop || mapDrop || contractualMapRise
 
         if (isDrop && prior.syncedAt != null) {
           const syncedToday = prior.syncedAt.toISOString().slice(0, 10) === today
