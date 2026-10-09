@@ -265,19 +265,36 @@ const SURFACES: Record<Surface, SurfaceSpec> = {
 // path has no carton-stripping stage — it would put a supplier's branded box in
 // the cast member's hand. Triggered by --cast <slug> on --surface hero.
 
-/** The post's hero product: the first blogProductEmbed with a defined handle
- *  (the same "first embedded product" the card projection uses). Prefers the
+/** Ticket #14201: picks the hero subject from a post's embeds. Prefers
+ *  `explicit` (the post's `heroProductHandle` override) when it names a
+ *  product the post actually embeds — lets a writer point the hero at an
+ *  embed with real product photography when the first embed is
+ *  carton-art-only. Falls back to the first embed (the same "first embedded
+ *  product" the card projection uses) when `explicit` is unset or names a
+ *  product the post does not embed (a typo should not composite against a
+ *  product the article never mentions). Pure, so it is unit-testable without
+ *  a Sanity client. */
+export function pickHeroProductHandle(explicit: string | null | undefined, embeds: string[]): string | null {
+  if (explicit && embeds.includes(explicit)) return explicit
+  return embeds[0] ?? null
+}
+
+/** The post's hero product, resolved via `pickHeroProductHandle`. Prefers the
  *  published post over its draft. Null when the post embeds no product. */
 async function resolveHeroProductHandle(slug: string): Promise<string | null> {
   const { getClient } = await import('~/lib/sanity.server')
   const client = getClient(true, true) // withToken + preview so an unpublished draft is visible
   if (!client) return null
-  return client.fetch<string | null>(
+  const doc = await client.fetch<{ heroProductHandle: string | null; embeds: string[] } | null>(
     `*[_type == "blogPost" && slug.current == $slug]
-       | order((_id in path("drafts.**")) asc)[0]
-       .body[_type == "blogProductEmbed" && defined(productHandle)][0].productHandle`,
+       | order((_id in path("drafts.**")) asc)[0] {
+         heroProductHandle,
+         "embeds": body[_type == "blogProductEmbed" && defined(productHandle)].productHandle
+       }`,
     { slug },
   )
+  if (!doc) return null
+  return pickHeroProductHandle(doc.heroProductHandle, doc.embeds)
 }
 
 async function resolveCastPhotoUrl(castSlug: string): Promise<string> {

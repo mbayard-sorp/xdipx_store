@@ -7,7 +7,7 @@
 // (app/lib/social-vision-gate.server.ts) the hero path now calls on every
 // candidate before it can reach disk or Sanity.
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { gateHeroBuffer, splitByVerdict, splitByFidelity, billableCandidateCount, remoteVisionCallVision, heroVisionDeps, sniffImageMediaType } from './gen-notebook-art'
+import { gateHeroBuffer, splitByVerdict, splitByFidelity, billableCandidateCount, remoteVisionCallVision, heroVisionDeps, sniffImageMediaType, pickHeroProductHandle } from './gen-notebook-art'
 import type { VisionVerdict } from '../app/lib/social-vision-gate.server'
 import type { ProductFidelityVerdict } from '../app/lib/social-product-fidelity.server'
 
@@ -322,5 +322,29 @@ describe('splitByFidelity', () => {
     const { passing, failing } = splitByFidelity(buffers, verdicts)
     expect(passing).toEqual(buffers)
     expect(failing).toEqual([])
+  })
+})
+
+// Ticket #14201: the hero generator used to always target the FIRST
+// blogProductEmbed, which is expensive on apparel posts whose only Shopify
+// image is carton/packaging art. pickHeroProductHandle is the decision
+// function that lets a post's heroProductHandle override that default.
+describe('pickHeroProductHandle', () => {
+  it('prefers the explicit handle when it names one of the post\'s own embeds', () => {
+    expect(pickHeroProductHandle('kixies-thigh-high', ['glow-bodystocking', 'kixies-thigh-high'])).toBe('kixies-thigh-high')
+  })
+
+  it('falls back to the first embed when no explicit handle is set', () => {
+    expect(pickHeroProductHandle(null, ['glow-bodystocking', 'kixies-thigh-high'])).toBe('glow-bodystocking')
+  })
+
+  it('falls back to the first embed when the explicit handle names a product the post does not embed', () => {
+    // A typo or stale handle must not composite the hero against a product
+    // the article never mentions.
+    expect(pickHeroProductHandle('not-embedded-handle', ['glow-bodystocking', 'kixies-thigh-high'])).toBe('glow-bodystocking')
+  })
+
+  it('returns null when the post embeds no product, regardless of the explicit handle', () => {
+    expect(pickHeroProductHandle('some-handle', [])).toBe(null)
   })
 })
