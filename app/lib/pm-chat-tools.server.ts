@@ -501,6 +501,7 @@ export async function dispatchPmTool(
         content: JSON.stringify({
           staged:          result.staged,
           skipped_carried: result.skippedCarried,
+          skipped_restricted: result.skippedRestricted ?? 0,
           not_found:       result.notFound,
         }),
         diagnostics: { durationMs: Date.now() - start, resultCount: result.staged },

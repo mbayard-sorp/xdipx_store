@@ -4,8 +4,10 @@ import {
   PRICING_AUDIT_RETENTION_DAYS,
   PRUNABLE_AUDIT_STATUSES,
   DEFAULT_MAP_BRANDS,
+  contractualMapFor,
   decideStatus,
   mapAppliesToVendor,
+  withDefaultMapBrands,
   isPartialBatchDay,
 } from './pricing-apply-v2.server'
 
@@ -182,11 +184,17 @@ describe('pricing_audit_log retention', () => {
 })
 
 describe('mapAppliesToVendor', () => {
-  const brands = [...DEFAULT_MAP_BRANDS] // ['Lovense', 'Playground']
+  const brands = [...DEFAULT_MAP_BRANDS] // Nalpac's MAP-verification list
 
   it('applies MAP to the configured MAP brands', () => {
     expect(mapAppliesToVendor('Lovense', brands)).toBe(true)
     expect(mapAppliesToVendor('Playground', brands)).toBe(true)
+  })
+
+  it('covers every brand Nalpac verifies for MAP (notice of 2026-10-09)', () => {
+    for (const v of ['Autoblow', 'Dame', 'Doxy', 'Gun Oil', 'Shinesty', 'SVibe', 'Snail Vibe', 'SpareParts', 'Hello Playground']) {
+      expect(mapAppliesToVendor(v, brands)).toBe(true)
+    }
   })
 
   it('is case-insensitive and trims whitespace', () => {
@@ -195,7 +203,7 @@ describe('mapAppliesToVendor', () => {
   })
 
   it('does NOT apply MAP to any other brand (the bug being fixed)', () => {
-    for (const v of ['Doc Johnson', 'Rene Rofe', 'Sportsheets', 'Classic Brands', 'LELO', 'Dame']) {
+    for (const v of ['Doc Johnson', 'Rene Rofe', 'Sportsheets', 'Classic Brands', 'LELO', 'Blush']) {
       expect(mapAppliesToVendor(v, brands)).toBe(false)
     }
   })
@@ -235,5 +243,32 @@ describe('decideStatus — autopilot (owner direction 2026-09-25)', () => {
 
   it('still skips a no-op', () => {
     expect(decideStatus({ ...base, oldPrice: 30, newPrice: 30.004, marginAfter: 0.4 })).toBe('skipped_no_change')
+  })
+})
+
+describe('withDefaultMapBrands', () => {
+  it('adds setting brands on top of the defaults', () => {
+    const out = withDefaultMapBrands(['We-Vibe'])
+    expect(out).toContain('We-Vibe')
+    for (const b of DEFAULT_MAP_BRANDS) expect(out).toContain(b)
+  })
+
+  it('cannot drop a Nalpac-verified brand, and dedupes case-insensitively', () => {
+    const out = withDefaultMapBrands(['lovense'])
+    expect(out.filter(b => b.toLowerCase() === 'lovense')).toHaveLength(1)
+    expect(mapAppliesToVendor('Dame', out)).toBe(true)
+  })
+})
+
+describe('contractualMapFor', () => {
+  it('binds a Nalpac-verified brand to its MAP', () => {
+    expect(contractualMapFor('SVibe', 19.99)).toBe(19.99)
+    expect(contractualMapFor('Lovense', 129)).toBe(129)
+  })
+
+  it('is null for other brands and for a missing or zero MAP', () => {
+    expect(contractualMapFor('Blush', 29.99)).toBeNull()
+    expect(contractualMapFor('Dame', null)).toBeNull()
+    expect(contractualMapFor('Dame', 0)).toBeNull()
   })
 })

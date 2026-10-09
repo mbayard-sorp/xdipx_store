@@ -12,6 +12,7 @@ import { dealHistory } from '../../db/schema'
 import { generateSEOTitle } from '~/lib/claude.server'
 import { enqueueBatchJob } from '~/lib/batch-orchestrator.server'
 import { cleanDescription, isDiscontinued, deriveSection } from '~/lib/feed-processor.server'
+import { dropshipRestriction } from '~/lib/nalpac-dropship-policy'
 import { UNCATEGORIZED_SENTINEL } from '~/lib/master-collapse.server'
 import {
   findProductBySKU,
@@ -27,6 +28,20 @@ import {
 import { upsertProductPage } from '~/lib/sanity.server'
 import type { BulkImportRow, BulkVariantRow, MasterProductGroup } from '~/types'
 import type { ProductScore } from '~/types'
+
+/**
+ * Why Nalpac will not dropship this group (see nalpac-dropship-policy), or
+ * null when it may be imported. Shared by every bulk-import entry point.
+ */
+export function groupDropshipRestriction(group: MasterProductGroup): string | null {
+  const { masterRow, variants } = group
+  return dropshipRestriction({
+    brand:              masterRow.Brand,
+    titles:             [masterRow['Product Title']],
+    subCategories:      [masterRow['Sub-Category']],
+    skus:               [masterRow.SKU, ...variants.map(v => v.sku)],
+  })
+}
 
 // ─── Category inference ───────────────────────────────────────────────────────
 
@@ -224,6 +239,12 @@ export async function importProductGroup(group: MasterProductGroup): Promise<{
     })) {
       console.info(`[bulk-import] ${masterSku} skipped: discontinued`)
       return { success: false, sku: masterSku, skipped: true, error: 'discontinued by manufacturer' }
+    }
+
+    const restriction = groupDropshipRestriction(group)
+    if (restriction) {
+      console.info(`[bulk-import] ${masterSku} skipped: ${restriction}`)
+      return { success: false, sku: masterSku, skipped: true, error: restriction }
     }
 
     // 2. Duplicate check
@@ -496,6 +517,11 @@ export async function importProductGroupRaw(group: MasterProductGroup): Promise<
       return { success: false, sku: masterSku, skipped: true, error: 'discontinued by manufacturer' }
     }
 
+    const restriction = groupDropshipRestriction(group)
+    if (restriction) {
+      return { success: false, sku: masterSku, skipped: true, error: restriction }
+    }
+
     if (await isSkuAlreadyImported(masterSku)) {
       return { success: false, sku: masterSku, skipped: true }
     }
@@ -749,6 +775,16 @@ export async function importNewProduct(input: ImportNewProductInput): Promise<Im
     'Product Description': rawProduct.rawDescription ?? rawProduct.description,
   })) {
     throw new Error(`importNewProduct: ${sku} is flagged discontinued by manufacturer`)
+  }
+
+  const restriction = dropshipRestriction({
+    brand:              rawProduct.brand,
+    titles:             [rawProduct.title],
+    subCategories:      rawProduct.categories,
+    skus:               [sku],
+  })
+  if (restriction) {
+    throw new Error(`importNewProduct: ${sku} refused: ${restriction}`)
   }
 
   // 2. Duplicate check — if SKU already exists, surface the existing GID

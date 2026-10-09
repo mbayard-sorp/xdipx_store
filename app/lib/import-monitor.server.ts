@@ -31,6 +31,7 @@ import {
   isNoveltyCategory,
 } from '~/lib/master-collapse.server'
 import type { MasterRecord } from '~/lib/master-collapse.server'
+import { dropshipRestriction } from '~/lib/nalpac-dropship-policy'
 import { flagSustainedOutOfStock } from '~/lib/oos-monitor.server'
 import type { BulkImportRow, BulkVariantRow, MasterProductGroup } from '~/types'
 
@@ -38,6 +39,24 @@ import type { BulkImportRow, BulkVariantRow, MasterProductGroup } from '~/types'
 
 export type ImportCandidateRow = typeof importCandidates.$inferSelect
 export type ImportMonitorRunRow = typeof importMonitorRuns.$inferSelect
+
+/**
+ * Why Nalpac will not dropship this master (Crave, restricted-brand
+ * supplements, store-exclusive items), or null when it may be imported.
+ */
+export function masterDropshipRestriction(
+  master: Pick<MasterRecord, 'brand' | 'displayTitle' | 'skus' | 'snapshots'>,
+): string | null {
+  return dropshipRestriction({
+    brand:         master.brand,
+    titles:        [master.displayTitle, ...master.snapshots.map(s => s.productTitle)],
+    subCategories: master.snapshots.flatMap(s => [
+      s.raw.mainRow?.['Sub-Category'],
+      s.raw.saleRow?.['Sub-Category'],
+    ]),
+    skus:          master.skus,
+  })
+}
 
 // ─── Run result ────────────────────────────────────────────────────────────────
 
@@ -321,11 +340,13 @@ export async function runImportMonitor(
     // 5. Collapse flat SKU snapshots into master groups.
     const allMasters = collapseMasters(feedResult.snapshots)
 
-    // 6. Drop masters where ANY of their SKUs is already carried.
-    //    Then drop masters that fail isEligible (qty floor, no image, pricing).
+    // 6. Drop masters where ANY of their SKUs is already carried, then
+    //    masters Nalpac will not dropship, then masters that fail isEligible
+    //    (qty floor, no image, pricing).
     const eligibleMasters = allMasters.filter(master => {
       const anyCarried = master.skus.some(s => carriedSkus.has(s))
       if (anyCarried) return false
+      if (masterDropshipRestriction(master)) return false
       const { ok } = isEligible(master)
       return ok
     })
@@ -702,6 +723,8 @@ async function autoImportPhase2(
 export interface StageMasterResult {
   staged:         number
   skippedCarried: number
+  /** Masters refused because Nalpac will not dropship them. */
+  skippedRestricted?: number
   notFound:       string[]
 }
 
@@ -771,8 +794,9 @@ export async function stageMasterCandidatesBySkus(
     : []
   const existingByKey = new Map(existingRows.map(r => [r.masterKey ?? '', r.status]))
 
-  let staged         = 0
-  let skippedCarried = 0
+  let staged            = 0
+  let skippedCarried    = 0
+  let skippedRestricted = 0
 
   for (const masterKey of mastersToDo) {
     const master = masterByKey.get(masterKey)!
@@ -780,6 +804,11 @@ export async function stageMasterCandidatesBySkus(
     // Skip if any variant is already carried.
     if (master.skus.some(s => carriedSkus.has(s))) {
       skippedCarried++
+      continue
+    }
+
+    if (masterDropshipRestriction(master)) {
+      skippedRestricted++
       continue
     }
 
@@ -824,7 +853,7 @@ export async function stageMasterCandidatesBySkus(
     }
   }
 
-  return { staged, skippedCarried, notFound }
+  return { staged, skippedCarried, skippedRestricted, notFound }
 }
 
 // ─── Query helpers ─────────────────────────────────────────────────────────────
@@ -1043,6 +1072,19 @@ export async function approveAndImport(id: number, reviewedBy?: string, opts: { 
     const error = 'master no longer in feed'
     await stampImportFailure(id, candidate.importAttemptCount, error)
     return { ok: false, error }
+  }
+
+  // Nalpac will not ship this (Crave, restricted-brand supplements,
+  // store-exclusive items). Reject the row rather than stamping a retryable
+  // failure, so no caller (admin, product-manager agent, Phase 2) keeps
+  // trying to import it.
+  const restriction = masterDropshipRestriction(master)
+  if (restriction) {
+    await db
+      .update(importCandidates)
+      .set({ status: 'rejected', rejectionReason: restriction, updatedAt: new Date(), ...reviewedStamp })
+      .where(eq(importCandidates.id, id))
+    return { ok: false, error: restriction }
   }
 
   const { axes, variantRows } = detectAxes(master)

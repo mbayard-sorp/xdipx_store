@@ -98,6 +98,17 @@ The importer computes the deal price with this logic (`computeDealPrice()` in th
 
 Supply **MSRP**, **Wholesale**, and **MAP**. The importer handles the rest.
 
+### 4a. Nalpac dropship restrictions (notice of 2026-10-09)
+
+Some products can't be dropshipped through Nalpac, so every import path refuses them: the daily monitor, PM-chat staging, `approveAndImport`, the CSV upload, and `/api/import-product`. The list lives in `app/lib/nalpac-dropship-policy.ts`.
+
+- **Crave**: the whole brand. It is brick and mortar only.
+- **Pills, supplements and gummies** from Bedroom Products, Bijoux Indiscrets, Doc Johnson, Elixir, Gig Wholesale, K-Beech, National, Promescent, Rhino, Sex Chocolates, Swiss Navy and Zeus. A row is caught when its Sub-Category includes Pills, Top Supplements, Shots Honeys and Nectars, or Gummies and Edibles. The rest of each brand's line can still be imported.
+- **Elixir pheromone products.** Nalpac named 98510, the pheromone lip gloss, which the feed files under Body Care.
+- **Adam & Eve Fleshlight**, and any feed title that says "Restricted to".
+
+Nalpac checks listings from Lovense, Playground, Autoblow, Dame, Doxy, Gun Oil (Empowered Products), Shinesty, Snail Vibe (SVibe) and SpareParts for MAP compliance before it approves their sales. The Lovense and Playground MAP agreements are signed. The v2 pricing engine holds these brands at or above MAP, with no clearance exemption. For these brands it reads each SKU's MAP from `nalpac_price_history`, because the product-level `map_price` metafield can't hold different MAPs per size. `scripts/nalpac-dropship-sweep.ts` is the one-time cleanup for listings that were live before these rules. It archives restricted products, rejects queued candidates, and lifts existing prices to MAP. It is a dry run unless you pass `--apply`.
+
 ## 5. What NOT to include
 
 These are generated downstream by Claude during import — do **not** add columns for them (they'd be ignored, and it bloats the sheet):

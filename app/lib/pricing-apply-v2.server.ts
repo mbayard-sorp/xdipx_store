@@ -14,7 +14,7 @@
 // and is out of scope here -- see the follow-up ticket this PR files.
 
 import { db } from './db.server'
-import { pricingAuditLog, pipelineSettings } from '../../db/schema'
+import { pricingAuditLog, pipelineSettings, nalpacPriceHistory } from '../../db/schema'
 import { eq, sql } from 'drizzle-orm'
 import {
   computePrice,
@@ -27,6 +27,7 @@ import {
   parseClearanceLadder,
 } from './pricing-engine-v2.server'
 import type { ClearanceLadder } from './pricing-engine-v2.server'
+import { NALPAC_MAP_VERIFIED_BRANDS, isNalpacMapVerifiedBrand } from './nalpac-dropship-policy'
 import {
   resolvePricingConfig,
   buildRationale,
@@ -245,10 +246,30 @@ async function getApprovalMode(): Promise<ApprovalMode> {
  * increases, none of them a MAP brand). Scoping MAP to the brands that actually
  * enforce it is the fix.
  *
- * Editable without a deploy via the `pricing_map_brands` pipeline setting (JSON
- * array of vendor names); this constant is the fallback.
+ * Since 2026-10-09 the list is Nalpac's MAP-verification list
+ * (NALPAC_MAP_VERIFIED_BRANDS): Nalpac checks those listings for MAP
+ * compliance before approving their sales on our account. Those brands are a
+ * contractual floor with no clearance exemption (see contractualMapFor). The
+ * `pricing_map_brands` pipeline setting (JSON array of vendor names) can add
+ * brands on top without a deploy; it cannot remove a Nalpac-verified one.
  */
-export const DEFAULT_MAP_BRANDS: readonly string[] = ['Lovense', 'Playground']
+export const DEFAULT_MAP_BRANDS: readonly string[] = NALPAC_MAP_VERIFIED_BRANDS
+
+/**
+ * Pure: the MAP that binds this vendor unconditionally, or null. A
+ * Nalpac-verified brand is held at MAP even when the product is discontinued
+ * or its group is configured `ignore_map`, because a clearance price below MAP
+ * fails Nalpac's verification the same as any other. This reverses the
+ * 2026-09-25 direction that let discontinued Lovense/Playground clear below
+ * MAP. Exported for unit testing.
+ */
+export function contractualMapFor(
+  vendor: string | null | undefined,
+  mapPrice: number | null | undefined,
+): number | null {
+  if (mapPrice == null || mapPrice <= 0) return null
+  return isNalpacMapVerifiedBrand(vendor) ? mapPrice : null
+}
 
 /**
  * Pure predicate: does MAP enforcement apply to this vendor? Case-insensitive,
@@ -267,9 +288,9 @@ export function mapAppliesToVendor(
 }
 
 /**
- * Read the MAP-brand list from `pricing_map_brands` (JSON array of strings),
- * falling back to DEFAULT_MAP_BRANDS. Read once per run and carried on
- * RunContext so a batch does not re-read it per variant.
+ * Read the MAP-brand list: DEFAULT_MAP_BRANDS plus any extra brands in
+ * `pricing_map_brands` (JSON array of strings). Read once per run and carried
+ * on RunContext so a batch does not re-read it per variant.
  */
 export async function getMapBrands(): Promise<string[]> {
   try {
@@ -285,13 +306,44 @@ export async function getMapBrands(): Promise<string[]> {
         const brands = parsed.filter(
           (b): b is string => typeof b === 'string' && b.trim().length > 0,
         )
-        if (brands.length > 0) return brands
+        if (brands.length > 0) return withDefaultMapBrands(brands)
       }
     }
   } catch {
     // fall through to defaults
   }
   return [...DEFAULT_MAP_BRANDS]
+}
+
+/**
+ * Today's feed MAP for one SKU, from the snapshot cost-sync refreshes daily.
+ * The product-level xdipx.map_price metafield cannot express per-size MAPs
+ * (Gun Oil's 2oz and its largest bottle differ by $140), so a contractual
+ * floor must come from the variant's own SKU. Null when unknown.
+ */
+async function getFeedMapForSku(sku: string | null | undefined): Promise<number | null> {
+  if (!sku) return null
+  try {
+    const rows = await db
+      .select({ mapPrice: nalpacPriceHistory.mapPrice })
+      .from(nalpacPriceHistory)
+      .where(eq(nalpacPriceHistory.sku, sku))
+      .limit(1)
+    const raw = rows[0]?.mapPrice
+    const n = raw != null ? parseFloat(raw) : NaN
+    return Number.isFinite(n) && n > 0 ? n : null
+  } catch {
+    return null
+  }
+}
+
+/** Pure: setting brands plus every default brand, deduped case-insensitively. */
+export function withDefaultMapBrands(brands: readonly string[]): string[] {
+  const out = [...DEFAULT_MAP_BRANDS]
+  for (const b of brands) {
+    if (!mapAppliesToVendor(b, out)) out.push(b)
+  }
+  return out
 }
 
 // ---------------------------------------------------------------------------
@@ -423,13 +475,18 @@ async function recomputeFromData(
   const isDiscontinued = discontinuedByState || group?.usesClearanceLadder === true || productType === DISCONTINUED_PRODUCT_TYPE
 
   // MAP is a per-brand contractual floor (owner rule 2026-08-29): honor the
-  // feed's MAP only for the MAP brands, and never for a discontinued item
-  // (owner direction 2026-09-25: discontinued Lovense/Playground may clear
-  // below MAP). Every other case resolves MAP to null so it prices off the
-  // markup rules instead of being held at MAP/MSRP.
-  const map         = !isDiscontinued && mapAppliesToVendor(product.vendor, mapBrands)
-    ? product.metafields.mapPrice
+  // feed's MAP only for the MAP brands. A Nalpac-verified brand is held at MAP
+  // even when discontinued or in an ignore_map group (contractualMapFor); a
+  // brand added only through the setting still clears below MAP when
+  // discontinued (owner direction 2026-09-25). Every other case resolves MAP
+  // to null so it prices off the markup rules instead of being held at MAP/MSRP.
+  const contractualMap = isNalpacMapVerifiedBrand(product.vendor)
+    ? contractualMapFor(product.vendor, (await getFeedMapForSku(sku)) ?? product.metafields.mapPrice)
     : null
+  const map         = contractualMap
+    ?? (!isDiscontinued && mapAppliesToVendor(product.vendor, mapBrands)
+      ? product.metafields.mapPrice
+      : null)
 
   let velocityBucket: VelocityBucket | undefined
   let effectiveCfg = cfg
@@ -476,6 +533,13 @@ async function recomputeFromData(
     return { status: 'skipped_no_change', auditId: null, applied: false, error: 'cannot compute price: missing cost' }
   }
 
+  // The discontinued ladder and an ignore_map config both skip computePrice's
+  // MAP clamp; a contractual MAP still binds them.
+  if (contractualMap != null && newSell < contractualMap) {
+    newSell = enforceMapFloor(newSell, contractualMap)
+    if (newCompare != null && newCompare <= newSell) newCompare = null
+  }
+
   const marginAfter  = cost != null && newSell > 0 ? (newSell - cost) / newSell : 0
   const marginBefore = cost != null && oldSell > 0 ? (oldSell - cost) / oldSell : 0
 
@@ -483,7 +547,7 @@ async function recomputeFromData(
     oldPrice:    oldSell,
     newPrice:    newSell,
     map,
-    mapBehavior: cfg.map_behavior,
+    mapBehavior: contractualMap != null && cfg.map_behavior === 'ignore_map' ? 'at_map' : cfg.map_behavior,
     marginFloor: cfg.margin_floor_pct,
     marginAfter,
     mode,
@@ -570,8 +634,9 @@ async function recomputeFromData(
       // decideStatus already rejects below-MAP prices and computePrice clamps
       // after rounding, but nothing may reach Shopify below a positive MAP.
       // Discontinued items are exempt (clearance ladder, MAP does not apply),
-      // as is an explicit ignore_map config.
-      const mapFloor = !isDiscontinued && cfg.map_behavior !== 'ignore_map' ? map : null
+      // as is an explicit ignore_map config, unless the MAP is contractual.
+      const mapFloor = contractualMap
+        ?? (!isDiscontinued && cfg.map_behavior !== 'ignore_map' ? map : null)
       const guardedSell = enforceMapFloor(newSell, mapFloor)
       if (guardedSell !== newSell) {
         console.warn(`[pricing-apply-v2] MAP floor guard raised ${sku} from $${newSell} to $${guardedSell}`)
@@ -820,9 +885,14 @@ export async function dryRunRuleChange(opts: {
         // Fall back to the legacy xdipx.wholesale_cost product metafield only if unset.
         const cost = variant.unitCost ?? product.metafields.wholesaleCost
         const isDiscontinued = discontinuedAt != null || group?.usesClearanceLadder === true || productType === DISCONTINUED_PRODUCT_TYPE
-        // MAP is brand-scoped (owner rule 2026-08-29) and lifted for discontinued items.
+        // MAP is brand-scoped (owner rule 2026-08-29) and lifted for discontinued
+        // items, except a contractual (Nalpac-verified) MAP, which always binds.
+        // Mirrors recomputeFromData, except that this counts-only preview reads
+        // the product-level metafield rather than each SKU's feed MAP.
         const vendor = (product as { vendor?: string | null }).vendor ?? null
-        const map = !isDiscontinued && mapAppliesToVendor(vendor, mapBrands) ? product.metafields.mapPrice : null
+        const contractualMap = contractualMapFor(vendor, product.metafields.mapPrice)
+        const map = contractualMap
+          ?? (!isDiscontinued && mapAppliesToVendor(vendor, mapBrands) ? product.metafields.mapPrice : null)
         const msrp = product.metafields.originalPrice
         const oldSell = variant.price
 
@@ -846,6 +916,7 @@ export async function dryRunRuleChange(opts: {
         }
 
         if (newSell == null) continue
+        if (contractualMap != null) newSell = enforceMapFloor(newSell, contractualMap)
 
         // Skip if price unchanged
         if (Math.abs(newSell - oldSell) < 0.005) continue
@@ -853,7 +924,7 @@ export async function dryRunRuleChange(opts: {
         result.totalAffected++
 
         const marginAfter = newSell > 0 ? (newSell - cost) / newSell : 0
-        const mapApplies = cfg.map_behavior !== 'ignore_map' && map != null
+        const mapApplies = (contractualMap != null || cfg.map_behavior !== 'ignore_map') && map != null
         const breachesMap = mapApplies && newSell < (map as number)
         const breachesFloor = marginAfter < cfg.margin_floor_pct
 
