@@ -1159,6 +1159,19 @@ product with fresh charter-voice pairing copy (or remove the embed when no hones
 re-run the Step 6c sweep on every post touched to confirm it is clean, and close each remediated row
 `applied`. Do not close a row you did not actually remediate.
 
+**Remediation prose is gated like any other published word (ticket #14314).** A bare handle
+substitution, where the surrounding sentence never names the replacement product or asserts a
+property of it, needs no re-gate. Anything else — new pairing copy that names the product, or any
+sentence asserting a spec, ingredient, or material-compatibility fact about it — is new
+customer-facing prose entering an already-published post, so route it through `emma-empathy-reviewer`
+and `sex-wellness-reviewer` before the swap, exactly as Step 5 does for a fresh draft. The
+PDP-as-source pre-flight above applies here too: a replacement product's ingredient, material, or
+compatibility claims are the likeliest thing to be lifted straight from our own Shopify description,
+and that copy carries no evidentiary weight. Close the row `applied` only after both gates PASS on
+the new strings. When the gates cannot be run in the remaining budget, file the diagnosis (which
+handle, which posts, the proposed replacement) and leave the row open for the next run rather than
+choosing between an ungated edit and a silent skip.
+
 ## Step 7: Retro + finish
 
 Compare against the plan and last run's post (published? still draft? which gate verdict?). One
