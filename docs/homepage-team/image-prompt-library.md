@@ -2665,3 +2665,39 @@ Gesture per the "Is this normal? / Is it just me?" row, adapted to empty hands. 
 - **Alt:** A woman with voluminous curly hair in a plain grey t-shirt stands in a bright white room, head tilted and brow raised, one hand open palm-up and the other resting at her shoulder, her gaze drifting to the side as if quietly asking whether it is just the two of them who stopped kissing
 - **Lesson:** an empty-hands cast hero holds identity and avoids the generic-person fallback when the prompt names the gaze target
   (the empty space where a partner would be), states the gesture per hand, and lists "no coral jacket, no letters along any edge".
+
+## Notebook §0-H keeper — content run 1340, "You and Your Partner Want Different Kinds of Touch. Four Dials, Three Moves."
+
+`[cast: sofia]` `blogPost-what-if-you-like-different-kinds-of-touch` (`real-talk`, thoughtful with quiet relief under a
+flicker of worry, no levity, no scale exaggeration). Gesture per the **"Which one? / this-or-that"** row: product held in
+one hand, weighed against the open empty other palm like a pair of scales. The empty palm IS the other kind of touch, which
+is what makes the frame unswappable onto another post. Asset
+`image-99c2693951aca05b0220deabd5b95bbc8c269bb7-1200x900-png`, 4:3, `atlas/seedream-4.5-edit` via `composeSceneFrame`.
+Route: `gen-notebook-art.ts --feature content-blog --run-id 1340` on every call including `--upload` (ticket #11100), with
+the same explicit `--prompt` repeated on upload (#10682/#9369).
+- **Product:** We-Vibe Sync 2 Rose (`we-vibe-sync-2-rechargeable-remote-control-couples-vibrator-rose`). It renders
+  berry-pink, which is the real Shopify colour; "rose" in the prompt is the SKU name, not the colour to aim for.
+- **Casting:** `sofia` (clear of no-repeat-within-5: Maya 10-08, Marcus 10-06, the 10-02 post, Jade 10-01, the 09-25 post).
+  No `editorialPhoto`, composited on `referencePhoto`.
+- **Rounds, 3 of them, 6 candidates (2/1/3):** round 1 lost every `composite` rung to the product-fidelity gate on
+  silhouette or the We-Vibe wordmark and fell through to the product-less `single-figure` rung, so all candidates were
+  discarded unviewed. Round 2 (1 candidate, `--label-tolerant`) was rejected at manual review for a baked-in "Sync"
+  box-logo text block, a stray string line across the hands, and the product lying flat on the palm like a tray. Round 3
+  (3 candidates) kept candidate 1; candidate 2 was a usable tighter-crop alternate; candidate 3 was rejected for a peach
+  wall breaking the ground lock. Anatomy gate passed on the upload (hands 5 and 4 digits, one occluded).
+- **Lesson (Sync-line SKUs):** pass `--label-tolerant` for the Sync line. Its printed wordmark has been unrenderable
+  before, and the fidelity gate otherwise collapses the whole composite ladder to the no-product rung.
+- **Lesson (negatives that fixed round 2):** add "no box, no packaging, no carton", "no caption, no banner, no headline,
+  no printed word anywhere in the frame", "no string, no thread, no line or bar between the hands", and "the product is
+  gripped in the fingers and not resting flat on the palm". The last one is what makes a scales gesture read as weighing
+  rather than as presenting on a tray.
+- **Weak point on the keeper, recorded rather than hidden:** her eyes rest on the product instead of shifting between the
+  two hands. The scales gesture still reads, but a future this-or-that frame should state the gaze path between the hands
+  as its own clause.
+- **Keeper prompt:** `Bright warm editorial magazine photograph, soft directional window daylight, high-key, calm private sunlit room, tasteful and non-explicit. The woman from reference 1, an adult in her late 20s, keep her face, hair, skin tone and build exactly as reference 1, fully clothed in a soft plain heather-grey cotton crew-neck top, waist-up framing, generous room on both sides of the subject. She pinches the rose-coloured C-shaped wearable couples vibrator from reference 2 up in her fingertips at chest height, large and co-primary with her face, keep the product's shape, color and finish exactly as reference 2, perfectly plain unmarked silicone with no logo and no engraving. Her other hand is open, palm up and completely empty, held level beside it, so she weighs the product against the empty palm like a pair of scales. Her eyes move between the two hands, head tipped slightly, one brow raised, deliberately undecided, a theatrically big thoughtful expression with a small amused half-smile and quiet relief arriving under a flicker of worry. Drama in the face and the hands, never in the light. Walls plain white and very pale warm-neutral only, generous negative space on the upper left for a title overlay. Natural five-fingered hands. No object other than the product, no props, no box, no packaging, no carton, no caption, no banner, no headline, no printed word anywhere in the frame, no string, no thread, no line or bar between the hands, the product is gripped in the fingers and not resting flat on the palm. No children, no teenagers, no youthful ambiguity, no nudity, no bare torso, no sexual contact, no product-in-use, no uncanny faces, no warped features, no extra fingers, no mugs, no cups, no candles, no folded blankets, no towels, no text, no words, no letters along any edge, no logos, no selfie energy, not moody, not dark, no candlelight, no orange, no amber, no gradient wall, not clinical.`
+- **Alt:** A dark-haired woman in a soft grey sweatshirt holds a berry-pink We-Vibe Sync wearable couples vibrator in her fingertips while her other palm waits open and empty below it, weighing the two like a pair of scales with a thoughtful, undecided half-smile in bright window light
+- **Process note, second occurrence of #11320:** `media-manager` again finished this hero without appending its keeper
+  entry, and again flagged the gap honestly rather than guessing a path. The content-writer wrote this entry by hand, which
+  is the same hand-off that cost run 1053 and PR #1331. `docs/notebook-team/image-brief.md` §0 still points the keeper log
+  at a `docs/notebook-team/image-prompt-library.md` that has never existed, while eight runs of practice append here. The
+  cast no-repeat-within-5 rule reads this file, so every missed entry degrades the next run's rotation check.
