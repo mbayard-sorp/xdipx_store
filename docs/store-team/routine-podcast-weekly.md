@@ -45,6 +45,20 @@ agree/pushback angle; medical claims are flagged in the angle, never restated as
 `productAngles` map episode themes to real catalog categories/handles (validate against live
 collections; the writer verifies stock before embedding).
 
+**When `sourceQuality` is `'show-notes'`, every claim must trace to the fetched page (ticket
+#14308).** `podcastReviewBrief-shameless-sex-506-pucker-up-kissing` declared `sourceQuality:
+'show-notes'` and its own summary said it was built from the episode description and topic list
+only, not a full listen-through, yet it asserted takeaways and a whole `productAngle` ("Taste as
+part of kissing") the fetched show-notes page never mentioned — cost content run 1318 four gate
+cycles trimming nine unsourced attributions back to the page. Because the brief claims the same
+narrow source as the eventual post, there is no richer source to appeal to once a writer inherits
+it: the over-reach has to be caught here, not downstream. So before writing the brief: every
+`keyTakeaway` and every `productAngle` theme must be traceable to a phrase actually present on the
+fetched page; quote the page's own wording for any superlative or ordering claim rather than
+paraphrasing it into a stronger one; and an inference worth adding that the page does not state
+goes in its own field or is explicitly marked as the reviewer's own extrapolation, never attributed
+to the episode. A claim that cannot be sourced this way is dropped, not softened.
+
 ## Step 5 — Write the brief
 
 One `podcastReviewBrief`, status `pending`, `createdBy` = run id, `_id` =
