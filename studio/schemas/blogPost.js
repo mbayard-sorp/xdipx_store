@@ -130,6 +130,19 @@ export default {
       description: 'Describe the hero image for accessibility and SEO.',
     },
     {
+      // Ticket #14201: the hero generator defaults to the FIRST blogProductEmbed,
+      // which is wrong when that embed's only Shopify image is carton/packaging
+      // art (common on apparel SKUs). Setting this points the hero at a different
+      // embedded product instead. scripts/gen-notebook-art.ts only honors it when
+      // it matches one of this post's own embeds; otherwise it falls back to the
+      // first embed as before.
+      name: 'heroProductHandle',
+      title: 'Hero Product Handle (override)',
+      type: 'string',
+      group: 'content',
+      description: 'Optional. Points the generated hero at a specific embedded product instead of the first one in the body — use when the first embed has only carton/packaging photography. Must match the Shopify handle of one of this post\'s embedded products.',
+    },
+    {
       // Durable record of the anatomy vision-gate verdict this exact hero
       // image passed before upload (ticket #8691, scripts/gen-notebook-art.ts).
       // Read-only: written by the generation script, not hand-edited, so a
