@@ -204,6 +204,18 @@ no action taken locally in between. Treat a test-count delta as evidence only wh
 are pinned to the identical head SHA; a delta between two independently-fetched checkouts is
 evidence about how much of the fleet merged in the interval, not about test-suite health.
 
+**Run full suites serially across concurrent worktrees (ticket #14326).** A different failure mode
+from the drift above: running `npm test`'s full suite at the same time in more than one
+worktree-isolated review (one per ticket, same pass) produces spurious failures from CPU/resource
+contention, not from a code defect or a tracked flake. Run 1320 (2026-10-08) saw this directly —
+three worktrees running the full suite concurrently each failed a different random subset of
+`app/lib/sms-v2/__tests__/{discovery-dial-drop,processor-reliability,discovery-search-query}.test.ts`,
+none of which any of the three PRs touched; re-running each failing file alone, with no concurrent
+suite running, passed clean every time, and each PR's own GitHub Actions check (a separate runner)
+was already green. Run full suites one worktree at a time within a pass, or, if reviews are already
+running concurrently, re-run only the failing file in isolation before treating an sms-v2-adjacent or
+other timing-sensitive failure as real.
+
 **The stale-artifact bounce.** CI's `check` job also asserts the tree is clean after a build, and
 the one file that legitimately goes dirty is `server/vercel-entry.mjs`, a committed build artifact.
 When that is the *only* thing wrong with an otherwise-correct PR, the change is not defective and
