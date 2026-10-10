@@ -125,9 +125,12 @@ can publish it once the dependency is fixed.
    backlog is the floor, still binding for slot themes and standing rules), then the strategy
    brief's content section. If content-plan.md is ever missing in your checkout, fall back
    gracefully and record a `step` event saying you did.
-5. `docs/store-team/creative-platform.md` (binding context once it exists): the brand idea, the
-   manifesto, and the campaign signature every surface shares. Where it and the charter disagree,
-   the charter wins.
+5. `docs/store-team/creative-platform.md` (binding context, read every run): the brand idea, the
+   manifesto, and the campaign signature every surface shares. It names `content-writer` by header
+   as a surface it binds. Where it and the charter disagree, the charter wins.
+6. `docs/store-team/campaign-look.md` (standing read, every run): the one-page router for which
+   campaign treatment is active and which document carries each surface's imagery ceiling —
+   Notebook heroes included.
 
 ## Step 3: Topic selection + slug pre-check
 
