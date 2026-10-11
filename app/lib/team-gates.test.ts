@@ -241,6 +241,25 @@ describe('publish-gate feeling-first register anchors (ticket #8212)', () => {
   })
 })
 
+describe('publish-gate mix-report scoping (ticket #13114)', () => {
+  // The endpoint-fallback model path (this system prompt) injects the same
+  // mixReportBlock data the social-publish-gate subagent definition scopes
+  // to the too-tame/close-crop REVISE check only (never a BLOCK/HOLD
+  // reason), but never told the model that until now — so a cap-breach
+  // line it could read as an uncovered "genuine account-risk judgment
+  // call" (the prompt's own definition of when HOLD is reserved) had
+  // nothing here ruling that reading out. The owner's blocker #194 answer
+  // ("report only, no hold") is instagram-campaigns.md §3.2c binding
+  // doctrine regardless of which gate path is judging.
+  it('tells the model mix-report data calibrates too-tame/close-crop only, never BLOCK or HOLD', async () => {
+    const { PUBLISH_GATE_SYSTEM } = await import('./team-gates.server')
+    expect(PUBLISH_GATE_SYSTEM).toContain('Read the rolling mix report before ruling on')
+    expect(PUBLISH_GATE_SYSTEM).toContain('never a BLOCK or HOLD reason on its own')
+    expect(PUBLISH_GATE_SYSTEM).toContain('nothing in the publish\n  path blocks on a breached cap, and nothing should')
+    expect(PUBLISH_GATE_SYSTEM).toContain('never the §3.2a stop list, which still BLOCKs exactly as before')
+  })
+})
+
 describe('publish-gate limb-tracing anatomy calibration (ticket #13501)', () => {
   it('requires tracing every visible arm from shoulder to terminus, by default, not only when asked to look harder', async () => {
     const { PUBLISH_GATE_SYSTEM } = await import('./team-gates.server')
