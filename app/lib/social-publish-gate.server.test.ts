@@ -1494,6 +1494,43 @@ describe('legible text baked into the image', () => {
       expect(r.blocked).toBe(false)
     })
   })
+
+  // Ticket #14774. Reproduced twice on run 1375 (2026-10-11) against the
+  // Dorcel Discreet Storage Box combination-lock prop: social_media_assets
+  // #1115 (social post 432) and #1117 (draft that became post 431), both
+  // false-positive BLOCKed although the verdict text unambiguously said no
+  // text was found.
+  describe('intervening adverbs and inverted word order in "no text" phrasing (ticket #14774)', () => {
+    it('asset #1115 / post 432: an adverb between "no" and "legible", plus a branching noun before "letters", is not a brand-mark misread', () => {
+      expect(classifyLegibleText(
+        'No clearly legible text visible; the combination lock dial shows small tick marks but no readable numbers ' +
+        'or letters at this resolution.',
+      )).toBe('none')
+    })
+
+    it('the full pipeline no longer blocks the post 432 candidate', async () => {
+      const r = await run(
+        'No clearly legible text visible; the combination lock dial shows small tick marks but no readable numbers ' +
+        'or letters at this resolution.',
+      )
+      expect(checks(r)).not.toContain('vision-legible-text')
+      expect(r.blocked).toBe(false)
+    })
+
+    it('asset #1117 / post 431: "not legibly readable" inverts the readable/legible word order the original list required', () => {
+      expect(classifyLegibleText(
+        'Combination lock digits on the purple box are partially visible but not legibly readable as specific numbers.',
+      )).toBe('none')
+    })
+
+    it('the full pipeline no longer blocks the post 431 candidate', async () => {
+      const r = await run(
+        'Combination lock digits on the purple box are partially visible but not legibly readable as specific numbers.',
+      )
+      expect(checks(r)).not.toContain('vision-legible-text')
+      expect(r.blocked).toBe(false)
+    })
+  })
 })
 
 // Ticket #13368: the New-in carousel's packshot card and the typographic
