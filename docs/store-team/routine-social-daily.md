@@ -2037,6 +2037,12 @@ stops.
   in the same grid position). Instagram's profile is a persistent browsable mosaic where a repeated
   face reads as a personal account; X is an ephemeral timeline with no grid, so the reason does not
   transfer. **X therefore has no per-day cast cap.**
+- **`mixReport`'s `castVolume` line (the Instagram-scoped 4/14 cap) is informational only on X, never
+  a verdict input (tickets #11757, #14567, confirmed twice).** That line also reads `cast_slugs`
+  recorded on posted rows, not whether a cast member is actually in frame, so a null-field recording
+  gap can make it misreport in either direction. X is governed by the per-post cast mandate above and
+  the rotation floor below, not by `castVolume`; judging an X row against both is what let one row
+  BLOCK and a same-day rework PASS on the identical finding.
 - **X gets a rotation floor instead, which is what the cap was really protecting.** The roster is
   eight, and a feed where one or two faces carry everything reads as a personal account just as surely
   on X as on Instagram. So: **no single cast member appears in more than a third of X posts in a
