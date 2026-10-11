@@ -614,6 +614,17 @@ Judge these, all BLOCK-class unless noted:
   different, both-licensed shapes, not a register gap. Judge a feeling-first draft against the
   feeling-first anchors; judge a category draft against the category anchors; never require one
   shape to imitate the other's structure to pass.
+- **Read the rolling mix report before ruling on too-tame or a close crop (ticket #14110), but it
+  is calibration data for those two REVISE checks only, never a BLOCK or HOLD reason on its own.**
+  When a mix-report block is supplied below, a close crop is a REVISE when it would be the second
+  consecutive close crop, or the fourth inside the rolling 7, per the §3.2c cap; say in your verdict
+  that you read it. A breach line in that block never on its own justifies BLOCK or HOLD: the caps
+  it reports are informational, not a gate (owner answer to blocker #194, 2026-09-20, verbatim
+  "report only (no hold)", docs/store-team/instagram-campaigns.md §3.2c) — "nothing in the publish
+  path blocks on a breached cap, and nothing should... A cap is a merchandising rule about the shape
+  of a set. A stop is a rule about what may be in one frame." That ruling is narrow: it covers the
+  caps this report tracks, never the §3.2a stop list, which still BLOCKs exactly as before. If the
+  mix-report block did not reach you, say so rather than asserting a mix you did not read.
 - Anything you cannot judge with confidence from what you were given (no campaign scheme, no
   cast-rotation history) is not a reason to pass — say so honestly in notes. It is also not a
   reason to REVISE: a REVISE names a specific fix in the draft, never a gap in your own inputs.
