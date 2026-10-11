@@ -298,8 +298,17 @@ const BRAND_MARK_MAX_CHARS = 40
  * classification below rather than being waved through.
  */
 const EXPLICIT_NO_TEXT_PATTERNS: readonly RegExp[] = [
-  /\bno legible (letters?|words?|text|lettering)\b/i,
-  /\bno (readable|legible) (text|words?|letters?)\b/i,
+  // Ticket #14774, reproduced on social asset #1115 (social post 432):
+  // "No clearly legible text visible" has an adverb between "no" and
+  // "legible" that the original zero-tolerance adjacency missed. One
+  // optional word is enough; the defect-pattern guard below still catches
+  // a genuine garbled attempt regardless of how this clause reads.
+  /\bno\s+(?:\w+\s+)?legible (letters?|words?|text|lettering)\b/i,
+  // Same ticket, same asset: "no readable numbers or letters at this
+  // resolution" branches through a noun ("numbers") that isn't itself
+  // text/words/letters before reaching one that is. Tolerate one leading
+  // noun and an "or" before the recognized noun.
+  /\bno (readable|legible) (?:\w+\s+)?(?:or\s+)?(text|words?|letters?)\b/i,
   // Ticket #13534, verified against social post #389's picked candidate
   // (asset #965, We-Vibe/Womanizer-class product with molded control
   // buttons): "one appears to show a power symbol ... and one shows what
@@ -328,6 +337,14 @@ const EXPLICIT_NO_TEXT_PATTERNS: readonly RegExp[] = [
   // RESOLUTION/SIZE, i.e. a camera-and-distance limit, not a garbled guess.
   // Same defect-pattern guard as the rest of this list.
   /\bnot (clearly )?legible at (this|that|the) (resolution|size|scale|distance)\b/i,
+  // Ticket #14774, social asset #1117 (draft that became social post 431,
+  // rejected twice): "not legibly readable" inverts the word order of
+  // "no readable"/"no legible" above and the original list had no entry
+  // for it at all. "partially visible but not readable" is the sibling
+  // phrasing the ticket names; distinct from "partially legible" in
+  // ATTEMPTED_TEXT_DEFECT_PATTERNS below, which still blocks.
+  /\bnot (?:clearly |fully )?legibly readable\b/i,
+  /\bpartially visible but not (?:clearly |legibly )?readable\b/i,
 ]
 const ATTEMPTED_TEXT_DEFECT_PATTERNS: readonly RegExp[] = [
   /\bgarbled\b/i,
