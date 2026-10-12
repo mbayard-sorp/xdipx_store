@@ -12,7 +12,12 @@
 import type { LoaderFunctionArgs, MetaFunction } from 'react-router'
 import { Link, useLoaderData } from 'react-router'
 import { requireAdmin } from '~/lib/session.server'
-import { getDailyTokenRollup, getMediaBlockRollup, MEDIA_BLOCK_FEATURE } from '~/lib/token-log.server'
+import {
+  getDailyTokenRollup,
+  getMediaBlockRollup,
+  getSocialImageCostPerPost,
+  MEDIA_BLOCK_FEATURE,
+} from '~/lib/token-log.server'
 
 export const meta: MetaFunction = () => [{ title: 'API Usage — xdipx Admin' }]
 
@@ -30,9 +35,10 @@ function fmtUsd(n: number): string {
 export async function loader({ request }: LoaderFunctionArgs) {
   await requireAdmin(request)
 
-  const [rows, blockRows] = await Promise.all([
+  const [rows, blockRows, socialImageCost] = await Promise.all([
     getDailyTokenRollup({ days: 30 }),
     getMediaBlockRollup({ days: 30 }),
+    getSocialImageCostPerPost({ days: 7 }),
   ])
 
   // Parse numeric strings from the view's DECIMAL / SUM columns.
@@ -91,7 +97,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return {
     rows: parsed, mtdCost, mtdCalls, mtdInput, mtdOutput, mtdBatch, mtdSync, batchPct, featureSavings,
-    blocks, blockedTotal, refusedTotal,
+    blocks, blockedTotal, refusedTotal, socialImageCost,
   }
 }
 
@@ -109,7 +115,7 @@ function StatCard({ label, value, sub }: { label: string; value: string; sub?: s
 
 export default function UsagePage() {
   const { rows, mtdCost, mtdCalls, mtdInput, mtdOutput, mtdBatch, mtdSync, batchPct, featureSavings,
-          blocks, blockedTotal, refusedTotal } = useLoaderData<LoaderData>()
+          blocks, blockedTotal, refusedTotal, socialImageCost } = useLoaderData<LoaderData>()
 
   return (
     <div className="max-w-3xl mx-auto space-y-8">
@@ -126,6 +132,40 @@ export default function UsagePage() {
         <StatCard label="Total calls" value={fmtNum(mtdCalls)} />
         <StatCard label="Input tokens" value={fmtNum(mtdInput)} />
         <StatCard label="Output tokens" value={fmtNum(mtdOutput)} />
+      </div>
+
+      {/* Social imagery pipeline cost per post (ticket #14938) */}
+      <div className="bg-paper rounded-xl border border-line p-4 space-y-2">
+        <p className="text-sm font-semibold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
+          Social imagery cost per post — {socialImageCost.platform}, last {socialImageCost.days}d
+        </p>
+        <div className="flex flex-wrap gap-6 text-sm">
+          <div>
+            <span className="text-ink-4 text-xs">Cost / published post</span>
+            <p className="font-mono text-ink font-semibold">
+              {socialImageCost.costPerPost == null ? '—' : fmtUsd(socialImageCost.costPerPost)}
+            </p>
+          </div>
+          <div>
+            <span className="text-ink-4 text-xs">Vision calls / published post</span>
+            <p className="font-mono text-ink font-semibold">
+              {socialImageCost.visionCallsPerPost == null ? '—' : fmtNum(socialImageCost.visionCallsPerPost, 1)}
+            </p>
+          </div>
+          <div>
+            <span className="text-ink-4 text-xs">Published posts</span>
+            <p className="font-mono text-ink font-semibold">{socialImageCost.publishedPosts}</p>
+          </div>
+          <div>
+            <span className="text-ink-4 text-xs">Window spend</span>
+            <p className="font-mono text-ink font-semibold">{fmtUsd(socialImageCost.totalCostUsd)}</p>
+          </div>
+        </div>
+        {socialImageCost.publishedPosts === 0 && (
+          <p className="text-xs text-coral">
+            Zero posts published in this window — any spend above is drafts that never shipped.
+          </p>
+        )}
       </div>
 
       {/* Batch vs sync split */}

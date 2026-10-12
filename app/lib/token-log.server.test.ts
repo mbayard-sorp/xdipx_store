@@ -21,6 +21,8 @@ const state = {
   // When true, every db.insert(...).values() rejects (both the initial write
   // and insertTokenRow's single retry), so insertTokenRow throws.
   insertThrows: false,
+  // getSocialImageCostPerPost's lone db.execute() call reads this.
+  executeRows: [] as Array<Record<string, unknown>>,
 }
 
 vi.mock('~/lib/db.server', () => ({
@@ -32,6 +34,7 @@ vi.mock('~/lib/db.server', () => ({
         return Promise.resolve()
       },
     }),
+    execute: () => Promise.resolve({ rows: state.executeRows }),
   },
 }))
 
@@ -62,7 +65,7 @@ vi.mock('~/lib/kv.server', () => ({
   },
 }))
 
-import { logImageCost, logMessageUsage } from '~/lib/token-log.server'
+import { logImageCost, logMessageUsage, getSocialImageCostPerPost } from '~/lib/token-log.server'
 
 const LONG_HANDLE = 'sliquid-naturals-satin-personal-moisturizer' // 43 chars, > 32
 
@@ -70,6 +73,7 @@ beforeEach(() => {
   state.inserted = []
   state.incr = []
   state.insertThrows = false
+  state.executeRows = []
 })
 
 describe('logImageCost — long product handle (#5051)', () => {
@@ -154,5 +158,43 @@ describe('logMessageUsage (vision-gate spend, 2026-09-29)', () => {
     ).not.toThrow()
     await vi.waitFor(() => expect(state.incr.length).toBeGreaterThan(0))
     expect(state.inserted).toHaveLength(0)
+  })
+})
+
+describe('getSocialImageCostPerPost (ticket #14938)', () => {
+  it('divides the window spend by the published-post count', async () => {
+    state.executeRows = [{ published_posts: '6', total_cost_usd: '33.12', total_vision_calls: '1110' }]
+    const row = await getSocialImageCostPerPost({ days: 7 })
+    expect(row.platform).toBe('instagram')
+    expect(row.publishedPosts).toBe(6)
+    expect(row.totalCostUsd).toBeCloseTo(33.12)
+    expect(row.totalVisionCalls).toBe(1110)
+    expect(row.costPerPost).toBeCloseTo(5.52)
+    expect(row.visionCallsPerPost).toBe(185)
+  })
+
+  it('reports null rates rather than dividing by zero on a zero-post window', async () => {
+    state.executeRows = [{ published_posts: '0', total_cost_usd: '12.40', total_vision_calls: '300' }]
+    const row = await getSocialImageCostPerPost({ days: 1 })
+    expect(row.publishedPosts).toBe(0)
+    expect(row.costPerPost).toBeNull()
+    expect(row.visionCallsPerPost).toBeNull()
+    // The spend itself is still reported — a zero-post window is expensive, not costless.
+    expect(row.totalCostUsd).toBeCloseTo(12.4)
+  })
+
+  it('reports zero spend (not null) when nothing was logged in the window', async () => {
+    state.executeRows = [{ published_posts: '2', total_cost_usd: null, total_vision_calls: null }]
+    const row = await getSocialImageCostPerPost({ days: 7 })
+    expect(row.totalCostUsd).toBe(0)
+    expect(row.totalVisionCalls).toBe(0)
+    expect(row.costPerPost).toBe(0)
+  })
+
+  it('accepts an explicit platform override', async () => {
+    state.executeRows = [{ published_posts: '4', total_cost_usd: '8', total_vision_calls: '40' }]
+    const row = await getSocialImageCostPerPost({ platform: 'x' })
+    expect(row.platform).toBe('x')
+    expect(row.costPerPost).toBe(2)
   })
 })
