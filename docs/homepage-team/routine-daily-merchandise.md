@@ -553,7 +553,7 @@ spend in Step 6 — the script already posts exactly one `{kind:'image'}` row pe
 | Wayfinder mosaic | `wayfinderMosaic` block in `singleton.homepage.sections[]` — the "Find your way in" tiles + "Discover You" promo. `tiles[]` (label/link/emmaAside/image, 3-4) + `promo` (eyebrow/heading/emphasis/body/cta/image). Empty/unset → the storefront renders its hardcoded fallback tiles (never blank). Place tile images via `--target tile --tile-key`, the promo via `--target promo`. | storefront `/` |
 | Couples band | `playTogetherBanner` block in `singleton.homepage.sections[]` — the "Play intimately together" band (heading/body/cta/image). It **does** render on the storefront (it is whitelisted in `homepage-payload.server.ts`); an unset image renders an imageless plate, so always place art. Place it via `--target block --block-key` like any other block image. | storefront `/` |
 | Curiosity shelf | `singleton.curiosityShelf` (`curiosityShelf`): `eyebrow`, `heading`, `emphasis`, `emmaLine`, `lanes[]`. Lane labels and Emma lines are voice-gated copy (`emma-empathy-reviewer` before publish); each lane's `productHandles` are the curated deck (pinned to page 1) and `backfill.typeDial` is the required category floor. Absent/`enabled:false` → code `DEFAULT_SHELF_CONTENT`. The week's `marketing_calendar` theme should tint at least the eyebrow and one lane label. Write it with `sanity-content-cli.ts` (never the Sanity MCP), one `patch` + one `publish` per day, batched with the rest of the page's writes. A "reviewed, no change" day must not touch Sanity — log a `decision` event instead. | storefront `/` Nº 07 |
-| Announcement ticker | `announcementBar` messages in `singleton.homepage` (the layout pins it site-wide). | all pages |
+| Announcement ticker | **Not** the top-level `announcementBar.messages` field — that does not render. The layout reads the `sections[]` block of `_type: "announcementBar"` in `singleton.homepage`, specifically `sections[_key=="<that block's key>"].messages[_key=="<message key>"].text`. Patch the block's `messages[]` entries by their own `_key`, the same way you'd patch any other `sections[]` block. | all pages |
 
 **Curiosity shelf write (Nº 07).** One `patch` + one `publish` per day, batched with the rest of
 the page's writes. Dry-run first, exactly as with every other Sanity surface:
@@ -686,7 +686,13 @@ Every merchandise run touches all of these, not just the hero and rails:
 5. **Couples band** — refresh `playTogetherBanner` (image + copy). It renders; see above.
 6. **Notebook override** — `editorialTiles` only for a deliberate editorial pick, under the two hard
    rules in the table above. Auto-populate is the better default.
-7. **Announcement** — `announcementBar` messages in step with today's theme.
+7. **Announcement** — refresh the ticker text in step with today's theme. Patch it at
+   `sections[_key=="<announcementBar block key>"].messages[_key=="<message key>"].text` in
+   `singleton.homepage`, never the top-level `announcementBar.messages` field, which does not render
+   (second occurrence, runs 1351 and 1371: run 1351 patched the dead field and reported the surface
+   changed when it had not; run 1371 found the served ticker unchanged at Step 7 and had to re-patch
+   the sections-block path instead). Add the ticker's rendered text to the Step 7 render-truth
+   assertions so a dead-field patch is caught the same run it happens, not the next one.
 
 **Pairing merchandising is mandatory:**
 
@@ -1004,11 +1010,15 @@ as either a pass or a failure.
 2. The **published hero product handle** appears in the returned HTML.
 3. **Every published rail title** appears in the returned HTML.
 4. **At least one published wayfinder tile headline** appears in the returned HTML.
-5. **Page weight budget (ticket #13149, owner all-hands 2026-10-02: "The homepage of our site
+5. **If the announcement ticker was patched this run, its new text** appears in the returned HTML
+   (patched at the `sections[]` `announcementBar` block path named in the render-surfaces table
+   above, never the dead top-level `announcementBar.messages` field). Catches a dead-field patch the
+   same run it happens instead of a later run discovering the served ticker never changed.
+6. **Page weight budget (ticket #13149, owner all-hands 2026-10-02: "The homepage of our site
    continues to experience long load times").** Lighthouse CI only measures code PRs; this team
    changes the page every day through Sanity (hero image swaps, rail contents, sections, notebook
    rail) and nothing else measures the weight of those content changes. Checked on the same fetch
-   as assertions 1-4, with the 2026-10-02 baseline stated so drift is visible:
+   as assertions 1-5, with the 2026-10-02 baseline stated so drift is visible:
    - **Compressed HTML** — `curl -s -H 'Accept-Encoding: br' -o /dev/null -w '%{size_download}'
      https://xdipx.com/` must be <= 80,000 B (baseline 65,826 B).
    - **Loader data** — `curl -s https://xdipx.com/.data | wc -c` must be <= 160,000 B (baseline
@@ -1018,7 +1028,7 @@ as either a pass or a failure.
    - **Hero/tile image weight** — every newly published hero or tile image, fetched at the width the
      page requests, is <= 150 KB.
 
-   A breach of assertion 5 does **not** fail the publish (content stays live): mark the run
+   A breach of assertion 6 does **not** fail the publish (content stays live): mark the run
    `degraded` and file ONE `kind:'code'` suggestion to team `homepage`, `category:'performance'`,
    `dedupeKey:'perf-weight-budget-<YYYY-MM-DD>'`, naming the metric, the measured value, the
    baseline, and the surface that grew.
