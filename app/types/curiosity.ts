@@ -34,6 +34,15 @@ export const SHELF_PAYLOAD_CAP = 60
 export const LOW_BAND = 40
 /** price > HIGH_BAND reads as a splurge. */
 export const HIGH_BAND = 80
+/**
+ * Minimum tracked stock to take a deck slot (ticket #14926). A 1-3 unit
+ * product is still orderable, just not something the shelf should hand six
+ * curious taps in a row before it sells out mid-feature. Untracked
+ * (`null`) always passes — mirrors the homepage's shared featured-stock
+ * floor in `discovery-rules.server.ts`, duplicated as a literal here because
+ * this module stays pure/dependency-free (no `.server.ts` imports).
+ */
+export const MIN_SHELF_STOCK = 3
 
 /**
  * The backfill rule that fills a lane's deck to 12 and keeps it alive on a day

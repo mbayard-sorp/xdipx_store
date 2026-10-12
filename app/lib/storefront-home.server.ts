@@ -12,7 +12,7 @@
  */
 
 import { getDiscoveryIndex, getDiscoveryRails } from '~/lib/discovery.server'
-import { isOutOfStock } from '~/lib/discovery-rules.server'
+import { isBelowFeaturedStockFloor } from '~/lib/discovery-rules.server'
 import {
   buildHomeContentBlocksLean,
   getAnchorCollectionProducts,
@@ -492,14 +492,22 @@ export async function buildHomepagePayloadB(): Promise<HomepagePayloadB> {
   let pinnedProduct: DiscoveryProduct | null = null
   if (pinnedHandle) {
     pinnedProduct =
-      rails.flatMap(r => r.items).find(i => i.product.handle === pinnedHandle)?.product ??
-      // Not surfaced by today's rails: pull it from the discovery index. The
-      // rails call above already warmed the L1 memo, so this is an in-memory
-      // lookup, not a second KV round-trip. A rail lead already passed
-      // applyRules()'s stock gate, but this raw index lookup has not, so the
-      // same out-of-stock check is re-applied here (ticket #6751) — otherwise
-      // a curator-pinned handle that just sold out would still hero.
-      (await getDiscoveryIndex()).find(p => p.handle === pinnedHandle && !isOutOfStock(p.totalInventory)) ??
+      rails
+        .flatMap(r => r.items)
+        .find(
+          i => i.product.handle === pinnedHandle && !isBelowFeaturedStockFloor(i.product.totalInventory),
+        )?.product ??
+      // Not surfaced by today's rails (or surfaced too thin to hero, #14926):
+      // pull it from the discovery index. The rails call above already warmed
+      // the L1 memo, so this is an in-memory lookup, not a second KV
+      // round-trip. A rail lead already passed applyRules()'s stock gate, but
+      // this raw index lookup has not, so the same minimum-stock check is
+      // re-applied here (ticket #6751, floor raised #14926) — otherwise a
+      // curator-pinned handle that just sold out, or is down to its last
+      // couple of units, would still hero.
+      (await getDiscoveryIndex()).find(
+        p => p.handle === pinnedHandle && !isBelowFeaturedStockFloor(p.totalInventory),
+      ) ??
       null
     if (!pinnedProduct) {
       console.warn(

@@ -22,7 +22,7 @@ import { homepagePayload } from '../../db/schema'
 import { kvGet, kvSet, kvDel } from '~/lib/kv.server'
 import { withTimeout } from '~/lib/with-timeout.server'
 import { getDiscoveryRails, getDiscoveryVocab } from '~/lib/discovery.server'
-import { isOutOfStock } from '~/lib/discovery-rules.server'
+import { isBelowFeaturedStockFloor } from '~/lib/discovery-rules.server'
 import { EMPTY_STATE } from '~/types/discovery'
 import type { Rail } from '~/types/discovery'
 import type { ChipAvailabilityArrays } from '~/lib/discovery-emma'
@@ -238,15 +238,17 @@ function toLeanCardProduct(p: Product): LeanCardProduct {
 }
 
 /**
- * Out-of-stock gate for curator-placed homepage surfaces (ticket #6751). Unlike
- * the algorithmic discovery rails, these surfaces (the Nº 03 anchor grid, the
- * Sanity-curated carousels) are simple Shopify fetches with no pass through
- * `applyRules()`, so a product that just sold out stays pinned until a curator
- * notices. Same rule as the always-on rail gate: a tracked count at or below
- * zero is dropped, untracked (`null`/absent) always passes.
+ * Out-of-stock gate for curator-placed homepage surfaces (ticket #6751, floor
+ * raised #14926). Unlike the algorithmic discovery rails, these surfaces (the
+ * Nº 03 anchor grid, the Sanity-curated carousels) are simple Shopify fetches
+ * with no pass through `applyRules()`, so a product that just sold out (or is
+ * down to its last couple of units) stays pinned until a curator notices.
+ * Drops a tracked count at or below `MIN_FEATURED_STOCK`, not just zero —
+ * these are limited, hand-placed slots, not a sellability check — untracked
+ * (`null`/absent) always passes.
  */
 function dropOutOfStock<T extends { totalInventory?: number | null }>(products: T[]): T[] {
-  return products.filter(p => !isOutOfStock(p.totalInventory))
+  return products.filter(p => !isBelowFeaturedStockFloor(p.totalInventory))
 }
 
 /**

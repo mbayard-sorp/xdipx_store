@@ -175,6 +175,23 @@ describe('resolveLane', () => {
     )!
     expect(bestSellersUnverified.seeAllHref).toBeNull()
   })
+
+  // ── 11. a deck never seats a thin-stock survivor (ticket #14926) ────────────
+  it('excludes a tracked 1-3 unit product from the deck but keeps untracked and 4+ unit products', () => {
+    const index = [
+      ...typePool('vibrator', 5, i => 30 + i),
+      mk({ id: 'thin-1', handle: 'thin-1', title: 'thin 1', productTypeDial: 'vibrator', price: 45, totalInventory: 1 }),
+      mk({ id: 'thin-3', handle: 'thin-3', title: 'thin 3', productTypeDial: 'vibrator', price: 46, totalInventory: 3 }),
+      mk({ id: 'ok-4', handle: 'ok-4', title: 'ok 4', productTypeDial: 'vibrator', price: 47, totalInventory: 4 }),
+      mk({ id: 'untracked', handle: 'untracked', title: 'untracked', productTypeDial: 'vibrator', price: 48, totalInventory: null }),
+    ]
+    const resolved = resolveLane(lane({ key: 'hums' }), index, 0, OPTS())!
+    const handles = resolved.deck.map(p => p.handle)
+    expect(handles).not.toContain('thin-1')
+    expect(handles).not.toContain('thin-3')
+    expect(handles).toContain('ok-4')
+    expect(handles).toContain('untracked')
+  })
 })
 
 // ── 4. fewer than three surviving lanes → resolveShelf returns null ───────────
