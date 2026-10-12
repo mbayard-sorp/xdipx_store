@@ -428,6 +428,95 @@ export async function getMediaBlockRollup(opts: { days?: number } = {}): Promise
 }
 
 // ---------------------------------------------------------------------------
+// Social imagery pipeline: cost per published post (ticket #14938)
+// ---------------------------------------------------------------------------
+
+/**
+ * The `api_token_log.feature` values that make up the social imagery
+ * pipeline's billed chain for one post: the frame-reference check, the
+ * image generation itself, the post-crop zone check, and the vision gate.
+ * Kept as one list so the cost rollup and its tests agree on exactly what
+ * "the pipeline" means.
+ */
+export const SOCIAL_IMAGE_PIPELINE_FEATURES = [
+  'social-vision-gate',
+  'social-images',
+  'social-product-fidelity',
+  'social-crop-to-zone',
+] as const
+
+export interface SocialImageCostPerPostRow {
+  platform:           string
+  days:               number
+  publishedPosts:     number
+  totalCostUsd:       number
+  totalVisionCalls:   number
+  /** null when nothing published in the window — a rate with a zero denominator is not a number. */
+  costPerPost:        number | null
+  visionCallsPerPost: number | null
+}
+
+/**
+ * Cost and billed vision-gate-call count per post actually PUBLISHED in the
+ * last `days`, for one platform (default Instagram, the only platform this
+ * pipeline currently serves). Not a join on a shared key — the two halves are
+ * independent aggregates over the same rolling window the ticket's own
+ * evidence used (total pipeline spend, divided by posts that cleared the
+ * gate and went live), because a draft's generation and gate calls are not
+ * tied to a `social_posts` row until (and unless) it is ever approved and
+ * posted. Deliberately single-platform: `api_token_log` rows for this
+ * pipeline carry no platform column, so dividing one window's total spend
+ * across more than one platform's post count would double-count it.
+ * A thin window (few or zero posts) reads as an expensive or undefined rate,
+ * which is the honest answer, not a bug: it means the window spent heavily
+ * on drafts that never shipped.
+ */
+export async function getSocialImageCostPerPost(
+  opts: { days?: number; platform?: string } = {},
+): Promise<SocialImageCostPerPostRow> {
+  const { db } = await import('./db.server')
+  const { sql } = await import('drizzle-orm')
+  const days = opts.days ?? 7
+  const platform = opts.platform ?? 'instagram'
+  const result = await db.execute(
+    sql`
+      WITH spend AS (
+        SELECT SUM(est_cost_usd) AS total_cost_usd, SUM(request_count) AS total_vision_calls
+        FROM api_token_log
+        WHERE feature = ANY(${SOCIAL_IMAGE_PIPELINE_FEATURES}::text[])
+          AND ts >= current_date - ${days}::int
+      ),
+      posted AS (
+        SELECT COUNT(*) AS published_posts
+        FROM social_posts
+        WHERE status = 'posted'
+          AND platform = ${platform}
+          AND posted_at >= current_date - ${days}::int
+      )
+      SELECT posted.published_posts, spend.total_cost_usd, spend.total_vision_calls
+      FROM posted, spend
+    `,
+  )
+  const r = result.rows[0] as unknown as {
+    published_posts: string
+    total_cost_usd: string | null
+    total_vision_calls: string | null
+  }
+  const publishedPosts = Number(r?.published_posts ?? 0)
+  const totalCostUsd = Number(r?.total_cost_usd ?? 0)
+  const totalVisionCalls = Number(r?.total_vision_calls ?? 0)
+  return {
+    platform,
+    days,
+    publishedPosts,
+    totalCostUsd,
+    totalVisionCalls,
+    costPerPost: publishedPosts > 0 ? totalCostUsd / publishedPosts : null,
+    visionCallsPerPost: publishedPosts > 0 ? totalVisionCalls / publishedPosts : null,
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Video-generation spend logger
 // ---------------------------------------------------------------------------
 
