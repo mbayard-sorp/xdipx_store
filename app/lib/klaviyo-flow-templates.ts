@@ -14,6 +14,14 @@
  * Order and Viewed Product events. A template always renders sanely when a key
  * is missing (every variable carries a default).
  */
+import {
+  EMAIL_BODY_FONT as BODY_FONT,
+  EMAIL_COLORS as C,
+  EMAIL_DARK_COLORS as D,
+  EMAIL_HEAD_FONT as HEAD_FONT,
+  EMAIL_PREHEADER_FILLER as PREHEADER_FILLER,
+  coralButton,
+} from './email-design-system'
 
 export const FLOW_EVENT_PROPERTY_KEYS = {
   name: 'ProductName',
@@ -195,36 +203,9 @@ function actBlock(): string {
 // "Design"). v3 tokens from app/app.css, flattened to hex because email clients
 // do not read CSS variables and Outlook does not read rgba. Paper ground, ink
 // type ramp, one plum emphasis word, one coral button and nothing else coral.
-
-const HEAD_FONT = "Newsreader, Georgia, 'Times New Roman', serif"
-const BODY_FONT = "'DM Sans', Arial, Helvetica, sans-serif"
-
-const C = {
-  paper: '#FFFFFF',
-  paper2: '#FAFAF9',
-  ink: '#1A1418',
-  ink2: '#3D2F3A',
-  ink3: '#6B5F68',
-  ink4: '#726673',
-  /** `line` (8% ink) flattened onto paper. */
-  line: '#EDECEC',
-  /** `line-3` (32% ink) flattened onto paper. */
-  line3: '#B6B4B5',
-  coral: '#C2350F',
-  plum: '#7A2BB8',
-} as const
-
-/** Dark-mode palette, used only where a client asks for it (Apple Mail, iOS Mail, Outlook.com). */
-const D = {
-  ground: '#1A1418',
-  card: '#241C22',
-  text: '#F4F1F3',
-  text2: '#DCD3DA',
-  text3: '#B9AEB6',
-  line: '#3D2F3A',
-  /** Plum lifted for contrast on ink; the brand plum is 2.3:1 there. */
-  plum: '#C9A0EE',
-} as const
+// HEAD_FONT/BODY_FONT/C/D/coralButton/PREHEADER_FILLER now live in
+// email-design-system.ts (ticket #14998) so the daily promo email block
+// library reuses the exact same system; imported above.
 
 /**
  * Header plate size in CSS pixels. The plate is square: header art arrives as
@@ -244,32 +225,6 @@ function emphasizedHeadline(spec: FlowEmailSpec): string {
     spec.headline.slice(i + spec.emphasis.length)
   )
 }
-
-/**
- * Bulletproof coral button. Three layers, each for a client that ignores the
- * others:
- *  - Outlook for Windows gets a VML roundrect (it cannot pad or round an <a>).
- *  - Gmail's dark mode repaints background colours but not background images,
- *    so the cell and the link carry the coral as a one-colour image fill as well
- *    as bgcolor. It renders flat, no visible gradient. The label is white,
- *    which Gmail leaves alone (it lightens dark text, it does not darken light).
- *    The mix-blend-mode label hack was tried and dropped: it brightened the
- *    coral to orange in every browser-engine client.
- */
-function coralButton(href: string, label: string): string {
-  const fill = `background-color:${C.coral};background-image:linear-gradient(${C.coral},${C.coral});`
-  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:0 auto;">
-<tr><td align="center" bgcolor="${C.coral}" class="x-btn" style="${fill}border-radius:999px;mso-padding-alt:0;">
-<!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${href}" style="height:52px;v-text-anchor:middle;width:260px;" arcsize="50%" stroke="f" fillcolor="${C.coral}"><w:anchorlock/><center style="color:#FFFFFF;font-family:Arial,sans-serif;font-size:16px;font-weight:bold;">${label}</center></v:roundrect><![endif]-->
-<!--[if !mso]><!--><a href="${href}" target="_blank" class="x-btn-a" style="display:inline-block;${fill}color:#FFFFFF;font-family:${BODY_FONT};font-size:16px;line-height:20px;font-weight:600;letter-spacing:0.01em;text-decoration:none;padding:16px 36px;border-radius:999px;mso-hide:all;">${label}</a><!--<![endif]-->
-</td></tr>
-</table>`
-}
-
-/** Hidden preheader filler. Klaviyo injects the message's preview text ahead of
- * the body; this run of zero-width joiners stops the masthead and headline from
- * trailing into the inbox snippet after it. */
-const PREHEADER_FILLER = '&#8199;&#65279;&#847; '.repeat(60)
 
 export interface RenderedFlowEmail {
   name: string
