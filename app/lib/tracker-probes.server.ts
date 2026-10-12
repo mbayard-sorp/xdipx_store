@@ -19,6 +19,30 @@
  * GREEN while their own stated evidence failed. The third was honest. That
  * ratio is the argument for this file.
  *
+ * ## Registry drift, corrected 2026-10-12 (ticket #14942)
+ *
+ * All three of the original entries had drifted from the tracker:
+ *  - `e3-targetteam` was CUT (the tracker row itself reads `dropped`, 2026-09-02:
+ *    `target_team IS NULL` was redefined to mean "the proposing team owns it",
+ *    so the backfill this probe measured would write redundant data). Removed.
+ *  - `b1-bus` (closed, done/GREEN) measured the exact same quantity as
+ *    `e1-blocked` (the live, actively-tracked RED milestone: "blocked rows at
+ *    attempt_count 0, below 10"), so every contradiction it could ever report
+ *    was reported twice under two keys, one of them already closed. Re-keyed
+ *    to `e1-blocked` rather than re-targeted at the harder-to-verify
+ *    `dismissed`-edge-usage reading the ticket also offered: the query was
+ *    already right, it was just filed under the wrong milestone.
+ *  - `a4-probes` had fallen out of sync with the tracker's own corrected probe
+ *    text (`docs/store-team/trackers/self-healing-automation.md`, row a4-probes,
+ *    2026-09-15 entry): missing `override_no_probe_reason IS NULL` entirely, and
+ *    excluding only `category = 'decision'` where the tracker excludes `console`
+ *    too. Corrected to match that row's literal probe exactly. Left open: that
+ *    tracker text does not exclude `category = 'approval'`, even though
+ *    `PROBE_REQUIRED_CATEGORIES` (`owner-blockers-core.ts`) doesn't require one
+ *    there either — a real ambiguity the tracker row itself hasn't resolved, so
+ *    this entry restates the tracker's literal words rather than guessing past
+ *    them.
+ *
  * ## Why the SQL lives here and not in the markdown
  *
  * The obvious implementation reads the probe cell and runs it. It was rejected:
@@ -75,7 +99,11 @@ async function scalar(q: ReturnType<typeof sql>): Promise<number | null> {
  */
 export const MILESTONE_PROBES: readonly MilestoneProbe[] = [
   {
-    key: 'self-healing-automation:b1-bus',
+    // Re-keyed from the now-closed b1-bus (ticket #14942): the query itself was
+    // already correct, just filed under the wrong milestone, duplicating this
+    // one under a second key. e1-blocked is the live, actively-tracked (RED)
+    // milestone this bound actually belongs to.
+    key: 'self-healing-automation:e1-blocked',
     describe: 'blocked rows at attempt_count 0, below 10',
     measure: () => scalar(sql`
       SELECT COUNT(*)::int AS n FROM homepage_team_suggestions
@@ -84,18 +112,11 @@ export const MILESTONE_PROBES: readonly MilestoneProbe[] = [
   },
   {
     key: 'self-healing-automation:a4-probes',
-    describe: 'open blockers with no probe that are not decisions, is 0',
+    describe: 'open blockers with no probe, no override reason, not decision/console, is 0',
     measure: () => scalar(sql`
       SELECT COUNT(*)::int AS n FROM owner_blockers
-       WHERE status = 'open' AND verify_probe IS NULL AND category <> 'decision'`),
-    ok: (n) => n === 0,
-  },
-  {
-    key: 'self-healing-automation:e3-targetteam',
-    describe: 'live rows with a NULL target_team, is 0',
-    measure: () => scalar(sql`
-      SELECT COUNT(*)::int AS n FROM homepage_team_suggestions
-       WHERE target_team IS NULL AND status NOT IN ('applied', 'dismissed')`),
+       WHERE status = 'open' AND verify_probe IS NULL AND override_no_probe_reason IS NULL
+         AND category NOT IN ('decision', 'console')`),
     ok: (n) => n === 0,
   },
 ]
