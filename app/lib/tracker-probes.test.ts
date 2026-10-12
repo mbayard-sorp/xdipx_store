@@ -38,6 +38,31 @@ describe('the registry', () => {
     expect(new Set(keys).size).toBe(keys.length)
   })
 
+  // Registry drift fix (ticket #14942): e3-targetteam was cut (the milestone
+  // itself was dropped), and b1-bus was re-keyed to e1-blocked rather than
+  // left as a second entry measuring the exact same quantity.
+  it('no longer carries the cut e3-targetteam milestone or the closed b1-bus key', () => {
+    const keys = MILESTONE_PROBES.map(p => p.key)
+    expect(keys).not.toContain('self-healing-automation:e3-targetteam')
+    expect(keys).not.toContain('self-healing-automation:b1-bus')
+  })
+
+  it('carries the blocked-rows bound under e1-blocked, the milestone it actually measures', () => {
+    const entry = MILESTONE_PROBES.find(p => p.key === 'self-healing-automation:e1-blocked')
+    expect(entry).toBeTruthy()
+    expect(entry!.ok(9)).toBe(true)
+    expect(entry!.ok(10)).toBe(false)
+  })
+
+  it('restates the tracker a4-probes row literally: no probe, no override reason, not decision/console', () => {
+    const entry = MILESTONE_PROBES.find(p => p.key === 'self-healing-automation:a4-probes')
+    expect(entry).toBeTruthy()
+    expect(entry!.describe).toContain('override reason')
+    expect(entry!.describe).toContain('decision/console')
+    expect(entry!.ok(0)).toBe(true)
+    expect(entry!.ok(1)).toBe(false)
+  })
+
   it('encodes bounds that actually discriminate', () => {
     // A predicate that accepts everything is a probe that cannot fail, which is
     // the same defect as a floor of zero.
