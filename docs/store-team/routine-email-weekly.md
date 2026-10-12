@@ -1,5 +1,7 @@
 # Routine — Email Campaign Briefs (email-marketing-manager)
 
+> **Being replaced by the daily program (owner direction 2026-10-12).** `routine-email-daily.md` is the email team's playbook from here on. It is PLANNED until its activation checklist completes. Until then this weekly routine keeps firing, with three changes that bind now: the cadence is three promo sends per recipient per week (Tuesday, Thursday, Saturday), which replaced the old two-a-week cap; imagery follows `email-designer`'s source order (owner-hearted Social Studio frames first); and the old campaign briefs #2607, #4117, #4118, #5394, and #5395 are superseded, so do not re-file them or push them. Once the daily trigger exists, the owner disables this routine's trigger.
+
 The playbook for the scheduled weekly email routine. Entry agent: `email-marketing-manager`.
 **PLAN-ONLY for sending**: campaign briefs are filed as suggestions (kind `campaign`). Once the
 owner approves a brief, an optional valve-gated executor turns it into a Klaviyo **draft** (never a
@@ -38,8 +40,9 @@ whose status is approved or posted. This routine fires Tuesday 15:00 UTC, before
 Each brief is copy-paste executable: segment (list + filters), send day/time with reasoning,
 2 subject + preview variants, full body copy, canonical `/products/{slug}` links with
 `utm_source=klaviyo&utm_medium=email&utm_campaign=<name>`, and the success metric (clicks and
-attributed orders, not opens). Frequency guard: a subscriber never gets more than 2 marketing sends
-per week, flows included where visible. Discounts only reference owner-approved promo codes with the
+attributed orders, not opens). Frequency guard: a subscriber gets at most 3 promo campaign sends
+per week (Tue/Thu/Sat, owner override 2026-10-12, until the list reaches about 250); flows run on
+Smart Sending. Discounts only reference owner-approved promo codes with the
 MAP note.
 
 **One clip brief per week, when last week produced a clip.** One of the week's briefs (never both)

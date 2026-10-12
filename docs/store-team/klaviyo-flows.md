@@ -30,7 +30,7 @@ no helper in the codebase changes a flow's status. Nothing can send until the ow
 3. Review the flow filter and the delays. The filter is "zero Placed Order in the last 30 days", the API's
    form of "has not ordered since" (Klaviyo's UI option "since starting this flow" is not exposed by the
    API). It is equivalent for these delays.
-4. Smart Sending is on (16 hours). Leave it on: it is the frequency guard behind the 2-sends-a-week rule.
+4. Smart Sending is on (16 hours). Leave it on: it keeps a flow email from landing within 16 hours of another send. Promo campaigns run three a week (Tue/Thu/Sat) since the owner's 2026-10-12 direction, see `routine-email-daily.md`.
 5. Set each flow to Live, one at a time. Cart first.
 6. For browse abandonment, see the next section. Do not build it by hand yet.
 
@@ -215,3 +215,22 @@ The email-marketing-manager may propose copy refreshes for these flows as `campa
 (subject variants, act paragraphs, a new header-art rule). It still sends nothing and has no flow or
 template write access: a refresh lands as a suggestion, the owner approves, and the setup script's
 `--update-templates` plus a flow rebuild applies it.
+
+## Status check, 2026-10-12: both flows are live and have sent nothing
+
+Read from the Klaviyo API on 2026-10-12. Both `xdipx Cart Abandonment` (`TvzW5L`) and `xdipx Post-Purchase`
+(`XCPvmX`) are **live** (set 2026-10-05), so the "Owner steps" above are done. But the account's Received
+Email metric shows **zero emails in the three weeks to 2026-10-12**. The reason is upstream of the flows:
+
+- The only "Placed Order" metric in the account is the Shopify-integration one, and it has **zero events
+  since April**, even though the store took about 29 orders in the last 90 days. Klaviyo's Shopify
+  integration is connected in name and dead in practice.
+- The store's own Placed Order event (`server/webhooks.ts`) has never landed either: no API-sourced Placed
+  Order metric exists. Most orders arrive through the Shop app or guest checkout, where the store's Admin
+  token sees the customer email redacted.
+- Added to Cart fired once in the same three weeks, so cart abandonment has had almost nothing to act on.
+
+The fix is the owner's: repair Klaviyo's Shopify integration with customer, email-consent, and historical
+order sync (owner blocker `email:klaviyo-shopify-sync`). Klaviyo's own app sees the emails the store's token
+cannot. Once its Placed Order metric shows events, the post-purchase flow starts firing on its own, and the
+daily promo program (`routine-email-daily.md`) gets its purchase history from the same data.
