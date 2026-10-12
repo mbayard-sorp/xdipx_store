@@ -27,6 +27,7 @@ import {
   SHELF_PRICE_CEILING,
   LOW_BAND,
   HIGH_BAND,
+  MIN_SHELF_STOCK,
 } from '~/types/curiosity'
 
 // ─── Ordering ────────────────────────────────────────────────────────────────
@@ -133,9 +134,14 @@ export function applySanityFloor(
 
 // ─── Base filters ────────────────────────────────────────────────────────────
 
-/** Every card needs an image (it is the payoff), stock, and a live product. */
+/**
+ * Every card needs an image (it is the payoff), a live product, and more than
+ * a couple of units left (ticket #14926): the deck hands a product six
+ * curious taps in a row, so a 1-3 unit survivor is a sellout risk, not a
+ * sellability question. Untracked (`null`) always passes.
+ */
 function passesBaseFilters(p: DiscoveryProduct): boolean {
-  const inStock = p.totalInventory == null || p.totalInventory > 0
+  const inStock = p.totalInventory == null || p.totalInventory > MIN_SHELF_STOCK
   const live = p.productType !== 'Discontinued'
   return p.imageUrl != null && inStock && live
 }

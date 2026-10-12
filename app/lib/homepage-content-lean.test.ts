@@ -369,10 +369,16 @@ describe('getAnchorCollectionProducts — Nº 03 grid source (ticket #464)', () 
     expect(lean.map(p => p.handle)).toEqual(['untracked-1'])
   })
 
-  it('keeps a product with exactly one unit in stock', async () => {
-    mockGetCollectionProducts.mockResolvedValue([withStock(makeFatProduct('last-one'), 1)])
+  // Minimum-featured-stock floor (ticket #14926): a 1-3 unit survivor is still
+  // orderable, just not something the grid should hand every visitor before it
+  // sells out. Raised past the bare zero-stock gate above.
+  it('drops a product with exactly one unit in stock, keeps one with four', async () => {
+    mockGetCollectionProducts.mockResolvedValue([
+      withStock(makeFatProduct('last-one'), 1),
+      withStock(makeFatProduct('four-left'), 4),
+    ])
     const lean = await getAnchorCollectionProducts('curated-picks')
-    expect(lean.map(p => p.handle)).toEqual(['last-one'])
+    expect(lean.map(p => p.handle)).toEqual(['four-left'])
   })
 
   // Sibling size-variant dedupe (ticket #8419, design-critic run 778): two

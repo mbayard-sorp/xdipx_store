@@ -623,11 +623,24 @@ describe('assembleStorefrontHome — pinned-headliner out-of-stock gate', () => 
     vi.mocked(getEmmaHeroSettings).mockResolvedValue({
       featuredProductHandle: 'healthy',
     } as unknown as Awaited<ReturnType<typeof getEmmaHeroSettings>>)
-    vi.mocked(getDiscoveryIndex).mockResolvedValue([product('healthy', 3)])
+    vi.mocked(getDiscoveryIndex).mockResolvedValue([product('healthy', 10)])
 
     const data = await assembleStorefrontHome()
 
     expect(data.featured[0]!.handle).toBe('healthy')
+  })
+
+  // ── the minimum-featured-stock floor (ticket #14926) ───────────────────────
+  it('does not pin a thin-stock (1-3 unit) product found only via the raw index lookup', async () => {
+    vi.mocked(getEmmaHeroSettings).mockResolvedValue({
+      featuredProductHandle: 'thin',
+    } as unknown as Awaited<ReturnType<typeof getEmmaHeroSettings>>)
+    vi.mocked(getDiscoveryIndex).mockResolvedValue([product('thin', 3)])
+
+    const data = await assembleStorefrontHome({ seed: 1 })
+
+    expect(data.featured.map(p => p.handle)).not.toContain('thin')
+    expect(data.featured[0]!.handle).toBe('x')
   })
 })
 

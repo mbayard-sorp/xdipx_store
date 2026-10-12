@@ -13,6 +13,7 @@ import {
   autoLoosen,
   resolveCollectionPins,
   isOutOfStock,
+  isBelowFeaturedStockFloor,
 } from './discovery-rules.server'
 import type { DiscoveryProduct, DiscoveryRule, Rail } from '~/types/discovery'
 import { EMPTY_STATE } from '~/types/discovery'
@@ -287,6 +288,29 @@ describe('isOutOfStock', () => {
 
   it('is false for any positive count', () => {
     expect(isOutOfStock(1)).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// isBelowFeaturedStockFloor — the hand-placed-surface minimum-stock gate
+// (anchor grid, Sanity carousels, the pinned headliner), raised past bare
+// sellability for ticket #14926
+// ---------------------------------------------------------------------------
+
+describe('isBelowFeaturedStockFloor', () => {
+  it('is true at and below the floor of 3', () => {
+    expect(isBelowFeaturedStockFloor(0)).toBe(true)
+    expect(isBelowFeaturedStockFloor(1)).toBe(true)
+    expect(isBelowFeaturedStockFloor(3)).toBe(true)
+  })
+
+  it('is false above the floor', () => {
+    expect(isBelowFeaturedStockFloor(4)).toBe(false)
+  })
+
+  it('is false for untracked inventory (null or undefined)', () => {
+    expect(isBelowFeaturedStockFloor(null)).toBe(false)
+    expect(isBelowFeaturedStockFloor(undefined)).toBe(false)
   })
 })
 

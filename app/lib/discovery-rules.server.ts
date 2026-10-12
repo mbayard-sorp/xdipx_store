@@ -295,6 +295,26 @@ export function isOutOfStock(totalInventory: number | null | undefined): boolean
 }
 
 /**
+ * Minimum tracked stock to take one of the homepage's hand-placed, limited
+ * slots (the Nº 03 anchor grid, a Sanity-curated carousel, the pinned
+ * headliner fallback) — never the sellability question `isOutOfStock`
+ * answers. A product at 1-3 units is still perfectly orderable from its own
+ * PDP or a collection; it just should not be the thing a curator (or a
+ * fallback lookup) hands the whole homepage, where it can sell out mid-feature.
+ * Untracked (`null`/`undefined`) always passes, same rule as `isOutOfStock`.
+ * These surfaces have no curator-tunable lever of their own (unlike the
+ * algorithmic rails' `discovery_inventory_min`), so the floor is a constant.
+ */
+const MIN_FEATURED_STOCK = 3
+
+/** Shared predicate for the hand-placed-surface minimum-stock gate above. */
+export function isBelowFeaturedStockFloor(totalInventory: number | null | undefined): boolean {
+  return (
+    totalInventory !== null && totalInventory !== undefined && totalInventory <= MIN_FEATURED_STOCK
+  )
+}
+
+/**
  * Thin-stock observability threshold. Survivors at or below this (but still in
  * stock, i.e. > 0) are kept but logged once per build so a merchandiser can see
  * a featured product is about to sell out. Not a drop threshold.
