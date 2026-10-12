@@ -2579,3 +2579,53 @@ export const backupRuns = pgTable('backup_runs', {
   error:       text('error'),
   createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
+
+/**
+ * Daily promo email program ledger (migration 121, owner direction
+ * 2026-10-12). One row per campaign_key (e.g. daily-20261014); routine docs
+ * are docs/store-team/routine-email-daily.md.
+ */
+export const emailSends = pgTable('email_sends', {
+  id:                 serial('id').primaryKey(),
+  campaignKey:        text('campaign_key').notNull().unique(),
+  sendDate:           date('send_date'),
+  klaviyoCampaignId:  text('klaviyo_campaign_id'),
+  klaviyoTemplateId:  text('klaviyo_template_id'),
+  templateVersion:    text('template_version'),
+  audience:           text('audience'),
+  subject:            text('subject'),
+  previewText:        text('preview_text'),
+  featuredHandles:    jsonb('featured_handles').$type<string[]>(),
+  blocks:             jsonb('blocks').$type<Record<string, unknown>[]>(),
+  hypothesis:         text('hypothesis'),
+  voiceGateVerdict:   text('voice_gate_verdict'),
+  designCheckVerdict: text('design_check_verdict'),
+  runId:              integer('run_id'),
+  status:             text('status').notNull().default('drafted'), // drafted|sent|skipped
+  approvedBy:         text('approved_by'),
+  sentAt:             timestamp('sent_at', { withTimezone: true }),
+  createdAt:          timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+// Klaviyo performance pulls for a campaign_key (migration 121). Append-only:
+// one row per pull, never overwritten, so metrics history survives re-pulls.
+export const emailCampaignMetrics = pgTable('email_campaign_metrics', {
+  id:                serial('id').primaryKey(),
+  campaignKey:       text('campaign_key').notNull(),
+  klaviyoCampaignId: text('klaviyo_campaign_id'),
+  pulledAt:          timestamp('pulled_at', { withTimezone: true }).notNull().defaultNow(),
+  recipients:        integer('recipients'),
+  delivered:         integer('delivered'),
+  opensUnique:       integer('opens_unique'),
+  clicksUnique:      integer('clicks_unique'),
+  conversions:       integer('conversions'),
+  conversionValue:   decimal('conversion_value', { precision: 10, scale: 2 }),
+  unsubscribes:      integer('unsubscribes'),
+  spamComplaints:    integer('spam_complaints'),
+  bounced:           integer('bounced'),
+  attributedOrders:  integer('attributed_orders'),
+  attributedRevenue: decimal('attributed_revenue', { precision: 10, scale: 2 }),
+  byBlock:           jsonb('by_block').$type<Record<string, unknown>>(),
+}, t => ({
+  campaignKeyIdx: index('idx_email_campaign_metrics_campaign_key').on(t.campaignKey),
+}))
