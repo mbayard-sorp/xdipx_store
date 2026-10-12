@@ -183,6 +183,17 @@ brief that fits the problem→resolution shape), and write to the §8B structure
 (direct-answer capsule, scene-first problem, root cause with authority, resolution with at most
 ONE earned embed).
 
+**Brief figures are not evidence (mandatory, ticket #14798).** When today's topic comes from a
+`trendTopicBrief` or a `podcastReviewBrief`, every number and every attributed claim the brief
+carries is re-traced to the brief's own cited PRIMARY source before drafting, never drafted from the
+brief's summary verbatim, however high that brief's `sourceQuality` field reads. Two occurrences:
+run 1318 (ticket #14308) drafted a podcastReviewBrief claim that over-ran its own cited source; run
+1377 would have shipped a `trendTopicBrief` figure ("62.4% used external vibrators ... during
+masturbation") that was in fact the brief's partnered-sex subsample, not its masturbation figure
+(63.5%) — caught only by pulling the accepted manuscript and reading its own results tables. A bare
+percentage with no stated denominator or subsample scope is exactly what makes a brief figure
+unsafe to draft from directly.
+
 ## Step 3.5: Intimacy-advisor brief (Real Talk days only)
 
 Before drafting a Real Talk post, hand the chosen §8B row (slug, problem, target query, † flag)
@@ -503,6 +514,13 @@ REVISE:
   source, quote the source's own sentence next to the draft's sentence before submit, and check
   whether the source's sentence carries a `when`, an `if`, or an `as long as` that the draft's
   does not.
+- **Where a primary source's own prose and its own tables disagree, the tables win (ticket
+  #14798).** A primary source is not automatically safe just because it was read directly: run 1377's
+  accuracy gate re-derived every figure from a cited paper's table counts and found the paper's own
+  prose contradicted its own tables in four places, including an Abstract that misstated its own
+  denominator, which had already invalidated a comparison built on the prose reading. Ship the figure
+  rounded to what both the prose and the tables support, and disclose the disagreement if the gap is
+  material.
 
 The accuracy gate (`sex-wellness-reviewer`) returned REVISE on first submit in four consecutive
 daily-writer runs (466, 485, 502, 523), and every one resolved the same way — by narrowing or
