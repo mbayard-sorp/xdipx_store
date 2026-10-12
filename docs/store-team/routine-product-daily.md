@@ -131,8 +131,19 @@ newly-published products worth a merchandising push → suggestion `targetTeam:'
 owner wants new products showcased on social as they arrive, and the enrich chain's own daily row
 lists every published product unranked, which social could not act on. Rank the products published
 since the last run: never posted on social first, then a product type absent from social's last 7
-product posts, then stock depth, then margin. Exclude what Instagram cannot run (dildos,
-anatomically realistic products) and anything with inventory of 3 or less. File one row:
+product posts, then stock depth, then margin.
+
+**Read LIVE Shopify stock, never `import_candidates.qty_available` (second occurrence, ticket
+#14757).** `qty_available` is the Nalpac feed figure, not what Shopify will actually sell: on
+2026-10-11, 11 of 15 products published the prior day were ACTIVE but at 0-2 sellable units
+(`inventoryPolicy: DENY`, tracked) despite the feed showing hundreds. A nomination or health check
+built on feed quantity points social at products a visitor cannot buy (first occurrence,
+2026-10-09, suggestion #14484: 3 of 5 picks were out of stock at draft time). The Shopify Admin API
+check is cheap and runs in-session — query each newly-published handle's live `totalInventory`
+before ranking. Exclude what Instagram cannot run (dildos, anatomically realistic products) and
+anything at 3 or fewer live sellable units, and report the published-but-unsellable count in the
+run summary each time it is nonzero, so the inventory-sync defect stays visible until it is fixed
+upstream. File one row:
 `kind:'process'`, `team:'product'`, `targetTeam:'social'`, `dedupeKey:'social-new-picks:<YYYY-MM-DD>'`,
 **and `dedupeScope:'daily'`** (without it the API strips the date and every day's row collapses onto
 one key; row #13082 landed as bare `social-new-picks` for exactly that reason), the top 3 to 6 with
