@@ -2,6 +2,7 @@ import { getPipelineSetting } from './feed-processor.server'
 import { sendOwnerEmail, escapeHtml } from './owner-alerts.server'
 import type { EscalationClassName } from './owner-escalation'
 import { addSuggestionNote } from './team.server'
+import { createTemplate, type KlaviyoTemplateSummary } from './klaviyo-flows.server'
 
 /**
  * Executor for `kind:'campaign'` suggestion rows (the email-marketing-manager
@@ -17,19 +18,27 @@ import { addSuggestionNote } from './team.server'
  * defaults OFF in code (a missing setting reads as off), so with the valve off
  * nothing changes.
  *
- * The draft-only Campaigns client is create / preview / list only
- * (`createKlaviyoCampaign`, `previewKlaviyoCampaign`, `listKlaviyoCampaigns`).
- * There is deliberately NO send helper: triggering a send is a campaign-send-job
+ * The draft-only Campaigns client is create / preview / list / assign-template
+ * (`createKlaviyoCampaign`, `previewKlaviyoCampaign`, `listKlaviyoCampaigns`,
+ * `assignTemplateToMessage`), plus `createDailyTemplate` (ticket #14998, the
+ * daily promo email program), which reuses `createTemplate` from
+ * klaviyo-flows.server.ts rather than forking it. There is deliberately NO
+ * send helper: triggering a send is a campaign-send-job
  * (POST /api/campaign-send-jobs/), an owner-attended money-valve surface that
  * stays in #57 and must never be reachable from an unattended routine (#4222,
- * the shippable code slice split from #57 clause 1).
+ * the shippable code slice split from #57 clause 1). Assigning a template to a
+ * draft campaign-message is not sending: the campaign stays Draft until a
+ * human triggers a campaign-send-job in the Klaviyo UI.
  */
 
 /** Valve key. Read via the generic pipeline-settings getter. Default OFF. */
 export const EMAIL_CAMPAIGN_PUSH_VALVE = 'email_campaign_push_enabled'
 
 const KLAVIYO_BASE = 'https://a.klaviyo.com/api'
-const KLAVIYO_REVISION = '2024-10-15'
+// Bumped from 2024-10-15 to the revision klaviyo-flows.server.ts already uses
+// (ticket #15000), so campaigns and the daily program's template assignment
+// read the same API shape.
+const KLAVIYO_REVISION = '2026-07-15'
 
 export interface ParsedCampaignBrief {
   /** Short internal campaign name, derived from the utm_campaign token or the subject. */
@@ -49,8 +58,20 @@ export interface AudienceEnv {
 
 export interface AudienceResolution {
   listId: string | null
-  /** 'waitlist' | 'main' | 'waitlist-fallback' | 'unresolved' */
+  /** 'explicit' | 'waitlist' | 'main' | 'waitlist-fallback' | 'unresolved' */
   source: string
+}
+
+/**
+ * A hint that is a single alphanumeric token (no spaces) reads as a literal
+ * Klaviyo list or segment id rather than free-text audience prose, so the
+ * daily email program (and any other brief) can target an explicit list or
+ * segment instead of only the two env-configured waitlist/main lists.
+ * Excludes the handful of plain-English words a brief author might type
+ * alone ("waitlist", "subscribers", "everyone", "all").
+ */
+function looksLikeExplicitAudienceId(raw: string): boolean {
+  return /^[A-Za-z0-9]{4,40}$/.test(raw) && !/^(waitlist|subscribers|everyone|all)$/i.test(raw)
 }
 
 export interface CampaignPayloadInput {
@@ -137,7 +158,11 @@ export function parseCampaignBrief(text: string): ParsedCampaignBrief {
  * recipients on, so a best-effort audience is safe and correctable in the UI.
  */
 export function resolveAudience(hint: string | null, env: AudienceEnv): AudienceResolution {
-  const h = (hint ?? '').toLowerCase()
+  const raw = (hint ?? '').trim()
+  if (looksLikeExplicitAudienceId(raw)) {
+    return { listId: raw, source: 'explicit' }
+  }
+  const h = raw.toLowerCase()
   if (/waitlist/.test(h) && env.waitlistListId) {
     return { listId: env.waitlistListId, source: 'waitlist' }
   }
@@ -159,6 +184,11 @@ export function buildCampaignPayload(i: CampaignPayloadInput): Record<string, un
       attributes: {
         name: i.name,
         audiences: { included: [i.listId], excluded: [] },
+        // The daily program's own UTMs (klaviyo-flow-templates.ts / the
+        // future email-daily.server.ts) must survive untouched: Klaviyo's
+        // auto-appended tracking params would otherwise collide with them.
+        use_smart_sending: true,
+        tracking_options: { add_tracking_params: false },
         'campaign-messages': {
           data: [
             {
@@ -284,15 +314,51 @@ export interface KlaviyoCampaignResource {
 /**
  * Create a campaign. Klaviyo creates it in DRAFT status; this sends nothing.
  * Pass a payload from `buildCampaignPayload` (or an equivalent Campaigns API
- * body). Returns the new campaign's id.
+ * body). Returns the new campaign's id, plus the id of its one
+ * campaign-message (from the create response's own relationships) when
+ * present, so a caller can assign a template to that message without a
+ * second round trip to look it up.
  */
 export async function createKlaviyoCampaign(
   payload: Record<string, unknown>,
-): Promise<{ id: string }> {
-  const json = await klaviyoCampaignsApi<{ data?: { id?: string } }>('/campaigns/', 'POST', payload)
+): Promise<{ id: string; messageId?: string | undefined }> {
+  const json = await klaviyoCampaignsApi<{
+    data?: {
+      id?: string
+      relationships?: { 'campaign-messages'?: { data?: { id: string; type: string }[] } }
+    }
+  }>('/campaigns/', 'POST', payload)
   const id = json.data?.id
   if (!id) throw new Error('Klaviyo campaign create returned no id')
-  return { id }
+  const messageId = json.data?.relationships?.['campaign-messages']?.data?.[0]?.id
+  return { id, messageId }
+}
+
+/**
+ * Assign a template to a draft campaign-message. Still draft only: this
+ * changes what the message will render, never whether or when it sends.
+ * `messageId` is the campaign-message id from `createKlaviyoCampaign`'s
+ * `relationships`, never the campaign id itself.
+ */
+export async function assignTemplateToMessage(messageId: string, templateId: string): Promise<void> {
+  await klaviyoCampaignsApi('/campaign-message-assign-template/', 'POST', {
+    data: {
+      type: 'campaign-message',
+      id: messageId,
+      relationships: {
+        template: { data: { type: 'template', id: templateId } },
+      },
+    },
+  })
+}
+
+/**
+ * Create the Klaviyo template that holds one day's rendered email HTML/text.
+ * Reuses `createTemplate` from klaviyo-flows.server.ts rather than forking
+ * it (ticket #14998/#15000): same endpoint, same `editor_type: 'CODE'` shape.
+ */
+export async function createDailyTemplate(input: { dateKey: string; html: string; text: string }): Promise<KlaviyoTemplateSummary> {
+  return createTemplate({ name: `xdipx daily ${input.dateKey}`, html: input.html, text: input.text })
 }
 
 /**
@@ -426,4 +492,103 @@ export async function pushApprovedCampaign(
     editUrl,
     ownerEmailed: sent.sent,
   }
+}
+
+// ─── Daily promo email program (ticket #15000) ──────────────────────────────
+// Same valve, same draft-only guarantee as pushApprovedCampaign above, but the
+// content is the daily program's own rendered HTML/text rather than a
+// free-text brief: create the campaign, create a template from the rendered
+// email, and assign the template to the campaign's one message. Still never
+// touches a campaign-send-job.
+
+export interface DailyCampaignInput {
+  dateKey: string
+  subject: string
+  previewText: string | null
+  listId: string
+  html: string
+  text: string
+}
+
+export interface DailyCampaignPushResult {
+  pushed: boolean
+  /** 'ok' | 'valve-off' | 'no-klaviyo-api-key' | 'no-campaign-message-id' | 'klaviyo-error: ...' */
+  reason: string
+  campaignId?: string | undefined
+  templateId?: string | undefined
+}
+
+export interface DailyCampaignPushDeps {
+  getSetting: (key: string) => Promise<string | null>
+  createCampaign: (payload: Record<string, unknown>) => Promise<{ id: string; messageId?: string | undefined }>
+  createTemplate: (input: { dateKey: string; html: string; text: string }) => Promise<KlaviyoTemplateSummary>
+  assignTemplate: (messageId: string, templateId: string) => Promise<void>
+  env: {
+    apiKey?: string | undefined
+    fromEmail: string
+    fromLabel: string
+  }
+}
+
+/** Production wiring of the daily-program dependency seam. */
+export function defaultDailyCampaignPushDeps(): DailyCampaignPushDeps {
+  return {
+    getSetting: getPipelineSetting,
+    createCampaign: createKlaviyoCampaign,
+    createTemplate: createDailyTemplate,
+    assignTemplate: assignTemplateToMessage,
+    env: {
+      apiKey: process.env['KLAVIYO_API_KEY'],
+      fromEmail: process.env['EMAIL_FROM'] ?? 'hello@xdipx.com',
+      fromLabel: 'xdipx',
+    },
+  }
+}
+
+/**
+ * Push one day's rendered email to Klaviyo as a draft campaign carrying a
+ * real template: create the campaign (draft), create the template from the
+ * rendered HTML/text, then assign that template to the campaign's message.
+ * Valve-gated like pushApprovedCampaign: with the valve off this returns
+ * immediately and makes zero fetches. Never creates a campaign-send-job.
+ */
+export async function pushDailyEmailCampaign(
+  input: DailyCampaignInput,
+  deps: DailyCampaignPushDeps,
+): Promise<DailyCampaignPushResult> {
+  if (!campaignPushEnabled(await deps.getSetting(EMAIL_CAMPAIGN_PUSH_VALVE))) {
+    return { pushed: false, reason: 'valve-off' }
+  }
+  if (!deps.env.apiKey) {
+    return { pushed: false, reason: 'no-klaviyo-api-key' }
+  }
+
+  const payload = buildCampaignPayload({
+    name: `xdipx daily ${input.dateKey}`,
+    subject: input.subject,
+    previewText: input.previewText,
+    listId: input.listId,
+    fromEmail: deps.env.fromEmail,
+    fromLabel: deps.env.fromLabel,
+  })
+
+  let campaign: { id: string; messageId?: string | undefined }
+  try {
+    campaign = await deps.createCampaign(payload)
+  } catch (err) {
+    return { pushed: false, reason: `klaviyo-error: ${err instanceof Error ? err.message : String(err)}` }
+  }
+  if (!campaign.messageId) {
+    return { pushed: false, reason: 'no-campaign-message-id', campaignId: campaign.id }
+  }
+
+  let template: KlaviyoTemplateSummary
+  try {
+    template = await deps.createTemplate({ dateKey: input.dateKey, html: input.html, text: input.text })
+    await deps.assignTemplate(campaign.messageId, template.id)
+  } catch (err) {
+    return { pushed: false, reason: `klaviyo-error: ${err instanceof Error ? err.message : String(err)}`, campaignId: campaign.id }
+  }
+
+  return { pushed: true, reason: 'ok', campaignId: campaign.id, templateId: template.id }
 }

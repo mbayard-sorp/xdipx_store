@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
+import { readFileSync } from 'node:fs'
 import {
   campaignPushEnabled,
   parseCampaignBrief,
@@ -10,8 +11,12 @@ import {
   createKlaviyoCampaign,
   previewKlaviyoCampaign,
   listKlaviyoCampaigns,
+  assignTemplateToMessage,
+  createDailyTemplate,
+  pushDailyEmailCampaign,
   EMAIL_CAMPAIGN_PUSH_VALVE,
   type CampaignPushDeps,
+  type DailyCampaignPushDeps,
 } from './klaviyo-campaigns.server'
 
 // These helpers back the campaign executor that turns an approved email brief
@@ -84,6 +89,15 @@ describe('resolveAudience', () => {
   it('is unresolved when nothing is configured', () => {
     expect(resolveAudience('subscribers', {})).toEqual({ listId: null, source: 'unresolved' })
   })
+  it('treats a single alphanumeric token as an explicit list or segment id', () => {
+    expect(resolveAudience('SEG6WpAwJ', env)).toEqual({ listId: 'SEG6WpAwJ', source: 'explicit' })
+    expect(resolveAudience('  Y6g4XB12  ', env)).toEqual({ listId: 'Y6g4XB12', source: 'explicit' })
+  })
+  it('does not treat free-text prose or the bare env words as an explicit id', () => {
+    expect(resolveAudience('the waitlist for X', env)).not.toEqual(expect.objectContaining({ source: 'explicit' }))
+    expect(resolveAudience('waitlist', env)).not.toEqual(expect.objectContaining({ source: 'explicit' }))
+    expect(resolveAudience('subscribers', env)).not.toEqual(expect.objectContaining({ source: 'explicit' }))
+  })
 })
 
 describe('buildCampaignPayload', () => {
@@ -104,6 +118,15 @@ describe('buildCampaignPayload', () => {
     expect(content.subject).toBe('Sub')
     expect(content.preview_text).toBe('Prev')
     expect(content.from_email).toBe('hello@xdipx.com')
+  })
+
+  it('keeps smart sending on and tells Klaviyo not to append its own tracking params', () => {
+    const p = buildCampaignPayload({
+      name: 'aug', subject: 'Sub', previewText: 'Prev', listId: 'MAIN1',
+      fromEmail: 'hello@xdipx.com', fromLabel: 'xdipx',
+    }) as any
+    expect(p.data.attributes.use_smart_sending).toBe(true)
+    expect(p.data.attributes.tracking_options.add_tracking_params).toBe(false)
   })
 
   it('sends an empty preview_text rather than null', () => {
@@ -295,5 +318,166 @@ describe('Klaviyo Campaigns client (draft-only, no send)', () => {
     for (const call of fetchMock.mock.calls as unknown as unknown[][]) {
       expect(String(call[0])).not.toContain('campaign-send-job')
     }
+  })
+
+  it('createKlaviyoCampaign also returns the campaign-message id when the response carries one', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => okJson({
+      data: {
+        id: '01NEW',
+        type: 'campaign',
+        relationships: { 'campaign-messages': { data: [{ id: 'MSG1', type: 'campaign-message' }] } },
+      },
+    })))
+    const res = await createKlaviyoCampaign({ data: {} })
+    expect(res).toEqual({ id: '01NEW', messageId: 'MSG1' })
+  })
+
+  it('assignTemplateToMessage POSTs to campaign-message-assign-template with the template relationship', async () => {
+    const fetchMock = vi.fn(async () => okJson({}))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await assignTemplateToMessage('MSG1', 'TPL1')
+
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+    expect(url).toBe('https://a.klaviyo.com/api/campaign-message-assign-template/')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual({
+      data: {
+        type: 'campaign-message',
+        id: 'MSG1',
+        relationships: { template: { data: { type: 'template', id: 'TPL1' } } },
+      },
+    })
+  })
+
+  it('createDailyTemplate reuses the templates endpoint with a daily-keyed name', async () => {
+    const fetchMock = vi.fn(async () => okJson({ data: { id: 'TPL1', type: 'template', attributes: { name: 'xdipx daily 2026-10-14' } } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await createDailyTemplate({ dateKey: '2026-10-14', html: '<html></html>', text: 'plain' })
+
+    expect(res).toEqual({ id: 'TPL1', name: 'xdipx daily 2026-10-14' })
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+    expect(url).toBe('https://a.klaviyo.com/api/templates/')
+    const body = JSON.parse(init.body as string)
+    expect(body.data.attributes.name).toBe('xdipx daily 2026-10-14')
+    expect(body.data.attributes.editor_type).toBe('CODE')
+    expect(body.data.attributes.html).toBe('<html></html>')
+  })
+
+  it('a grep test: no line of actual code (comments aside) names a campaign-send-job endpoint path', () => {
+    // The module header deliberately documents, in prose, why there is no send
+    // helper, so it names the forbidden endpoint in a comment. This grep scopes
+    // itself to non-comment lines so that documentation does not fail its own check.
+    const source = readFileSync(new URL('./klaviyo-campaigns.server.ts', import.meta.url), 'utf8')
+    const codeLines = source.split('\n').filter((line) => {
+      const trimmed = line.trim()
+      return trimmed.length > 0 && !trimmed.startsWith('*') && !trimmed.startsWith('//')
+    })
+    for (const line of codeLines) {
+      expect(line).not.toMatch(/campaign-send-jobs?/)
+    }
+  })
+})
+
+describe('pushDailyEmailCampaign (ticket #15000)', () => {
+  const okJson = (body: unknown, status = 200) =>
+    ({ ok: status >= 200 && status < 300, status, text: async () => JSON.stringify(body) }) as unknown as Response
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  function makeDailyDeps(overrides: Partial<DailyCampaignPushDeps> = {}): DailyCampaignPushDeps {
+    return {
+      getSetting: vi.fn(async () => 'true'),
+      createCampaign: createKlaviyoCampaign,
+      createTemplate: createDailyTemplate,
+      assignTemplate: assignTemplateToMessage,
+      env: { apiKey: 'k', fromEmail: 'hello@xdipx.com', fromLabel: 'xdipx' },
+      ...overrides,
+    }
+  }
+
+  const INPUT = {
+    dateKey: '2026-10-14',
+    subject: 'What is new this week',
+    previewText: 'A few fresh arrivals',
+    listId: 'MAIN1',
+    html: '<html>daily</html>',
+    text: 'daily plain text',
+  }
+
+  it('calls create-campaign, create-template, then assign-template in that order, with the expected bodies', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      const u = String(url)
+      if (u.endsWith('/campaigns/')) {
+        return okJson({
+          data: {
+            id: 'CAMP1',
+            type: 'campaign',
+            relationships: { 'campaign-messages': { data: [{ id: 'MSG1', type: 'campaign-message' }] } },
+          },
+        })
+      }
+      if (u.endsWith('/templates/')) {
+        return okJson({ data: { id: 'TPL1', type: 'template', attributes: { name: 'xdipx daily 2026-10-14' } } })
+      }
+      if (u.endsWith('/campaign-message-assign-template/')) {
+        return okJson({})
+      }
+      throw new Error(`unexpected fetch to ${u}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await pushDailyEmailCampaign(INPUT, makeDailyDeps())
+
+    expect(res).toEqual({ pushed: true, reason: 'ok', campaignId: 'CAMP1', templateId: 'TPL1' })
+
+    const calls = fetchMock.mock.calls as unknown as [string, RequestInit][]
+    expect(calls).toHaveLength(3)
+    expect(calls[0]![0]).toBe('https://a.klaviyo.com/api/campaigns/')
+    expect(calls[1]![0]).toBe('https://a.klaviyo.com/api/templates/')
+    expect(calls[2]![0]).toBe('https://a.klaviyo.com/api/campaign-message-assign-template/')
+
+    const campaignBody = JSON.parse(calls[0]![1].body as string)
+    expect(campaignBody.data.attributes.use_smart_sending).toBe(true)
+    expect(campaignBody.data.attributes.tracking_options.add_tracking_params).toBe(false)
+
+    const templateBody = JSON.parse(calls[1]![1].body as string)
+    expect(templateBody.data.attributes.html).toBe(INPUT.html)
+    expect(templateBody.data.attributes.text).toBe(INPUT.text)
+
+    const assignBody = JSON.parse(calls[2]![1].body as string)
+    expect(assignBody.data.id).toBe('MSG1')
+    expect(assignBody.data.relationships.template.data.id).toBe('TPL1')
+  })
+
+  it('makes zero fetches when the valve is off', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await pushDailyEmailCampaign(INPUT, makeDailyDeps({ getSetting: vi.fn(async () => null) }))
+
+    expect(res).toEqual({ pushed: false, reason: 'valve-off' })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('short-circuits with zero fetches when no Klaviyo api key is configured', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await pushDailyEmailCampaign(INPUT, makeDailyDeps({ env: { apiKey: undefined, fromEmail: 'a@b.c', fromLabel: 'x' } }))
+
+    expect(res.reason).toBe('no-klaviyo-api-key')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('never reaches create-template or assign-template when the campaign carries no message id', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => okJson({ data: { id: 'CAMP1', type: 'campaign' } })))
+
+    const res = await pushDailyEmailCampaign(INPUT, makeDailyDeps())
+
+    expect(res).toEqual({ pushed: false, reason: 'no-campaign-message-id', campaignId: 'CAMP1' })
   })
 })
