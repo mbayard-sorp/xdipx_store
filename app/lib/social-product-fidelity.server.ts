@@ -30,6 +30,8 @@
  * fail anything by itself; it is a report, not a gate.
  */
 
+import type Anthropic from '@anthropic-ai/sdk'
+
 const ALLOWED_MEDIA_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'] as const
 type AllowedMediaType = (typeof ALLOWED_MEDIA_TYPES)[number]
 
@@ -213,6 +215,16 @@ function mediaTypeOf(mediaType: string): AllowedMediaType {
 }
 
 /**
+ * Wraps a system prompt in a cache_control block so the static charter text
+ * is cache-read (not rebilled in full) on repeat calls. Same pattern as
+ * `cacheableSystem()` in claude.server.ts / team-gates.server.ts /
+ * social-vision-gate.server.ts.
+ */
+function cacheableSystem(system: string): Anthropic.TextBlockParam[] {
+  return [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }]
+}
+
+/**
  * Builds the default deps bound to one correlation id (ticket #13526, split
  * 1-of-3 off #13398), the sibling factory to
  * `social-vision-gate.server.ts`'s `buildDefaultDeps` — see that module's
@@ -230,9 +242,11 @@ function buildDefaultDeps(refId?: string): Required<ProductFidelityDeps> {
     const msg = await client.messages.create({
       model: SONNET,
       max_tokens: 300,
-      system: strict
-        ? `${basePrompt}\n\nReply with the JSON object only. No prose, no explanation, no markdown fence: the first character of your reply must be "{" and the last must be "}".`
-        : basePrompt,
+      system: cacheableSystem(
+        strict
+          ? `${basePrompt}\n\nReply with the JSON object only. No prose, no explanation, no markdown fence: the first character of your reply must be "{" and the last must be "}".`
+          : basePrompt,
+      ),
       ...(strict ? { temperature: 0 } : {}),
       messages: [
         {

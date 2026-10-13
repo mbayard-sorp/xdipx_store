@@ -454,6 +454,15 @@ export interface VisionGateDeps {
 }
 
 /**
+ * Wraps a system prompt in a cache_control block so the static charter text
+ * is cache-read (not rebilled in full) on repeat calls. Same pattern as
+ * `cacheableSystem()` in claude.server.ts / team-gates.server.ts.
+ */
+function cacheableSystem(system: string): Anthropic.TextBlockParam[] {
+  return [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }]
+}
+
+/**
  * Builds the default deps bound to one correlation id (ticket #13526, split
  * 1-of-3 off #13398). A factory rather than a module-level const so each
  * caller's `refId` (today a team run id, forwarded from
@@ -489,9 +498,11 @@ function buildDefaultDeps(refId?: string): Required<VisionGateDeps> {
       // this same call site, so it gets the same headroom with no separate
       // branch needed.
       max_tokens: 1024,
-      system: strict
-        ? `${VISION_SYSTEM_PROMPT}\n\nReply with the JSON object only. No prose, no explanation, no markdown fence: the first character of your reply must be "{" and the last must be "}".`
-        : VISION_SYSTEM_PROMPT,
+      system: cacheableSystem(
+        strict
+          ? `${VISION_SYSTEM_PROMPT}\n\nReply with the JSON object only. No prose, no explanation, no markdown fence: the first character of your reply must be "{" and the last must be "}".`
+          : VISION_SYSTEM_PROMPT,
+      ),
       // Ticket #10990: the retry lowers temperature toward deterministic
       // formatting rather than re-asking the substantive question; the first
       // attempt keeps the SDK default.

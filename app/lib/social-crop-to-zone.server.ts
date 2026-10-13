@@ -50,6 +50,7 @@
  */
 
 import sharp from 'sharp'
+import type Anthropic from '@anthropic-ai/sdk'
 import { SONNET } from './models.server'
 
 export interface CropBox {
@@ -273,6 +274,16 @@ export function expandBoxToAspect(
 }
 
 /**
+ * Wraps a system prompt in a cache_control block so the static charter text
+ * is cache-read (not rebilled in full) on repeat calls. Same pattern as
+ * `cacheableSystem()` in claude.server.ts / team-gates.server.ts /
+ * social-vision-gate.server.ts.
+ */
+function cacheableSystem(system: string): Anthropic.TextBlockParam[] {
+  return [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }]
+}
+
+/**
  * Builds the default deps bound to one correlation id (ticket #13526, split
  * 1-of-3 off #13398), the sibling factory to
  * `social-vision-gate.server.ts`'s `buildDefaultDeps` — see that module's
@@ -290,7 +301,7 @@ function buildDefaultDeps(refId?: string): Required<CropToZoneDeps> {
     const msg = await client.messages.create({
       model: SONNET,
       max_tokens: 300,
-      system: cropZoneSystemPrompt(bodyZone),
+      system: cacheableSystem(cropZoneSystemPrompt(bodyZone)),
       messages: [
         {
           role: 'user',
