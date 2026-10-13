@@ -37,6 +37,23 @@ Voice: the `emma-product-enricher` agent def is binding on output (it reads `doc
 first, charter core + "Product enrichment and SEO" addendum). This playbook never restates voice
 rules; the charter wins.
 
+**Data access note (ticket #14940, third occurrence of this lesson in a month).** `DATABASE_URL` is
+present in this session's environment. Port 5432 (raw `psql`/TCP Postgres) is firewalled in the
+cloud sandbox and will hang or refuse; that is not the same thing as "production DB read
+unavailable." The supported path is Neon's SQL-over-HTTPS endpoint on port 443, reachable through
+the agent proxy. Verified working:
+
+```bash
+HOST=$(echo "$DATABASE_URL" | sed -E 's#^postgresql://[^@]+@([^/]+)/.*#\1#')
+curl -sS "https://${HOST}/sql" \
+  -H "Neon-Connection-String: $DATABASE_URL" \
+  -H "Content-Type: application/json" \
+  --data '{"query":"select 1 as ok"}'
+```
+
+A run may not report the database unreachable without naming the exact request it made (host,
+port, driver) and the exact response it got (status code or error text).
+
 ## Step 0: Start
 
 ```bash
