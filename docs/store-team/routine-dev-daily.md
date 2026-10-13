@@ -28,6 +28,12 @@ Mission brief: `docs/store-team/mission-brief.md`. Repo rules that bind every di
 `CLAUDE.md` (React Router v7 framework mode, `.server.ts` discipline, mobile-first at 375px, no
 em-dashes, additive-only Sanity schema).
 
+**Cold checkout: run `npm install` before Step 3's `typecheck`/`test`/`build`.** (ticket #15226) A
+fresh cloud checkout has no `node_modules`, so discovering this mid-ticket pays the install out of
+the ticket's own time instead of budgeting for it up front (homepage merchandise run 1389,
+2026-10-12, burned its whole turn budget this way). Run `[ -d node_modules ] || npm install` once,
+early in the pass, before claiming the first ticket.
+
 ## Step 0 — Gate + start
 
 1. `POST /api/team/run {"op":"start","team":"strategy","runType":"dev"}` → `$RUN_ID`.

@@ -18,6 +18,13 @@ Runs on the **Max subscription** under the **social** team's gate and budget. Ca
 **Thursday 16:00 UTC** (after the daily 14:00 social run; `social_team_max_runs` must be ≥2 for
 Thursdays to carry both).
 
+**Cold checkout: run `npm install` before the first `npx tsx` call.** (ticket #15226) A fresh cloud
+checkout has no `node_modules`, so a routine that only discovers this mid-run (at the
+`sanity-content-cli.ts publish` step below, for example) pays the install out of its own turn
+budget instead of its actual steps (homepage merchandise run 1389, 2026-10-12, burned its whole
+budget this way). Run `[ -d node_modules ] || npm install` once, before Step 1, so the cost is
+budgeted rather than discovered.
+
 ## The researchBrief doc shape
 
 ```

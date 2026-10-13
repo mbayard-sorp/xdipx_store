@@ -8,6 +8,13 @@ Runs on the **Max subscription** under the **strategy** team's gate and budget. 
 **`0 12 * * *` UTC** (05:00 Pacific), which puts a freshly-swept list in front of the 13:30 UTC
 email rather than a day-old one.
 
+**Cold checkout: run `npm install` before the first `npx tsx` call.** (ticket #15226) A fresh cloud
+checkout has no `node_modules`, so a routine that only discovers this mid-run pays the install out
+of its own turn budget instead of its actual steps (homepage merchandise run 1389, 2026-10-12,
+burned its whole budget this way before reaching its Step 3 picks). Run
+`[ -d node_modules ] || npm install` once, before Step 1, so the cost is budgeted rather than
+discovered.
+
 **Run it locally.** The transcript-mining step needs the session-management MCP tools, which
 exist in a local desktop session and not in a cloud routine. A cloud run still does useful work
 (the state sweep is all API and repo reads) but it will report mining as unavailable, and the

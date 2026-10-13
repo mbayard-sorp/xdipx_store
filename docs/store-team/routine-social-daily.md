@@ -31,6 +31,13 @@ change how you draft.
 
 Runs on the **Max subscription**. Recommended cadence: daily (the frequency config sizes each run).
 
+**Cold checkout: run `npm install` before the first `npx tsx` call.** (ticket #15226) A fresh cloud
+checkout has no `node_modules`, so a routine that only discovers this mid-run (at `gen-social-image.ts`
+or the inline Sanity script below, for example) pays the install out of its own turn budget instead
+of its actual steps (homepage merchandise run 1389, 2026-10-12, burned its whole budget this way).
+Run `[ -d node_modules ] || npm install` once, before Step 1, so the cost is budgeted rather than
+discovered.
+
 ## Step 0 — Start
 
 ```bash

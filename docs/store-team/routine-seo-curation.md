@@ -14,6 +14,12 @@ data reads and spend logging only. Sanity reads/writes go through the Sanity MCP
 Auth on every `/api/team/*` call: header `x-team-secret: $TEAM_TOKEN` (falls back to
 `$HOMEPAGE_TEAM_TOKEN`, then `$CRON_SECRET`). `BASE_URL` = deployed origin.
 
+**Cold checkout: run `npm install` before the first `npx tsx` call.** (ticket #15226) A fresh cloud
+checkout has no `node_modules`, so a routine that only discovers this mid-run pays the install out
+of its own turn budget instead of its actual steps (homepage merchandise run 1389, 2026-10-12,
+burned its whole budget this way). Run `[ -d node_modules ] || npm install` once, before Step 1, so
+the cost is budgeted rather than discovered.
+
 ## Step 0: Valve check (before starting a run)
 
 Read the `seo_curation_enabled` valve (Sanity is not the source; it is a `pipeline_settings` row,
