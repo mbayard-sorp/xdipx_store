@@ -174,6 +174,11 @@ export const PROBE_DESCRIPTIONS: Record<string, (arg: string) => string> = {
    * fulfillment or cancellation — both are the honest ways a stuck order
    * stops being stuck. */
   order_fulfilled: a => `order ${a.split('|')[0]} is now fulfilled or cancelled`,
+  /* Arg is a day count (default 3). Of import_candidates published in that
+   * window, asks whether most are actually buyable on the live site, rather
+   * than `rows_exist`'s always-true "the table has rows". See the runner
+   * (owner-blockers.server.ts) for the incident this replaced. */
+  buyable_share: a => `at least 80% of candidates published in the last ${a || 3} days are buyable (live stock > 3)`,
 }
 
 /**
