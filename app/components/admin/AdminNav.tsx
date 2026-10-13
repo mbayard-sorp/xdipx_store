@@ -31,6 +31,13 @@ function PhoneIcon() {
     </svg>
   )
 }
+function MailIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="2" y="4" width="20" height="16" rx="2" /><path d="m2 7 10 6 10-6" />
+    </svg>
+  )
+}
 function SocialsIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -177,6 +184,7 @@ const NAV_ITEMS = [
   { to: '/admin/trackers',           label: 'Trackers',         Icon: SlidersIcon    },
   { to: '/admin/design-gallery',     label: 'Design Gallery',   Icon: DesignGalleryIcon },
   { to: '/admin/marketing-calendar', label: 'Marketing Calendar', Icon: SocialsIcon  },
+  { to: '/admin/email',              label: 'Email',              Icon: MailIcon     },
   { to: '/admin/pricing',           label: 'Pricing',          Icon: PricingIcon    },
   { to: '/admin/checkout-upsells',  label: 'Checkout Upsells', Icon: CartUpsellIcon },
   { to: '/admin/bulk-import',       label: 'Bulk Import',      Icon: UploadIcon     },
