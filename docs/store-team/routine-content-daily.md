@@ -378,6 +378,36 @@ rejected/flagged terms are the avoid list:
 
 Use `embedHints` only after verifying the handles are in stock; use `internalLinks` where natural.
 
+**Topic-collision pre-check (mandatory, as soon as a title + H2 outline exist — before writing full
+prose).** Ticket #14988, second occurrence: the topic-selection step (Step 3) only ever has a
+candidate slug/title to go on, with no H2 outline yet to compare, so this cannot run any earlier
+than the moment a title and an H2 skeleton exist — sketch both FIRST, run this, THEN write the
+prose, rather than discovering the collision mid-draft. Two real instances cost a mid-run rebuild in
+run 1397: content-plan row 17 (`how-do-you-start-anal-play`) was already fully answered by the live
+`does-anal-have-to-hurt` post, and a re-angled sizing draft then collided with
+`what-size-dildo-should-you-start-with`, down to the same three sub-topics. A third (run 760, row 15)
+had already been caught by hand and written up as a standing warning paragraph in content-plan — this
+check is what replaces that hand-maintained note with a mechanism.
+
+```bash
+npx tsx scripts/check-topic-collision.ts --category <categoryId> --slug <slug> --draft <draft.json>
+```
+
+`check-fresh-language.ts` below cannot see this shape: it requires a shared word-6-gram, and most H2
+headings in this corpus are 2-5 words, so a heading that reuses the same core nouns as a prior post's
+heading ("dilators", "plugs", "numbing", "douching") in different surrounding words never reaches the
+6-word floor a 6-gram needs — not a near miss, a floor it structurally cannot reach. This checker
+compares by normalized-token-set overlap (not contiguous n-grams) on three surfaces: H2-vs-H2, title-
+vs-title, and shared embedded products (`blogProductEmbed.productHandle`) — the last one is
+deliberate, because the row-15 collision shared no heading or title vocabulary at all ("what helps
+when you finish faster than you want" vs "what counts as premature ejaculation") and was only
+identifiable by the fact that both posts embedded the same three products. `--draft` only needs
+`title` and an H2-only `body` outline; full prose is not required for a hit. Retrieval is the same
+category PLUS any prior post whose slug shares a content word with the candidate ("topic stem"), so a
+same-subject post outside today's category still gets compared. Exit 0 means no collision found; exit
+1 prints each H2/title/embed hit with its prior post's slug — re-angle the topic, or confirm by
+reading the cited prior post that it genuinely does not already answer this, before writing prose.
+
 **Fresh-language pre-check (mandatory, before Step 5):** `emma-empathy-reviewer` has no Sanity
 access and cannot see cross-post reuse, so this check runs here, not at the gate. Run the
 deterministic checker and drive it to exit 0 before submitting to the voice gate:
