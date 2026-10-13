@@ -146,13 +146,51 @@ export async function updateTemplate(id: string, input: { html: string; text: st
 
 // ─── Metrics ──────────────────────────────────────────────────────────────
 
-/** Metric ids by name. A metric exists only after its first event arrives. */
+interface MetricAttrs {
+  name: string
+  integration?: { name?: string; category?: string } | null
+}
+
+/**
+ * Metric ids by name. A metric exists only after its first event arrives.
+ *
+ * Klaviyo allows two metrics to share one name from different integrations
+ * (a Shopify-sourced "Placed Order" and, say, an API-tracked "Placed Order"
+ * from a test send). The old version kept whichever page happened to list a
+ * name last, silently discarding the other id with no record of the
+ * collision (ticket #15004). On a collision this keeps the Shopify-sourced
+ * metric, since that is the one real storefront events populate, and warns
+ * so an operator can see the ambiguity instead of it being invisible.
+ */
 export async function getMetricIdsByName(): Promise<Map<string, string>> {
   const map = new Map<string, string>()
-  let path: string | null = '/metrics/?fields[metric]=name'
+  const integrationOf = new Map<string, string>()
+  let path: string | null = '/metrics/?fields[metric]=name,integration'
   for (let i = 0; i < 20 && path; i++) {
-    const res: ListResponse<{ name: string }> = await flowFetch(path)
-    for (const r of res.data ?? []) map.set(r.attributes.name, r.id)
+    const res: ListResponse<MetricAttrs> = await flowFetch(path)
+    for (const r of res.data ?? []) {
+      const name = r.attributes.name
+      const integration = (r.attributes.integration?.name ?? '').toLowerCase()
+      const existingId = map.get(name)
+      if (!existingId) {
+        map.set(name, r.id)
+        integrationOf.set(name, integration)
+        continue
+      }
+      const existingIsShopify = integrationOf.get(name) === 'shopify'
+      const candidateIsShopify = integration === 'shopify'
+      if (candidateIsShopify && !existingIsShopify) {
+        console.warn(`[klaviyo] metric name collision on "${name}": keeping Shopify metric ${r.id} over ${existingId}`)
+        map.set(name, r.id)
+        integrationOf.set(name, integration)
+      } else if (!candidateIsShopify && !existingIsShopify) {
+        console.warn(`[klaviyo] metric name collision on "${name}": keeping first-seen metric ${existingId} over ${r.id}`)
+      }
+      // existingIsShopify && !candidateIsShopify: keep the existing Shopify
+      // metric, nothing to do. existingIsShopify && candidateIsShopify: two
+      // Shopify metrics share the name, which should not happen; keep the
+      // first seen rather than flip on every page.
+    }
     const next = res.links?.next
     path = next ? next.replace(KLAVIYO_BASE, '') : null
   }

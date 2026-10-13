@@ -178,7 +178,16 @@ describe('the cron expectation manifest', () => {
     // explicitly tells the owner to check this route's cron_runs history
     // when the expiry-ahead warning keeps firing, so recording it is not
     // optional bookkeeping — it is the diagnostic the blocker points at.
-    expect(RECORDED_CRON_ROUTES.size).toBeLessThanOrEqual(20)
+    //
+    // Raised 20 -> 21 for /cron/email-metrics-pull (ticket #15004), DAILY:
+    // +1 row a day, same arithmetic as the earlier DAILY raises. The daily
+    // email program's self-improving loop (routine-email-daily.md) reads
+    // the ledger this route writes every day to judge a send's hypothesis;
+    // a silently missed pull means email-analyst judges stale or absent
+    // numbers with nothing pointing at why, so its next actor is the email
+    // lane's own daily routine, the same "next actor" bar every raise above
+    // holds to.
+    expect(RECORDED_CRON_ROUTES.size).toBeLessThanOrEqual(21)
   })
 
   it('records the surfaces whose failure has a next actor', () => {

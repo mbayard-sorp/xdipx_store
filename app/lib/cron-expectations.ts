@@ -727,6 +727,20 @@ export const CRON_EXPECTATIONS: readonly CronExpectation[] = [
     demandDriven: true, // fires only when the index blob and its Neon row are both missing
     notes: 'The third bypass. Routed through cronRoute in this change.',
   },
+  {
+    route: '/cron/email-metrics-pull',
+    plane: 'vercel',
+    schedule: '0 12 * * *',
+    periodMinutes: DAILY,
+    graceMinutes: 120,
+    recorded: true,
+    moneyRelevant: false,
+    ownerTeam: 'email',
+    notes:
+      'Pulls Klaviyo campaign stats for recent email_sends rows, joins order_attribution, writes '
+      + 'email_campaign_metrics, and flips a campaign to sent. A missed day delays email-analyst\'s '
+      + 'read, not anything live.',
+  },
 ]
 
 /** Indexed by route, for the wrapper's per-request lookup. */

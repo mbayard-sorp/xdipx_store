@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest'
-import { buildFlowPayload, emailHeaderImageUrl, flowEventProps, inferProductType, pickHeaderAsset, emailsForFlow, FLOW_NAMES } from './klaviyo-flows.server'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import { buildFlowPayload, emailHeaderImageUrl, flowEventProps, inferProductType, pickHeaderAsset, emailsForFlow, FLOW_NAMES, getMetricIdsByName } from './klaviyo-flows.server'
 import { FLOW_EMAILS } from './klaviyo-flow-templates'
 
 const ids = Object.fromEntries(FLOW_EMAILS.map(e => [e.key, `tpl-${e.key}`]))
@@ -151,5 +151,52 @@ describe('emailHeaderImageUrl', () => {
   it('leaves other hosts and junk alone', () => {
     expect(emailHeaderImageUrl('https://cdn/pack.jpg')).toBe('https://cdn/pack.jpg')
     expect(emailHeaderImageUrl('not a url')).toBe('not a url')
+  })
+})
+
+describe('getMetricIdsByName (ticket #15004)', () => {
+  const okJson = (body: unknown) =>
+    ({ ok: true, status: 200, text: async () => JSON.stringify(body) }) as unknown as Response
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('keeps the Shopify-integration metric when two metrics share a name', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => okJson({
+      data: [
+        { type: 'metric', id: 'API_ORDER', attributes: { name: 'Placed Order', integration: { name: 'API', category: 'API' } } },
+        { type: 'metric', id: 'SHOPIFY_ORDER', attributes: { name: 'Placed Order', integration: { name: 'Shopify', category: 'Ecommerce' } } },
+        { type: 'metric', id: 'VIEWED', attributes: { name: 'Viewed Product', integration: { name: 'Shopify' } } },
+      ],
+    })))
+
+    const map = await getMetricIdsByName()
+    expect(map.get('Placed Order')).toBe('SHOPIFY_ORDER')
+    expect(map.get('Viewed Product')).toBe('VIEWED')
+  })
+
+  it('keeps the Shopify metric regardless of which page lists it first', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => okJson({
+      data: [
+        { type: 'metric', id: 'SHOPIFY_ORDER', attributes: { name: 'Placed Order', integration: { name: 'Shopify' } } },
+        { type: 'metric', id: 'API_ORDER', attributes: { name: 'Placed Order', integration: { name: 'API' } } },
+      ],
+    })))
+
+    const map = await getMetricIdsByName()
+    expect(map.get('Placed Order')).toBe('SHOPIFY_ORDER')
+  })
+
+  it('keeps the first-seen id when neither colliding metric is Shopify-sourced', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => okJson({
+      data: [
+        { type: 'metric', id: 'FIRST', attributes: { name: 'Placed Order', integration: { name: 'API' } } },
+        { type: 'metric', id: 'SECOND', attributes: { name: 'Placed Order', integration: { name: 'Zapier' } } },
+      ],
+    })))
+
+    const map = await getMetricIdsByName()
+    expect(map.get('Placed Order')).toBe('FIRST')
   })
 })
