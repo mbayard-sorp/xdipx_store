@@ -152,6 +152,33 @@ export const pnlAdSpend = pgTable('pnl_ad_spend', {
   platformPeriodUq: uniqueIndex('pnl_ad_spend_platform_period_uniq').on(t.platform, t.periodStart),
 }))
 
+/**
+ * Nalpac invoices for the admin P&L (migration 122), uploaded from Nalpac's
+ * order-history CSV. One row per invoice; re-uploads update in place. The P&L
+ * uses them for actual product cost, drop-ship fee and freight per order.
+ */
+export const nalpacInvoices = pgTable('nalpac_invoices', {
+  invoiceNo:       varchar('invoice_no', { length: 20 }).primaryKey(),
+  orderName:       varchar('order_name', { length: 20 }).notNull(),
+  poNo:            varchar('po_no', { length: 60 }).notNull(),
+  nalpacOrderNo:   varchar('nalpac_order_no', { length: 20 }),
+  pickTicketNo:    varchar('pick_ticket_no', { length: 20 }),
+  orderDate:       date('order_date'),
+  dueDate:         date('due_date'),
+  paidDate:        date('paid_date'),
+  shipDate:        date('ship_date'),
+  status:          varchar('status', { length: 30 }),
+  freightUsd:      decimal('freight_usd', { precision: 10, scale: 2 }).notNull(),
+  invoiceTotalUsd: decimal('invoice_total_usd', { precision: 10, scale: 2 }).notNull(),
+  carrier:         varchar('carrier', { length: 60 }),
+  trackingNumber:  varchar('tracking_number', { length: 60 }),
+  uploadedBy:      varchar('uploaded_by', { length: 255 }),
+  createdAt:       timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt:       timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => ({
+  orderNameIdx: index('idx_nalpac_invoices_order_name').on(t.orderName),
+}))
+
 export const dailyProfitSummary = pgTable('daily_profit_summary', {
   summaryDate:   date('summary_date').primaryKey(),
   totalOrders:   integer('total_orders'),

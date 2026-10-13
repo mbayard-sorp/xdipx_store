@@ -4,11 +4,13 @@ import {
   AD_PLATFORM_SUGGESTIONS, EXPENSE_CATEGORIES, NALPAC_SHIPPING_RATES, PNL_EPOCH, addDays, daysInMonth, expenseCategoryLabel,
   type ExpenseRow, type FixedCostRow, type ManualAdSpendRow,
 } from '~/lib/pnl-core'
+import { NALPAC_DROPSHIP_FEE } from '~/lib/nalpac-invoices'
 import { ResponsiveTable } from '~/components/admin/ResponsiveTable'
 import { Card } from './Card'
 import { dayLabel, money, monthLabel } from './format'
 
-type ActionResult = { ok: boolean; message?: string; error?: string } | undefined
+type ActionResult = { ok: boolean; message?: string; error?: string; details?: string[] } | undefined
+type InvoiceSummary = { count: number; latestOrderDate: string | null; lastChangedAt: string | null }
 
 const input = 'w-full rounded-[10px] border border-line-2 bg-paper px-3 py-2 text-sm focus:outline-none focus:border-plum'
 const btn = 'inline-flex items-center justify-center rounded-[10px] bg-ink text-paper text-sm font-semibold px-4 py-2 hover:bg-ink-2 disabled:opacity-50'
@@ -17,9 +19,14 @@ const th = 'font-medium pb-2 text-[11px] uppercase tracking-[0.08em] text-ink-3'
 function Status({ data }: { data: ActionResult }) {
   if (!data) return null
   return (
-    <p role="status" className={`text-xs mt-2 ${data.ok ? 'text-[#1F6B3A]' : 'text-[#A3261B]'}`}>
-      {data.ok ? data.message : data.error}
-    </p>
+    <div role="status" className="mt-2">
+      <p className={`text-xs ${data.ok ? 'text-[#1F6B3A]' : 'text-[#A3261B]'}`}>{data.ok ? data.message : data.error}</p>
+      {data.details && data.details.length > 0 && (
+        <ul className="mt-1 space-y-0.5 text-xs text-ink-3 list-disc pl-4">
+          {data.details.map(d => <li key={d}>{d}</li>)}
+        </ul>
+      )}
+    </div>
   )
 }
 
@@ -33,7 +40,7 @@ function useResetOnSuccess(fetcher: { state: string; data: unknown }) {
 }
 
 export function CostsPanel({
-  isOwner, today, handlingFeePerOrder, fixed, expenses, expensesReady, manualAds, manualAdsReady,
+  isOwner, today, handlingFeePerOrder, fixed, expenses, expensesReady, manualAds, manualAdsReady, invoices, invoicedInRange, ordersInRange,
 }: {
   isOwner: boolean
   today: string
@@ -43,6 +50,9 @@ export function CostsPanel({
   expensesReady: boolean
   manualAds: ManualAdSpendRow[]
   manualAdsReady: boolean
+  invoices: InvoiceSummary | null
+  invoicedInRange: number
+  ordersInRange: number
 }) {
   const ful = useFetcher<ActionResult>()
   const addFixed = useFetcher<ActionResult>()
@@ -62,12 +72,14 @@ export function CostsPanel({
         <p className="text-sm text-ink-3 bg-paper-2 border border-line rounded-[10px] px-3 py-2">Only the owner can change costs. Everything here is read-only for you.</p>
       )}
 
+      <NalpacInvoices isOwner={isOwner} summary={invoices} invoicedInRange={invoicedInRange} ordersInRange={ordersInRange} />
+
       <AdSpendByMonth isOwner={isOwner} today={today} rows={manualAds} ready={manualAdsReady} />
 
       <Card kicker="Cost of sales" title="Shipping">
         <p className="text-sm text-ink-3 mb-3 max-w-2xl">
-          Every order that ships is charged Nalpac&apos;s average rate for the method the customer chose and where it went.
-          The cost applies even when the customer got free shipping, since Nalpac still bills it.
+          An order without a Nalpac invoice yet is charged Nalpac&apos;s average rate for the method the customer chose and where it went.
+          The cost applies even when the customer got free shipping, since Nalpac still bills it. Once its invoice is uploaded, the actual freight replaces the estimate.
         </p>
         <ResponsiveTable className="mb-4">
           <table className="w-full min-w-[340px] text-sm">
@@ -94,6 +106,7 @@ export function CostsPanel({
         <p className="text-sm text-ink-2 font-semibold">Extra handling fee per order (optional)</p>
         <p className="text-sm text-ink-3 mb-3 max-w-2xl">
           Anything Nalpac or anyone else charges per order on top of shipping, such as a drop-ship or packaging fee. Leave it blank if there is none.
+          Orders with a Nalpac invoice skip this and carry the invoiced {money(NALPAC_DROPSHIP_FEE)} drop-ship fee instead, so it is never counted twice.
         </p>
         <ful.Form method="post" className="flex flex-col gap-3 md:flex-row md:items-end">
           <input type="hidden" name="intent" value="save-handling" />
@@ -338,6 +351,60 @@ function AdSpendByMonth({ isOwner, today, rows, ready }: { isOwner: boolean; tod
               </table>
             </ResponsiveTable>
           )}
+        </>
+      )}
+    </Card>
+  )
+}
+
+/**
+ * Nalpac's order-history export, uploaded every couple of weeks. Each invoice
+ * replaces that order's estimated product cost and shipping with what Nalpac
+ * billed. Re-uploading an overlapping export is safe: invoices are matched by
+ * number, so nothing is counted twice.
+ */
+function NalpacInvoices({ isOwner, summary, invoicedInRange, ordersInRange }: {
+  isOwner: boolean
+  summary: InvoiceSummary | null
+  invoicedInRange: number
+  ordersInRange: number
+}) {
+  const upload = useFetcher<ActionResult>()
+  const formRef = useResetOnSuccess(upload)
+  const busy = upload.state !== 'idle'
+
+  return (
+    <Card
+      kicker="Cost of sales"
+      title="Nalpac invoices"
+      action={summary && summary.count > 0 ? <p className="text-sm text-ink-3 tabular-nums">{invoicedInRange} of {ordersInRange} orders in range use actuals</p> : undefined}
+    >
+      <p className="text-sm text-ink-3 mb-3 max-w-2xl">
+        Upload the order history CSV from Nalpac. Each invoice sets that order&apos;s actual product cost, the {money(NALPAC_DROPSHIP_FEE)} drop-ship fee (on the handling line)
+        and freight, in place of the estimates. Upload the full export every time: invoices already saved are matched by number and updated, never added twice.
+      </p>
+      {!summary ? (
+        <p className="text-sm text-ink-3 bg-paper-2 border border-line rounded-[10px] px-3 py-2">
+          This arrives with migration 122, which the production build applies on the next deploy.
+        </p>
+      ) : (
+        <>
+          <p className="text-xs text-ink-4 mb-3">
+            {summary.count === 0
+              ? 'No invoices uploaded yet.'
+              : <>{summary.count} invoice{summary.count === 1 ? '' : 's'} on file{summary.latestOrderDate && <>, through Nalpac orders of {dayLabel(summary.latestOrderDate)}</>}{summary.lastChangedAt && <>. Last change {dayLabel(summary.lastChangedAt.slice(0, 10))}</>}.</>}
+          </p>
+          {isOwner && (
+            <upload.Form ref={formRef} method="post" encType="multipart/form-data" className="flex flex-col gap-3 md:flex-row md:items-end">
+              <input type="hidden" name="intent" value="upload-nalpac" />
+              <label className="block md:w-96">
+                <span className="text-xs text-ink-3">Nalpac export (.csv)</span>
+                <input name="file" type="file" required accept=".csv,text/csv" className={`${input} file:mr-3 file:rounded-[8px] file:border-0 file:bg-paper-3 file:px-3 file:py-1 file:text-xs file:font-semibold`} />
+              </label>
+              <button type="submit" className={btn} disabled={busy}>{busy ? 'Uploading…' : 'Upload'}</button>
+            </upload.Form>
+          )}
+          <Status data={upload.data} />
         </>
       )}
     </Card>

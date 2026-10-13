@@ -205,7 +205,7 @@ export function OrdersLedger({ orders, handlingFeePerOrder, storeDomain }: { ord
                   </td>
                   <td className={`${td} text-right text-ink-3`}>
                     {money(o.paymentFees + ful)}
-                    <span className="block text-[10px] text-ink-4">{NALPAC_SHIPPING_RATES[o.shippingTier].label}</span>
+                    <span className={`block text-[10px] ${o.invoice ? 'text-[#1F6B3A]' : 'text-ink-4'}`}>{o.invoice ? 'Nalpac invoice' : `${NALPAC_SHIPPING_RATES[o.shippingTier].label} (est.)`}</span>
                   </td>
                   <td className={`${td} text-right font-semibold ${gp < 0 ? 'text-[#A3261B]' : 'text-ink'}`}>{money(gp)}</td>
                   <td className={`${td} text-right text-ink-3`}>{pct(margin, 0)}</td>
