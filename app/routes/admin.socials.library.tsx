@@ -133,7 +133,7 @@ export default function SocialsLibrary() {
     filters.source && { key: 'source', label: SOURCE_LABELS[filters.source] ?? filters.source },
     filters.picked != null && { key: 'picked', label: filters.picked ? 'picked' : 'not picked' },
     filters.archived && { key: 'archived', label: 'Archived' },
-    filters.dropped && { key: 'dropped', label: 'Including dropped' },
+    !filters.dropped && !filters.archived && { key: 'dropped', label: 'Hiding dropped' },
     filters.feedback && { key: 'feedback', label: FEEDBACK_LABELS[filters.feedback] ?? filters.feedback },
   ].filter(Boolean) as Array<{ key: string; label: string }>
 
@@ -205,12 +205,12 @@ export default function SocialsLibrary() {
           </button>
           <button
             type="button"
-            onClick={() => setFilter('dropped', filters.dropped ? null : '1')}
-            aria-pressed={filters.dropped}
-            title="Also show frames the crop pass refused"
-            className={`shrink-0 inline-flex items-center gap-1 min-h-9 px-2.5 rounded-full border text-xs font-mono ${filters.dropped ? 'border-coral bg-coral-soft text-ink' : 'border-line bg-paper text-ink-3 hover:border-ink-4'}`}
+            onClick={() => setFilter('dropped', filters.dropped ? '0' : null)}
+            aria-pressed={!filters.dropped}
+            title="Dropped frames are billed generations that cannot ship as-is: the crop pass refused them, the rehost failed, or the run ended before they were processed"
+            className={`shrink-0 inline-flex items-center gap-1 min-h-9 px-2.5 rounded-full border text-xs font-mono ${!filters.dropped ? 'border-coral bg-coral-soft text-ink' : 'border-line bg-paper text-ink-3 hover:border-ink-4'}`}
           >
-            Include dropped
+            Hide dropped
           </button>
           {facets.tags.slice(0, 12).map(t => (
             <button

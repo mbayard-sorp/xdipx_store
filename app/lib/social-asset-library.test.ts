@@ -155,6 +155,52 @@ describe('ingestSocialAsset', () => {
   })
 })
 
+describe('ingestSocialAsset: finalizing a raw-first row', () => {
+  it('rewrites the raw row in place, clearing its archive state, instead of inserting', async () => {
+    const updateAsset = vi.fn(async (id: number, row: SocialMediaAssetInsert) => ({ ...fakeRow(row), id }))
+    const d = deps({ updateAsset })
+    const row = await ingestSocialAsset({
+      buffer: Buffer.from('cropped'),
+      filename: 'social-x-cast-1.jpg',
+      url: `${CDN}/social-x-cast-1.jpg`,
+      source: 'generated',
+      provider: 'atlas',
+      replacesAssetId: 41,
+    }, d)
+
+    expect(d.insertAsset).not.toHaveBeenCalled()
+    expect(updateAsset).toHaveBeenCalledTimes(1)
+    const [id, written] = updateAsset.mock.calls[0]!
+    expect(id).toBe(41)
+    expect(written.archivedAt).toBeNull()
+    expect(written.archivedBy).toBeNull()
+    expect(written.url).toBe(`${CDN}/social-x-cast-1.jpg`)
+    expect(written.provider).toBe('atlas')
+    expect(row.id).toBe(41)
+  })
+
+  it('reuses the raw Sanity asset instead of uploading the same bytes twice', async () => {
+    const updateAsset = vi.fn(async (id: number, row: SocialMediaAssetInsert) => ({ ...fakeRow(row), id }))
+    const d = deps({ updateAsset })
+    await ingestSocialAsset({
+      buffer: Buffer.from('same'),
+      filename: 'social-x-cast-1.jpg',
+      url: `${CDN}/social-x-cast-1.jpg`,
+      source: 'generated',
+      replacesAssetId: 41,
+      existingSanityAssetId: 'image-raw-1080x1350-jpg',
+    }, d)
+    expect(d.uploadToSanity).not.toHaveBeenCalled()
+    expect(updateAsset.mock.calls[0]![1].sanityAssetId).toBe('image-raw-1080x1350-jpg')
+  })
+
+  it('falls back to an insert when the raw row is gone', async () => {
+    const d = deps({ updateAsset: vi.fn(async () => null) })
+    await ingestSocialAsset({ buffer: Buffer.from('x'), filename: 'x.jpg', source: 'generated', replacesAssetId: 99 }, d)
+    expect(d.inserted).toHaveLength(1)
+  })
+})
+
 describe('tryIngestSocialAsset', () => {
   it('swallows a Sanity throw and returns null', async () => {
     const err = vi.spyOn(console, 'error').mockImplementation(() => {})

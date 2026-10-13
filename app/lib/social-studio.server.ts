@@ -18,6 +18,7 @@ import { and, desc, eq, ilike, inArray, isNotNull, isNull, lt, or, sql, type SQL
 import { SOCIAL_PLATFORMS } from '~/lib/team-keys'
 import { revertSocialPostToDraft } from '~/lib/social-publish-approve.server'
 import { laWallClockToUtcIso } from '~/lib/social-schedule-ui'
+import { DROPPED_ARCHIVED_BY } from '~/lib/social-asset-library.server'
 
 export type PostRow = typeof socialPosts.$inferSelect
 export type AssetRow = typeof socialMediaAssets.$inferSelect
@@ -312,9 +313,13 @@ export interface LibraryFilters {
    */
   generationBatchId: string | null
   /**
-   * #11549: `?dropped=1` adds crop-rejected frames (archived by
-   * `system:crop-reject`) to the active view. Default false, so the grid and
-   * the Composer picker never show them.
+   * Adds frames the generation path archived itself (`DROPPED_ARCHIVED_BY`:
+   * crop-rejected, rehost-failed, never processed) to the active view.
+   * #11549 introduced it as an opt-in `?dropped=1`. It is now ON by default in
+   * the Library grid, because the owner wants every frame the provider
+   * produced to be visible there; `?dropped=0` hides them. The Composer picker
+   * (`?select=1`) and every programmatic caller keep it off: these frames
+   * cannot ship as-is.
    */
   dropped: boolean
   /** #11551: owner feedback filter. loved = heart, rejected = thumbs-down, unrated = neither. */
@@ -357,7 +362,7 @@ export function parseLibraryFilters(url: URL): LibraryFilters {
     before: Number.isInteger(before) && before > 0 ? before : null,
     archived: p.get('archived') === '1',
     generationBatchId: p.get('generationBatchId')?.trim() || null,
-    dropped: p.get('dropped') === '1',
+    dropped: p.get('select') === '1' ? false : p.get('dropped') !== '0',
     feedback: isFeedbackFilter(p.get('feedback')) ? (p.get('feedback') as FeedbackFilter) : null,
   }
 }
@@ -402,7 +407,7 @@ export async function listLibraryAssets(f: LibraryFilters): Promise<LibraryPage>
     f.archived
       ? isNotNull(socialMediaAssets.archivedAt)
       : f.dropped
-        ? or(isNull(socialMediaAssets.archivedAt), eq(socialMediaAssets.archivedBy, 'system:crop-reject'))!
+        ? or(isNull(socialMediaAssets.archivedAt), inArray(socialMediaAssets.archivedBy, [...DROPPED_ARCHIVED_BY]))!
         : isNull(socialMediaAssets.archivedAt),
   )
 

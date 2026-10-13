@@ -25,6 +25,19 @@ export interface LibraryAsset {
   /** Provider generation id (#11548); the card shows its first 8 chars. */
   providerRequestId?: string | null
   generationBatchId?: string | null
+  /** Set on archived rows; a `system:*` value marks a dropped frame (see DROPPED_LABELS). */
+  archivedBy?: string | null
+}
+
+/**
+ * Badge text for frames the generation path archived itself. Mirrors
+ * `DROPPED_ARCHIVED_BY` in social-asset-library.server.ts (not imported:
+ * this component ships to the client).
+ */
+const DROPPED_LABELS: Record<string, string> = {
+  'system:crop-reject': 'dropped: crop',
+  'system:rehost-failed': 'dropped: rehost',
+  'system:unprocessed': 'unprocessed',
 }
 
 export function aspectClassOf(aspect: string | null | undefined, w?: number | null, h?: number | null): string {
@@ -126,6 +139,11 @@ export function LibraryGrid({
               <span className="absolute bottom-1.5 left-1.5 inline-flex items-center gap-1 font-mono text-[10px] leading-none px-1.5 py-1 rounded-full bg-ink/70 text-white tabular-nums">
                 <SourceIcon size={10} /> #{a.id}
               </span>
+              {a.archivedBy && DROPPED_LABELS[a.archivedBy] && (
+                <span className="absolute top-1.5 left-10 md:left-9 font-mono text-[10px] leading-none px-1.5 py-1 rounded-full bg-ink/70 text-white">
+                  {DROPPED_LABELS[a.archivedBy]}
+                </span>
+              )}
               {a.isPicked && (
                 <span className="absolute bottom-1.5 right-1.5 font-mono text-[10px] leading-none px-1.5 py-1 rounded-full bg-sage text-white">
                   picked
