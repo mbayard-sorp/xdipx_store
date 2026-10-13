@@ -37,7 +37,7 @@
 export const NON_SKIN_SENTINEL = 'none'
 
 /**
- * Body zones. The migration-099 header list, plus the two the on-skin
+ * Body zones. The migration-099 header list, plus the three the on-skin
  * campaign added after it was written:
  *  - `gluteal-cleft`, the plug placement §3.2c licenses at one per rolling 7
  *    (it is a `CEILING_ZONES` member in the report, so it must be in here or
@@ -45,6 +45,14 @@ export const NON_SKIN_SENTINEL = 'none'
  *  - `top-of-thigh`, which is the spelling in use, kept alongside the
  *    migration header's `thigh-top` rather than silently dropping either.
  *    Both name the same zone; the report assigns neither a charge tier.
+ *  - `collarbone` (ticket #14968): social-art-director proposed it for a
+ *    card-near-the-chest beat and the route 400'd because it was not a
+ *    member at all (closest real value was `sternum`). Added as a writable
+ *    zone so that stops 400ing; left untiered in `social-mix-report.server.ts`
+ *    like `top-of-thigh`/`ankle` above rather than guessed into
+ *    `CEILING_ZONES` alongside `sternum` — the charge-tier bands are an
+ *    owner-decided classification (#10272, #10340) this ticket did not carry
+ *    one for.
  * `nape` stays in the vocabulary although §3.2c retired it as a MID zone: it
  * is still a writable value, it simply scores as neither tier.
  */
@@ -62,6 +70,7 @@ export const BODY_ZONES = [
   'shoulder-blade',
   'ankle',
   'gluteal-cleft',
+  'collarbone',
   NON_SKIN_SENTINEL,
 ] as const
 export type BodyZone = (typeof BODY_ZONES)[number]
