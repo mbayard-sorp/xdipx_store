@@ -16,6 +16,13 @@ Sanity MCP tools.
 Auth on every `/api/team/*` call and the revalidate endpoint: header `x-team-secret: $TEAM_TOKEN`
 (falls back to `$HOMEPAGE_TEAM_TOKEN`, then `$CRON_SECRET`). `BASE_URL` = deployed origin.
 
+**Cold checkout: run `npm install` before the first `npx tsx` call.** (ticket #15226) A fresh cloud
+checkout has no `node_modules`; content run 1416 (2026-10-13) hit this at the hero-dependency
+preflight, the first step after the gate that shells out to `npx tsx` (`gen-notebook-art.ts`,
+`check-slug-precheck.ts`, the five prose checkers, `check-hero-embed-match.ts`,
+`audit-blog-embed-stock.ts`, `sanity-content-cli.ts`). Run `[ -d node_modules ] || npm install` once,
+before Step 1, so the cost is budgeted rather than discovered mid-run.
+
 ## Step 0: Start
 
 ```bash
