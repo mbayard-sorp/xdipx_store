@@ -223,6 +223,22 @@ describe('generate', () => {
     expect(gateMock).toHaveBeenCalledWith('social', undefined)
   })
 
+  // Ticket #15006: every op hardcoded 'social', so an email-team caller was
+  // gated and charged against the social team's budget/image cap instead of
+  // its own. Omitting `team` must keep today's social behavior byte-for-byte.
+  it('gates against social and bills social-images by default (team omitted)', async () => {
+    await post(validGenerate)
+    expect(gateMock).toHaveBeenCalledWith('social', undefined)
+    expect(genMock.mock.calls[0]![0]).toHaveProperty('team', 'social')
+  })
+
+  it('gates against the email team and forwards team to generateAndUploadSocialImage when team:"email"', async () => {
+    const res = await post({ ...validGenerate, team: 'email', runId: 42 })
+    expect(res.status).toBe(200)
+    expect(gateMock).toHaveBeenCalledWith('email', 42)
+    expect(genMock).toHaveBeenCalledWith(expect.objectContaining({ team: 'email' }))
+  })
+
   // The exact failure mode behind ticket #13348: a direct caller (the
   // scheduled cloud sandbox hitting this route without node_modules) that
   // forgets `runId` cannot exclude itself, so the gate names the calling run
@@ -364,6 +380,17 @@ describe('cast', () => {
     const res = await post({ ...validCast, presenterImageUrl: undefined })
     expect(res.status).toBe(400)
     expect(castMock).not.toHaveBeenCalled()
+  })
+
+  // Ticket #15006: the cast op logs its own spend rows (unlike generate,
+  // which defers to generateAndUploadSocialImage), so this route is the one
+  // place the feature-per-team label has to be built directly.
+  it('gates against and bills the email team when team:"email"', async () => {
+    const res = await post({ ...validCast, team: 'email', runId: 7 })
+    expect(res.status).toBe(200)
+    expect(gateMock).toHaveBeenCalledWith('email', 7)
+    expect(logImageCostMock).toHaveBeenCalledWith(expect.objectContaining({ feature: 'email-images' }))
+    expect(logImageCostMock).not.toHaveBeenCalledWith(expect.objectContaining({ feature: 'social-images' }))
   })
 })
 
@@ -782,6 +809,21 @@ describe('method + op guards', () => {
     expect(genMock).not.toHaveBeenCalled()
     expect(castMock).not.toHaveBeenCalled()
   })
+
+  // Ticket #15006: resolved once, ahead of every op, so an unrecognized value
+  // 400s before any op's gate check or spend, not only the generate/cast ops.
+  it('rejects an unknown team value before any gate call or spend, on every op', async () => {
+    const generateRes = await post({ ...validGenerate, team: 'ads' })
+    expect(generateRes.status).toBe(400)
+    expect(await generateRes.text()).toMatch(/team must be one of social\|email/)
+    expect(gateMock).not.toHaveBeenCalled()
+    expect(genMock).not.toHaveBeenCalled()
+
+    const cardRes = await post({ op: 'plate', line: 'x', slideIndex: 1, slideCount: 1, team: 'ads' })
+    expect(cardRes.status).toBe(400)
+    expect(gateMock).not.toHaveBeenCalled()
+    expect(renderCardMock).not.toHaveBeenCalled()
+  })
 })
 
 /**
@@ -882,5 +924,12 @@ describe('packshot-card / plate (ticket #13368)', () => {
   it('forwards runId to the money gate as its excludeRunId argument', async () => {
     await post({ op: 'plate', line: 'x', slideIndex: 1, slideCount: 1, runId: 1226 })
     expect(gateMock).toHaveBeenCalledWith('social', 1226)
+  })
+
+  // Ticket #15006: packshot-card/plate also hardcoded 'social' in their own
+  // gate() call, separate from the shared generate/cast path.
+  it('gates against the email team when team:"email"', async () => {
+    await post({ op: 'plate', line: 'x', slideIndex: 1, slideCount: 1, runId: 1226, team: 'email' })
+    expect(gateMock).toHaveBeenCalledWith('email', 1226)
   })
 })
