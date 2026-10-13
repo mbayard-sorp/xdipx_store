@@ -16,6 +16,16 @@
  *     castSlug?, castSlugs?, productImageUrl?, extraImageUrls?, scale,
  *     count?, caller?, runId?, team?, faceInFrame?, + the scene axes }
  *       -> GenerateCastCompositeResult { urls, filenames, costs, requestIds, plateRequestId? }
+ *          `castSlug` (singular) is what resolves the primary presenter
+ *          reference (via `resolveCastReference`) and is REQUIRED for that
+ *          resolution even when `castSlugs` (plural) is ALSO passed for a
+ *          multi-cast-member brief: `castSlugs` alone only reaches
+ *          `generateCastComposite`'s own cast-continuity field, it never
+ *          drives presenter resolution. Passing only `castSlugs` with no
+ *          `castSlug` 400s "presenterImageUrl or castSlug required" (ticket
+ *          #14968) unless an explicit `presenterImageUrl` is also given. For
+ *          a two-person brief, set `castSlug` to the lead/gaze-focus cast
+ *          member alongside `castSlugs` listing everyone in frame.
  *          plus bodyReferenceMissing?/handReferenceMissing?/dualReferenceMissing?/warning?
  *          (#10336, #10341, #11476, #13740). `faceInFrame:true` sends both the
  *          body and portrait references instead of just the one the crop
