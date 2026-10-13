@@ -300,6 +300,21 @@ export interface PnlOrderFact {
   /** Amount paid with Shop Cash. A tender, not a cost; shown as a memo. */
   shopCash: number
   lines: PnlLine[]
+  /**
+   * What Nalpac actually billed, when an uploaded invoice covers this order
+   * (nalpac-invoices.ts). Then cogs, shippingCost and handling are actuals, not estimates.
+   */
+  invoice: OrderInvoiceCost | null
+}
+
+export interface OrderInvoiceCost {
+  invoiceNos: string[]
+  /** Sum of the invoice totals: product + drop-ship fee + freight. */
+  total: number
+  freight: number
+  /** Nalpac's drop-ship fee, reported on the handling line. */
+  handling: number
+  carrier: string | null
 }
 
 export type CostLineFn = (
@@ -423,6 +438,7 @@ export function orderToFact(
     shippingCost,
     shopCash: round2(shopCash),
     lines: outLines,
+    invoice: null,
   }
 }
 
@@ -569,6 +585,8 @@ export interface PnlTotals {
   shopCash: number
   productCost: number
   cogsMissingUnits: number
+  /** Orders whose costs come from an uploaded Nalpac invoice rather than estimates. */
+  invoicedOrders: number
   /** Nalpac shipping at table rates. */
   shippingCost: number
   /** Optional per-order handling fee plus logged shipping & fulfillment expenses. */
@@ -608,15 +626,20 @@ export function emptyTotals(): PnlTotals {
   return {
     orders: 0, units: 0, newCustomers: 0, returningCustomers: 0,
     grossSales: 0, discounts: 0, returns: 0, shipping: 0, netRevenue: 0, tax: 0, shopCash: 0,
-    productCost: 0, cogsMissingUnits: 0, shippingCost: 0, handling: 0, fulfillment: 0, paymentFees: 0, grossProfit: 0,
+    productCost: 0, cogsMissingUnits: 0, invoicedOrders: 0, shippingCost: 0, handling: 0, fulfillment: 0, paymentFees: 0, grossProfit: 0,
     adSpend: 0, adByPlatform: {}, contribution: 0,
     aiSpend: 0, fixedCosts: 0, fixedByVendor: {}, otherExpenses: 0, otherByCategory: {},
     operatingExpenses: 0, netProfit: 0,
   }
 }
 
-/** Handling fee, charged per order that shipped something. */
+/**
+ * Handling for one order. An invoiced order carries Nalpac's actual drop-ship
+ * fee, which replaces the per-order setting so the fee is never counted twice.
+ * Otherwise the setting is charged per order that shipped something.
+ */
 export function handlingFor(o: PnlOrderFact, perOrder: number | null): number {
+  if (o.invoice) return o.invoice.handling
   return perOrder != null && o.units > 0 ? perOrder : 0
 }
 
@@ -643,6 +666,7 @@ export function totalsFor(input: PnlInputs, from: string, to: string): PnlTotals
     t.shopCash += o.shopCash
     t.productCost += o.cogs
     t.cogsMissingUnits += o.cogsMissingUnits
+    if (o.invoice) t.invoicedOrders += 1
     t.paymentFees += o.paymentFees
     t.shippingCost += o.shippingCost
     t.handling += handlingFor(o, input.handlingFeePerOrder)
@@ -758,6 +782,13 @@ export interface StatementRow {
  * ad platform, per software vendor, per expense category) appear only when they
  * carry money so the statement stays as short as the business is.
  */
+/** "Nalpac invoices for 12 of 14 orders, cost on file for the rest". Null when no order is invoiced. */
+function invoiceHint(t: PnlTotals, actual: string, estimate: string): string | null {
+  if (t.invoicedOrders === 0) return null
+  if (t.invoicedOrders >= t.orders) return `Nalpac ${actual} on every order`
+  return `Nalpac ${actual} for ${t.invoicedOrders} of ${t.orders} orders, ${estimate} for the rest`
+}
+
 export function statementRows(t: PnlTotals): StatementRow[] {
   const rows: StatementRow[] = []
   const push = (r: StatementRow) => rows.push(r)
@@ -772,14 +803,20 @@ export function statementRows(t: PnlTotals): StatementRow[] {
   push({ key: 'h-cogs', label: 'Cost of sales', kind: 'header', indent: 0, isCost: false, value: null })
   push({
     key: 'productCost', label: 'Product cost (wholesale)', kind: 'line', indent: 1, isCost: true, value: t.productCost,
-    hint: t.cogsMissingUnits > 0 ? `${t.cogsMissingUnits} unit${t.cogsMissingUnits === 1 ? '' : 's'} had no cost on file and are not included` : undefined,
+    hint: [
+      invoiceHint(t, 'billed item cost', 'cost on file'),
+      t.cogsMissingUnits > 0 ? `${t.cogsMissingUnits} unit${t.cogsMissingUnits === 1 ? '' : 's'} had no cost on file and are not included` : null,
+    ].filter(Boolean).join('. ') || undefined,
   })
   push({
     key: 'shippingCost', label: 'Shipping (Nalpac)', kind: 'line', indent: 1, isCost: true, value: t.shippingCost,
-    hint: 'Nalpac average rate for each order\'s shipping method',
+    hint: invoiceHint(t, 'invoiced freight', 'average rate for the shipping method') ?? 'Nalpac average rate for each order\'s shipping method',
   })
   if (t.handling > 0) {
-    push({ key: 'handling', label: 'Handling & other fulfillment', kind: 'line', indent: 1, isCost: true, value: t.handling })
+    push({
+      key: 'handling', label: 'Handling & other fulfillment', kind: 'line', indent: 1, isCost: true, value: t.handling,
+      hint: t.invoicedOrders > 0 ? `Includes Nalpac's drop-ship fee on ${t.invoicedOrders} invoiced order${t.invoicedOrders === 1 ? '' : 's'}` : undefined,
+    })
   }
   push({ key: 'paymentFees', label: 'Payment processing', kind: 'line', indent: 1, isCost: true, value: t.paymentFees, hint: 'Actual Shopify Payments fees' })
   push({ key: 'grossProfit', label: 'Gross profit', kind: 'subtotal', indent: 0, isCost: false, value: t.grossProfit })
@@ -1054,13 +1091,19 @@ export function toCsv(header: readonly string[], rows: ReadonlyArray<ReadonlyArr
   return [header, ...rows].map(r => r.map(csvCell).join(',')).join('\n') + '\n'
 }
 
+/** The ledger's shipping label: the invoiced carrier when Nalpac billed the order, else the estimated rate. */
+export function shippingMethodLabel(o: PnlOrderFact): string {
+  if (o.invoice) return `Nalpac invoice${o.invoice.carrier ? ` (${o.invoice.carrier})` : ''}`
+  return NALPAC_SHIPPING_RATES[o.shippingTier].label
+}
+
 export function ordersCsv(orders: readonly PnlOrderFact[], handlingPerOrder: number | null): string {
   return toCsv(
     ['order', 'date', 'channel', 'source', 'customer', 'status', 'units', 'gross_sales', 'discounts', 'returns', 'shipping', 'net_revenue', 'tax', 'product_cost', 'cogs_missing_units', 'payment_fees', 'shipping_method', 'shipping_cost', 'handling', 'gross_profit'],
     orders.map(o => {
       const handling = handlingFor(o, handlingPerOrder)
       return [o.name, o.day, o.channel, o.source, o.customerType, o.status, o.units, o.grossSales, o.discounts, o.returns, o.shipping,
-        o.netRevenue, o.tax, o.cogs, o.cogsMissingUnits, o.paymentFees, NALPAC_SHIPPING_RATES[o.shippingTier].label, o.shippingCost, handling,
+        o.netRevenue, o.tax, o.cogs, o.cogsMissingUnits, o.paymentFees, shippingMethodLabel(o), o.shippingCost, handling,
         round2(o.netRevenue - o.cogs - o.paymentFees - o.shippingCost - handling)]
     }),
   )

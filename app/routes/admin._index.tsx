@@ -6,7 +6,9 @@
  * app/lib/pnl.server.ts: Shopify orders (revenue, discounts, refunds,
  * shipping, tax, actual payment fees), COGS from the order metafields and
  * inventory cost, imported ad-platform spend, metered AI spend, and the costs
- * the owner enters on the Costs tab. Days are the store's local days.
+ * the owner enters on the Costs tab, including the Nalpac invoice upload that
+ * replaces estimated product and shipping cost with what Nalpac billed. Days
+ * are the store's local days.
  *
  * Cost edits are owner-only, same as the ad caps on /admin/ad-studio/spend.
  */
@@ -18,8 +20,10 @@ import {
   PnlInputError, addExpense, addFixedCost, deleteExpense, deleteManualAdSpend, endFixedCost, getStoreTimezone, loadPnlData,
   saveHandlingFeePerOrder, saveManualAdSpend,
 } from '~/lib/pnl.server'
+import { NalpacCsvError } from '~/lib/nalpac-invoices'
+import { uploadNalpacInvoiceFile } from '~/lib/nalpac-invoices.server'
 import {
-  PNL_EPOCH, RANGE_PRESETS, adPlatformRows, dayInTz, manualAdOverlaps, goalStatus, monthStart, monthlyColumns, orderBreakdown,
+  PNL_EPOCH, RANGE_PRESETS, addDays, adPlatformRows, dayInTz, manualAdOverlaps, goalStatus, monthStart, monthlyColumns, orderBreakdown,
   productBreakdown, ratiosFor, resolveRange, seriesFor, statementRows, totalsFor, waterfallSteps, deltaPct,
 } from '~/lib/pnl-core'
 import { Card } from '~/components/admin/pnl/Card'
@@ -71,6 +75,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
   for (const o of manualAdOverlaps(inputs.manualAds, inputs.ads)) {
     quality.push(`${o} has both a monthly entry and imported spend, so it is probably counted twice. Delete the monthly entry on the Costs tab once the import covers that month.`)
   }
+  if (data.invoices && data.invoices.count > 0) {
+    // Nalpac invoices within a few days of shipping; older orders with none mean the last export is stale.
+    const stale = inRange.filter(o => !o.invoice && o.units > 0 && o.day <= addDays(today, -7))
+    if (stale.length > 0) {
+      quality.push(`${stale.length} order${stale.length === 1 ? '' : 's'} older than a week ${stale.length === 1 ? 'has' : 'have'} no Nalpac invoice yet (${stale.slice(0, 6).map(o => o.name).join(', ')}${stale.length > 6 ? ', …' : ''}), so ${stale.length === 1 ? 'it uses' : 'they use'} estimated cost. Upload the latest Nalpac export on the Costs tab.`)
+    }
+  }
   if (data.fixedAll.length === 0) quality.push('No software or subscription costs are entered, so net profit leaves out hosting, apps and the Claude Max plan. Add them on the Costs tab.')
 
   return {
@@ -101,6 +112,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     expensesReady: data.expensesReady,
     manualAds: data.manualAdsAll,
     manualAdsReady: data.manualAdsReady,
+    invoices: data.invoices,
+    invoicedInRange: cur.invoicedOrders,
     quality,
   }
 }
@@ -137,9 +150,13 @@ export async function action({ request }: ActionFunctionArgs) {
       }
       case 'delete-ad-spend':
         return { ok: true as const, message: await deleteManualAdSpend(Number(form.get('id'))) }
+      case 'upload-nalpac': {
+        const r = await uploadNalpacInvoiceFile(form.get('file'), admin.email)
+        return { ok: true as const, message: r.message, details: r.details }
+      }
     }
   } catch (err) {
-    if (err instanceof PnlInputError) return { ok: false as const, error: err.message }
+    if (err instanceof PnlInputError || err instanceof NalpacCsvError) return { ok: false as const, error: err.message }
     console.error('[admin pnl] action failed', err)
     return { ok: false as const, error: 'That did not save. Try again.' }
   }
@@ -255,6 +272,7 @@ export default function PnlDashboard() {
           <CostsPanel
             isOwner={d.isOwner} today={d.today} handlingFeePerOrder={d.handlingFeePerOrder} fixed={d.fixed}
             expenses={d.expenses} expensesReady={d.expensesReady} manualAds={d.manualAds} manualAdsReady={d.manualAdsReady}
+            invoices={d.invoices} invoicedInRange={d.invoicedInRange} ordersInRange={d.cur.orders}
           />
         )}
       </div>

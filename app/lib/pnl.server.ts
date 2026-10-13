@@ -13,10 +13,13 @@
  *   fixed_monthly_costs  software and subscriptions, spread per day
  *   pnl_expenses         one-off expenses (migration 119)
  *   pnl_ad_spend         hand-entered monthly ad spend per platform (migration 120)
+ *   nalpac_invoices      what Nalpac actually billed per order (migration 122)
  *   pipeline_settings    pnl_handling_fee_cents, an optional per-order handling fee
  *
- * Shipping cost needs no input: each order is charged Nalpac's rate for its
- * shipping method and destination (NALPAC_SHIPPING_RATES in pnl-core.ts).
+ * An order with an uploaded Nalpac invoice uses the invoice for product cost,
+ * the drop-ship fee and freight (nalpac-invoices.ts). Any other order is
+ * estimated: inventory unit cost, plus Nalpac's average rate for its shipping
+ * method and destination (NALPAC_SHIPPING_RATES in pnl-core.ts).
  */
 import { and, asc, desc, eq, gte, inArray, isNull, lte, sql } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
@@ -24,6 +27,8 @@ import {
   adCreativeDailyMetrics, fixedMonthlyCosts, orderAttribution, pipelineSettings, pnlAdSpend, pnlExpenses,
 } from '../../db/schema'
 import { costLineItem, costsFromOrderMetafields } from '~/lib/profit.server'
+import { applyNalpacInvoices } from '~/lib/nalpac-invoices'
+import { getInvoiceSummary, readInvoicesForOrders, type InvoiceSummary } from '~/lib/nalpac-invoices.server'
 import { setPipelineSettingAudited, type SettingsActor } from '~/lib/settings.server'
 import {
   COUNTED_FINANCIAL_STATUSES, PNL_EPOCH, addDays, dayInTz, isExpenseCategory, isIsoDay, manualAdPeriod, orderToFact, round2,
@@ -273,6 +278,8 @@ export interface PnlData {
   manualAdsAll: ManualAdSpendRow[]
   /** False until migration 120 has been applied. */
   manualAdsReady: boolean
+  /** Uploaded Nalpac invoices, or null until migration 122 has been applied. */
+  invoices: InvoiceSummary | null
 }
 
 export async function loadPnlData(window: { from: string; to: string }, opts: { fresh?: boolean } = {}): Promise<PnlData> {
@@ -282,7 +289,7 @@ export async function loadPnlData(window: { from: string; to: string }, opts: { 
   const to = window.to
   const gaps: string[] = []
 
-  const [orders, ads, ai, fixedAll, expenses, handlingFeePerOrder, manualAds] = await Promise.all([
+  const [estimated, ads, ai, fixedAll, expenses, handlingFeePerOrder, manualAds, invoiceSummary] = await Promise.all([
     fetchOrderFacts(from, to, tz, opts),
     readAds(from, to).catch((err): AdSpendRow[] => { gaps.push('Ad spend could not be read.'); console.error('[pnl] ads', err); return [] }),
     readAi(from, to, tz).catch((err): DailyAmount[] => { gaps.push('AI spend could not be read.'); console.error('[pnl] ai', err); return [] }),
@@ -296,7 +303,22 @@ export async function loadPnlData(window: { from: string; to: string }, opts: { 
       console.error('[pnl] manual ad spend', err)
       return { ok: false as const, rows: [] as ManualAdSpendRow[] }
     }),
+    getInvoiceSummary().catch((err: unknown): null => { console.error('[pnl] nalpac invoice summary', err); return null }),
   ])
+
+  // Swap estimates for what Nalpac billed. New objects: the cached facts stay estimates.
+  let orders = estimated
+  if (invoiceSummary) {
+    try {
+      const byOrder = await readInvoicesForOrders(estimated.map(o => o.name))
+      orders = estimated.map(o => applyNalpacInvoices(o, byOrder.get(o.name) ?? []))
+    } catch (err) {
+      gaps.push('Nalpac invoices could not be read, so every order uses estimated product and shipping cost.')
+      console.error('[pnl] nalpac invoices', err)
+    }
+  } else {
+    gaps.push('Nalpac invoice upload is not available yet (migration 122 applies on the next production deploy).')
+  }
   await attachSources(orders, gaps)
 
   let expensesRecent: ExpenseRow[] = []
@@ -309,7 +331,7 @@ export async function loadPnlData(window: { from: string; to: string }, opts: { 
 
   return {
     tz, today, fixedAll, expensesRecent, gaps, expensesReady: expenses.ok,
-    manualAdsAll: manualAds.rows, manualAdsReady: manualAds.ok,
+    manualAdsAll: manualAds.rows, manualAdsReady: manualAds.ok, invoices: invoiceSummary,
     inputs: { orders, ads, manualAds: manualAds.rows, ai, fixed: fixedAll, expenses: expenses.rows, handlingFeePerOrder },
   }
 }
