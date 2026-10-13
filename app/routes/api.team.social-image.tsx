@@ -1,12 +1,20 @@
 /**
  * POST /api/team/social-image — server-side social image generation + rehost.
  *
+ * EVERY op also accepts an optional `team: 'social' | 'email'` (ticket
+ * #15006, default 'social'), which decides whose money gate and spend row
+ * ('{team}-images') this call bills against. Before this, every op hardcoded
+ * 'social', so a caller outside the social team (the daily email program
+ * generating or reusing imagery, routine-email-daily.md Step 5) was gated and
+ * charged against the social team's budget and image cap instead of its own.
+ * An unrecognized `team` value 400s before any gate check or spend.
+ *
  *   { op: 'generate', prompt, handle, archetype, mood, date, slide?,
- *     refImageUrl?, imageSize?, only?, caller?, runId?, + the scene axes }
+ *     refImageUrl?, imageSize?, only?, caller?, runId?, team?, + the scene axes }
  *       -> GenerateSocialImageResult { url, filename, provider, model }
  *   { op: 'cast', prompt, handle, mood, date, slide?, presenterImageUrl?,
  *     castSlug?, castSlugs?, productImageUrl?, extraImageUrls?, scale,
- *     count?, caller?, runId?, faceInFrame?, + the scene axes }
+ *     count?, caller?, runId?, team?, faceInFrame?, + the scene axes }
  *       -> GenerateCastCompositeResult { urls, filenames, costs, requestIds, plateRequestId? }
  *          plus bodyReferenceMissing?/handReferenceMissing?/dualReferenceMissing?/warning?
  *          (#10336, #10341, #11476, #13740). `faceInFrame:true` sends both the
@@ -103,6 +111,26 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 const ONLY_VALUES = ['atlas', 'fal', 'imagen'] as const
 const CARD_TONE_VALUES = ['coral', 'plum', 'paper'] as const
 const REHOST_ASPECT_VALUES = ['4:5', '16:9'] as const
+/**
+ * Which team's money gate and spend row this call bills against (ticket
+ * #15006). Every op hardcoded 'social', so an email run calling this route
+ * (the daily promo program generating/reusing imagery, routine-email-daily.md
+ * Step 5) was gated and charged against the social team's budget and image
+ * cap instead of its own. Omitting `team` keeps today's social behavior
+ * unchanged; narrow on purpose (not the full TeamId union) because this route
+ * only ever needs the two callers that actually exist today.
+ */
+const IMAGE_GATE_TEAMS = ['social', 'email'] as const
+type ImageGateTeam = typeof IMAGE_GATE_TEAMS[number]
+
+/** `undefined` body field -> the pre-existing default. Anything else must be a known team. */
+function resolveImageGateTeam(b: Record<string, unknown>): ImageGateTeam | 'invalid' {
+  const raw = b['team']
+  if (raw === undefined) return 'social'
+  return typeof raw === 'string' && (IMAGE_GATE_TEAMS as readonly string[]).includes(raw)
+    ? (raw as ImageGateTeam)
+    : 'invalid'
+}
 
 function str(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined
@@ -135,7 +163,7 @@ function imageSizeVal(v: unknown): string | { width: number; height: number } | 
  * this renderer takes no `prompt`/`mood`/`date` and bills no AI image
  * generation.
  */
-async function handleSocialCardOp(op: 'packshot-card' | 'plate', b: Record<string, unknown>): Promise<Response> {
+async function handleSocialCardOp(op: 'packshot-card' | 'plate', b: Record<string, unknown>, team: ImageGateTeam): Promise<Response> {
   const line = str(b['line'])
   if (!line) return new Response('Bad Request: line required', { status: 400 })
   const slideIndex = num(b['slideIndex'])
@@ -162,7 +190,7 @@ async function handleSocialCardOp(op: 'packshot-card' | 'plate', b: Record<strin
   // this path logs to the `social-images` feature that cap counts), so only
   // the generic refusal reasons (disabled, over_budget, over_run_cap,
   // run_in_progress) matter; `gateResult.ok` already covers all of them.
-  const gateResult = await gate('social', runId)
+  const gateResult = await gate(team, runId)
   if (!gateResult.ok) {
     return Response.json({ error: 'gated', reason: gateResult.reason, gate: gateResult }, { status: 403 })
   }
@@ -205,7 +233,7 @@ async function handleSocialCardOp(op: 'packshot-card' | 'plate', b: Record<strin
  * this reuses an existing picture rather than generating one, same reasoning
  * as `handleSocialCardOp` above.
  */
-async function handleRehostOp(b: Record<string, unknown>): Promise<Response> {
+async function handleRehostOp(b: Record<string, unknown>, team: ImageGateTeam): Promise<Response> {
   const sourceUrl = str(b['sourceUrl'])
   if (!sourceUrl) return new Response('Bad Request: sourceUrl required', { status: 400 })
   const slug = str(b['slug'])
@@ -222,7 +250,7 @@ async function handleRehostOp(b: Record<string, unknown>): Promise<Response> {
   // above): this op bills no AI image generation, but the vision gate it
   // still runs calls the Anthropic API, so a direct team-token caller
   // looping this route is not free.
-  const gateResult = await gate('social', runId)
+  const gateResult = await gate(team, runId)
   if (!gateResult.ok) {
     return Response.json({ error: 'gated', reason: gateResult.reason, gate: gateResult }, { status: 403 })
   }
@@ -251,6 +279,14 @@ export async function action({ request }: ActionFunctionArgs) {
   try {
     const op = b['op']
 
+    // Ticket #15006: resolved once, before any op's gate/spend, so an
+    // unrecognized value 400s ahead of everything below rather than one op
+    // learning it was 'invalid' only after the others would have proceeded.
+    const team = resolveImageGateTeam(b)
+    if (team === 'invalid') {
+      return new Response(`Bad Request: team must be one of ${IMAGE_GATE_TEAMS.join('|')}`, { status: 400 })
+    }
+
     // Ticket #13368: the New-in carousel's packshot card and the typographic
     // save-close plate. Deliberately NOT routed through the shared
     // generate/cast validation below: this renderer takes no `prompt`,
@@ -261,13 +297,13 @@ export async function action({ request }: ActionFunctionArgs) {
     // file header's own reasoning for why the gate lives here rather than
     // only in the CLI.
     if (op === 'packshot-card' || op === 'plate') {
-      return await handleSocialCardOp(op, b)
+      return await handleSocialCardOp(op, b, team)
     }
 
     // Ticket #13370: reuses an existing picture (a Notebook post's hero),
     // same "not a billed generation" reasoning as packshot-card/plate above.
     if (op === 'rehost') {
-      return await handleRehostOp(b)
+      return await handleRehostOp(b, team)
     }
 
     if (op !== 'generate' && op !== 'cast') return new Response('Bad Request', { status: 400 })
@@ -316,7 +352,7 @@ export async function action({ request }: ActionFunctionArgs) {
     // Money gate: generation spends real dollars, so gate before generating,
     // exactly like api.team.video-job's enqueue ops. The CLI already gates too;
     // this closes the hole a direct team-token call would otherwise open.
-    const gateResult = await gate('social', runId)
+    const gateResult = await gate(team, runId)
     if (!gateResult.ok) {
       // Ticket #13348: a direct caller that forgets `runId` in the body
       // cannot exclude its own run from the gate's `run_in_progress` check,
@@ -522,22 +558,26 @@ export async function action({ request }: ActionFunctionArgs) {
       // filename/requestId so a fal request id resolves to the exact asset it
       // produced; a remainder row for any billed-but-dropped candidate (failed
       // rehost or vision gate — still billed, #887); then any stage-1 plate.
+      // Feature is `${team}-images` (ticket #15006) so the spend row and the
+      // image-cap counter attribute to the caller's own team, not always
+      // 'social-images' regardless of who is actually billing.
+      const imageFeature = `${team}-images`
       const frameCostKey = result.costs[0]?.costKey ?? 'fal/flux-2-edit'
       const framesBilled = result.costs[0]?.count ?? result.urls.length
       for (let i = 0; i < result.urls.length; i++) {
         await logImageCost({
-          feature: 'social-images', model: frameCostKey, count: 1, caller,
+          feature: imageFeature, model: frameCostKey, count: 1, caller,
           refId: result.filenames[i]!,
           ...(result.requestIds[i] ? { requestId: result.requestIds[i]! } : {}),
         })
       }
       const remainder = framesBilled - result.urls.length
       if (remainder > 0) {
-        await logImageCost({ feature: 'social-images', model: frameCostKey, count: remainder, caller })
+        await logImageCost({ feature: imageFeature, model: frameCostKey, count: remainder, caller })
       }
       for (const plate of result.costs.slice(1)) {
         await logImageCost({
-          feature: 'social-images', model: plate.costKey, count: plate.count, caller,
+          feature: imageFeature, model: plate.costKey, count: plate.count, caller,
           ...(result.plateRequestId ? { requestId: result.plateRequestId } : {}),
         })
       }
@@ -633,9 +673,10 @@ export async function action({ request }: ActionFunctionArgs) {
     const imageSize = imageSizeVal(b['imageSize'])
 
     const { generateAndUploadSocialImage } = await import('~/lib/social-media.server')
-    // logCost:true — this route is the single owner of the social-images spend
-    // row (#8032; was `false` under #887's older CLI-owns-it design). Same
-    // pattern already proven at api.admin.social-image.tsx's generate path.
+    // logCost:true — this route is the single owner of the `${team}-images`
+    // spend row (#8032; was `false` under #887's older CLI-owns-it design;
+    // the feature label is per-team as of #15006). Same pattern already
+    // proven at api.admin.social-image.tsx's generate path.
     const result = await generateAndUploadSocialImage({
       prompt,
       handle,
@@ -644,6 +685,7 @@ export async function action({ request }: ActionFunctionArgs) {
       date,
       caller,
       logCost: true,
+      team,
       ...(Object.keys(sceneAxes).length ? { sceneAxes } : {}),
       ...(slide ? { slide } : {}),
       ...(refImageUrl ? { refImageUrl } : {}),

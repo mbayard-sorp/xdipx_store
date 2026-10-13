@@ -1049,6 +1049,13 @@ export interface GenerateSocialImageOpts {
    */
   logCost?: boolean
   /**
+   * Which team's spend row this bills to when `logCost` is true (ticket
+   * #15006). Default 'social' keeps every existing caller's behavior
+   * byte-for-byte; the email program passes 'email' so its own generation
+   * bills its own budget and image cap instead of the social team's.
+   */
+  team?: 'social' | 'email'
+  /**
    * The scene axes this frame was briefed at (#10479), stamped onto the
    * library row's `tags` so the draft resolves them by URL. Same contract as
    * `GenerateCastCompositeOpts.sceneAxes`.
@@ -1114,10 +1121,11 @@ export async function generateAndUploadSocialImage(
       const result = await generateImage({
         prompt: opts.prompt,
         count: 1,
-        // The social team's own spend feature. Nothing emitted this before, which
-        // is why social image spend was invisible to the budget gate: it sums
-        // `feature LIKE 'social-%'`.
-        feature: 'social-images',
+        // The caller's own team spend feature (default 'social', ticket
+        // #15006 added 'email'). Nothing emitted this before #8032, which is
+        // why social image spend was invisible to the budget gate: it sums
+        // `feature LIKE '{team}-%'`.
+        feature: `${opts.team ?? 'social'}-images`,
         caller: opts.caller ?? 'social-media-manager',
         logCost: opts.logCost ?? false,
         ...(opts.refImageUrl ? { refImageUrl: opts.refImageUrl } : {}),
