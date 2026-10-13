@@ -32,6 +32,20 @@ import {
 } from '~/lib/team.server'
 import { TEAM_IDS, teamKeys, isTeamId, HOMEPAGE_EXTRA_KEYS, CONTENT_EXTRA_KEYS, VIDEO_EXTRA_KEYS, VIDEO_DEFAULT_MODEL_TIER_DEFAULT, VALVE_KEYS, SOCIAL_PLATFORMS, SOCIAL_FREQ_DEFAULTS, socialFreqKey, X_METRICS_MAX_READS_MONTH_KEY, X_METRICS_MAX_READS_MONTH_DEFAULT, SOCIAL_EXTRA_KEYS as SOCIAL_TEAM_EXTRA_KEYS, SOCIAL_MAX_IMAGES_DEFAULT, type TeamId, type SocialPlatform } from '~/lib/team-keys'
 import { VIDEO_MODELS } from '~/lib/fal-video.server'
+
+/**
+ * Daily email program push valve (ticket #15007). The canonical constant
+ * (`EMAIL_CAMPAIGN_PUSH_VALVE`) lives in `klaviyo-campaigns.server.ts`, a
+ * `.server.ts` file — importing it here would pull that whole server-only
+ * module into the client bundle, since `settingKey={...}` is read by the
+ * default-exported component, not just the loader/action React Router
+ * strips server code from. Duplicated as a plain string for the same reason
+ * `RELEASE_ENGINE_KEYS` and `SOCIAL_EXTRA_KEYS` above are local rather than
+ * imported from team-keys.ts: the two copies agreeing is what matters, and a
+ * `.server.ts` import failing the client/server boundary check is a build
+ * break, not a lint nit.
+ */
+const EMAIL_CAMPAIGN_PUSH_VALVE = 'email_campaign_push_enabled'
 import {
   NO_EXECUTOR_KINDS, classifyTeamTablesError, facetTotal, fmtAge, sumFacetCount, truncationNote,
   type TicketFacetRow,
@@ -200,6 +214,8 @@ interface LoaderData {
   socialFrequencies: Record<SocialPlatform, number>
   releaseEngine: boolean
   releaseEngineMaxMerges: number
+  /** Email tab's push valve (ticket #15007): creates Klaviyo drafts, never sends. */
+  emailCampaignPush: boolean
   /**
    * Tiers the Video tab's default-model-tier picker offers: every registered
    * tier that is not a retired fal tier and not owner-only, read from
@@ -219,7 +235,7 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
   const config = await getTeamConfig(team).catch(
     (): TeamConfig => ({ team, enabled: false, dailyCents: 500, maxRunsPerDay: 1, autoApproveSuggestions: false }),
   )
-  const [autopost, socialTrendScout, socialMetricsSweep, suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish, videoProgram, videoDefaultModelTier, videoFrameReview, videoRenderReview, videoEndcard, instagramAutopublish, instagramPublishRow, xAutopublish, xPublishRows, releaseEngineRow, socialFrequencies] = await Promise.all([
+  const [autopost, socialTrendScout, socialMetricsSweep, suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish, videoProgram, videoDefaultModelTier, videoFrameReview, videoRenderReview, videoEndcard, instagramAutopublish, instagramPublishRow, xAutopublish, xPublishRows, releaseEngineRow, socialFrequencies, emailCampaignPush] = await Promise.all([
     getValve(VALVE_KEYS.socialAutopost).catch(() => false),
     getValve(VALVE_KEYS.socialTrendScout).catch(() => false),
     getValve(VALVE_KEYS.socialMetricsSweep).catch(() => false),
@@ -277,6 +293,16 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
     // routine uses via {op:'config'}, so the tab shows exactly what the next
     // run will read. Falls back to the defaults on a read failure.
     getSocialFrequencies().catch(() => ({ ...SOCIAL_FREQ_DEFAULTS })),
+    // Daily email program push valve (ticket #15007). Not a VALVE_KEYS member
+    // (its canonical key lives in klaviyo-campaigns.server.ts's
+    // EMAIL_CAMPAIGN_PUSH_VALVE, not team-keys.ts) — read directly like frame
+    // review above. Same ON-value check campaignPushEnabled() uses
+    // ('true', else OFF — a missing row reads OFF, same as there), duplicated
+    // rather than imported so this loader never pulls that .server.ts module
+    // into the client bundle (see the local EMAIL_CAMPAIGN_PUSH_VALVE const).
+    db.select().from(pipelineSettings).where(eq(pipelineSettings.key, EMAIL_CAMPAIGN_PUSH_VALVE)).limit(1)
+      .then(rows => rows[0]?.value === 'true')
+      .catch(() => false),
   ])
   // Parsed exactly as the cron parses it, zero included: `|| DEFAULT` would turn
   // a deliberate 0 (pause publishing without touching the valve) back into 3.
@@ -450,7 +476,7 @@ export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderDat
     suggestionApply, contentAutopublish, seoCuration, trendScout, videoAutopublish, videoProgram,
     videoDefaultModelTier, videoFrameReview, videoRenderReview, videoEndcard, instagramAutopublish, instagramPublishMaxPerDay,
     xAutopublish, xPublishMaxPerDay, xPublishMaxSpendUsdMonth, xMetricsMaxReadsMonth, socialFrequencies,
-    releaseEngine, releaseEngineMaxMerges, videoTierOptions,
+    releaseEngine, releaseEngineMaxMerges, videoTierOptions, emailCampaignPush,
   }
 }
 
@@ -482,6 +508,11 @@ export async function action({ request }: ActionFunctionArgs) {
     // this allowlists them for the audited write path so the owner can size
     // the daily slate from the Social tab instead of a raw POST.
     ...SOCIAL_PLATFORMS.map(p => socialFreqKey(p)),
+    // Daily email program push valve (ticket #15007). Before this the owner
+    // had no control at all: the key is read by klaviyo-campaigns.server.ts
+    // (EMAIL_CAMPAIGN_PUSH_VALVE) but nothing rendered or allowlisted it, so
+    // the only way to flip it was a raw form post straight at this action.
+    EMAIL_CAMPAIGN_PUSH_VALVE,
   ])
 
   // Routed through the audited write path so a valve flip is attributable
@@ -598,7 +629,7 @@ export default function AgentTeamsPage() {
     seoCuration, trendScout, videoAutopublish, videoProgram, videoDefaultModelTier, videoFrameReview, videoRenderReview, videoEndcard,
     instagramAutopublish, instagramPublishMaxPerDay,
     xAutopublish, xPublishMaxPerDay, xPublishMaxSpendUsdMonth, xMetricsMaxReadsMonth, socialFrequencies,
-    releaseEngine, releaseEngineMaxMerges, videoTierOptions,
+    releaseEngine, releaseEngineMaxMerges, videoTierOptions, emailCampaignPush,
   } = useLoaderData<typeof loader>()
   const keys = teamKeys(team)
   const activeBrief = briefs.find(b => b.status === 'active')
@@ -841,6 +872,16 @@ export default function AgentTeamsPage() {
               detail="Kill switch for the weekly Saturday trend-scout routine: community-discourse research that proposes 3-5 trendTopicBrief docs (in Sanity Studio) for the Sunday SEO curation to adopt or skip. Research-only, never writes posts or briefs into the queue itself."
               settingKey={VALVE_KEYS.trendScout}
               on={trendScout}
+            />
+          </>
+        )}
+        {team === 'email' && (
+          <>
+            <ValveRow
+              label={`Email draft push is ${emailCampaignPush ? 'ON' : 'OFF'}`}
+              detail="When ON, the daily promo email routine builds a Klaviyo DRAFT campaign (template, audience, add-ons) and emails you a review link. OFF renders the preview with no Klaviyo calls and no draft created. Draft-only either way: nothing in this routine can send. You still send from Klaviyo yourself."
+              settingKey={EMAIL_CAMPAIGN_PUSH_VALVE}
+              on={emailCampaignPush}
             />
           </>
         )}
