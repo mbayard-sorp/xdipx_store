@@ -119,9 +119,10 @@ const AI_ASSISTANT_HOSTS = [
 
 export function classifyChannelGroup(signals: {
   utmSource?: string | null
+  utmMedium?: string | null
   referringSite?: string | null
   sourceName?: string | null
-}): 'ai-assistant' | 'organic-search' | 'social' | 'direct' | 'other' {
+}): 'email' | 'ai-assistant' | 'organic-search' | 'social' | 'direct' | 'other' {
   const host = (value: string | null | undefined): string => {
     if (!value) return ''
     try {
@@ -131,7 +132,16 @@ export function classifyChannelGroup(signals: {
     }
   }
   const utmSourceHost = (signals.utmSource ?? '').toLowerCase()
+  const utmMediumValue = (signals.utmMedium ?? '').toLowerCase()
   const referringHost = host(signals.referringSite)
+
+  // Ticket #15003 (daily promo email program, owner direction 2026-10-12):
+  // Klaviyo's own UTM convention is the only email signal that reaches this
+  // function, so it is checked first, ahead of the heuristic host matches
+  // below, the same way ai-assistant already takes priority over them.
+  if (utmMediumValue === 'email' || utmSourceHost === 'klaviyo') {
+    return 'email'
+  }
 
   if (
     AI_ASSISTANT_HOSTS.some(h => utmSourceHost.includes(h)) ||
@@ -351,16 +361,18 @@ async function handleOrderCreated(order: ShopifyOrder): Promise<void> {
     const attrOf = (name: string): string | undefined =>
       order.note_attributes?.find(a => a.name === name)?.value
     const utmSource   = attrOf('_utm_source') ?? null
+    const utmMedium   = attrOf('_utm_medium') ?? null
     const referringSite = order.referring_site ?? null
     const channelGroup = classifyChannelGroup({
       utmSource,
+      utmMedium,
       referringSite,
       sourceName: order.source_name ?? null,
     })
     await db.insert(orderAttribution).values({
       shopifyOrderId: String(order.id),
       utmSource,
-      utmMedium:      attrOf('_utm_medium') ?? null,
+      utmMedium,
       utmCampaign:    attrOf('_utm_campaign') ?? null,
       utmContent:     attrOf('_utm_content') ?? null,
       refCode:        referralCodeFromNoteAttributes(order.note_attributes) ?? null,
