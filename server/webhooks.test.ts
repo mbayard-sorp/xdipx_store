@@ -98,6 +98,26 @@ describe('classifyChannelGroup', () => {
   it('classifies other for an unrecognized referrer', () => {
     expect(classifyChannelGroup({ referringSite: 'https://some-blog.example.com/post' })).toBe('other')
   })
+
+  // Ticket #15003 (daily promo email program, owner direction 2026-10-12):
+  // Klaviyo's send links carry utm_medium=email and utm_source=klaviyo.
+  describe('email (ticket #15003)', () => {
+    it('classifies email from utm_medium=email', () => {
+      expect(classifyChannelGroup({ utmSource: null, utmMedium: 'email', referringSite: null })).toBe('email')
+    })
+
+    it('classifies email from utm_source=klaviyo alone', () => {
+      expect(classifyChannelGroup({ utmSource: 'klaviyo', utmMedium: null, referringSite: null })).toBe('email')
+    })
+
+    it('classifies email from both signals together', () => {
+      expect(classifyChannelGroup({ utmSource: 'klaviyo', utmMedium: 'email', referringSite: null })).toBe('email')
+    })
+
+    it('email takes priority over a social referring site carried on the same order', () => {
+      expect(classifyChannelGroup({ utmSource: 'klaviyo', utmMedium: 'email', referringSite: 'https://www.instagram.com/' })).toBe('email')
+    })
+  })
 })
 
 // ticket #9329: for logged-in-account checkouts, api.cart stamps the
