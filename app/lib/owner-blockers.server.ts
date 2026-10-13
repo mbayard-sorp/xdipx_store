@@ -366,6 +366,63 @@ async function orderFulfilled(arg: string): Promise<ProbeVerdict> {
   return res.order.displayFulfillmentStatus === 'FULFILLED'
 }
 
+/** Minimum live Shopify stock to count a published candidate as buyable. */
+const BUYABLE_INVENTORY_FLOOR = 3
+/** Minimum fraction of recently-published candidates that must clear the floor. */
+const BUYABLE_SHARE_FLOOR = 0.8
+
+/**
+ * `days` (default 3, min 1, max 90) — of the `import_candidates` rows
+ * published in the last N days, what fraction are actually buyable (LIVE
+ * Shopify `totalInventory` above `BUYABLE_INVENTORY_FLOOR`)?
+ *
+ * Exists because `rows_exist` on `import_candidates` always answers true —
+ * the table always has rows — which is exactly how blocker #555 (Nalpac
+ * inventory sync) false-cleared on 2026-10-12 while the defect was still
+ * live: re-measured 2026-10-13 at 8/28 recent publishes buyable, 14/16
+ * published-since-last-run at `totalInventory=0`, and the row had to be
+ * re-escalated by hand as #588. This probe asks the question the blocker is
+ * actually about instead of the always-true one `rows_exist` happened to be
+ * wired to.
+ *
+ * Could-not-ask returns null, never false or true: nothing published in the
+ * window to measure, or every live Shopify lookup failing, is "cannot tell",
+ * not "the fix worked". A silent clear on no-data would be the #4702
+ * collapse in a new place.
+ */
+async function buyableShare(arg: string): Promise<ProbeVerdict> {
+  const days = Math.min(Math.max(parseInt(arg || '3', 10) || 3, 1), 90)
+  const res = await db.execute(sql`
+    SELECT dh.shopify_product_id AS product_id
+      FROM import_candidates ic
+      JOIN deal_history dh ON dh.id = ic.deal_history_id
+     WHERE ic.published_at IS NOT NULL
+       AND ic.published_at >= now() - (${String(days)} || ' days')::interval`)
+  const productIds = (res.rows ?? [])
+    .map(r => (r as Record<string, unknown>)['product_id'])
+    .filter((id): id is string => typeof id === 'string' && id.length > 0)
+  if (productIds.length === 0) return null
+
+  const { getHandleByProductId, getProductByHandle } = await import('~/lib/shopify.server')
+  let checked = 0
+  let buyable = 0
+  for (const id of productIds) {
+    try {
+      const handle = await getHandleByProductId(id)
+      if (!handle) continue
+      const product = await getProductByHandle(handle)
+      if (!product) continue
+      checked++
+      if ((product.totalInventory ?? 0) > BUYABLE_INVENTORY_FLOOR) buyable++
+    } catch {
+      // One product's lookup failing is not a could-not-ask for the whole
+      // probe; it is simply excluded from the denominator.
+    }
+  }
+  if (checked === 0) return null
+  return buyable / checked >= BUYABLE_SHARE_FLOOR
+}
+
 const RUNNERS: Record<string, (arg: string) => Promise<ProbeVerdict>> = {
   table_exists:  tableExists,
   column_exists: columnExists,
@@ -384,6 +441,7 @@ const RUNNERS: Record<string, (arg: string) => Promise<ProbeVerdict>> = {
   row_matches:   rowMatches,
   migration_applied: migrationApplied,
   order_fulfilled: orderFulfilled,
+  buyable_share: buyableShare,
 }
 
 /**
