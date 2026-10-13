@@ -418,4 +418,11 @@ Keep entries terse and factual. This file is content/documentation on the agent-
 - **Evidence:** run 1371; `rails-fingerprint --assert-changed rails,hero,couples` OK; render-truth PASS at origin; Step 2c surfaces changed: hero (product), rails (product selection), mosaic (imagery), promo (imagery), couples (imagery + copy), announcement (copy); final homepage rev `yXdZWMnDvmUzJNoLXdhl9g`; sections block `8ebaf6a2da8d`.
 - **Appended by:** agent-editor, suggestion #14767 (run 1371 had no git for this run, per #9503, and this changelog append was pending).
 
+### 2026-10-13 · Routine A (run 1410)
+
+- **What changed:** hero re-pinned from Lush 3 to We-Vibe Ditto+ (satin) with new emmaHero copy; rail 0 relined to a Backdoor 101 shelf (Tantus trainer kit, Njoy Pure Plug L, Aneros Eupho, Lovense Ridge, Pjur Back Door lube, See-all `/collections/anal`); under-$30 rail relined to anal on-ramp picks (7 SKUs, See-all `/collections/under-30`); wayfinder tiles wf65a/wf65b new art, labels and collection links (`/collections/plugs`, `/collections/prostate-toys`); Discover You promo new art and copy; couples band new art, copy and CTA (Lovense Edge 2); ticker lines a1003m1/a1003m4; masthead standfirst micro-refresh on categoryPage-pleasure and categoryPage-play.
+- **Why:** calendar row 40, Backdoor 101 week; Monday run 1389 failed at cold start so the live page was still on last week's Couples Control theme. Brief 16 AOV directive: hero and first-rail anchors at $57.99 to $139.
+- **Evidence:** run 1410; `rails-fingerprint --assert-changed rails,hero,couples` OK; render-truth PASS at origin (`?variant=b&rt=`, MISS); Step 2c surfaces changed: hero (product), rails (product selection), mosaic (imagery), promo (imagery), couples (imagery + copy), announcement (copy); new assets image-a0c2839e…, image-f8717aec…, image-07c13f3d…, image-ca331bce… (6 generated, 2 replaced after a ground-lock self-review).
+- **Appended by:** homepage-orchestrator, run 1410.
+
 <!-- Newest entries appended above this line by each routine's changelog step. -->
