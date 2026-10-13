@@ -185,6 +185,10 @@
     {
       "path": "/cron/db-restore-probe",
       "schedule": "10 6 * * *"
+    },
+    {
+      "path": "/cron/email-metrics-pull",
+      "schedule": "0 12 * * *"
     }
   ]
 }

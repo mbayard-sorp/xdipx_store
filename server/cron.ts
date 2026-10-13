@@ -882,6 +882,24 @@ export function createCronRoutes() {
   })
 
   /**
+   * GET|POST /cron/email-metrics-pull
+   * Schedule: daily, 12:00 UTC — pull Klaviyo campaign stats for every
+   * `email_sends` row from the last 30 days, join order_attribution, write
+   * `email_campaign_metrics`, and flip a campaign to `sent` once Klaviyo
+   * reports it that way (ticket #15004, routine-email-daily.md).
+   */
+  cronRoute('/email-metrics-pull', async (_req, res) => {
+    try {
+      const { runEmailMetricsPull } = await import('../app/lib/email-metrics-pull.server.js')
+      const result = await runEmailMetricsPull()
+      res.json({ ok: true, result })
+    } catch (err) {
+      console.error('[cron/email-metrics-pull] failed:', err)
+      res.status(500).json({ ok: false, error: (err as Error).message })
+    }
+  })
+
+  /**
    * GET|POST /cron/social-asset-auto-archive
    * Schedule: daily. Archives unpicked social_media_assets rows past a
    * tunable age threshold (default 60 days, `social_library_auto_archive_days`
