@@ -1674,7 +1674,7 @@ export const homepageTeamSuggestions = pgTable('homepage_team_suggestions', {
   cxRisk:        varchar('cx_risk', { length: 8 }).notNull().default('low'), // low|med|high
   status:        varchar('status', { length: 16 }).notNull().default('proposed'), // proposed|approved|pr_open|applied|dismissed
   applyRef:      text('apply_ref'),                                   // PR URL / applied artifact
-  decidedBy:     varchar('decided_by', { length: 24 }),               // auto|owner|NULL — who moved it off 'proposed'
+  decidedBy:     varchar('decided_by', { length: 32 }),               // auto|owner|agent:<slug>|NULL — who moved it off 'proposed' (widened 122, matches assignee/verified_by)
   decidedAt:     timestamp('decided_at'),
   createdAt:     timestamp('created_at').notNull().defaultNow(),
   // ── ticket system (070) ──────────────────────────────────────────────────

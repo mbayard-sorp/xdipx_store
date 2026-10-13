@@ -7,6 +7,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { PgDialect } from 'drizzle-orm/pg-core'
 import type { SQL } from 'drizzle-orm'
+import { homepageTeamSuggestions } from '../../db/schema'
 
 // ---------------------------------------------------------------------------
 // Mock the db client and KV before importing the module under test
@@ -134,6 +135,7 @@ import {
   RUN_CLOSE_ACTORS,
   RUN_CLOSE_KINDS,
   VERDICT_PIN_NOTE_PREFIX,
+  AGENT_ACTOR_RE,
   type TicketActor,
   type TicketStatus,
 } from '~/lib/team.server'
@@ -1562,6 +1564,40 @@ describe('delegated supersession edges (#3573)', () => {
     await transitionSuggestion(42, 'dismissed', 'owner')
     expect(h.state.patches[0]!['status']).toBe('dismissed')
     expect(h.state.patches[0]!['decidedBy']).toBe('owner')
+  })
+
+  /**
+   * Ticket #15009. Production repro, five real rows (4117, 4118, 5394, 5395,
+   * 2607): a delegated dismissal by `agent:email-marketing-manager` (29
+   * characters) 500'd on the UPDATE after its note links had already
+   * committed, because `decided_by` was `varchar(24)` — Postgres rejects an
+   * oversized value outright rather than truncating it. The mocked db here
+   * cannot reproduce that 500 (it does not enforce column widths), so these
+   * two tests pin the actual bug a different way: the patch value itself,
+   * and the schema contract that value must fit.
+   */
+  it('writes the full, untruncated actor string into decidedBy even for a long agent name', async () => {
+    seedTicket({ status: 'approved', kind: 'campaign' })
+    await transitionSuggestion(42, 'dismissed', 'agent:email-marketing-manager', {
+      note: 'Superseded by https://github.com/mbayard-sorp/xdipx_store/pull/1618',
+    })
+    expect(h.state.patches[0]!['decidedBy']).toBe('agent:email-marketing-manager')
+    expect((h.state.patches[0]!['decidedBy'] as string).length).toBe(29)
+  })
+
+  it('decided_by is wide enough for the longest actor AGENT_ACTOR_RE admits (migration 122)', () => {
+    // drizzle's public PgColumn type does not surface the declared varchar
+    // length, though it is there at runtime (config.length) — same value
+    // `db push`/migrations generate from. Read it the same way rather than
+    // hardcoding "32" a second time, so this test tracks the real column.
+    const decidedByMaxLength = (homepageTeamSuggestions.decidedBy as unknown as { length?: number }).length
+    // AGENT_ACTOR_RE is `agent:` + 1 + up to 24 more [a-z0-9-] chars: 6 + 25 = 31.
+    const longestLegalActor = `agent:${'a'.repeat(25)}`
+    expect(AGENT_ACTOR_RE.test(longestLegalActor)).toBe(true)
+    expect(longestLegalActor.length).toBeLessThanOrEqual(decidedByMaxLength!)
+    // Pinned to the real production actor that 500'd, so this test fails
+    // loudly again if decided_by ever regresses back toward varchar(24).
+    expect('agent:email-marketing-manager'.length).toBeLessThanOrEqual(decidedByMaxLength!)
   })
 })
 

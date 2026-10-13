@@ -1703,7 +1703,11 @@ export function isTicketStatus(v: unknown): v is TicketStatus {
  */
 export type TicketActor = 'owner' | 'auto' | 'system' | `agent:${string}`
 
-const AGENT_ACTOR_RE = /^agent:[a-z0-9][a-z0-9-]{0,24}$/
+// Exported for the column-width guard in team-tickets.test.ts (#15009): the
+// longest string this grammar admits must fit in every
+// homepage_team_suggestions column that stores a raw actor value
+// (decided_by, assignee, verified_by).
+export const AGENT_ACTOR_RE = /^agent:[a-z0-9][a-z0-9-]{0,24}$/
 
 export function isTicketActor(v: unknown): v is TicketActor {
   return typeof v === 'string'
