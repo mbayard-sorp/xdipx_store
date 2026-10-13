@@ -532,6 +532,14 @@ without reading into any JSON. Only reconcile rows you own; never touch a homepa
    block. **Never invent campaign N+1 yourself:** the social team owns execution inside a campaign,
    `store-strategist` owns which story the store is telling this month. If a runway suggestion is
    already open, say so in the summary instead of filing a duplicate.
+6. **Spine coverage pre-draft check (owner evidence, ticket #10869/#14939; 2nd occurrence in three
+   weeks).** Status reconciliation above is necessary but not sufficient: a campaign can sit
+   correctly `active` all week while never once being posted about, and the weekly retro drift
+   check only catches this a week late, by which point the campaign has expired unposted. So, right
+   after reconciling status, check whether any post published in the last 48h (Instagram or X)
+   carries the active campaign's subject. If none does, this run's **first draft slot** must be a
+   campaign-spine post for that campaign, before any other obligation (new-in carousel, Notebook
+   echo, product post). Record a decision event naming the campaign and the row that served it.
 
 ## Step 2b — Self-throttle
 
