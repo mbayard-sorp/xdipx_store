@@ -235,6 +235,12 @@ Format rules added 2026-07-21 (owner-approved):
   a person actually asks an LLM (the Target query column below). The title or the problem H2
   matches that phrasing closely; the FAQ picks up adjacent variants. This is what makes a
   narrative citable instead of merely readable.
+- **Check across categories before selecting a row, not just within Real Talk (added 2026-10-13,
+  content run 1416).** Check a candidate row's target query against published podcast-notes and
+  wellness-basics posts too, not only against other real-talk posts. The slug pre-check and
+  check-fresh-language are both category-scoped and neither one can see a collision with the
+  weekly podcast lane, which is what let rows 15, 25, and 26 each reach topic-selection before the
+  duplication was caught.
 - **Series membership.** Real Talk posts belong to the `real-talk` series (§4). The writer flags
   the fit in the run summary as usual; attachment stays a `blogPostExtras` doc via the seed script
   or Studio. Reading order is lightest-topic-first rather than beginner-first.
@@ -274,8 +280,8 @@ extend freely — additions need a slug, problem, and target query):
 | 22 | what-if-a-partner-feels-replaced-by-a-toy | Partner insecurity about a vibrator | "my partner feels threatened by my vibrator" |
 | 23 | is-scheduling-sex-a-good-idea | The spontaneity myth vs the calendar reality | "does scheduling sex actually work" |
 | 24 | what-if-you-like-different-kinds-of-touch | Mismatched stimulation preferences in one bed | "my partner and I like different kinds of touch" |
-| 25 | what-helps-you-relax-enough-to-enjoy-sex | Staying stuck in your head, unable to be present | "how do I relax and stay present during sex" |
-| 26 | what-if-you-feel-self-conscious-during-sex | Body self-consciousness dimming everything | "how do I stop feeling self conscious in bed" |
+| 25 | what-helps-you-relax-enough-to-enjoy-sex | Staying stuck in your head, unable to be present **COVERED, do not write as-is** | "how do I relax and stay present during sex" |
+| 26 | what-if-you-feel-self-conscious-during-sex | Body self-consciousness dimming everything **COVERED, do not write as-is** | "how do I stop feeling self conscious in bed" |
 | 27 | how-do-you-restart-after-a-long-dry-spell | Restarting solo or partnered sex after a long break | "how to get back into sex after a long time without it" |
 | 28 | how-do-you-choose-toys-when-mobility-is-limited | Grip, reach, and mobility limits | "sex toys that work with arthritis or limited mobility" |
 | 29 | how-do-you-keep-toys-private-in-a-shared-home | Privacy with roommates or kids in the house | "how do I keep sex toys private at home" |
@@ -296,6 +302,16 @@ distinct angle that the podcast post does not already answer (the target query "
 bed" is high volume and still worth owning, so a dedicated page is the right instinct, but it needs its
 own substance), or strike it and let the podcast post hold the cluster. Do not write it to the brief as
 written.
+
+**Rows 25 and 26 are already covered too, for the same reason as row 15 (content run 1416, 2026-10-13).**
+The published podcast-notes post `/notebook/how-do-you-get-out-of-your-head-during-sex` already carries
+row 25's whole resolution, down to its own FAQ asking "How do you stop overthinking during sex?" The
+published podcast-notes post `/notebook/how-to-get-more-confident-in-bed` already carries row 26's whole
+resolution, with H2s "Nobody is behind" and "Confidence is not a technique problem." Writing either row
+to its current brief would ship near-identical intent at a second URL rather than add one. Run 1416
+reordered past both rows for exactly this reason. Either give each row a genuinely distinct angle that
+its podcast post does not already answer, or strike it and let the podcast post hold the cluster. Do
+not write either row to the brief as written.
 
 Bank composition: roughly a third health-adjacent, a third relationship and communication, a third
 practical confidence. Rows 1-10 are the original launch bank and seed the `real-talk` series in
