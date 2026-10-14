@@ -34,6 +34,15 @@ export interface CatalogProduct {
   handle: string
   /** Product title, if known. Falls back to the handle when absent. */
   title: string | null
+  /**
+   * Manufacturer's verbatim title (`xdipx.original_title` / Sanity
+   * `originalTitle`), if known. An Emma-rewritten `title` can drop the
+   * manufacturer's own vocabulary entirely ("Glans Massager" for a product
+   * whose box says "... Vibrating Penis Massager"), so a hero prompt that
+   * describes the product in manufacturer terms needs this to be recognized
+   * as naming it (ticket #15409).
+   */
+  manufacturerTitle?: string | null
 }
 
 export interface HeroEmbedMismatch {
@@ -68,6 +77,13 @@ const GENERIC_TOKENS = new Set<string>([
   'pink', 'purple', 'blue', 'teal', 'black', 'noir', 'onyx', 'magenta',
   'coral', 'rose', 'red', 'green', 'grey', 'gray', 'white', 'silver', 'gold',
   'peach', 'lilac', 'violet', 'aqua', 'ombre',
+  // Staging / composition vocabulary (ticket #15409, second occurrence of the
+  // #11731 class: an ordinary word from the image-brief's own shared prompt
+  // scaffold reads as a distinctive brand/model token when it happens to
+  // match an arbitrary SKU). Run 1438: "edge" in "At the lower edge of the
+  // frame" matched bathmate-edge-pro, a product the hero never depicted.
+  'edge', 'frame', 'corner', 'fold', 'light', 'shadow', 'surface', 'paper',
+  'grain', 'format', 'angle', 'highlight', 'background', 'daylight',
 ])
 
 /** Lowercase, replace non-alphanumerics with spaces, collapse whitespace. */
@@ -176,10 +192,24 @@ export function findHeroEmbedMismatches(
     const embedSet = new Set(post.embedHandles.map((h) => h.toLowerCase().trim()).filter(Boolean))
 
     // Distinctive tokens of every product this post DOES embed — used to
-    // suppress sibling-SKU false positives.
+    // suppress sibling-SKU false positives. Each embedded product contributes
+    // TWO token sets, not one: its Shopify (Emma-rewritten) title AND its
+    // manufacturer-facing title, since a hero prompt may describe the
+    // embedded product using either vocabulary (ticket #15409: the embedded
+    // product's Emma title "Glans Massager" carries none of "penis massager",
+    // the manufacturer's own term, which a sibling SKU's un-rewritten title
+    // shares in full).
     const embeddedTokenSets = productsWithTokens
       .filter(({ p }) => embedSet.has(p.handle.toLowerCase()))
-      .map(({ dt }) => new Set(dt))
+      .flatMap(({ p, dt }) => {
+        const sets = [new Set(dt)]
+        const manufacturerName = p.manufacturerTitle?.trim()
+        if (manufacturerName) {
+          const manufacturerDt = distinctiveTokens(normalize(manufacturerName))
+          if (manufacturerDt.length > 0) sets.push(new Set(manufacturerDt))
+        }
+        return sets
+      })
 
     for (const { p, dt, ct } of productsWithTokens) {
       if (embedSet.has(p.handle.toLowerCase())) continue

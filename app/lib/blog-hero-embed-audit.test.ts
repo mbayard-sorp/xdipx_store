@@ -305,6 +305,99 @@ describe('zero-distinctive-token title falls back to handle tokens (#12865)', ()
   })
 })
 
+// Ticket #15409 (run 1438, second occurrence of the #11731 class): a generic
+// staging/composition word from the image-brief's own shared prompt scaffold
+// reads as a distinctive brand/model token when it collides with an
+// unrelated SKU's name, and the sibling-SKU subset guardrail only compared
+// against an embedded product's Emma-rewritten Shopify title, missing a
+// sibling whose un-rewritten manufacturer title shares the colliding word.
+describe('generic staging-word false positives (#15409, run 1438)', () => {
+  it('"edge" in a staging phrase does not match an unrelated SKU named Edge Pro', () => {
+    const catalog: CatalogProduct[] = [
+      { handle: 'bathmate-edge-pro', title: 'Edge Pro Rechargeable Masturbator' },
+    ]
+    const posts: AuditBlogPost[] = [
+      {
+        slug: 'what-is-a-gyroscope-sex-toy',
+        heroImageAlt: 'A gyroscope-style massager in warm coral light',
+        imagePrompt:
+          'Editorial product photography. At the lower edge of the frame, a rechargeable ' +
+          'gyroscope-style toy rests on paper. Warm coral light, soft shadow, grain, daylight tone.',
+        embedHandles: [],
+      },
+    ]
+    expect(findHeroEmbedMismatches(posts, catalog)).toEqual([])
+  })
+
+  it('a manufacturer-term hero for the embedded product does not flag a sibling SKU under the raw manufacturer title', () => {
+    const catalog: CatalogProduct[] = [
+      {
+        handle: 'gush-2',
+        title: 'Remote-Controlled Gush 2 Vibrating Penis Massager',
+      },
+      {
+        handle: 'lovense-gush-2-motion',
+        title: 'Glans Massager',
+        manufacturerTitle: 'Remote-Controlled Gush 2 Vibrating Penis Massager',
+      },
+    ]
+    const posts: AuditBlogPost[] = [
+      {
+        slug: 'some-other-post',
+        heroImageAlt: 'A glans massager in warm coral light',
+        imagePrompt:
+          'Editorial product photography of a remote-controlled gush vibrating penis massager, ' +
+          'warm coral light.',
+        embedHandles: ['lovense-gush-2-motion'],
+      },
+    ]
+    expect(findHeroEmbedMismatches(posts, catalog)).toEqual([])
+  })
+
+  it('still flags the sibling SKU off-embed when no embedded product shares its manufacturer name', () => {
+    const catalog: CatalogProduct[] = [
+      { handle: 'gush-2', title: 'Remote-Controlled Gush 2 Vibrating Penis Massager' },
+      { handle: 'magic-wand-mini', title: 'Magic Wand Mini' },
+    ]
+    const posts: AuditBlogPost[] = [
+      {
+        slug: 'p',
+        heroImageAlt: 'a remote-controlled gush vibrating penis massager on white',
+        imagePrompt: null,
+        embedHandles: ['magic-wand-mini'],
+      },
+    ]
+    const hits = findHeroEmbedMismatches(posts, catalog)
+    expect(hits.map((h) => h.matchedHandle)).toContain('gush-2')
+  })
+
+  it('run 1438\'s original hero prompt is OK against the real check-hero-embed-match.ts flow', () => {
+    // Reproduces the exact DONE WHEN (d): the original hero prompt containing
+    // both "penis massager" and "the lower edge of the frame" must clear
+    // cleanly once the embedded product is correctly recognized.
+    const catalog: CatalogProduct[] = [
+      { handle: 'bathmate-edge-pro', title: 'Edge Pro Rechargeable Masturbator' },
+      { handle: 'gush-2', title: 'Remote-Controlled Gush 2 Vibrating Penis Massager' },
+      {
+        handle: 'lovense-gush-2-motion',
+        title: 'Glans Massager',
+        manufacturerTitle: 'Remote-Controlled Gush 2 Vibrating Penis Massager',
+      },
+    ]
+    const posts: AuditBlogPost[] = [
+      {
+        slug: 'what-is-a-gyroscope-sex-toy',
+        heroImageAlt: 'A glans massager in warm coral light',
+        imagePrompt:
+          'Editorial product photography of a remote-controlled gush vibrating penis massager. ' +
+          'At the lower edge of the frame, warm coral light, soft shadow, grain, daylight tone.',
+        embedHandles: ['lovense-gush-2-motion'],
+      },
+    ]
+    expect(findHeroEmbedMismatches(posts, catalog)).toEqual([])
+  })
+})
+
 // Ticket #11543, THIRD-PLUS OCCURRENCE: heroImageAlt is a customer-facing,
 // LLM-ingested string no gate reviews, and it routinely carries spec claims
 // whose only source is our own Emma-rewritten Shopify title — which the
