@@ -4169,6 +4169,48 @@ export async function createShopifyProductFromFeed(product: ProductScore, handle
   return String(res.product.id)
 }
 
+/**
+ * Push a fresh absolute available quantity to a product's first variant
+ * (ticket #14756). `createShopifyProductFromFeed` sets `inventory_quantity`
+ * once, at import time; enrichment can take 2+ days before a product
+ * actually goes live, and nothing re-reads the feed in between, so a SKU
+ * whose stock changed since import (either direction) goes live carrying a
+ * stale number — confirmed live: Pipedream Moist Water-Based Lube's Nalpac
+ * feed qty read 2137 while Shopify's totalInventory sat at 0.
+ *
+ * Resolves the variant's inventory_item_id, then the location(s) it is
+ * already stocked at (set at creation, so always at least one), and sets
+ * the absolute quantity at each via the same `inventory_levels/set.json`
+ * REST endpoint the rest of this file already uses for inventory writes.
+ * No-ops quietly (not an error) when the product has no resolvable variant
+ * or inventory item — this is a best-effort resync, never a reason to fail
+ * the publish that already succeeded.
+ */
+export async function syncVariantInventoryQuantity(numericProductId: string, availableQty: number): Promise<void> {
+  const id = numericProductId.replace('gid://shopify/Product/', '')
+  const productRes = await shopifyAdmin<{
+    product: { variants: { inventory_item_id: number | null }[] } | null
+  }>(`/products/${id}.json?fields=id,variants`, 'GET')
+
+  const inventoryItemId = productRes.product?.variants[0]?.inventory_item_id
+  if (!inventoryItemId) return
+
+  const levelsRes = await shopifyAdmin<{
+    inventory_levels: { location_id: number }[]
+  }>(`/inventory_levels.json?inventory_item_ids=${inventoryItemId}`, 'GET')
+
+  const locationIds = levelsRes.inventory_levels.map(l => l.location_id)
+  if (locationIds.length === 0) return
+
+  for (const locationId of locationIds) {
+    await shopifyAdmin('/inventory_levels/set.json', 'POST', {
+      location_id:       locationId,
+      inventory_item_id: inventoryItemId,
+      available:         availableQty,
+    })
+  }
+}
+
 /** Read a product's Shopify product_type. Returns null when unset. */
 export async function getShopifyProductType(numericProductId: string): Promise<string | null> {
   const res = await shopifyAdmin<{ product: { id: number; product_type: string } }>(
