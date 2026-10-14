@@ -64,7 +64,8 @@ async function main(): Promise<void> {
     sanity.fetch<CatalogProduct[]>(
       `*[_type == "productPage" && archived != true && defined(shopifyHandle)]{
         "handle": shopifyHandle,
-        title
+        title,
+        "manufacturerTitle": originalTitle
       }`,
     ),
   ])
