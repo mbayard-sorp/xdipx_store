@@ -425,4 +425,11 @@ Keep entries terse and factual. This file is content/documentation on the agent-
 - **Evidence:** run 1410; `rails-fingerprint --assert-changed rails,hero,couples` OK; render-truth PASS at origin (`?variant=b&rt=`, MISS); Step 2c surfaces changed: hero (product), rails (product selection), mosaic (imagery), promo (imagery), couples (imagery + copy), announcement (copy); new assets image-a0c2839e…, image-f8717aec…, image-07c13f3d…, image-ca331bce… (6 generated, 2 replaced after a ground-lock self-review).
 - **Appended by:** homepage-orchestrator, run 1410.
 
+### 2026-10-14 · Routine A (run 1431)
+
+- **What changed:** hero re-pinned to Aneros Helix Syn V with new emmaHero copy; rail 3 relined from last week's couples lineup to a prostate rail (See-all `/collections/prostate-toys`); harness rail re-led with the Bend-Over beginner and intermediate kits (See-all removed, no destination holds its products); couples band new art, copy and CTA (Lovense Hush 2 small); Discover You promo new art and copy; wayfinder tile wf65c new art and label ("Lace, then less", `/collections/lingerie`); ticker line a1003m1; categoryPage-body and categoryPage-wear deep refresh (masthead headline, standfirst and new art, shelf intros, body lubricants pin).
+- **Why:** calendar row 40, Backdoor 101 week, day 3; 3-day page cycle day 2 (body + wear). Vector and Hush 2 medium were rejected as leads because their primaries are packaging shots.
+- **Evidence:** run 1431; Step 2c surfaces changed: hero (product), rails (product selection), couples (imagery + copy), promo (imagery + copy), mosaic (imagery + label), announcement (copy); new assets image-854645f9…, image-776dfad3…, image-f9c82fa5…, image-b76556ef…, image-0c7b9c49… (5 generated, 0 reused).
+- **Appended by:** homepage-orchestrator, run 1431.
+
 <!-- Newest entries appended above this line by each routine's changelog step. -->
