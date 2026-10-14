@@ -99,6 +99,76 @@ describe('priority ordering', () => {
   })
 })
 
+// Ticket #15376, follow-up to #14756: Nalpac cross-lists some unambiguous
+// lubricants and vibrator kits under unrelated vibrator/ring shape
+// Sub-Category values. These pin the three live-confirmed mismatches plus the
+// cock-ring/vibrator-kit collision, and the precedents that prove a blanket
+// fix would have broken real products (a silicone dildo also tagged
+// Silicone-Based; a genuine bullet-equipped vibrating cock ring also tagged
+// Vibrator Kits; an Arousal Gel also branded "Personal Lubricant").
+describe('category/title collisions (#15376)', () => {
+  it('a lube-base category plus a colliding shape category resolves to Lubricant when the title says so (nalpac-sku 102077)', () => {
+    expect(
+      derive(['Finger and Clit', 'Silicone-Based'], 'Moist Silicone Personal Lubricant 1 oz.').productType,
+    ).toBe('Lubricant')
+  })
+
+  it('Dual Action and Rabbits plus a lube-base category resolves to Lubricant when the title says so (nalpac-sku 101685)', () => {
+    expect(
+      derive(['Dual Action and Rabbits', 'Silicone-Based'], 'Sex Grease Silicone-Based Personal Lubricant 4 oz')
+        .productType,
+    ).toBe('Lubricant')
+  })
+
+  it('Vibrating Cockrings plus a lube-base category resolves to Lubricant when the title says so (nalpac-sku 102293)', () => {
+    expect(
+      derive(['Silicone-Based', 'Vibrating Cockrings'], 'Sex Sauce Thick Silicone Lubricant 1.69 oz').productType,
+    ).toBe('Lubricant')
+  })
+
+  it('does NOT flip to Lubricant without the title corroboration (precision guard)', () => {
+    expect(derive(['Finger and Clit', 'Silicone-Based'], 'Some Toy').productType).toBe('Clitoral Vibrator')
+  })
+
+  it('a real silicone dildo keeps its type — the lube-base category is not trustworthy alone', () => {
+    expect(
+      derive(
+        ['Realistic', 'Silicone Dildos and Dongs', 'Silicone-Based', 'Strap-on Compatible'],
+        'K-Pop Idols Aren Realistic Silicone Dildo with Balls',
+      ).productType,
+    ).toBe('Realistic Dildo')
+  })
+
+  it('a real Arousal Gel keeps its type even when branded "Personal Lubricant" — the colliding-shape set is scoped to toy/ring aliases, not Arousal Gel', () => {
+    expect(
+      derive(
+        ['Arousal Gels Creams and Balms', 'Female Arousal', 'Silicone-Based'],
+        'Platinum Silicone-Based Personal Lubricant 3.1 oz.',
+      ).productType,
+    ).toBe('Arousal Gel')
+  })
+
+  it('Classic + Cockring Sets + Vibrator Kits resolves to the generic Vibrator bucket, not Cock Ring (nalpac-sku 102053)', () => {
+    expect(
+      derive(['Classic', 'Cockring Sets', 'Vibrator Kits'], 'Lushe Egg & Textured Interchangeable Vibrator Purple')
+        .productType,
+    ).toBe('Vibrator')
+  })
+
+  it('a genuine vibrating cock ring keeps Cock Ring even with Vibrator Kits present (nalpac-sku 62602)', () => {
+    expect(
+      derive(
+        ['Bullets and Eggs', 'Couples and Wearable', 'Vibrating Cockrings', 'Vibrator Kits'],
+        'Fantasy C-Ringz Duo-Vibrating Super Ring Dual Bullet Purple',
+      ).productType,
+    ).toBe('Cock Ring')
+  })
+
+  it('Classic + Cockring Sets alone (no Vibrator Kits) still resolves to Cock Ring as before', () => {
+    expect(derive(['Classic', 'Cockring Sets']).productType).toBe('Cock Ring')
+  })
+})
+
 describe('modifier and noise categories', () => {
   it('pure modifiers alone do not resolve (fall to title)', () => {
     expect(derive(['Strap-on Compatible'], 'Ripple Silicone Dildo'))

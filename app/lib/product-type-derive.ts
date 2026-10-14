@@ -92,6 +92,40 @@ function norm(s: string): string {
 }
 
 /**
+ * Lube base-material Sub-Category values (Nalpac's Lubricants > Water-Based /
+ * Silicone-Based / etc). NOT trustworthy alone: Nalpac also tags these onto
+ * toy material (a silicone dildo carries "Silicone-Based" as a material tag,
+ * confirmed live — nalpac-sku 100796 "K-Pop Idols Aren ... Silicone Dildo").
+ * Only reliable paired with both an unambiguous colliding shape category AND
+ * the product's own title plainly saying "lube"/"lubricant" — see
+ * lubeDespiteCollidingShapeCategory below.
+ */
+const LUBE_BASE_ALIASES = new Set(['water based', 'silicone based', 'hybrid', 'oil based', 'flavored', 'natural'])
+
+/**
+ * Vibrator/ring shape Sub-Category values Nalpac has been confirmed to also
+ * cross-list onto unambiguous lubricants (ticket #15376, follow-up to
+ * #14756): nalpac-sku 102077 "Moist Silicone Personal Lubricant" also carries
+ * Finger and Clit; 101685 "Sex Grease Silicone-Based Personal Lubricant" also
+ * carries Dual Action and Rabbits; 102293 "Sex Sauce Thick Silicone
+ * Lubricant" also carries Vibrating Cockrings. A product cannot physically be
+ * both, so when one of these co-occurs with a lube base-material category
+ * (above) AND the title plainly says lube/lubricant, the title+category pair
+ * together are reliable where either alone is not (a title check alone would
+ * also flip genuinely-distinct Nalpac categories like Arousal Gel, which some
+ * products also brand as "Personal Lubricant").
+ */
+const LUBE_COLLIDING_SHAPE_ALIASES = new Set(['finger and clit', 'dual action and rabbits', 'vibrating cockrings'])
+
+/** True when the categories+title pair unambiguously describes a lubricant
+ *  mis-tagged under a vibrator/ring shape category — see the two sets above. */
+function lubeDespiteCollidingShapeCategory(cats: ReadonlySet<string>, normalizedTitle: string): boolean {
+  if (!/\b(lube|lubricant)\b/.test(normalizedTitle)) return false
+  if (![...LUBE_BASE_ALIASES].some(a => cats.has(a))) return false
+  return [...LUBE_COLLIDING_SHAPE_ALIASES].some(a => cats.has(a))
+}
+
+/**
  * Priority-ordered category rules. For each rule (top to bottom), if ANY of the
  * product's normalized categories equals one of the rule's aliases, that rule's
  * type wins. Order encodes specificity: e.g. "Vibrating Cockrings" must beat
@@ -102,7 +136,7 @@ function norm(s: string): string {
  * tags, program tags like abs-altitude-2025) are deliberately absent — they
  * never determine a type on their own.
  */
-const CATEGORY_RULES: ReadonlyArray<{ type: string; aliases: string[] }> = [
+const CATEGORY_RULES: ReadonlyArray<{ type: string; aliases: string[]; unless?: string[] }> = [
   // Gift card first — unambiguous.
   { type: 'Gift Card', aliases: ['gift card', 'gift cards'] },
 
@@ -124,13 +158,23 @@ const CATEGORY_RULES: ReadonlyArray<{ type: string; aliases: string[] }> = [
 
   // Cock rings — before couples categories they co-occur with.
   { type: 'Cock Ring', aliases: [
-    'vibrating cockrings', 'cockring sets', 'cock rings',
+    'vibrating cockrings', 'cock rings',
     'straps and adjustable cockrings', 'cock and ball slings', 'ball stretchers',
     'slings',
-    // "Classic" is Nalpac's Cockrings > Classic subcategory — it never
-    // co-occurs with non-ring categories in the live feed data.
-    'classic',
   ] },
+  // "Classic" and "Cockring Sets" are Nalpac's Cockrings > Classic / Cockring
+  // Sets subcategories, assumed above to never co-occur with non-ring
+  // categories in the live feed data. Ticket #15376 (follow-up to #14756)
+  // disproved that for "Vibrator Kits" specifically: nalpac-sku 102053
+  // "Lushe Egg & Textured Interchangeable Vibrator" carries Classic +
+  // Cockring Sets + Vibrator Kits with no ring in the kit at all. A genuine
+  // vibrating cock ring that also carries Vibrator Kits (nalpac-sku 62602,
+  // bullet-equipped "Fantasy C-Ringz") always also carries an explicit ring
+  // alias (Vibrating Cockrings, above), so gating only these two aliases on
+  // the absence of Vibrator Kits — rather than dropping them — keeps every
+  // other live Classic/Cockring-Sets product (13 of 14 in the catalog at
+  // filing time) matching exactly as before.
+  { type: 'Cock Ring', aliases: ['cockring sets', 'classic'], unless: ['vibrator kits'] },
 
   // Anal — specific before generic.
   { type: 'Prostate Massager', aliases: ['prostate toys', 'prostate'] },
@@ -320,15 +364,20 @@ export function deriveProductType(input: DeriveProductTypeInput): DeriveProductT
       .filter(Boolean),
   )
 
+  const title = norm(input.title)
+
   if (cats.size > 0) {
+    if (lubeDespiteCollidingShapeCategory(cats, title)) {
+      return { productType: 'Lubricant', matchedBy: 'category' }
+    }
     for (const rule of CATEGORY_RULES) {
+      if (rule.unless && rule.unless.some(a => cats.has(a))) continue
       if (rule.aliases.some(a => cats.has(a))) {
         return { productType: rule.type, matchedBy: 'category' }
       }
     }
   }
 
-  const title = norm(input.title)
   if (title) {
     for (const rule of TITLE_RULES) {
       if (rule.pattern.test(title)) {
