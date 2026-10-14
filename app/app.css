@@ -421,7 +421,10 @@ em.brand {
    57  CookieConsent banner -- deliberately above both the tab bar (55)
        and MobileExploreMenu's flyout dialog (56) so it is never visually
        clipped by either, whichever the user is interacting with; its own
-       buttons must always be fully tappable
+       buttons must always be fully tappable. Ticket #15385: while the
+       banner is open, the tab bar (55) and AskEmmaWidget's launcher (55)
+       hide themselves via the `:has()` rule below, rather than the banner
+       growing a bigger z-index workaround -- see that rule's comment.
    58  AccountMobileTabs (account area only)
    59  AccountMobileHeader (account area only), CartDrawer's own backdrop
        (Navbar.tsx, cart-open state) -- unrelated components, coincidental
@@ -435,3 +438,26 @@ em.brand {
    70  Navbar account dropdown
    80  SearchBar desktop results dropdown and mobile search overlay
    ──────────────────────────────────────────────────────────────────── */
+
+/* ─── CookieConsent clears the mobile chrome it competes with (ticket
+   #15385) ───────────────────────────────────────────────────────────────
+   Design-critic (run 1435, scripts/design-snapshots.ts captures at
+   375/768/1440) found the banner covering the homepage hero's discovery
+   chip row ("Where do you want to start?") at 375px on first paint, with
+   no stored consent choice -- i.e. on almost every first session. Measured
+   live (DOM rects): the chip row's own bottom sits only ~72px above the
+   mobile tab bar's reserved clearance, which is less room than the
+   banner's two-choice content needs at any reasonable size, so shrinking
+   the banner alone cannot clear it without also widening the reserved
+   floor. The tab bar and AskEmmaWidget's floating launcher are both
+   redundant, dismissable chrome while a modal consent choice (the banner
+   is `role="dialog" aria-modal="true"`) is pending, so they yield the
+   space instead: hidden via `:has()` while the dialog is in the DOM, with
+   no JS coordination and no change to CookieConsent.tsx's own consent
+   logic, timing, or storage. Scoped to exactly these two selectors, not a
+   blanket "hide all fixed chrome", so it cannot silently swallow some
+   future unrelated overlay. */
+body:has([role="dialog"][aria-label="Cookie consent"]) nav[aria-label="Browse categories"],
+body:has([role="dialog"][aria-label="Cookie consent"]) button[aria-label$="chat with Emma"] {
+  display: none;
+}
