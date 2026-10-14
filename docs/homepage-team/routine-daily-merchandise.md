@@ -8,6 +8,13 @@ This routine runs on the **Max subscription** — it does its own reasoning and 
 **data** and **spend logging**. It must never call the site's Anthropic-keyed endpoints (that flips
 free Max work to metered).
 
+**Cold checkout: run `npm install` before the first `npx tsx` call.** (ticket #15226) A fresh cloud
+checkout has no `node_modules`, so a routine that only discovers this mid-run pays the install out
+of its own turn budget instead of its actual steps — this routine's own run 1389 (2026-10-12) burned
+its whole budget this way before reaching Step 3 picks, the incident that got this exact fix added to
+every sibling daily routine except this one. Run `[ -d node_modules ] || npm install` once, before
+Step 0, so the cost is budgeted rather than discovered.
+
 ---
 
 ## Before Step 0 — Voice charter (mandatory, before any content is generated)
@@ -709,6 +716,8 @@ on 3+ live products (tags must come from the live vocab — `scripts/dump-discov
 Unpublish everything else (unpublished docs keep their drafts, so this is reversible). If nothing
 fits the theme, draft a new preset with emma-copywriter (label + narratorCopy voice-gated, tags from
 live vocab only), verify matches, publish it in place of one of the 5.
+
+**Zero-live baseline (ticket #8406):** a published count of 0 is not merely stale or theme-mismatched, it is a missing baseline -- there is nothing live to re-curate FROM, and the theme/hero-change trigger above never fires if the theme hasn't changed. Runs 714 and 772 each found 0 of 34 `emmaPreset` docs live and only logged it as a finding. When the published count is 0 at Step 5, treat it as a one-time seeding gap: seed and publish up to 5 theme-appropriate presets from the draft pool this run (same verification as above -- 3+ live products per preset, tags from `scripts/dump-discovery-vocab.ts`), rather than waiting for the next theme change to discover it again.
 
 **Theme-change checkpoint (mandatory, not optional re-curation).** On any day Step 1c changed this
 week's theme, explicitly verify, and record the verification: at most 5 `emmaPreset` docs are
