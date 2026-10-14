@@ -2168,3 +2168,122 @@ case 2, is raised as a question for the doctrine owner and is not resolved here.
 
 With GA4 far below the 300-sessions/week threshold, this cycle banks the
 imagery-generation items as design capital and spends only on the certain fixes.
+
+---
+
+## Delta, 2026-10-14 (Routine B run 1435)
+
+Three real captures, five refusals, all recorded as results rather than dropped.
+Fetched and read this run: `maude.co`, `getmaude.com`, `www.glossier.com`.
+Refused: `www.dame.com` (429), `vush.com` (DNS, `EAI_AGAIN`), `vush.com.au`
+(503), `www.lovehoney.com` (403), `www.sextoy.com` (429),
+`spectrumboutique.com` (429), `www.aesop.com` (403). Nothing below is quoted or
+inferred from memory; where a bench row went unfetched this delta says so and
+carries last capture's finding forward unchanged rather than refreshing it.
+
+### Bench-list correction, found by fetching rather than assuming
+
+**The Maude row resolves to a parked domain.** `maude.co` is not the brand: it
+serves a Spaceship domain-sale page listing `maude.co` at $4,999, with payment
+icons and a Phoenix address. No storefront, no grid. The live brand is
+`getmaude.com`, which fetched clean. Doctrine §7 names the reference as
+"**Maude**" without a URL, so this is not a doctrine defect, but any agent
+resolving that row by guessing the obvious domain lands on a sale page and can
+score it without noticing. Recorded here so the next cycle resolves it to
+`getmaude.com` directly. The same class of error as this cycle's own defect: an
+instrument that answers confidently while pointed at the wrong thing.
+
+### The finding that matters this cycle, and it is the inverse of our own bug
+
+This cycle fixed a lead surface that **excludes products the customer can buy**.
+Glossier's homepage, captured today, shows the same root cause running the other
+way: it **includes products the customer cannot buy**. Its one product grid,
+labeled "SHOP ALL", renders eight cards holding four unique products, and every
+card is marked "Coming soon" while also carrying both an "Add to bag" and a
+"Notify me" button. Three defects in one module, and all three are the same
+mistake we just paid for: the grid's membership rule is not derived from the one
+signal that says whether this product is purchasable right now.
+
+1. **Membership not gated on purchasability.** Every card unbuyable, none
+   labeled sold out, and the affordance contradicts the state.
+2. **No dedupe.** Four products filling eight slots. We already have
+   `dedupeByFamily()` doing exactly this job on the curiosity shelf, and the
+   largest-name brand on the bench does not.
+3. **Ranking asserted on one card only.** A single "Best Seller" tag inside a
+   set that is not a ranked set.
+
+`getmaude.com` is the counter-example and it is disciplined: eight best-seller
+cards plus five category grids, every card purchasable, and exactly one
+availability label anywhere on the page ("back in stock" on oil no. 0, on a
+product that is in fact buyable). No sold-out product in any featured grid, no
+low-stock badge, no waitlist. It also prints a real number in the hero
+("600,000+ nightstands upgraded") rather than a star rating, which is the
+honest-proof pattern doctrine §6 already requires of us.
+
+### Adopted
+
+1. **Purchasability is a membership rule, not a badge.** Both sites confirm the
+   discipline from opposite sides: Maude's featured grids contain only buyable
+   products and carry almost no availability chrome, while Glossier badges state
+   on a card it should not have seated. Our shelf already takes this position
+   (`MIN_SHELF_STOCK`, plus `status:active` on the index); this cycle's change
+   completes it by making the liveness half read the field that is actually
+   maintained. Standing rule, no markup change.
+2. **Keep the dedupe, and keep it where membership is decided.** Glossier's
+   repeat-filled grid is the measured cost of not having one. `dedupeByFamily()`
+   stays non-optional on any auto-generated set. No change required, recorded as
+   confirmation.
+3. **Count-based proof over rating-based proof while we have no reviews.**
+   Maude's hero number is a claim it can back. Ours cannot print stars yet
+   (backlog item 8 hard-suppresses them below threshold, correctly), and a
+   backable count is the honest alternative. Owner judgment on which count we
+   can stand behind, so it goes no further than this note.
+
+### Rejected
+
+- **An availability badge system on cards.** Tempting after reading Glossier,
+  and rejected: a badge is a worse answer than exclusion, because it spends card
+  real estate to explain why a slot was wasted. Exclusion is cheaper and the
+  shelf already does it.
+- **Pre-release / "Coming soon" merchandising in a lead grid.** Rejected
+  outright. We dropship, we hold no pre-release inventory, and a card the
+  visitor cannot act on breaks mission brief §1's rule that every module must
+  earn a click to something specific.
+- **A "View all" on every grid, Maude-style.** Rejected as a blanket pattern,
+  because ticket #4270 and mission brief §1 bind every See-all to a destination
+  that CONTAINS the module's set. Maude can link all six because its grids are
+  category-shaped. Ours are mood-shaped and frequently have no such collection,
+  and the standing answer there is to ship NO See-all rather than a plausible
+  one. This is a case where the field's pattern is right for the field and wrong
+  for us, which is worth recording as such.
+- **Discount chrome, urgency banners, coupon strips, scarcity-as-fact.**
+  Standing rejects. Re-measured absent on `getmaude.com` and absent on
+  `www.glossier.com` (its only strip is a free-shipping threshold, which is a
+  fact, not a countdown). Unchanged.
+
+### The one thing we will do that none of them do
+
+**Derive the lead surface's membership from the lifecycle field we actually
+maintain, in code, and refuse to trust the editorial one.** Neither site
+captured today has a visible rule separating "this product is categorized as
+retired" from "this product cannot be bought", and Glossier's grid is what that
+looks like when it fails. We now have that separation written down and tested in
+one place, and the field that drives it is written by a nightly sweep rather
+than by a human remembering to retype a product.
+
+### IA fence check
+
+This delta changes no markup and proposes none. Adopted items 1 and 2 are
+standing rules satisfied by existing code; adopted item 3 stops at an owner
+question. No new section type, no Sanity schema change, no new URL or route, no
+change to the locked Nº 01 to Nº 11 shell, so nothing goes to `tech-architect`
+this cycle. The two-link `/discover` cap is **not re-measured this run** and is
+therefore carried forward as last capture left it (breached at three, already
+handed to `homepage-ia` and Routine A); this delta adds no `/discover` link. The
+retired-route denylist is untouched. The doctrine §4 item 4 boundary question
+raised in the previous delta stays open with the doctrine owner and is not
+resolved here.
+
+Traffic is still far below the 300-sessions/week weighting threshold, so the
+imagery and proof items above stay banked as design capital and this cycle spent
+only on the one certain fix.
