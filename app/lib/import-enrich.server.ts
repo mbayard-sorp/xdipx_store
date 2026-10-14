@@ -53,8 +53,10 @@ import {
   appendProductTag,
   getHandleByProductId,
   resolveAndPersistBareProductReference,
+  syncVariantInventoryQuantity,
   type ProductPageDoc,
 } from '~/lib/shopify.server'
+import { fetchAllNalpacFeeds } from '~/lib/nalpac-feeds.server'
 import { createSuggestionDetailed } from '~/lib/team.server'
 import { upsertProductPage } from '~/lib/sanity.server'
 import { ensureProductTypeForPublish } from '~/lib/product-type.server'
@@ -1077,6 +1079,21 @@ export async function publishEnrichedProducts(): Promise<{ published: number; fa
       isNull(importCandidates.publishedAt),
     ))
 
+  // Ticket #14756: inventory_quantity is set once at import time
+  // (createShopifyProductFromFeed) and nothing re-reads the feed before a
+  // product actually goes live, so a batch whose enrichment took 2+ days
+  // can publish carrying a stale quantity in either direction. Fetched once
+  // per publish batch (KV-cached by nalpac-feeds.server.ts, same as the
+  // cost-sync pass), not once per product. Best-effort: a feed-fetch hiccup
+  // must never block publishing itself, only the resync for this batch.
+  let freshQtyBySku = new Map<string, number | null>()
+  try {
+    const { snapshots } = await fetchAllNalpacFeeds()
+    freshQtyBySku = new Map([...snapshots].map(([sku, snap]) => [sku, snap.qty]))
+  } catch (err) {
+    console.warn('[import-enrich] Nalpac feed fetch for publish-time inventory resync failed (non-blocking):', err instanceof Error ? err.message : err)
+  }
+
   let published = 0
   let failed = 0
   // Collected for the social team's new-product suggestion below (#3736,
@@ -1103,6 +1120,22 @@ export async function publishEnrichedProducts(): Promise<{ published: number; fa
       })
 
       await activateShopifyProduct(r.productId)
+
+      // Ticket #14756: resync inventory from the batch's fresh feed read
+      // (see freshQtyBySku above) right as the product goes live, so it
+      // never ships carrying whatever quantity happened to be true at
+      // import time, potentially days earlier. Only writes when the SKU is
+      // still in today's feed with a known quantity; same isolated
+      // try/catch pattern as the tag below — a resync hiccup must never
+      // block the publishedAt stamp, since the activation already succeeded.
+      const freshQty = freshQtyBySku.get(r.sku)
+      if (freshQty != null) {
+        try {
+          await syncVariantInventoryQuantity(r.productId, freshQty)
+        } catch (invErr) {
+          console.warn(`[import-enrich] syncVariantInventoryQuantity failed for product ${r.productId} (candidate ${r.id}):`, invErr instanceof Error ? invErr.message : invErr)
+        }
+      }
 
       // WS2b — tag the newly-activated product as a sourcing signal for the
       // daily merchandiser (opportunistic "New Arrivals" rail) and a future
