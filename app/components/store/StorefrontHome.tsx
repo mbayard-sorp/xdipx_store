@@ -368,12 +368,26 @@ function Hero({
             </h1>
           )}
 
+          {/* Ticket #15384: this used to carry `line-clamp-3` at mobile widths.
+              The hero body is written as three beats (sensory opening, arousal
+              moving toward release, a temptation closer — docs/emma-voice.md,
+              bound to this field at dial 9 by mission brief §8), and a 3-line
+              clamp cut the closer entirely on real copy (confirmed in
+              production: body clipped mid-second-sentence at 375px). Raising
+              the clamp to a fixed line count doesn't help — this copy's three
+              beats need 6 lines regardless of the cap, so any smaller number
+              still drops the closer. Measured the alternative (no clamp) at
+              375x812 (iPhone X/11/12-mini-class): the product card's top edge
+              lands just below that fold instead of inside it, versus fully
+              invisible before. Accepting that trade — a charter-bound field
+              not silently losing its mandated closer outweighs the product
+              image sometimes needing one scroll on shorter mobile screens. */}
           {emmaHero?.body ? (
-            <p className="mt-5 max-w-[46ch] text-[16.5px] leading-relaxed text-ink-3 line-clamp-3 md:mt-6 md:line-clamp-none" style={BODY}>
+            <p className="mt-5 max-w-[46ch] text-[16.5px] leading-relaxed text-ink-3 md:mt-6" style={BODY}>
               {emmaHero.body}
             </p>
           ) : (
-            <p className="mt-5 max-w-[46ch] text-[16.5px] leading-relaxed text-ink-3 line-clamp-3 md:mt-6 md:line-clamp-none" style={BODY}>
+            <p className="mt-5 max-w-[46ch] text-[16.5px] leading-relaxed text-ink-3 md:mt-6" style={BODY}>
               A short, checked selection instead of a wall of options. Start with the one below, or
               tell us what you're after.
             </p>
