@@ -59,6 +59,14 @@ import {
 //     struck price + badge on the MAP rule (ticket #3675). v8 entries lack it;
 //     the gate reads a missing value as "no MAP", i.e. the pre-fix behavior, so
 //     the bump forces a rebuild that populates the field for MAP-locked SKUs.
+// v10: added `discontinuedAt` (xdipx.discontinued_at) so the curiosity shelf
+//     can test the owner's canonical lifecycle STATE instead of the editorial
+//     `productType` string (#14925). v9 entries lack the field, and a missing
+//     value reads as `null`, i.e. "not discontinued" — which is the OPPOSITE of
+//     safe here, because it would let the shelf treat a genuinely discontinued
+//     product as live until the rebuild lands. Hence the bump rather than a
+//     tolerant read: the shelf must never run this test against a payload that
+//     structurally cannot answer it.
 /**
  * Exported so the SEO coverage gauge (seo-daily.server.ts) measures the SAME
  * payload the storefront serves. It previously hardcoded `version = 'v7'`, so
@@ -67,7 +75,7 @@ import {
  * A stale number that looks live is worse than no number, so the version now
  * has exactly one definition and a bump moves every reader at once.
  */
-export const INDEX_VERSION = 'v9'
+export const INDEX_VERSION = 'v10'
 export const INDEX_KEY = `discovery:index:${INDEX_VERSION}`
 export const INDEX_TTL_SECONDS = 60 * 60 * 24 // 24h — matches vocab TTL; bust explicitly via invalidateDiscoveryIndex() on tag/catalog changes
 
@@ -269,6 +277,7 @@ interface AdminProductNode {
   originalPriceRaw: { value: string | null } | null
   mapPriceRaw:      { value: string | null } | null
   productTypeDial:  { value: string | null } | null
+  discontinuedAtRaw:{ value: string | null } | null
   moodTagsRaw:      { value: string | null } | null
   audienceTagsRaw:  { value: string | null } | null
   mattersTagsRaw:   { value: string | null } | null
@@ -356,6 +365,7 @@ const PRODUCTS_PAGE_QUERY = /* GraphQL */ `
         originalPriceRaw: metafield(namespace: "xdipx", key: "original_price")     { value }
         mapPriceRaw:      metafield(namespace: "xdipx", key: "map_price")          { value }
         productTypeDial:  metafield(namespace: "xdipx", key: "product_type_dial") { value }
+        discontinuedAtRaw: metafield(namespace: "xdipx", key: "discontinued_at")   { value }
         moodTagsRaw:      metafield(namespace: "xdipx", key: "mood_tags")          { value }
         audienceTagsRaw:  metafield(namespace: "xdipx", key: "audience_tags")      { value }
         mattersTagsRaw:   metafield(namespace: "xdipx", key: "matters_tags")       { value }
@@ -404,6 +414,10 @@ function nodeToDiscoveryProduct(
   // rules ("hide everything with type Discontinued"). Separate from the dial.
   const productType = (n.productType ?? '').trim() || null
   const productTypeDial = dial || null
+  // The owner's canonical lifecycle signal (2026-09-25). Carried alongside
+  // productType, never derived from it: the type string is editorial taxonomy
+  // and is wrong on hundreds of sellable products (#14925).
+  const discontinuedAt = (n.discontinuedAtRaw?.value ?? '').trim() || null
 
   const { priceMax, compareAtPrice, mapPrice, colorValues, sizeValues } = derivePricingAndOptions(n, price)
 
@@ -429,6 +443,7 @@ function nodeToDiscoveryProduct(
     totalInventory: n.totalInventory ?? null,
     productType,
     productTypeDial,
+    discontinuedAt,
   }
 }
 
@@ -581,6 +596,7 @@ const NODES_BY_IDS_QUERY = /* GraphQL */ `
         originalPriceRaw: metafield(namespace: "xdipx", key: "original_price")     { value }
         mapPriceRaw:      metafield(namespace: "xdipx", key: "map_price")          { value }
         productTypeDial:  metafield(namespace: "xdipx", key: "product_type_dial") { value }
+        discontinuedAtRaw: metafield(namespace: "xdipx", key: "discontinued_at")   { value }
         moodTagsRaw:      metafield(namespace: "xdipx", key: "mood_tags")          { value }
         audienceTagsRaw:  metafield(namespace: "xdipx", key: "audience_tags")      { value }
         mattersTagsRaw:   metafield(namespace: "xdipx", key: "matters_tags")       { value }
@@ -647,6 +663,7 @@ export async function fetchHonoraryProducts(
         totalInventory: node.totalInventory ?? null,
         productType,
         productTypeDial: dial || null,
+        discontinuedAt: (node.discontinuedAtRaw?.value ?? '').trim() || null,
       })
     }
   }
