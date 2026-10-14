@@ -38,6 +38,7 @@ function mk(p: Partial<DiscoveryProduct> & { id: string; handle: string }): Disc
     totalInventory: p.totalInventory === undefined ? null : p.totalInventory,
     productType: p.productType ?? null,
     productTypeDial: p.productTypeDial ?? null,
+    discontinuedAt: p.discontinuedAt ?? null,
   }
 }
 
@@ -191,6 +192,64 @@ describe('resolveLane', () => {
     expect(handles).not.toContain('thin-3')
     expect(handles).toContain('ok-4')
     expect(handles).toContain('untracked')
+  })
+
+  // ── 12. liveness is the discontinued STATE, not the productType string ──────
+  //
+  // Both halves matter and the first is the regression that #14925 filed. The
+  // deck must seat a sellable product that merely CARRIES the editorial type
+  // string (608 live products did, with stock and feed cover, and only 2 of
+  // them were actually discontinued), and it must still drop a product the
+  // nightly sweep has actually marked, whatever its type string says.
+  it('seats a product typed Discontinued that is not in the discontinued state', () => {
+    const index = [
+      ...typePool('vibrator', 5, i => 30 + i),
+      mk({
+        id: 'mistyped', handle: 'mistyped-but-sellable', title: 'mistyped but sellable',
+        productTypeDial: 'vibrator', price: 129, totalInventory: 43,
+        productType: 'Discontinued', discontinuedAt: null,
+      }),
+    ]
+    const resolved = resolveLane(lane({ key: 'hums' }), index, 0, OPTS())!
+    expect(resolved.deck.map(p => p.handle)).toContain('mistyped-but-sellable')
+  })
+
+  it('drops a product in the discontinued state even when its productType is not Discontinued', () => {
+    // Pool of 8 so the lane still clears its minimum deck size once the
+    // discontinued product is dropped; a 5-pool lane resolves to null and the
+    // assertion would never reach the exclusion it is testing.
+    const index = [
+      ...typePool('vibrator', 8, i => 30 + i),
+      mk({
+        id: 'really-gone', handle: 'really-gone', title: 'really gone',
+        productTypeDial: 'vibrator', price: 44, totalInventory: 90,
+        productType: 'Vibrator', discontinuedAt: '2026-09-28',
+      }),
+    ]
+    const resolved = resolveLane(lane({ key: 'hums' }), index, 0, OPTS())!
+    expect(resolved.deck.map(p => p.handle)).not.toContain('really-gone')
+  })
+
+  it('keeps a curated pick that is only mistyped, and still drops a curated pick that is truly discontinued', () => {
+    const index = [
+      ...typePool('vibrator', 8, i => 30 + i),
+      mk({
+        id: 'cur-mistyped', handle: 'cur-mistyped', title: 'curated mistyped',
+        productTypeDial: 'vibrator', price: 212.99, totalInventory: 13,
+        productType: 'Discontinued', discontinuedAt: null,
+      }),
+      mk({
+        id: 'cur-gone', handle: 'cur-gone', title: 'curated gone',
+        productTypeDial: 'vibrator', price: 60, totalInventory: 20,
+        productType: 'Vibrator', discontinuedAt: '2026-10-01',
+      }),
+    ]
+    const resolved = resolveLane(
+      lane({ key: 'hums', productHandles: ['cur-mistyped', 'cur-gone'] }), index, 0, OPTS(),
+    )!
+    const handles = resolved.deck.map(p => p.handle)
+    expect(handles).toContain('cur-mistyped')
+    expect(handles).not.toContain('cur-gone')
   })
 })
 

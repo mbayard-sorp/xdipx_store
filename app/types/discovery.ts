@@ -170,6 +170,19 @@ export interface DiscoveryProduct {
    * exclusion rules match against. Null when the dial is unset or empty.
    */
   productTypeDial: string | null
+  /**
+   * The `xdipx.discontinued_at` metafield as an ISO date string, or null when
+   * the product is not in the discontinued state. This is the owner's canonical
+   * lifecycle signal (direction 2026-09-25, "Discontinued is a STATE, not a
+   * product type"): the nightly feed sweep writes it the first day a carried
+   * SKU has been absent from every Nalpac feed past the grace period, and
+   * clears it when the SKU returns. See `app/lib/discontinued-state.ts`.
+   *
+   * A string rather than a `Date` on purpose: the index is serialized to KV and
+   * Neon as JSON, so a `Date` would deserialize as a string and the declared
+   * type would quietly stop matching the runtime value.
+   */
+  discontinuedAt: string | null
 }
 
 export interface ScoredProduct {

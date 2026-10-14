@@ -42,6 +42,7 @@ function makeProduct(overrides: Partial<DiscoveryProduct> & Pick<DiscoveryProduc
     totalInventory: overrides.totalInventory !== undefined ? overrides.totalInventory : 10,
     productType:    overrides.productType ?? null,
     productTypeDial: overrides.productTypeDial ?? null,
+    discontinuedAt: overrides.discontinuedAt ?? null,
     ...overrides,
   }
 }

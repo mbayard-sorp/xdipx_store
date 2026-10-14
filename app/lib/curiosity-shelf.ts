@@ -139,10 +139,34 @@ export function applySanityFloor(
  * a couple of units left (ticket #14926): the deck hands a product six
  * curious taps in a row, so a 1-3 unit survivor is a sellout risk, not a
  * sellability question. Untracked (`null`) always passes.
+ *
+ * Liveness reads `discontinuedAt`, the owner's canonical STATE (direction
+ * 2026-09-25, "Discontinued is a STATE, not a product type"), and NOT the
+ * `productType` string this test used until #14925. The string is Shopify's
+ * editorial taxonomy field, and it was measured wrong on 608 ACTIVE, fully
+ * sellable products: every one had Shopify inventory above 3 and Nalpac feed
+ * qty above 3, and only 2 of the 608 carried `discontinued_at`. Reading it as a
+ * lifecycle gate removed about 14% of the in-stock catalog from the deck,
+ * including 77 products priced $75 or more, which are exactly the anchors the
+ * AOV directive asks the lead surfaces to carry.
+ *
+ * Nothing is lost by dropping the string test, because the two gates that
+ * actually answer "can the customer buy this" both still stand: the index is
+ * built with `query: "status:active"`, so an ARCHIVED product never enters the
+ * pool at all, and `MIN_SHELF_STOCK` above removes the thin-stock survivors. A
+ * product in the genuine discontinued state is still excluded here, now by the
+ * field the nightly sweep actually maintains.
+ *
+ * Scope, stated so it is not overread: this governs the curiosity shelf only.
+ * The discovery RAILS exclude the same products through a separate mechanism,
+ * the curator-configured `exclude_product_type` row in `discovery_rules`
+ * (id 8, "Hides all discontinued"), which `applyRules()` applies and which the
+ * shelf never passes through. That row is live data and a curator's call, not
+ * this function's to override.
  */
 function passesBaseFilters(p: DiscoveryProduct): boolean {
   const inStock = p.totalInventory == null || p.totalInventory > MIN_SHELF_STOCK
-  const live = p.productType !== 'Discontinued'
+  const live = p.discontinuedAt == null
   return p.imageUrl != null && inStock && live
 }
 
