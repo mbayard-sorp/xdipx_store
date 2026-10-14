@@ -1307,6 +1307,12 @@ export const nalpacPriceHistory = pgTable('nalpac_price_history', {
   inSale:            boolean('in_sale').notNull().default(false),
   observedAt:        timestamp('observed_at', { withTimezone: true }).notNull().defaultNow(),
   syncedAt:          timestamp('synced_at', { withTimezone: true }),
+  // Sticky cumulative basis for the wholesale-rise detector (migration 123,
+  // ticket #12082). Unlike `wholesale` above, this does NOT overwrite on
+  // every sync -- only when a rise fires or a drop-sync lands a fresh cost --
+  // so a creeping rise is caught against the last settled basis instead of
+  // resetting day over day. Null on pre-migration rows until backfilled.
+  riseBasisWholesale: decimal('rise_basis_wholesale', { precision: 10, scale: 2 }),
 }, t => ({
   syncedIdx: index('nalpac_price_history_synced_idx').on(t.syncedAt),
 }))
