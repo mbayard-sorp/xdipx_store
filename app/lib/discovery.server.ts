@@ -62,7 +62,7 @@ import {
 // v10: added `discontinuedAt` (xdipx.discontinued_at) so the curiosity shelf
 //     can test the owner's canonical lifecycle STATE instead of the editorial
 //     `productType` string (#14925). v9 entries lack the field, and a missing
-//     value reads as `null`, i.e. "not discontinued" — which is the OPPOSITE of
+//     value reads as `null`, i.e. "not discontinued", which is the OPPOSITE of
 //     safe here, because it would let the shelf treat a genuinely discontinued
 //     product as live until the rebuild lands. Hence the bump rather than a
 //     tolerant read: the shelf must never run this test against a payload that

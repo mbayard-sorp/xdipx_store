@@ -548,6 +548,10 @@ function shopifyToDiscovery(p: LeanCardProduct): DiscoveryProduct {
     totalInventory: null,
     productType: null,
     productTypeDial: null,
+    // This adapter feeds card rendering, never the shelf's liveness gate: a
+    // team rail is a hand-picked lineup, so there is no backfill to exclude
+    // from. `null` is the inert value, matching the other unused fields above.
+    discontinuedAt: null,
   }
 }
 
