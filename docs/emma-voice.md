@@ -491,6 +491,11 @@ Draft against both, and understand which one you are avoiding.
   pulled). Commerce goes post → profile → link in bio → site. The caption never points at a PDP.
   (Instagram/TikTok; X carves out to allow a direct PDP link and a stated live promo code with its
   discount depth, see above.)
+- **An editorial link is not the sale attempt the rule above bans (owner direction 2026-10-03).**
+  A `/notebook/<slug>` URL or the `/new` URL may appear once, plain, on its own line in an
+  Instagram or TikTok caption — this is the article or new-arrivals page, not a product, so it is
+  not "pointing at a PDP" and not a site CTA; `docs/store-team/routine-social-daily.md` Step 4c
+  has the full rule. A `/products/` link in the same caption is still a BLOCK, same as always.
 - **Tag the maker.** When a featured brand's Instagram handle is verified in the registry
   (`docs/store-team/brand-ig-handles.json`), tag it in the caption. Never guess a handle; a wrong
   tag is worse than none.
