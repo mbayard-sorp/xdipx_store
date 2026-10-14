@@ -279,9 +279,10 @@ async function runOne(
 
 /**
  * Generate `count` images from `prompt`, returning them as Buffers (matching
- * the fal/Imagen wrapper shape). Throws on any failure so generate-image can
- * fall back to fal. Any reference image routes to the edit endpoint; there is
- * no single/multi model split on this provider.
+ * the fal/Imagen wrapper shape). Returns whatever completed when only some of
+ * the `count` requests fail; throws only when all of them fail, so
+ * generate-image can still fall back to fal. Any reference image routes to the
+ * edit endpoint; there is no single/multi model split on this provider.
  */
 export async function atlasGenerate(opts: AtlasGenerateOpts): Promise<AtlasGenerateResult> {
   const key = requireKey()
@@ -306,14 +307,32 @@ export async function atlasGenerate(opts: AtlasGenerateOpts): Promise<AtlasGener
 
   // No documented num_images param on the Seedream endpoints; a multi-image
   // call is issued as `count` parallel single generations instead.
-  const runs = await Promise.all(
+  //
+  // allSettled, not all: one blocked or timed-out sibling used to reject the
+  // whole batch, discarding the images that DID complete. Those were billed,
+  // sat visible in the Atlas dashboard, and never reached the social library.
+  // A partial set is returned, matching the fal scene-frame path; this throws
+  // only when every request failed.
+  const settled = await Promise.allSettled(
     Array.from({ length: count }, () => runOne(key, model, body, opts.telemetry)),
   )
+  const runs = settled
+    .filter((r): r is PromiseFulfilledResult<Awaited<ReturnType<typeof runOne>>> => r.status === 'fulfilled')
+    .map(r => r.value)
+  if (!runs.length) {
+    const firstRejected = settled.find((r): r is PromiseRejectedResult => r.status === 'rejected')
+    throw firstRejected?.reason instanceof Error
+      ? firstRejected.reason
+      : new Error(`atlas ${model} returned no images`)
+  }
+  if (runs.length < settled.length) {
+    console.warn(`[atlas] ${model}: ${settled.length - runs.length} of ${settled.length} requests failed; returning the ${runs.length} that completed`)
+  }
 
   // Flatten to output URLs while keeping each URL's originating prediction id
   // index-aligned (a run can in principle return more than one URL).
-  const urls: string[] = []
-  const requestIds: (string | undefined)[] = []
+  let urls: string[] = []
+  let requestIds: (string | undefined)[] = []
   for (const r of runs) {
     for (const u of r.urls) {
       urls.push(u)
@@ -321,15 +340,26 @@ export async function atlasGenerate(opts: AtlasGenerateOpts): Promise<AtlasGener
     }
   }
 
-  const buffers = opts.download === false
-    ? []
-    : await Promise.all(
-        urls.map(async url => {
-          const r = await fetch(url)
-          if (!r.ok) throw new Error(`atlas image download failed: ${r.status}`)
-          return Buffer.from(await r.arrayBuffer())
-        }),
-      )
+  let buffers: Buffer[] = []
+  if (opts.download !== false) {
+    // Same partial tolerance for the download: drop only the output that could
+    // not be fetched, keeping urls/requestIds/buffers index-aligned.
+    const downloads = await Promise.allSettled(
+      urls.map(async url => {
+        const r = await fetch(url)
+        if (!r.ok) throw new Error(`atlas image download failed: ${r.status}`)
+        return Buffer.from(await r.arrayBuffer())
+      }),
+    )
+    const kept = downloads.flatMap((d, i) => (d.status === 'fulfilled' ? [{ i, buf: d.value }] : []))
+    if (!kept.length) {
+      const first = downloads.find((d): d is PromiseRejectedResult => d.status === 'rejected')
+      throw first?.reason instanceof Error ? first.reason : new Error('atlas image download failed')
+    }
+    buffers = kept.map(k => k.buf)
+    urls = kept.map(k => urls[k.i]!)
+    requestIds = kept.map(k => requestIds[k.i])
+  }
 
   const requestId = runs[0]?.predictionId
   return {

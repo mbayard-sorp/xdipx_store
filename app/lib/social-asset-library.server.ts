@@ -27,10 +27,28 @@
  * and a row written from the upload response may or may not carry it.
  */
 
-import { inArray, sql } from 'drizzle-orm'
+import { eq, inArray, sql } from 'drizzle-orm'
 import { socialMediaAssets } from '../../db/schema'
 
 export type SocialAssetSource = 'generated' | 'upload' | 'video_poster'
+
+/**
+ * `archived_by` values for frames the generation path archived itself rather
+ * than an owner or the age sweep. They are billed generations that cannot
+ * ship as-is, and the Library grid shows them by default (with a badge) so
+ * every frame the provider produced is visible; the Composer picker and the
+ * agents' reuse search never offer them.
+ *
+ * - crop-reject (#11549): the crop-to-zone pass refused the frame.
+ * - rehost-failed: the Shopify Files upload threw, so only the Sanity copy exists.
+ * - unprocessed: the raw-first row written the moment the provider returned.
+ *   A frame still carrying it never finished the crop/rehost/vision pass,
+ *   which in practice means the platform killed the request at 300s.
+ */
+export const CROP_REJECT_ARCHIVED_BY = 'system:crop-reject'
+export const REHOST_FAILED_ARCHIVED_BY = 'system:rehost-failed'
+export const UNPROCESSED_ARCHIVED_BY = 'system:unprocessed'
+export const DROPPED_ARCHIVED_BY = [CROP_REJECT_ARCHIVED_BY, REHOST_FAILED_ARCHIVED_BY, UNPROCESSED_ARCHIVED_BY] as const
 
 export type SocialMediaAssetRow = typeof socialMediaAssets.$inferSelect
 export type SocialMediaAssetInsert = typeof socialMediaAssets.$inferInsert
@@ -78,6 +96,18 @@ export interface IngestSocialAssetInput {
   /** Ingest straight into the archive (crop-rejected frames, #11549). */
   archivedAt?: Date
   archivedBy?: string
+  /**
+   * Finalize this existing row instead of inserting a new one: the raw-first
+   * row the generation path wrote before its slow passes. Every field below is
+   * rewritten, and archivedAt/archivedBy are cleared unless set here. Falls
+   * back to an insert if the row is gone.
+   */
+  replacesAssetId?: number
+  /**
+   * Skip the Sanity upload and reuse this asset: the bytes being finalized are
+   * the same bytes the raw-first row already uploaded (no crop happened).
+   */
+  existingSanityAssetId?: string
 }
 
 /**
@@ -88,6 +118,8 @@ export interface IngestSocialAssetInput {
 export interface SocialAssetLibraryDeps {
   uploadToSanity?: (buffer: Buffer, filename: string, contentType?: string) => Promise<{ assetId: string; url: string }>
   insertAsset?: (row: SocialMediaAssetInsert) => Promise<SocialMediaAssetRow>
+  /** Rewrite a row in place; null when no row has that id. */
+  updateAsset?: (id: number, row: SocialMediaAssetInsert) => Promise<SocialMediaAssetRow | null>
   findByUrl?: (url: string) => Promise<boolean>
   findIdsByUrls?: (urls: string[]) => Promise<{ id: number; url: string }[]>
   setPicked?: (assetIds: number[], postId: number) => Promise<void>
@@ -110,6 +142,15 @@ const defaultDeps: Required<SocialAssetLibraryDeps> = {
     const [inserted] = await db.insert(socialMediaAssets).values(row).returning()
     if (!inserted) throw new Error('social_media_assets insert returned no row')
     return inserted
+  },
+  updateAsset: async (id, row) => {
+    const { db } = await import('./db.server')
+    const [updated] = await db
+      .update(socialMediaAssets)
+      .set({ ...row, updatedAt: new Date() })
+      .where(eq(socialMediaAssets.id, id))
+      .returning()
+    return updated ?? null
   },
   findByUrl: async (bare) => {
     const { db } = await import('./db.server')
@@ -179,7 +220,9 @@ export async function ingestSocialAsset(
   const buffer = input.buffer ?? (input.sourceUrl ? await d.fetchBuffer(input.sourceUrl) : undefined)
   if (!buffer) throw new Error('ingestSocialAsset: a buffer or sourceUrl is required')
 
-  const sanity = await d.uploadToSanity(buffer, input.filename, input.contentType)
+  const sanity = input.existingSanityAssetId && input.url
+    ? { assetId: input.existingSanityAssetId, url: input.url }
+    : await d.uploadToSanity(buffer, input.filename, input.contentType)
 
   let width = input.width
   let height = input.height
@@ -218,6 +261,21 @@ export async function ingestSocialAsset(
     ...(input.providerRequestId ? { providerRequestId: input.providerRequestId.slice(0, 64) } : {}),
     ...(input.archivedAt ? { archivedAt: input.archivedAt } : {}),
     ...(input.archivedBy ? { archivedBy: input.archivedBy.slice(0, 60) } : {}),
+  }
+
+  if (input.replacesAssetId) {
+    // A finalized row must not keep the raw-first row's archive state or any
+    // optional field the final write leaves out, so those are nulled
+    // explicitly rather than omitted from the update.
+    const updated = await d.updateAsset(input.replacesAssetId, {
+      shopifyFileId: null, width: null, height: null, aspect: null, mimeType: null,
+      provider: null, model: null, prompt: null, negativePrompt: null, archetype: null,
+      productHandle: null, shopifyProductId: null, castSlugs: null, tags: null,
+      generationBatchId: null, postId: null, providerRequestId: null,
+      archivedAt: null, archivedBy: null,
+      ...row,
+    })
+    if (updated) return updated
   }
 
   return d.insertAsset(row)

@@ -31,7 +31,14 @@
 import sharp from 'sharp'
 import { generateImage } from './generate-image.server'
 import { uploadMoodImageToShopifyFilesWithId } from './shopify.server'
-import { tryIngestSocialAsset } from './social-asset-library.server'
+import {
+  CROP_REJECT_ARCHIVED_BY,
+  REHOST_FAILED_ARCHIVED_BY,
+  UNPROCESSED_ARCHIVED_BY,
+  tryIngestSocialAsset,
+  type IngestSocialAssetInput,
+  type SocialMediaAssetRow,
+} from './social-asset-library.server'
 import { NON_SKIN_SENTINEL, sceneAxisTags, type SceneAxes } from './social-scene-vocab'
 import type { VisionVerdict } from './social-vision-gate.server'
 
@@ -749,7 +756,66 @@ async function maybeCropToZone(
 }
 
 /** `archived_by` for an uncropped frame the crop-to-zone pass refused (#11549). */
-export const CROP_REJECT_ARCHIVED_BY = 'system:crop-reject'
+export { CROP_REJECT_ARCHIVED_BY }
+
+/**
+ * Raw-first ingest. The provider has already billed the frame, so its bytes
+ * land in the library as an archived `system:unprocessed` row before any slow
+ * pass (crop, rehost, fidelity, vision gate) can lose it to a thrown error or
+ * a platform kill at 300s. The caller finalizes this same row later through
+ * `finalizeRawFrame`; a row still `unprocessed` afterwards means the run never
+ * got that far. Non-fatal: null when the ingest itself failed.
+ */
+async function ingestRawFrame(
+  buffer: Buffer,
+  input: Omit<IngestSocialAssetInput, 'buffer' | 'archivedAt' | 'archivedBy'>,
+): Promise<SocialMediaAssetRow | null> {
+  return tryIngestSocialAsset({
+    ...input,
+    buffer,
+    archivedAt: new Date(),
+    archivedBy: UNPROCESSED_ARCHIVED_BY,
+  })
+}
+
+/**
+ * Finalize the raw-first row (or insert, when the raw ingest failed). When the
+ * bytes are unchanged from the raw upload, the raw row's Sanity asset is
+ * reused instead of uploading the same image twice.
+ */
+async function finalizeRawFrame(
+  raw: SocialMediaAssetRow | null,
+  rawBuffer: Buffer,
+  input: IngestSocialAssetInput & { buffer: Buffer },
+): Promise<SocialMediaAssetRow | null> {
+  const sameBytes = input.buffer === rawBuffer
+  return tryIngestSocialAsset({
+    ...input,
+    ...(raw?.id ? { replacesAssetId: raw.id } : {}),
+    ...(raw?.sanityAssetId && sameBytes && input.url ? { existingSanityAssetId: raw.sanityAssetId } : {}),
+  })
+}
+
+/**
+ * Archive a raw-first frame whose Shopify rehost threw. It keeps its Sanity
+ * url, so it is still visible in the library even though it can never ship.
+ */
+async function markRawFrameRehostFailed(
+  raw: SocialMediaAssetRow | null,
+  rawBuffer: Buffer,
+  input: Omit<IngestSocialAssetInput, 'buffer' | 'archivedAt' | 'archivedBy' | 'url' | 'shopifyFileId'>,
+  reason: string,
+): Promise<void> {
+  await tryIngestSocialAsset({
+    ...input,
+    buffer: rawBuffer,
+    ...(raw?.id ? { replacesAssetId: raw.id } : {}),
+    ...(raw?.sanityAssetId && raw.url ? { existingSanityAssetId: raw.sanityAssetId, url: raw.url } : {}),
+    archivedAt: new Date(),
+    archivedBy: REHOST_FAILED_ARCHIVED_BY,
+    tags: [...(input.tags ?? []), `dropped:${reason}`.slice(0, 120)],
+  })
+}
 
 /** One composeSceneFrame call, rehosted, ingested, and vision-gated per candidate. */
 async function generateCastCompositeBatch(
@@ -798,7 +864,12 @@ async function generateCastCompositeBatch(
   // Ticket #11548: the provider that actually produced the frame, not a
   // hardcoded label. costKey prefix is the fallback for an older result shape.
   const frameProvider = frame.provider ?? (frame.costKey.startsWith('atlas') ? 'atlas' : 'fal')
-  for (const [i, falUrl] of frame.urls.entries()) {
+  // Raw-first (see `ingestRawFrame`): fetch every candidate and land its bytes
+  // in the library in parallel, before the slow per-candidate passes below.
+  // Rehost fetch failures leave no bytes to save, so the provider request id
+  // rides on the drop reason to keep the frame traceable in the provider
+  // dashboard.
+  const fetched = await Promise.all(frame.urls.map(async (falUrl, i) => {
     const filename = buildSocialAssetFilename({
       handle: opts.handle,
       archetype: 'cast',
@@ -806,20 +877,55 @@ async function generateCastCompositeBatch(
       date: opts.date,
       slide: opts.slide ?? i + 1,
     })
+    const providerRequestId = frame.requestIds[i]
+    const reqSuffix = providerRequestId ? ` request_id=${providerRequestId}` : ''
+    const rowBase = {
+      filename,
+      contentType: 'image/jpeg',
+      aspect: opts.aspectRatio ?? '4:5',
+      source: 'generated' as const,
+      provider: frameProvider,
+      model: frame.costKey,
+      prompt: scaledPrompt,
+      archetype: 'cast',
+      productHandle: opts.handle,
+      generationBatchId,
+      isPicked: false,
+      createdBy: opts.caller ?? 'social-media-manager',
+      ...(providerRequestId ? { providerRequestId } : {}),
+      ...(opts.castSlugs?.length ? { castSlugs: opts.castSlugs } : {}),
+    }
+    try {
+      const res = await fetch(falUrl)
+      if (!res.ok) return { i, filename, rowBase, error: `rehost_fetch_failed:${res.status}${reqSuffix}` }
+      const buffer = Buffer.from(await res.arrayBuffer())
+      const raw = await ingestRawFrame(buffer, {
+        ...rowBase,
+        tags: [...sceneAxisTagList, ...(providerRequestId ? [`request_id:${providerRequestId}`] : [])],
+      })
+      return { i, filename, rowBase, buffer, raw }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      return { i, filename, rowBase, error: `rehost_error:${message}` }
+    }
+  }))
+
+  for (const c of fetched) {
+    const { i, filename, rowBase } = c
     // A candidate that fails to fetch or rehost is dropped from urls/filenames
     // but stays BILLED: the caller's `costs` remainder row accounts for it, so
     // spend and the image cap count at generation time, not upload time (#887).
+    if (!('buffer' in c) || !c.buffer) {
+      dropReasons.push(c.error ?? 'rehost_error:unknown')
+      continue
+    }
+    const fetchedBuffer = c.buffer
+    const raw = c.raw ?? null
     const providerRequestId = frame.requestIds[i]
-    // Rehost failures leave no bytes to save, so the provider request id rides
-    // on the drop reason to keep the frame traceable in the provider dashboard.
-    const reqSuffix = providerRequestId ? ` request_id=${providerRequestId}` : ''
+    // Set once the row reaches its final state, so a later failure (the
+    // vision gate throwing) never re-archives a finished row as a rehost miss.
+    let finalized = false
     try {
-      const res = await fetch(falUrl)
-      if (!res.ok) {
-        dropReasons.push(`rehost_fetch_failed:${res.status}${reqSuffix}`)
-        continue
-      }
-      const fetchedBuffer = Buffer.from(await res.arrayBuffer())
       // Crop-to-zone (#10999), before rehost and before the vision gate: a
       // refusal here (uncroppable/zone-miss/model error) drops the candidate
       // exactly like a rehost or vision-gate failure below, still billed.
@@ -827,40 +933,28 @@ async function generateCastCompositeBatch(
       if ('rejected' in cropOutcome) {
         dropReasons.push(cropOutcome.reason)
         // Ticket #11549: keep the UNCROPPED frame in the library as an
-        // archived row so the owner can see and score it. Archived rows never
-        // reach the default grid or the Composer picker, and the candidate is
-        // still excluded from the returned urls/filenames.
+        // archived row so the owner can see and score it. The candidate is
+        // still excluded from the returned urls/filenames. A failed Shopify
+        // upload here still archives the frame, under its Sanity url.
+        let dropped: { url: string; fileId: string | null } | null = null
         try {
-          const dropped = await uploadMoodImageToShopifyFilesWithId(fetchedBuffer, filename)
-          await tryIngestSocialAsset({
-            buffer: fetchedBuffer,
-            filename,
-            contentType: 'image/jpeg',
-            url: dropped.url,
-            shopifyFileId: dropped.fileId,
-            aspect: opts.aspectRatio ?? '4:5',
-            source: 'generated',
-            provider: frameProvider,
-            model: frame.costKey,
-            prompt: scaledPrompt,
-            archetype: 'cast',
-            productHandle: opts.handle,
-            generationBatchId,
-            isPicked: false,
-            createdBy: opts.caller ?? 'social-media-manager',
-            archivedAt: new Date(),
-            archivedBy: CROP_REJECT_ARCHIVED_BY,
-            ...(providerRequestId ? { providerRequestId } : {}),
-            ...(opts.castSlugs?.length ? { castSlugs: opts.castSlugs } : {}),
-            tags: [
-              ...sceneAxisTagList,
-              `dropped:${cropOutcome.reason}`,
-              ...(providerRequestId ? [`request_id:${providerRequestId}`] : []),
-            ],
-          })
+          dropped = await uploadMoodImageToShopifyFilesWithId(fetchedBuffer, filename)
         } catch (err) {
-          console.error(`[social-media] failed to save crop-rejected candidate to library (non-fatal): ${filename}`, err)
+          console.error(`[social-media] crop-rejected candidate rehost failed, archiving the Sanity copy: ${filename}`, err)
         }
+        await finalizeRawFrame(raw, fetchedBuffer, {
+          ...rowBase,
+          buffer: fetchedBuffer,
+          ...(dropped ? { url: dropped.url, shopifyFileId: dropped.fileId } : raw?.url ? { url: raw.url } : {}),
+          archivedAt: new Date(),
+          archivedBy: CROP_REJECT_ARCHIVED_BY,
+          tags: [
+            ...sceneAxisTagList,
+            `dropped:${cropOutcome.reason}`,
+            ...(providerRequestId ? [`request_id:${providerRequestId}`] : []),
+          ],
+        })
+        finalized = true
         continue
       }
       const buffer: Buffer = cropOutcome.buffer
@@ -874,26 +968,14 @@ async function generateCastCompositeBatch(
       // candidate. See maybeCheckProductFidelity's own doc comment.
       const fidelityTags = await maybeCheckProductFidelity(url, opts.productImageUrl, opts.sceneAxes)
       const candidateTags = [...sceneAxisTagList, ...(cropOutcome.tag ? [cropOutcome.tag] : []), ...fidelityTags]
-      const asset = await tryIngestSocialAsset({
+      const asset = await finalizeRawFrame(raw, fetchedBuffer, {
+        ...rowBase,
         buffer,
-        filename,
-        contentType: 'image/jpeg',
         url,
         shopifyFileId: fileId,
-        aspect: opts.aspectRatio ?? '4:5',
-        source: 'generated',
-        provider: frameProvider,
-        model: frame.costKey,
-        ...(providerRequestId ? { providerRequestId } : {}),
-        prompt: scaledPrompt,
-        archetype: 'cast',
-        productHandle: opts.handle,
-        generationBatchId,
-        isPicked: false,
-        createdBy: opts.caller ?? 'social-media-manager',
-        ...(opts.castSlugs?.length ? { castSlugs: opts.castSlugs } : {}),
         ...(candidateTags.length ? { tags: candidateTags } : {}),
       })
+      finalized = true
       // Vision-gate every candidate before it can reach a draft (#6763): the
       // verdict is recorded on the row regardless of outcome (a missing
       // verdict is what makes social-publish-gate block, not a failing one
@@ -918,6 +1000,12 @@ async function generateCastCompositeBatch(
       const message = err instanceof Error ? err.message : String(err)
       dropReasons.push(`rehost_error:${message}`)
       console.error(`[social-media] cast candidate rehost failed (billed, dropped): ${filename}`, err)
+      if (!finalized) {
+        await markRawFrameRehostFailed(raw, fetchedBuffer, {
+          ...rowBase,
+          tags: [...sceneAxisTagList, ...(providerRequestId ? [`request_id:${providerRequestId}`] : [])],
+        }, `rehost_error:${message}`)
+      }
     }
   }
 
@@ -1138,47 +1226,77 @@ export async function generateAndUploadSocialImage(
       const generatedBuffer = result.buffers[0]
       if (!generatedBuffer) return null
 
+      const aspect = opts.aspect ?? socialAspectFromImageSize(opts.imageSize)
+      const rowBase = {
+        filename,
+        contentType: 'image/jpeg',
+        aspect,
+        source: 'generated' as const,
+        provider: result.provider,
+        model: result.model,
+        prompt: opts.prompt,
+        archetype: opts.archetype,
+        productHandle: opts.handle,
+        generationBatchId: crypto.randomUUID(),
+        isPicked: false,
+        createdBy: opts.caller ?? 'social-media-manager',
+        ...(result.requestId ? { providerRequestId: result.requestId } : {}),
+      }
+      // Raw-first (see `ingestRawFrame`): the billed frame is in the library
+      // before the crop and rehost passes run.
+      const raw = await ingestRawFrame(generatedBuffer, {
+        ...rowBase,
+        ...(axisTags.length ? { tags: axisTags } : {}),
+      })
+
       // Rehost failure must not throw: the generation above is already billed
       // by the provider, and an exception here used to unwind the caller
       // before it could post the spend row, leaving billed generations
       // uncounted (#887). Returning null here (a "generation miss" to the
       // vision-gate loop) tells the caller "billed but unshipped".
+      let finalized = false
       try {
         // Crop-to-zone (#10999), before rehost and before the vision gate:
         // see `maybeCropToZone`'s own doc comment. A refusal here is treated
-        // exactly like the rehost failure below (billed but unshipped).
-        const cropOutcome = await maybeCropToZone(
-          generatedBuffer,
-          opts.sceneAxes,
-          opts.aspect ?? socialAspectFromImageSize(opts.imageSize),
-        )
-        if ('rejected' in cropOutcome) return null
+        // exactly like the rehost failure below (billed but unshipped), and
+        // the uncropped frame is archived as a crop reject (#11549), the same
+        // as the cast path.
+        const cropOutcome = await maybeCropToZone(generatedBuffer, opts.sceneAxes, aspect)
+        if ('rejected' in cropOutcome) {
+          await finalizeRawFrame(raw, generatedBuffer, {
+            ...rowBase,
+            buffer: generatedBuffer,
+            ...(raw?.url ? { url: raw.url } : {}),
+            archivedAt: new Date(),
+            archivedBy: CROP_REJECT_ARCHIVED_BY,
+            tags: [...axisTags, `dropped:${cropOutcome.reason}`],
+          })
+          finalized = true
+          return null
+        }
         const buffer = cropOutcome.buffer
         const { url, fileId } = await uploadMoodImageToShopifyFilesWithId(buffer, filename)
         // Library dual-write (#4937), non-fatal, buffer already in hand.
         // `shopifyFileId` (#5426) makes a future purge deterministic.
         const candidateTags = [...axisTags, ...(cropOutcome.tag ? [cropOutcome.tag] : [])]
-        const asset = await tryIngestSocialAsset({
+        const asset = await finalizeRawFrame(raw, generatedBuffer, {
+          ...rowBase,
           buffer,
-          filename,
-          contentType: 'image/jpeg',
           url,
           shopifyFileId: fileId,
-          aspect: opts.aspect ?? socialAspectFromImageSize(opts.imageSize),
-          source: 'generated',
-          provider: result.provider,
-          model: result.model,
-          prompt: opts.prompt,
-          archetype: opts.archetype,
-          productHandle: opts.handle,
-          generationBatchId: crypto.randomUUID(),
-          isPicked: false,
-          createdBy: opts.caller ?? 'social-media-manager',
           ...(candidateTags.length ? { tags: candidateTags } : {}),
         })
+        finalized = true
         return { url, assetId: asset?.id ?? null }
       } catch (err) {
-        console.error(`[social-media] rehost failed (generation billed, no asset): ${filename}`, err)
+        console.error(`[social-media] rehost failed (generation billed, archived as rehost-failed): ${filename}`, err)
+        if (!finalized) {
+          const message = err instanceof Error ? err.message : String(err)
+          await markRawFrameRehostFailed(raw, generatedBuffer, {
+            ...rowBase,
+            ...(axisTags.length ? { tags: axisTags } : {}),
+          }, `rehost_error:${message}`)
+        }
         return null
       }
     },

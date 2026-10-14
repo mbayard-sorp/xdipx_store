@@ -530,7 +530,8 @@ describe('generateCastComposite: billed-but-dropped candidates are named, not si
     vi.doMock('./shopify.server', () => ({
       uploadMoodImageToShopifyFilesWithId: vi.fn(async () => ({ url: 'https://cdn/rehosted.jpg', fileId: 'gid://shopify/MediaImage/1' })),
     }))
-    vi.doMock('./social-asset-library.server', () => ({
+    vi.doMock('./social-asset-library.server', async (orig) => ({
+      ...(await orig<object>()),
       tryIngestSocialAsset: vi.fn(async () => ({ id: 900 })),
     }))
     const recordVisionVerdict = vi.fn(async () => {})
@@ -575,7 +576,7 @@ describe('generateCastComposite: billed-but-dropped candidates are named, not si
       uploadMoodImageToShopifyFilesWithId: vi.fn(async () => ({ url: 'https://cdn/rehosted.jpg', fileId: 'gid://shopify/MediaImage/1' })),
     }))
     const tryIngestSocialAsset = vi.fn(async (_input: Record<string, unknown>) => ({ id: 903 }))
-    vi.doMock('./social-asset-library.server', () => ({ tryIngestSocialAsset }))
+    vi.doMock('./social-asset-library.server', async (orig) => ({ ...(await orig<object>()), tryIngestSocialAsset }))
     vi.doMock('./social-vision-gate.server', () => ({
       runVisionGate: vi.fn(async () => ({
         pass: false, checks: null, notes: 'nudity: genitalia visible', checkedAt: '2026-09-25T00:00:00.000Z',
@@ -591,9 +592,10 @@ describe('generateCastComposite: billed-but-dropped candidates are named, not si
 
     // Dropped from the result exactly like any other gate failure...
     expect(result.urls).toEqual([])
-    // ...but every ingest call (both regeneration attempts) still carried the
-    // provider request id, because ingestion runs before the gate check.
-    expect(tryIngestSocialAsset).toHaveBeenCalledTimes(2)
+    // ...but every ingest call (the raw-first row and its finalization, for
+    // both regeneration attempts) still carried the provider request id,
+    // because ingestion runs before the gate check.
+    expect(tryIngestSocialAsset).toHaveBeenCalledTimes(4)
     for (const call of tryIngestSocialAsset.mock.calls) {
       expect(call[0].providerRequestId).toBe('gate-fail-req-1')
     }
@@ -623,7 +625,8 @@ describe('generateCastComposite: billed-but-dropped candidates are named, not si
     vi.doMock('./shopify.server', () => ({
       uploadMoodImageToShopifyFilesWithId: vi.fn(async () => ({ url: 'https://cdn/rehosted.jpg', fileId: 'gid://shopify/MediaImage/1' })),
     }))
-    vi.doMock('./social-asset-library.server', () => ({
+    vi.doMock('./social-asset-library.server', async (orig) => ({
+      ...(await orig<object>()),
       tryIngestSocialAsset: vi.fn(async () => ({ id: 901 })),
     }))
     vi.doMock('./social-vision-gate.server', () => ({
@@ -676,7 +679,7 @@ describe('generateCastComposite: provider id on the row, crop rejects archived (
       uploadMoodImageToShopifyFilesWithId: vi.fn(async () => ({ url: 'https://cdn/rehosted.jpg', fileId: 'gid://shopify/MediaImage/1' })),
     }))
     const tryIngestSocialAsset = vi.fn(async (_input: Record<string, unknown>) => ({ id: 902 }))
-    vi.doMock('./social-asset-library.server', () => ({ tryIngestSocialAsset }))
+    vi.doMock('./social-asset-library.server', async (orig) => ({ ...(await orig<object>()), tryIngestSocialAsset }))
     vi.doMock('./social-vision-gate.server', () => ({
       runVisionGate: vi.fn(async () => ({
         pass: true, checks: null, notes: '', checkedAt: '2026-09-25T00:00:00.000Z',
@@ -695,8 +698,13 @@ describe('generateCastComposite: provider id on the row, crop rejects archived (
     const result = await generateCastComposite(CAST_OPTS)
 
     expect(result.urls).toEqual(['https://cdn/rehosted.jpg'])
-    expect(tryIngestSocialAsset).toHaveBeenCalledTimes(1)
-    const input = tryIngestSocialAsset.mock.calls[0]![0]
+    // Raw-first row, then its finalization in place.
+    expect(tryIngestSocialAsset).toHaveBeenCalledTimes(2)
+    const raw = tryIngestSocialAsset.mock.calls[0]![0]
+    expect(raw.archivedBy).toBe('system:unprocessed')
+    expect(raw.providerRequestId).toBe('d91a5b6dfdc0483c9b02c795194bb0ee')
+    const input = tryIngestSocialAsset.mock.calls[1]![0]
+    expect(input.replacesAssetId).toBe(902)
     expect(input.provider).toBe('atlas')
     expect(input.providerRequestId).toBe('d91a5b6dfdc0483c9b02c795194bb0ee')
     expect(input.archivedAt).toBeUndefined()
@@ -727,7 +735,8 @@ describe('generateCastComposite: provider id on the row, crop rejects archived (
     expect(result.filenames).toEqual([])
     expect(result.dropReasons).toContain('crop_rejected:zone_miss')
     expect(tryIngestSocialAsset).toHaveBeenCalled()
-    const input = tryIngestSocialAsset.mock.calls[0]![0]
+    const input = tryIngestSocialAsset.mock.calls.at(-1)![0]
+    expect(input.replacesAssetId).toBe(902)
     expect(input.archivedAt).toBeInstanceOf(Date)
     expect(input.archivedBy).toBe('system:crop-reject')
     expect(input.provider).toBe('atlas')
@@ -736,6 +745,39 @@ describe('generateCastComposite: provider id on the row, crop rejects archived (
       'dropped:crop_rejected:zone_miss',
       'request_id:d91a5b6dfdc0483c9b02c795194bb0ee',
     ]))
+  })
+
+  it('writes the raw frame before any slow pass, so it survives a run that never finishes it', async () => {
+    const { tryIngestSocialAsset } = mockCommon('atlas', 'atlas/seedream-4.5-edit')
+    vi.resetModules()
+    const { generateCastComposite } = await import('./social-media.server')
+    await generateCastComposite(CAST_OPTS)
+    const raw = tryIngestSocialAsset.mock.calls[0]![0]
+    expect(raw.archivedBy).toBe('system:unprocessed')
+    expect(raw.archivedAt).toBeInstanceOf(Date)
+    expect(raw.url).toBeUndefined()
+    expect(raw.buffer).toBeInstanceOf(Buffer)
+  })
+
+  it('archives the raw frame as rehost-failed when the Shopify upload throws', async () => {
+    const { tryIngestSocialAsset } = mockCommon('atlas', 'atlas/seedream-4.5-edit')
+    tryIngestSocialAsset.mockImplementation(async () => ({ id: 902, url: 'https://cdn.sanity.io/raw.jpg', sanityAssetId: 'image-raw' }))
+    vi.doMock('./shopify.server', () => ({
+      uploadMoodImageToShopifyFilesWithId: vi.fn(async () => { throw new Error('Shopify 503') }),
+    }))
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.resetModules()
+    const { generateCastComposite } = await import('./social-media.server')
+    const result = await generateCastComposite(CAST_OPTS)
+
+    expect(result.urls).toEqual([])
+    expect(result.dropReasons?.[0]).toContain('rehost_error:Shopify 503')
+    const final = tryIngestSocialAsset.mock.calls[1]![0]
+    expect(final.replacesAssetId).toBe(902)
+    expect(final.archivedBy).toBe('system:rehost-failed')
+    expect(final.url).toBe('https://cdn.sanity.io/raw.jpg')
+    expect(final.existingSanityAssetId).toBe('image-raw')
+    expect(final.tags).toEqual(expect.arrayContaining(['dropped:rehost_error:Shopify 503']))
   })
 
   it('runs the product-fidelity check on a held-in-hand candidate with no on-skin scene axes (#11725)', async () => {
@@ -762,7 +804,104 @@ describe('generateCastComposite: provider id on the row, crop rejects archived (
 
     expect(runProductFidelityCheck).toHaveBeenCalledTimes(1)
     expect(result.urls).toEqual(['https://cdn/rehosted.jpg'])
-    const input = tryIngestSocialAsset.mock.calls[0]![0]
+    const input = tryIngestSocialAsset.mock.calls.at(-1)![0]
     expect(input.tags).toEqual(expect.arrayContaining(['fidelity:silhouette=drift']))
+  })
+})
+
+// The single-image path used to return null on a crop reject or a rehost
+// failure with no library row at all, so those billed frames never appeared
+// in /admin/socials/library.
+describe('generateAndUploadSocialImage: every billed frame lands in the library', () => {
+  afterEach(() => {
+    vi.doUnmock('./generate-image.server')
+    vi.doUnmock('./social-vision-gate.server')
+    vi.doUnmock('./shopify.server')
+    vi.doUnmock('./social-asset-library.server')
+    vi.doUnmock('./social-crop-to-zone.server')
+    vi.restoreAllMocks()
+    vi.resetModules()
+  })
+
+  function mockSingle() {
+    vi.doMock('./generate-image.server', () => ({
+      generateImage: vi.fn(async () => ({
+        buffers: [Buffer.from('frame')], provider: 'atlas', model: 'atlas/seedream-4.5-edit', requestId: 'pred-single',
+      })),
+    }))
+    const tryIngestSocialAsset = vi.fn(async (_input: Record<string, unknown>) => ({
+      id: 950, url: 'https://cdn.sanity.io/raw.jpg', sanityAssetId: 'image-raw',
+    }))
+    vi.doMock('./social-asset-library.server', async (orig) => ({ ...(await orig<object>()), tryIngestSocialAsset }))
+    vi.doMock('./social-vision-gate.server', async (orig) => ({
+      ...(await orig<object>()),
+      runVisionGate: vi.fn(async () => ({ pass: true, checks: null, notes: '', checkedAt: '', checkCompleted: true, legibleText: '' })),
+      recordVisionVerdict: vi.fn(async () => {}),
+    }))
+    return { tryIngestSocialAsset }
+  }
+
+  const OPTS = {
+    prompt: 'a scene', handle: 'romp-2-0', archetype: 'scene', mood: 'warm', date: '2026-10-13',
+    imageSize: { width: 1080, height: 1350 },
+  }
+
+  it('archives a crop-rejected frame instead of dropping it with no row', async () => {
+    const { tryIngestSocialAsset } = mockSingle()
+    vi.doMock('./shopify.server', () => ({ uploadMoodImageToShopifyFilesWithId: vi.fn() }))
+    vi.doMock('./social-crop-to-zone.server', () => ({
+      cropImageToZone: vi.fn(async () => ({ cropped: false, reason: 'zone_miss', notes: '' })),
+      formatCropBoxTag: vi.fn(),
+    }))
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.resetModules()
+    const { generateAndUploadSocialImage } = await import('./social-media.server')
+    const out = await generateAndUploadSocialImage({
+      ...OPTS,
+      sceneAxes: { cropScale: 'close', bodyZone: 'hip-hollow' },
+    } as Parameters<typeof generateAndUploadSocialImage>[0])
+
+    expect(out.url).toBeNull()
+    expect(tryIngestSocialAsset.mock.calls[0]![0].archivedBy).toBe('system:unprocessed')
+    const final = tryIngestSocialAsset.mock.calls.at(-1)![0]
+    expect(final.replacesAssetId).toBe(950)
+    expect(final.archivedBy).toBe('system:crop-reject')
+    expect(final.providerRequestId).toBe('pred-single')
+    expect(final.tags).toEqual(expect.arrayContaining(['dropped:crop_rejected:zone_miss']))
+  })
+
+  it('archives the frame as rehost-failed when the Shopify upload throws', async () => {
+    const { tryIngestSocialAsset } = mockSingle()
+    vi.doMock('./shopify.server', () => ({
+      uploadMoodImageToShopifyFilesWithId: vi.fn(async () => { throw new Error('Shopify 503') }),
+    }))
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.resetModules()
+    const { generateAndUploadSocialImage } = await import('./social-media.server')
+    const out = await generateAndUploadSocialImage(OPTS as Parameters<typeof generateAndUploadSocialImage>[0])
+
+    expect(out.url).toBeNull()
+    const final = tryIngestSocialAsset.mock.calls.at(-1)![0]
+    expect(final.replacesAssetId).toBe(950)
+    expect(final.archivedBy).toBe('system:rehost-failed')
+    expect(final.url).toBe('https://cdn.sanity.io/raw.jpg')
+  })
+
+  it('finalizes the raw row in place on success', async () => {
+    const { tryIngestSocialAsset } = mockSingle()
+    vi.doMock('./shopify.server', () => ({
+      uploadMoodImageToShopifyFilesWithId: vi.fn(async () => ({ url: 'https://cdn/rehosted.jpg', fileId: 'gid://shopify/MediaImage/1' })),
+    }))
+    vi.resetModules()
+    const { generateAndUploadSocialImage } = await import('./social-media.server')
+    const out = await generateAndUploadSocialImage(OPTS as Parameters<typeof generateAndUploadSocialImage>[0])
+
+    expect(out.url).toBe('https://cdn/rehosted.jpg')
+    expect(out.assetId).toBe(950)
+    expect(tryIngestSocialAsset).toHaveBeenCalledTimes(2)
+    const final = tryIngestSocialAsset.mock.calls[1]![0]
+    expect(final.replacesAssetId).toBe(950)
+    expect(final.existingSanityAssetId).toBe('image-raw')
+    expect(final.archivedBy).toBeUndefined()
   })
 })

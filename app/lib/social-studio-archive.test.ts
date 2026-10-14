@@ -118,6 +118,24 @@ describe('parseLibraryFilters archived default', () => {
   })
 })
 
+// The owner wants every frame the provider produced visible in the Library
+// (2026-10-13), so frames the generation path archived itself show in the
+// grid by default. The Composer picker must never offer them.
+describe('parseLibraryFilters dropped default', () => {
+  it('includes dropped frames in the grid by default', () => {
+    expect(parseLibraryFilters(new URL('https://x.test/admin/socials/library')).dropped).toBe(true)
+  })
+
+  it('dropped=0 hides them', () => {
+    expect(parseLibraryFilters(new URL('https://x.test/admin/socials/library?dropped=0')).dropped).toBe(false)
+  })
+
+  it('the Composer picker (select=1) never includes them, even with dropped=1', () => {
+    expect(parseLibraryFilters(new URL(libraryPickerUrl('lace'), 'https://x.test')).dropped).toBe(false)
+    expect(parseLibraryFilters(new URL('https://x.test/admin/socials/library?select=1&dropped=1')).dropped).toBe(false)
+  })
+})
+
 describe('Composer picker inherits the archived default', () => {
   it('libraryPickerUrl carries no archived param, so parseLibraryFilters resolves archived:false, same as the grid', () => {
     const url = libraryPickerUrl('lace')
@@ -136,6 +154,23 @@ describe('listLibraryAssets WHERE clause', () => {
     expect(whereCalls).toHaveLength(1)
     const rendered = renderWhere(whereCalls[0])
     expect(rendered).toContain('archived_at')
+    expect(rendered).toContain('is null')
+  })
+
+  it('the default grid adds every system-dropped archive reason, and nothing else archived', async () => {
+    whereCalls.length = 0
+    await listLibraryAssets(parseLibraryFilters(new URL('https://x.test/admin/socials/library')))
+    const q = dialect.sqlToQuery(whereCalls[0] as Parameters<PgDialect['sqlToQuery']>[0])
+    expect(q.sql).toContain('archived_by')
+    expect(q.params).toEqual(expect.arrayContaining(['system:crop-reject', 'system:rehost-failed', 'system:unprocessed']))
+    expect(q.params).toHaveLength(3)
+  })
+
+  it('the picker query excludes every archived row, dropped frames included', async () => {
+    whereCalls.length = 0
+    await listLibraryAssets(parseLibraryFilters(new URL(libraryPickerUrl(''), 'https://x.test')))
+    const rendered = renderWhere(whereCalls[0])
+    expect(rendered).not.toContain('archived_by')
     expect(rendered).toContain('is null')
   })
 
