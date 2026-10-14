@@ -209,7 +209,17 @@ async function handleSocialCardOp(op: 'packshot-card' | 'plate', b: Record<strin
   if (op === 'packshot-card') {
     const { getProductByHandle } = await import('~/lib/shopify.server')
     const product = await getProductByHandle(handle!)
-    imageUrl = product?.images?.[0]?.url
+    // Ticket #15076: images[0] is sometimes the retail carton, not the
+    // product (Shopify's featuredMedia convention, same trap Step 5 of
+    // routine-social-daily.md warns about for AI-generation briefs).
+    // `cardImage` is the same bare-product-frame pick every other
+    // rail/grid/carousel card tile already reads (Product.cardImage's own
+    // doc comment, ticket #14190), computed once in `nodeToProduct()` via
+    // `pickBareProductImage()` — reuse it here instead of a second walk.
+    imageUrl = product?.cardImage?.url ?? product?.images?.[0]?.url
+    if (imageUrl && !product?.cardImage?.url) {
+      console.warn(`[social-image] packshot-card: no confirmed bare-product frame for "${handle}", falling back to images[0] (likely retail packaging)`)
+    }
     if (!imageUrl) {
       return new Response(`Bad Request: no product image found for handle "${handle}"`, { status: 400 })
     }
