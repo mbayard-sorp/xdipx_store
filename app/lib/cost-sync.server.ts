@@ -144,6 +144,12 @@ export async function runNalpacCostSync(opts: {
     // live sell price is a business call, not a mechanical margin-protection
     // sync, so this module stops at surfacing it.
     const riseFlags: { sku: string; priorWholesale: number; newWholesale: number }[] = []
+    // Ticket #12082: the sticky rise-comparison basis to persist per sku this
+    // run (see the `riseBasis` comment below). Filled for skus with a prior
+    // row inside the loop; a brand-new sku (no prior row at all) has no
+    // standing basis to carry forward, so it is seeded to the day's own
+    // wholesale -- nothing to compare against yet.
+    const riseBasisBySku = new Map<string, number>()
     type HistoryRow = typeof nalpacPriceHistory.$inferInsert
     const upsertRows: HistoryRow[] = []
 
@@ -186,9 +192,23 @@ export async function runNalpacCostSync(opts: {
         // risk a silent wholesale rise is. Mutually exclusive with
         // wholesaleDrop by construction (dropPct > 0), so this never fires on
         // a sku already queued for a drop-sync above.
-        const wholesaleRise = priorWholesale > 0 && newWholesale > 0 &&
-          newWholesale >= priorWholesale * (1 + dropPct)
-        if (wholesaleRise) riseFlags.push({ sku, priorWholesale, newWholesale })
+        //
+        // Ticket #12082: compared against `riseBasis`, not `priorWholesale`.
+        // `priorWholesale` is yesterday's raw observation, overwritten every
+        // sync run, so a creeping rise (each day's step under dropPct) never
+        // crosses the threshold against it no matter how far the cumulative
+        // total has drifted (SKU 88038: $23.96 -> $39.94, +66.6%, never
+        // flagged this way). `riseBasis` is sticky instead -- it only moves
+        // when a rise actually fires or a drop-sync lands a fresh cost below
+        // -- so the comparison is against the last settled basis, catching a
+        // slow creep the same way a single jump would be caught.
+        const riseBasis = prior.riseBasisWholesale != null
+          ? parseFloat(prior.riseBasisWholesale)
+          : priorWholesale
+        const wholesaleRise = riseBasis > 0 && newWholesale > 0 &&
+          newWholesale >= riseBasis * (1 + dropPct)
+        if (wholesaleRise) riseFlags.push({ sku, priorWholesale: riseBasis, newWholesale })
+        riseBasisBySku.set(sku, wholesaleRise || isDrop ? newWholesale : riseBasis)
       }
 
       if (isDrop) {
@@ -216,6 +236,14 @@ export async function runNalpacCostSync(opts: {
         // Sticky across days: only advance synced_at for SKUs that actually
         // fire a sync this run; otherwise carry forward whatever was there.
         syncedAt:          isDrop ? now : (prior?.syncedAt ?? null),
+        // Ticket #12082: carry forward the sticky rise basis computed above;
+        // a sku with no prior row at all has no standing basis yet, so seed
+        // it to today's own wholesale (nothing to compare against until the
+        // next observation).
+        riseBasisWholesale: (() => {
+          const basis = riseBasisBySku.get(sku) ?? snap.wholesale
+          return basis > 0 ? String(basis) : null
+        })(),
       })
     }
 
@@ -243,6 +271,7 @@ export async function runNalpacCostSync(opts: {
               inSale:            sql`excluded.in_sale`,
               observedAt:        sql`excluded.observed_at`,
               syncedAt:          sql`excluded.synced_at`,
+              riseBasisWholesale: sql`excluded.rise_basis_wholesale`,
             },
           })
       } catch (err) {

@@ -4,7 +4,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { NalpacPriceSnapshot } from './nalpac-feeds.server'
 
-type PriorRow = { sku: string; wholesale: string | null; mapPrice: string | null; syncedAt: Date | null }
+type PriorRow = {
+  sku: string
+  wholesale: string | null
+  mapPrice: string | null
+  syncedAt: Date | null
+  riseBasisWholesale?: string | null
+}
 
 let priorRows: PriorRow[] = []
 const settings: Record<string, string | null> = {
@@ -146,6 +152,52 @@ describe('runNalpacCostSync: wholesale-rise flag (#10871)', () => {
 
     expect(result.increasesFlagged).toBe(10) // MAX_WHOLESALE_RISE_FLAGS_PER_RUN
     expect(fileDetectionTicket).toHaveBeenCalledTimes(10)
+  })
+
+  it('does not reset the sticky rise basis on a sub-threshold rise, so it carries forward instead of tracking yesterday (#12082)', async () => {
+    priorRows = [{ sku: 'SKU1', wholesale: '10.00', mapPrice: null, syncedAt: null, riseBasisWholesale: null }]
+    const { runNalpacCostSync } = await import('./cost-sync.server')
+
+    const result = await runNalpacCostSync({
+      snapshots: new Map([['SKU1', snap({ sku: 'SKU1', wholesale: 10.5 })]]), // +5%, under the 10% floor
+      carriedSkus: new Set(['SKU1']),
+    })
+
+    expect(result.increasesFlagged).toBe(0)
+    const chunk = insertValues.mock.calls[0]![0] as Array<{ sku: string; riseBasisWholesale: string | null }>
+    // The basis stays pinned at 10.00 (not advanced to 10.50) so a second
+    // sub-threshold step is measured cumulatively against the same floor.
+    expect(chunk[0]!.riseBasisWholesale).toBe('10')
+  })
+
+  it('flags a creeping wholesale rise once the CUMULATIVE basis crosses the threshold, even though no single day crossed it (#12082, SKU 88038 shape)', async () => {
+    // Day 1: 10.00 -> 10.50 (+5%, under threshold). No flag, basis stays 10.00.
+    priorRows = [{ sku: 'SKU1', wholesale: '10.00', mapPrice: null, syncedAt: null, riseBasisWholesale: null }]
+    const { runNalpacCostSync } = await import('./cost-sync.server')
+    const day1 = await runNalpacCostSync({
+      snapshots: new Map([['SKU1', snap({ sku: 'SKU1', wholesale: 10.5 })]]),
+      carriedSkus: new Set(['SKU1']),
+    })
+    expect(day1.increasesFlagged).toBe(0)
+
+    // Day 2: 10.50 -> 11.50. Day-over-day is only ~9.5% (under threshold, and
+    // under the old priorWholesale-only check this would never flag), but
+    // against the still-10.00 basis it is +15%, over the 10% floor.
+    priorRows = [{ sku: 'SKU1', wholesale: '10.50', mapPrice: null, syncedAt: null, riseBasisWholesale: '10.00' }]
+    vi.clearAllMocks()
+    const day2 = await runNalpacCostSync({
+      snapshots: new Map([['SKU1', snap({ sku: 'SKU1', wholesale: 11.5 })]]),
+      carriedSkus: new Set(['SKU1']),
+    })
+
+    expect(day2.increasesFlagged).toBe(1)
+    const call = fileDetectionTicket.mock.calls[0]![0]
+    expect(call.suggestion).toContain('10.00')
+    expect(call.suggestion).toContain('11.50')
+    // The basis resets to today's wholesale once a rise actually fires, so
+    // the next comparison starts fresh rather than re-flagging immediately.
+    const chunk = insertValues.mock.calls[0]![0] as Array<{ sku: string; riseBasisWholesale: string | null }>
+    expect(chunk[0]!.riseBasisWholesale).toBe('11.5')
   })
 
   it('is a no-op entirely when pricing_costsync_enabled is off', async () => {

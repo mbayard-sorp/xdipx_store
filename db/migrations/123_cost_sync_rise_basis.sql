@@ -1,0 +1,26 @@
+-- 123: cumulative wholesale-rise basis for cost-sync's wholesale-INCREASE
+-- detector (ticket #12082).
+--
+-- runNalpacCostSync's wholesaleRise check (app/lib/cost-sync.server.ts)
+-- compared each day's new wholesale only against nalpac_price_history's
+-- existing `wholesale` column, which is overwritten every sync run
+-- regardless of whether a rise fired. That reset the comparison basis
+-- daily, so a creeping rise (each day's step under the material-change
+-- threshold) was never flagged even after a large total increase: SKU
+-- 88038 went $23.96 -> $39.94 (+66.6%) across several observation windows
+-- with zero rise tickets filed.
+--
+-- rise_basis_wholesale is a second, sticky wholesale value: it carries
+-- forward unchanged on an ordinary observation and only resets to the
+-- day's new wholesale when a rise actually fires or a drop-sync already
+-- pushed a fresh cost to Shopify. That makes the rise check cumulative
+-- against the last settled basis instead of day-over-day.
+--
+-- FULLY ADDITIVE: one ALTER TABLE ... ADD COLUMN IF NOT EXISTS. No DROP, no
+-- RENAME, no ALTER TYPE, no DML. Existing rows read NULL until the next
+-- cost-sync pass backfills them (app/lib/cost-sync.server.ts falls back to
+-- the existing `wholesale` column when this is NULL).
+--
+-- Idempotent: safe to re-run.
+
+ALTER TABLE nalpac_price_history ADD COLUMN IF NOT EXISTS rise_basis_wholesale numeric(10,2);
