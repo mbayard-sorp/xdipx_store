@@ -375,7 +375,7 @@ is on the record with a ticket the team can act on tomorrow.
      only: a `/notebook/` URL is editorial, the Step 4b sale gate still matches only
      `/products/` links, and the owner asked for the link. A PDP link in the same caption is still
      a BLOCK. A single still or a carousel both satisfy it; when the rolling-14 carousel count
-     reads 0, build it as the carousel (§3.3 arc, the article's claims as the substance slides).
+     reads 0, build it as the carousel (§3.3 arc, the article's claims as the substance slides). When the article's substance is clinical or diagnostic (causes, symptoms, when to see a professional, referral-style guidance) rather than feeling-first, build it as the carousel too, even when the rolling-14 count does not call for one: one on-register hook slide (9-by-implication) plus explanatory slides carrying the clinical substance, rather than forcing a single caption to hold diagnostic content at the full register floor (run 1356, post 428).
    - **The X echo.** Register 6-7, the summary in one or two sentences, the article URL with
      channel UTMs (`?utm_source=x&utm_medium=social&utm_campaign=notebook`), and a 16:9 cast or
      library frame per Step 5 (text plus link is unpublishable). The link makes it a ~$0.20 post
