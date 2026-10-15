@@ -1183,6 +1183,8 @@ export const pricingRules = pgTable('pricing_rules', {
   mapBehavior:             text('map_behavior'),
   compareAtStrategy:       text('compare_at_strategy'),
   velocityModifierEnabled: boolean('velocity_modifier_enabled'),
+  /** Dollar floor on unit gross profit (migration 124). NULL inherits; NULL everywhere = no floor. */
+  minUnitProfitUsd:        decimal('min_unit_profit_usd', { precision: 10, scale: 2 }),
   updatedAt:               timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   updatedBy:               text('updated_by'),
 }, t => ({

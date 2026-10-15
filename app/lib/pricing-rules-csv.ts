@@ -10,7 +10,13 @@ export const PRICING_RULES_CSV_HEADERS = [
   'map_behavior',
   'compare_at_strategy',
   'velocity_modifier_enabled',
+  'min_unit_profit_usd',
 ] as const
+
+/** Dollar floor on unit gross profit: a finite amount from $0 to $100. */
+export function isValidMinUnitProfit(v: number): boolean {
+  return Number.isFinite(v) && v >= 0 && v <= 100
+}
 
 export function escapeCell(value: string): string {
   if (value === '') return ''
@@ -33,6 +39,7 @@ export interface PricingRuleCSVRow {
   mapBehavior: string | null
   compareAtStrategy: string | null
   velocityModifierEnabled: boolean | null
+  minUnitProfitUsd?: number | null
 }
 
 export function pricingRulesToCSV(rows: PricingRuleCSVRow[]): string {
@@ -47,6 +54,7 @@ export function pricingRulesToCSV(rows: PricingRuleCSVRow[]): string {
       r.mapBehavior              ?? '',
       r.compareAtStrategy        ?? '',
       r.velocityModifierEnabled  != null ? String(r.velocityModifierEnabled) : '',
+      r.minUnitProfitUsd         != null ? String(r.minUnitProfitUsd) : '',
     ]))
   }
   return lines.join('\n') + '\n'

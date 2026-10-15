@@ -28,6 +28,7 @@ export async function action({ request }: ActionFunctionArgs) {
       mapBehavior:             g.rule.mapBehavior,
       compareAtStrategy:       g.rule.compareAtStrategy,
       velocityModifierEnabled: g.rule.velocityModifierEnabled,
+      minUnitProfitUsd:        g.rule.minUnitProfitUsd,
     })
 
     for (const sg of g.subGroups) {
@@ -40,6 +41,7 @@ export async function action({ request }: ActionFunctionArgs) {
         mapBehavior:             sg.rule.mapBehavior,
         compareAtStrategy:       sg.rule.compareAtStrategy,
         velocityModifierEnabled: sg.rule.velocityModifierEnabled,
+        minUnitProfitUsd:        sg.rule.minUnitProfitUsd,
       })
 
       for (const pt of sg.productTypes) {
@@ -52,6 +54,7 @@ export async function action({ request }: ActionFunctionArgs) {
           mapBehavior:             pt.rule.mapBehavior,
           compareAtStrategy:       pt.rule.compareAtStrategy,
           velocityModifierEnabled: pt.rule.velocityModifierEnabled,
+          minUnitProfitUsd:        pt.rule.minUnitProfitUsd,
         })
       }
     }

@@ -39,6 +39,16 @@ export interface PricingConfig {
   map_behavior: MapBehavior
   compare_at_strategy: CompareAtStrategy
   velocity_modifier_enabled: boolean
+  /**
+   * Dollar floor on gross profit per unit: sell >= cost + this, rounded UP to
+   * the next .99. Null (the default) means no dollar floor and leaves the
+   * historical math untouched. A non-null value (even 0) also switches on
+   * target-preserving rounding for sells under SMART_ROUND_MAX_USD; see
+   * roundToTargetPsychological. Pricing margin audit 2026-10-15: on a $7-20 single
+   * item order, a percentage margin alone cannot cover the $6.50 shipping,
+   * $2.50 drop-ship fee and payment fees every order carries.
+   */
+  min_unit_profit_usd?: number | null
 }
 
 export interface PriceResult {
@@ -102,6 +112,40 @@ export function roundUpPsychological(n: number): number {
   // (e.g. 18.995): step to the next dollar's .99.
   if (candidate < n) candidate = base + 1 + 0.99
   return round2(candidate)
+}
+
+/** Below this pre-rounding sell, rounding keeps target margin instead of always rounding down. */
+export const SMART_ROUND_MAX_USD = 20
+
+/**
+ * Target-preserving .99 rounding for cheap items. roundPsychological always
+ * rounds down, which on a $7 item gives away a large slice of the margin
+ * ($7.23 -> $6.99 takes a 35% target to 32.8%). Under SMART_ROUND_MAX_USD this
+ * picks the nearest of the two neighbouring .99 points (down and up) that
+ * still sits at or above `minSell` (the target-margin price) and at or below
+ * `ceiling` (an MSRP cap, when one applies). When neither qualifies it falls
+ * back to the historical round-down. At or above the threshold it is exactly
+ * roundPsychological.
+ */
+export function roundToTargetPsychological(n: number, minSell: number, ceiling: number | null = null): number {
+  const down = roundPsychological(n)
+  if (n >= SMART_ROUND_MAX_USD) return down
+  const up = roundUpPsychological(n)
+  const eligible = [down, up].filter(c =>
+    c >= minSell - 1e-9 && (ceiling == null || c <= ceiling + 1e-9))
+  if (eligible.length === 0) return down
+  // Nearest to the unrounded price; a tie goes to the lower price.
+  return eligible.reduce((best, c) => (Math.abs(c - n) < Math.abs(best - n) - 1e-9 ? c : best))
+}
+
+/**
+ * Dollar-floor clamp: the smallest .99 price that clears cost + minProfit, or
+ * the price unchanged when it already clears it or no floor is set.
+ */
+export function applyMinUnitProfit(sell: number, cost: number, minProfit: number | null | undefined): number {
+  if (minProfit == null || !(minProfit >= 0)) return sell
+  const minSell = cost + minProfit
+  return sell + 1e-9 >= minSell ? sell : roundUpPsychological(minSell)
 }
 
 // ---------------------------------------------------------------------------
@@ -193,7 +237,12 @@ export function computePrice(params: {
     sell = Math.min(sell, msrp)
   }
 
-  sell = roundPsychological(sell)
+  // A dollar floor set on the rule also opts the scope into target-preserving
+  // rounding under $20 (a null rule keeps the historical round-down).
+  const minProfit = cfg.min_unit_profit_usd ?? null
+  sell = minProfit != null
+    ? roundToTargetPsychological(sell, target, msrp)
+    : roundPsychological(sell)
 
   // Margin-floor re-clamp AFTER rounding (ticket #7884). roundPsychological
   // only rounds down, so a sell price clamped exactly to the margin floor at
@@ -209,6 +258,14 @@ export function computePrice(params: {
   // artifact to paper over.
   if (!msrpBelowFloor && sell < floor) {
     sell = roundUpPsychological(floor)
+    if (msrp != null) sell = Math.min(sell, msrp)
+  }
+
+  // Dollar floor (min_unit_profit_usd), after the percentage floor so the
+  // stricter of the two wins. Capped by an MSRP ceiling like the margin floor
+  // above: never advertise over MSRP while that valve is on.
+  if (minProfit != null) {
+    sell = applyMinUnitProfit(sell, cost, minProfit)
     if (msrp != null) sell = Math.min(sell, msrp)
   }
 
@@ -286,7 +343,7 @@ export function computeDiscontinuedPrice(params: {
   cost:             number | null
   msrp:             number | null
   daysDiscontinued: number
-  cfg:              Pick<PricingConfig, 'target_margin_pct' | 'margin_floor_pct'> & Partial<Pick<PricingConfig, 'compare_at_strategy'>>
+  cfg:              Pick<PricingConfig, 'target_margin_pct' | 'margin_floor_pct'> & Partial<Pick<PricingConfig, 'compare_at_strategy' | 'min_unit_profit_usd'>>
   /** See computePrice. When false, MSRP is compare-at only, never a cap. */
   msrpCeiling?:     boolean
   /** Owner-edited markdown steps; defaults to DEFAULT_CLEARANCE_LADDER. */
@@ -321,6 +378,10 @@ export function computeDiscontinuedPrice(params: {
   // the floor ($18.82 -> $18.99), rather than landing on the raw floor value.
   let rounded = roundPsychological(sell)
   if (rounded < floor) rounded = roundUpPsychological(floor)
+  // The dollar floor holds through clearance too: a markdown never takes a
+  // unit below cost + min_unit_profit_usd. Clearance keeps round-down
+  // otherwise; the markdown is the point there.
+  rounded = applyMinUnitProfit(rounded, cost, cfg.min_unit_profit_usd)
 
   // Clearance historically always struck MSRP; keep that for 'msrp' and
   // 'none' (a discontinued item always shows its reference price), and anchor

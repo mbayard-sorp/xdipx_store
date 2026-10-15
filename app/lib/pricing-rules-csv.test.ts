@@ -114,8 +114,8 @@ describe('pricingRulesToCSV', () => {
     const csv = pricingRulesToCSV(sampleRows)
     const lines = csv.trim().split('\n')
     const groupLine = lines[2]!
-    // group row has all-null rule fields -- last 5 cols should be empty
-    expect(groupLine).toMatch(/vibrators,Vibrators,,,,,$/)
+    // group row has all-null rule fields -- last 6 cols should be empty
+    expect(groupLine).toMatch(/vibrators,Vibrators,,,,,,$/)
   })
 })
 
@@ -277,5 +277,43 @@ describe('enum validation', () => {
       expect(errors, `expected no errors for compare_at_strategy=${val}`).toHaveLength(0)
       expect(patches[0]!.compare_at_strategy).toBe(val)
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// min_unit_profit_usd column
+// ---------------------------------------------------------------------------
+
+describe('min_unit_profit_usd column', () => {
+  const row: PricingRuleCSVRow = {
+    scopeLevel: 'group', scopeId: 'vibrators', scopeName: 'Vibrators',
+    targetMarginPct: null, marginFloorPct: null, mapBehavior: null,
+    compareAtStrategy: null, velocityModifierEnabled: null, minUnitProfitUsd: 4,
+  }
+
+  it('is exported and round-trips', async () => {
+    expect(PRICING_RULES_CSV_HEADERS).toContain('min_unit_profit_usd')
+    const { patches, errors } = await pricingRulesFromCSV(pricingRulesToCSV([row]))
+    expect(errors).toHaveLength(0)
+    expect(patches[0]!.min_unit_profit_usd).toBe(4)
+  })
+
+  it('an empty cell clears it to null', async () => {
+    const { patches } = await pricingRulesFromCSV(pricingRulesToCSV([{ ...row, minUnitProfitUsd: null }]))
+    expect(patches[0]!.min_unit_profit_usd).toBeNull()
+  })
+
+  it('a CSV exported before the column existed leaves it undefined (stored value untouched)', async () => {
+    const csv = 'scope_level,scope_id,target_margin_pct\ngroup,vibrators,45\n'
+    const { patches, errors } = await pricingRulesFromCSV(csv)
+    expect(errors).toHaveLength(0)
+    expect(patches[0]).not.toHaveProperty('min_unit_profit_usd')
+  })
+
+  it('accepts a leading $ and rejects out-of-range amounts', async () => {
+    const ok = await pricingRulesFromCSV('scope_level,scope_id,min_unit_profit_usd\ngroup,vibrators,$3.50\n')
+    expect(ok.patches[0]!.min_unit_profit_usd).toBe(3.5)
+    const bad = await pricingRulesFromCSV('scope_level,scope_id,min_unit_profit_usd\ngroup,vibrators,-1\n')
+    expect(bad.errors[0]).toContain('min_unit_profit_usd')
   })
 })

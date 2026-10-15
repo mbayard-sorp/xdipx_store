@@ -9,6 +9,9 @@ import {
   ABSOLUTE_PRICE_FLOOR_DEFAULT,
   parseClearanceLadder,
   compareAtFor,
+  roundToTargetPsychological,
+  applyMinUnitProfit,
+  SMART_ROUND_MAX_USD,
   type PricingConfig,
 } from './pricing-engine-v2.server'
 
@@ -774,5 +777,120 @@ describe('compare-at under compare_at_strategy=launch_price', () => {
     const ms = computeDiscontinuedPrice({ ...base, cfg: { target_margin_pct: 0.5, margin_floor_pct: 0.3 } })!
     expect(lp.compare_at).toBe(40)
     expect(ms.compare_at).toBe(60)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// min_unit_profit_usd dollar floor + target-preserving rounding under $20
+// (pricing margin audit 2026-10-15)
+// ---------------------------------------------------------------------------
+
+describe('roundToTargetPsychological', () => {
+  it('rounds up when rounding down would drop below target ($7.23 -> $7.99, not $6.99)', () => {
+    expect(roundToTargetPsychological(7.2308, 7.2308)).toBe(7.99)
+  })
+
+  it('keeps the nearer round-down when it still clears the target', () => {
+    expect(roundToTargetPsychological(7.10, 6.50)).toBe(6.99)
+  })
+
+  it('takes the nearer round-up when both clear the target', () => {
+    expect(roundToTargetPsychological(7.80, 6.50)).toBe(7.99)
+  })
+
+  it('lands on an exact .99 input instead of dropping a dollar', () => {
+    expect(roundToTargetPsychological(12.99, 12)).toBe(12.99)
+  })
+
+  it('is plain round-down at or above the threshold', () => {
+    expect(SMART_ROUND_MAX_USD).toBe(20)
+    expect(roundToTargetPsychological(24.37, 30)).toBe(23.99)
+    expect(roundToTargetPsychological(20.50, 20.50)).toBe(19.99)
+  })
+
+  it('falls back to round-down when an MSRP ceiling rules out the round-up', () => {
+    expect(roundToTargetPsychological(9.50, 10, 9.50)).toBe(8.99)
+  })
+})
+
+describe('applyMinUnitProfit', () => {
+  it('is a no-op when unset', () => {
+    expect(applyMinUnitProfit(6.99, 4.70, null)).toBe(6.99)
+    expect(applyMinUnitProfit(6.99, 4.70, undefined)).toBe(6.99)
+  })
+
+  it('lifts to cost + min, rounded UP to .99', () => {
+    expect(applyMinUnitProfit(6.99, 4.70, 4)).toBe(8.99)
+  })
+
+  it('leaves a price that already clears the floor alone', () => {
+    expect(applyMinUnitProfit(9.99, 4.70, 4)).toBe(9.99)
+    expect(applyMinUnitProfit(8.70, 4.70, 4)).toBe(8.70)
+  })
+
+  it('ignores a negative or non-finite floor', () => {
+    expect(applyMinUnitProfit(6.99, 4.70, -1)).toBe(6.99)
+    expect(applyMinUnitProfit(6.99, 4.70, Number.NaN)).toBe(6.99)
+  })
+})
+
+describe('computePrice — min_unit_profit_usd', () => {
+  const mint = { cost: 4.70, map: null, msrp: null }
+  const rules = { target_margin_pct: 0.35, margin_floor_pct: 0.25 }
+
+  it('null (the default) keeps the historical round-down: $4.70 cost at 35% -> $6.99', () => {
+    expect(computePrice({ ...mint, cfg: cfg(rules) })!.sell).toBe(6.99)
+    expect(computePrice({ ...mint, cfg: cfg({ ...rules, min_unit_profit_usd: null }) })!.sell).toBe(6.99)
+  })
+
+  it('a $4 floor prices the mint at $8.99 ($4.29 gross profit)', () => {
+    const r = computePrice({ ...mint, cfg: cfg({ ...rules, min_unit_profit_usd: 4 }) })!
+    expect(r.sell).toBe(8.99)
+    expect(r.sell - mint.cost).toBeGreaterThanOrEqual(4)
+  })
+
+  it('$0 switches on target-preserving rounding only: $7.99 keeps the 35% target', () => {
+    const r = computePrice({ ...mint, cfg: cfg({ ...rules, min_unit_profit_usd: 0 }) })!
+    expect(r.sell).toBe(7.99)
+    expect((r.sell - mint.cost) / r.sell).toBeGreaterThanOrEqual(0.35)
+  })
+
+  it('does not touch items whose percentage price already clears the floor', () => {
+    const base = { cost: 15, map: null, msrp: null }
+    const withFloor = computePrice({ ...base, cfg: cfg({ target_margin_pct: 0.45, min_unit_profit_usd: 4 }) })!
+    const without = computePrice({ ...base, cfg: cfg({ target_margin_pct: 0.45 }) })!
+    expect(withFloor.sell).toBe(26.99)
+    expect(withFloor.sell).toBe(without.sell)
+  })
+
+  it('MAP still binds: the price lands on MAP, not a rounded point under it', () => {
+    const r = computePrice({ cost: 4.70, map: 12, msrp: null, cfg: cfg({ ...rules, min_unit_profit_usd: 4 }) })!
+    expect(r.sell).toBe(12)
+  })
+
+  it('an MSRP ceiling caps the dollar floor; with the ceiling off the floor wins', () => {
+    const c = cfg({ ...rules, min_unit_profit_usd: 4 })
+    expect(computePrice({ cost: 4.70, map: null, msrp: 8, cfg: c })!.sell).toBe(8)
+    expect(computePrice({ cost: 4.70, map: null, msrp: 8, cfg: c, msrpCeiling: false })!.sell).toBe(8.99)
+  })
+
+  it('the dollar floor survives the margin-floor re-clamp (stricter of the two wins)', () => {
+    // target 20 / floor 30 (velocity can push target under floor): floor price $7.14 -> $7.99,
+    // then a $5 dollar floor lifts it to cost + 5 = $10 -> $10.99.
+    const r = computePrice({ cost: 5, map: null, msrp: null, cfg: cfg({ target_margin_pct: 0.20, margin_floor_pct: 0.30, min_unit_profit_usd: 5 }) })!
+    expect(r.sell).toBe(10.99)
+  })
+})
+
+describe('computeDiscontinuedPrice — min_unit_profit_usd', () => {
+  const base = { cost: 4.70, msrp: null, daysDiscontinued: 100 }
+  const rules = { target_margin_pct: 0.35, margin_floor_pct: 0.25 }
+
+  it('null keeps the clearance price at the rounded-up margin floor', () => {
+    expect(computeDiscontinuedPrice({ ...base, cfg: rules })!.sell).toBe(6.99)
+  })
+
+  it('a markdown never takes a unit below cost + the dollar floor', () => {
+    expect(computeDiscontinuedPrice({ ...base, cfg: { ...rules, min_unit_profit_usd: 4 } })!.sell).toBe(8.99)
   })
 })

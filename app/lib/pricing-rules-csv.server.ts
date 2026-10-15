@@ -3,6 +3,7 @@
 
 import { parse } from 'csv-parse/sync'
 import { loadGroupTree } from './pricing-admin.server'
+import { isValidMinUnitProfit } from './pricing-rules-csv'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -16,6 +17,7 @@ export interface RulePatch {
   map_behavior?: string | null
   compare_at_strategy?: string | null
   velocity_modifier_enabled?: boolean | null
+  min_unit_profit_usd?: number | null
 }
 
 // ---------------------------------------------------------------------------
@@ -39,6 +41,7 @@ interface CsvRow {
   map_behavior?: string
   compare_at_strategy?: string
   velocity_modifier_enabled?: string
+  min_unit_profit_usd?: string
 }
 
 export async function pricingRulesFromCSV(
@@ -173,6 +176,22 @@ export async function pricingRulesFromCSV(
       }
     } else {
       patch.velocity_modifier_enabled = null
+    }
+
+    // min_unit_profit_usd: a CSV exported before the column existed has no
+    // such key, so the patch omits it and the stored value is left alone.
+    if ('min_unit_profit_usd' in r) {
+      const minRaw = (r.min_unit_profit_usd ?? '').trim().replace(/^\$/, '')
+      if (minRaw !== '') {
+        const val = Number(minRaw)
+        if (!isValidMinUnitProfit(val)) {
+          errors.push(`Row ${lineNo}: min_unit_profit_usd must be a dollar amount 0-100 (got "${r.min_unit_profit_usd}")`)
+          return
+        }
+        patch.min_unit_profit_usd = val
+      } else {
+        patch.min_unit_profit_usd = null
+      }
     }
 
     patches.push(patch)
