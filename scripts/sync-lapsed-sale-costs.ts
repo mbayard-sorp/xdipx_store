@@ -14,8 +14,8 @@
  *   lapsed        not in the sale feed today. The unit cost is a dead promo
  *                 cost. --apply writes the list wholesale to unitCost and
  *                 reprices through recomputeVariant.
- *   live_sale     tagged "N% Off Sale" today and the unit cost matches that
- *                 discount. The account's real cost; left alone.
+ *   live_sale     in the sale feed or tagged "N% Off Sale" today, and the
+ *                 unit cost matches that discount. The account's real cost; left alone.
  *   sale_mismatch tagged on sale today, but the unit cost is below even the
  *                 sale cost (an older, deeper promo). Reported only.
  *
@@ -37,7 +37,7 @@ import { writeFileSync } from 'node:fs'
 import { adminGraphQL, bulkFetchProductsForPricing } from '../app/lib/shopify.server'
 import { fetchAllNalpacFeeds } from '../app/lib/nalpac-feeds.server'
 import { recomputeVariant } from '../app/lib/pricing-apply-v2.server'
-import { STALE_COST_TOLERANCE } from '../app/lib/engine-cost'
+import { STALE_COST_TOLERANCE, nalpacSaleTagPct } from '../app/lib/engine-cost'
 
 const args = process.argv.slice(2)
 const flag = (name: string) => args.find(a => a === `--${name}` || a.startsWith(`--${name}=`))
@@ -66,14 +66,6 @@ interface Row {
   price: number
   marginAtFeedCost: number
   feedQty: number | null
-}
-
-/** "40% Off Sale" in Main Category / Sub-Category -> 0.40. */
-function saleTagPct(row: Record<string, string> | undefined): number | null {
-  if (!row) return null
-  const text = `${row['Main Category'] ?? ''},${row['Sub-Category'] ?? ''}`
-  const m = text.match(/(\d{1,2})%\s*Off\s*Sale/i)
-  return m ? parseInt(m[1]!, 10) / 100 : null
 }
 
 function round2(n: number): number {
@@ -118,9 +110,12 @@ async function main() {
       feedMatched++
       if (v.unitCost >= snap.wholesale * STALE_COST_TOLERANCE) continue
 
-      const salePct = snap.inSaleFeed ? saleTagPct(snap.raw.saleRow ?? snap.raw.mainRow) : null
+      // On sale = in the sale feed, or carrying the tag in the main feed (the
+      // sale feed misses some tagged SKUs). Same rule cost-sync now writes.
+      const salePct = nalpacSaleTagPct(snap.raw.saleRow) ?? nalpacSaleTagPct(snap.raw.mainRow)
+      const onSale = snap.inSaleFeed || salePct != null
       let kind: Kind = 'lapsed'
-      if (snap.inSaleFeed) {
+      if (onSale) {
         const saleCost = salePct != null ? snap.wholesale * (1 - salePct) : null
         kind = saleCost == null || v.unitCost >= saleCost * STALE_COST_TOLERANCE ? 'live_sale' : 'sale_mismatch'
       }

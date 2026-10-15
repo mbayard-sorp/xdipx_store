@@ -8,6 +8,7 @@ import { describe, it, expect } from 'vitest'
 import {
   resolveEngineCost,
   engineCostNote,
+  nalpacSaleTagPct,
   FEED_COST_MAX_AGE_MS,
   type FeedCostSnapshot,
 } from './engine-cost'
@@ -79,5 +80,17 @@ describe('engineCostNote', () => {
 
   it('is empty when the unit cost stood', () => {
     expect(engineCostNote({ cost: 16.68, source: 'unit_cost', replacedUnitCost: null })).toBe('')
+  })
+})
+
+describe('nalpacSaleTagPct', () => {
+  it('reads the tag from Sub-Category or Main Category', () => {
+    expect(nalpacSaleTagPct({ 'Sub-Category': '40% Off Sale,Collars and Leashes' })).toBe(0.4)
+    expect(nalpacSaleTagPct({ 'Main Category': '75% Off Sale', 'Sub-Category': 'Wands' })).toBe(0.75)
+  })
+
+  it('is null for an untagged or missing row', () => {
+    expect(nalpacSaleTagPct({ 'Sub-Category': 'Douches and Enemas,Hygiene' })).toBeNull()
+    expect(nalpacSaleTagPct(undefined)).toBeNull()
   })
 })

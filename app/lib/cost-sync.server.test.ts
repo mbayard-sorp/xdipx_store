@@ -214,3 +214,29 @@ describe('runNalpacCostSync: wholesale-rise flag (#10871)', () => {
     expect(fileDetectionTicket).not.toHaveBeenCalled()
   })
 })
+
+describe('runNalpacCostSync: in_sale snapshot (pricing audit 2026-10-15)', () => {
+  beforeEach(() => {
+    priorRows = []
+    vi.clearAllMocks()
+    settings['pricing_costsync_enabled'] = 'true'
+  })
+
+  it('marks a SKU on sale when the main feed carries an "N% Off Sale" tag the sale feed missed', async () => {
+    const { runNalpacCostSync } = await import('./cost-sync.server')
+    await runNalpacCostSync({
+      snapshots: new Map([
+        ['TAGGED', snap({ sku: 'TAGGED', wholesale: 27.8, raw: { mainRow: { 'Sub-Category': '40% Off Sale,Collars and Leashes' } } })],
+        ['PLAIN',  snap({ sku: 'PLAIN',  wholesale: 50.05, raw: { mainRow: { 'Sub-Category': 'Douches and Enemas' } } })],
+        ['FEED',   snap({ sku: 'FEED',   wholesale: 10, inSaleFeed: true })],
+      ]),
+      carriedSkus: new Set(['TAGGED', 'PLAIN', 'FEED']),
+    })
+
+    const written = insertValues.mock.calls.flatMap(c => c[0] as Array<{ sku: string; inSale: boolean }>)
+    const bySku = new Map(written.map(r => [r.sku, r.inSale]))
+    expect(bySku.get('TAGGED')).toBe(true)
+    expect(bySku.get('PLAIN')).toBe(false)
+    expect(bySku.get('FEED')).toBe(true)
+  })
+})

@@ -32,6 +32,7 @@ import { findVariantsBySkus, updateProductMetafield } from './shopify.server'
 import { recomputeVariant } from './pricing-apply-v2.server'
 import { fileDetectionTicket, makeDedupeKey, priorityFromSeverity } from './detection-tickets.server'
 import type { NalpacPriceSnapshot } from './nalpac-feeds.server'
+import { nalpacSaleTagPct } from './engine-cost'
 
 export interface CostSyncResult {
   /** Whether pricing_costsync_enabled was 'true' for this run. */
@@ -231,7 +232,9 @@ export async function runNalpacCostSync(opts: {
         nalpacDiscountPct: nalpacDiscountPct != null ? String(nalpacDiscountPct) : null,
         inTop100:          snap.inTop100Feed,
         inNew:             snap.inNewFeed,
-        inSale:            snap.inSaleFeed,
+        // The pricing engine reads this to tell a live sale cost from a lapsed
+        // one (engine-cost.ts), so a tagged SKU the sale feed missed counts.
+        inSale:            snap.inSaleFeed || nalpacSaleTagPct(snap.raw.mainRow ?? snap.raw.saleRow) != null,
         observedAt:        now,
         // Sticky across days: only advance synced_at for SKUs that actually
         // fire a sync this run; otherwise carry forward whatever was there.

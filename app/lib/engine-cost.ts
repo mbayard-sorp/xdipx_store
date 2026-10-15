@@ -12,16 +12,17 @@
 // ~946 variants pricing off a cost Nalpac no longer charges, and 247 of them
 // sold at or below true cost.
 //
-// The fix: when today's feed is fresh, the SKU is NOT in Nalpac's sale feed,
-// and the unit cost sits below the feed's list wholesale, the unit cost is a
-// lapsed sale cost and the feed wins. While a SKU IS in the sale feed, the
-// lower unit cost is the account's real sale cost and is kept.
+// The fix: when today's feed is fresh, the SKU is not on a Nalpac sale (sale
+// feed or "N% Off Sale" tag), and the unit cost sits below the feed's list
+// wholesale, the unit cost is a lapsed sale cost and the feed wins. While a
+// SKU is on sale, the lower unit cost is the account's real sale cost and is
+// kept.
 
 /** The cost-sync daily snapshot fields this rule reads (nalpac_price_history). */
 export interface FeedCostSnapshot {
   /** Nalpac list wholesale as of observedAt. */
   wholesale: number | null
-  /** Whether the SKU was in Nalpac's sale feed ("N% Off Sale" tag) at observedAt. */
+  /** Whether the SKU was on a Nalpac sale at observedAt (sale feed or "N% Off Sale" tag). */
   inSale: boolean
   observedAt: Date
 }
@@ -71,9 +72,23 @@ export function resolveEngineCost(opts: {
   return { cost: base, source: baseSource, replacedUnitCost: null }
 }
 
+/**
+ * The "N% Off Sale" tag Nalpac puts in a feed row's Main Category or
+ * Sub-Category, as a fraction (0.40). Null when untagged. The tag is a better
+ * sale signal than sale-feed membership alone: on 2026-10-15, 16 tagged SKUs
+ * were missing from the sale feed while their unit cost sat at exactly the
+ * tagged discount.
+ */
+export function nalpacSaleTagPct(row: Record<string, string> | undefined | null): number | null {
+  if (!row) return null
+  const text = `${row['Main Category'] ?? ''},${row['Sub-Category'] ?? ''}`
+  const m = text.match(/(\d{1,2})%\s*Off\s*Sale/i)
+  return m ? parseInt(m[1]!, 10) / 100 : null
+}
+
 /** One-line rationale suffix so the audit log says why the cost moved. */
 export function engineCostNote(c: EngineCost): string {
   if (c.source !== 'feed' || c.cost == null) return ''
   const was = c.replacedUnitCost != null ? ` over Shopify unit cost $${c.replacedUnitCost.toFixed(2)}` : ''
-  return ` Cost: Nalpac feed wholesale $${c.cost.toFixed(2)}${was} (lapsed sale cost, SKU no longer in the sale feed).`
+  return ` Cost: Nalpac feed wholesale $${c.cost.toFixed(2)}${was} (lapsed sale cost, SKU no longer on a Nalpac sale).`
 }
