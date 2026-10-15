@@ -302,6 +302,18 @@ For anything that changes rendering, fetch the affected routes and confirm the e
 actually present in the HTML. "The build passed" is not evidence that a page renders. That
 distinction is exactly what a three-day homepage breakage cost us once.
 
+**Known limitation: `preview-fetch` cannot exercise a POST-only `/api/team/*` action route.** It
+only proxies a GET of a path against the PR's preview origin, with no way to pass a custom
+method or body. When a fix changes a POST-only action route (voice-gate, social-image, and
+similar), there is no sanctioned way to call it end-to-end against the preview deployment:
+`api.github.com` and the Vercel API are both off-limits per the rule above, and cloud-routine
+egress only reaches xdipx.com. Confirmed on tickets #15386 (voice-gate notebook-URL carve-out)
+and #15076 (packshot-card bare-image fix), both verified on static/code-path tracing plus the
+full test suite instead, stated explicitly rather than guessed. This mirrors the
+`ANTHROPIC_API_KEY` gap in `routine-dev-daily.md` step 3h: a known, accepted limitation of this
+environment, not a defect in the fix under review. Say so explicitly in the verdict rather than
+treating the gap as a surprise each time.
+
 **The lighthouse check.** Per `.github/workflows/lighthouse.yml`, "Lighthouse stays NON-required for
 merge": it is informational, not a gate. (a) If the PR diff has no rendering surface, no
 `app/components` or `app/routes` changes touching markup or styles, a failing lighthouse check
