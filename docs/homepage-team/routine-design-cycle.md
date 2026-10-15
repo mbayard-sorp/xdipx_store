@@ -247,6 +247,17 @@ from colliding with uncommitted work, they do not remove it.
   pattern, not just the file you edited, and make the guard span every file the surface spans — and
   pin the count of any deliberate remaining instances (e.g. a logo wordmark) so a later sweep does not
   strip those as though they were part of the fix.
+- **When a change adds a required field to a widely-constructed shared type, grep every construction
+  site before running the gate (run 1435).** Adding `discontinuedAt` to `DiscoveryProduct` broke eight
+  hand-built fixtures across five files (`admin.design-gallery.tsx`, `discovery-emma.test.ts`,
+  `discovery-rules.test.ts`, `discovery-vocab-counts.test.ts`, `homepage-payload.test.ts`). Typecheck
+  caught it, but only in two batches roughly 25 minutes apart, because `tsc` reports what it reaches
+  and the second batch only surfaced after the first was fixed; the test suite caught none of it,
+  because `vitest` does not typecheck, so all 6632 tests passed green through both broken states. The
+  same guard-spans-the-whole-surface lesson above, applied to a type instead of a markup pattern: grep
+  the type name plus one distinctive sibling field (e.g. `productTypeDial`) before the first gate run,
+  which finds every construction site in one pass instead of discovering them one typecheck failure at
+  a time.
 - **A claim that a product, label, or price is invented is checked against the live catalog, never
   against the repo (run 1298 retro).** CLAUDE.md keeps no product data in the repo by design (Shopify
   is source of truth, nothing hardcoded outside `db/seed.ts`), so grepping the repo for a product name
