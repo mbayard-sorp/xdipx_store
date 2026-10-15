@@ -23,6 +23,8 @@ export interface GroupRuleValues {
   mapBehavior: string | null
   compareAtStrategy: string | null
   velocityModifierEnabled: boolean | null
+  /** Dollar floor on unit gross profit; null inherits. */
+  minUnitProfitUsd: number | null
 }
 
 export interface ProductTypeRow {
@@ -90,6 +92,7 @@ function emptyRule(): GroupRuleValues {
     mapBehavior: null,
     compareAtStrategy: null,
     velocityModifierEnabled: null,
+    minUnitProfitUsd: null,
   }
 }
 
@@ -99,6 +102,7 @@ function ruleFromRow(row: {
   mapBehavior: string | null
   compareAtStrategy: string | null
   velocityModifierEnabled: boolean | null
+  minUnitProfitUsd?: string | null
 } | undefined): GroupRuleValues {
   if (!row) return emptyRule()
   return {
@@ -107,6 +111,7 @@ function ruleFromRow(row: {
     mapBehavior: row.mapBehavior,
     compareAtStrategy: row.compareAtStrategy,
     velocityModifierEnabled: row.velocityModifierEnabled,
+    minUnitProfitUsd: row.minUnitProfitUsd != null ? parseFloat(row.minUnitProfitUsd) : null,
   }
 }
 
@@ -116,7 +121,8 @@ function hasAnyOverride(rule: GroupRuleValues): boolean {
     rule.marginFloorPct != null ||
     rule.mapBehavior != null ||
     rule.compareAtStrategy != null ||
-    rule.velocityModifierEnabled != null
+    rule.velocityModifierEnabled != null ||
+    rule.minUnitProfitUsd != null
   )
 }
 

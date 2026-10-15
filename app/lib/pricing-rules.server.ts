@@ -71,27 +71,30 @@ const GLOBAL_DEFAULTS: PricingConfig = {
   map_behavior:              'at_map',
   compare_at_strategy:       'msrp',
   velocity_modifier_enabled: false,
+  min_unit_profit_usd:       null,
 }
 
 // ---------------------------------------------------------------------------
 // DB helpers
 // ---------------------------------------------------------------------------
 
-interface RawRule {
+export interface RawRule {
   targetMarginPct:         string | null
   marginFloorPct:          string | null
   mapBehavior:             string | null
   compareAtStrategy:       string | null
   velocityModifierEnabled: boolean | null
+  minUnitProfitUsd:        string | null
 }
 
-function toPartial(raw: RawRule): Partial<PricingConfig> {
+export function toPartial(raw: RawRule): Partial<PricingConfig> {
   const out: Partial<PricingConfig> = {}
   if (raw.targetMarginPct         != null) out.target_margin_pct         = parseFloat(raw.targetMarginPct)
   if (raw.marginFloorPct          != null) out.margin_floor_pct          = parseFloat(raw.marginFloorPct)
   if (raw.mapBehavior             != null) out.map_behavior              = raw.mapBehavior as MapBehavior
   if (raw.compareAtStrategy       != null) out.compare_at_strategy       = raw.compareAtStrategy as CompareAtStrategy
   if (raw.velocityModifierEnabled != null) out.velocity_modifier_enabled = raw.velocityModifierEnabled
+  if (raw.minUnitProfitUsd        != null) out.min_unit_profit_usd       = parseFloat(raw.minUnitProfitUsd)
   return out
 }
 
@@ -113,6 +116,7 @@ async function fetchRules(scopePairs: Array<[string, string]>): Promise<Map<stri
       mapBehavior:             row.mapBehavior             ?? null,
       compareAtStrategy:       row.compareAtStrategy       ?? null,
       velocityModifierEnabled: row.velocityModifierEnabled ?? null,
+      minUnitProfitUsd:        row.minUnitProfitUsd        ?? null,
     })
   }
   return map

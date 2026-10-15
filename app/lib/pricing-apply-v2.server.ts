@@ -785,6 +785,7 @@ export interface RuleOverride {
   map_behavior?: string
   compare_at_strategy?: string
   velocity_modifier_enabled?: boolean
+  min_unit_profit_usd?: number | null
 }
 
 export interface VariantDelta {
@@ -826,6 +827,7 @@ export async function dryRunRuleChange(opts: {
       ...(o.map_behavior != null ? { map_behavior: o.map_behavior as import('./pricing-engine-v2.server').MapBehavior } : {}),
       ...(o.compare_at_strategy != null ? { compare_at_strategy: o.compare_at_strategy as import('./pricing-engine-v2.server').CompareAtStrategy } : {}),
       ...(o.velocity_modifier_enabled != null ? { velocity_modifier_enabled: o.velocity_modifier_enabled } : {}),
+      ...(o.min_unit_profit_usd != null ? { min_unit_profit_usd: o.min_unit_profit_usd } : {}),
     })
   }
 

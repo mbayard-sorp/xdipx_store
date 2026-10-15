@@ -35,7 +35,7 @@ vi.mock('../../db/schema', () => ({
   pipelineSettings:      { key: 'key', value: 'value' },
 }))
 
-import { buildRationale } from './pricing-rules.server'
+import { buildRationale, toPartial } from './pricing-rules.server'
 
 // ---------------------------------------------------------------------------
 // buildRationale tests
@@ -129,5 +129,28 @@ describe('buildRationale', () => {
     expect(r).toContain('Auto-applied')
     expect(r).toContain('$20.00')
     expect(r).toContain('$21.00')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// toPartial: min_unit_profit_usd inherits like every other rule field
+// ---------------------------------------------------------------------------
+
+describe('toPartial — min_unit_profit_usd', () => {
+  const blank = { targetMarginPct: null, marginFloorPct: null, mapBehavior: null, compareAtStrategy: null, velocityModifierEnabled: null }
+
+  it('parses a set value into the config', () => {
+    expect(toPartial({ ...blank, minUnitProfitUsd: '4.00' })).toEqual({ min_unit_profit_usd: 4 })
+  })
+
+  it('omits a NULL value so the parent scope wins on merge', () => {
+    const parent = toPartial({ ...blank, minUnitProfitUsd: '4.00' })
+    const child = toPartial({ ...blank, targetMarginPct: '0.4500', minUnitProfitUsd: null })
+    expect(child).not.toHaveProperty('min_unit_profit_usd')
+    expect({ ...parent, ...child }).toEqual({ min_unit_profit_usd: 4, target_margin_pct: 0.45 })
+  })
+
+  it('keeps an explicit $0 (it opts the scope into target-preserving rounding)', () => {
+    expect(toPartial({ ...blank, minUnitProfitUsd: '0.00' })).toEqual({ min_unit_profit_usd: 0 })
   })
 })

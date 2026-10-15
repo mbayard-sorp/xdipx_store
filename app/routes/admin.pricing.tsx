@@ -279,6 +279,13 @@ function MiniBarChart({ days }: { days: DaySummary[] }) {
 // Inline rule field editor
 // ---------------------------------------------------------------------------
 
+/**
+ * Starting value when "override" is clicked on Min $ profit and nothing above
+ * sets one: the $4 floor the 2026-10-15 margin audit replayed against real
+ * orders. Only a starting point in the input; nothing is saved until Save.
+ */
+const DEFAULT_MIN_UNIT_PROFIT_USD = 4
+
 interface RuleFieldsEditorProps {
   inherited: GroupRuleValues // effective value from parent (for display when null)
   values: GroupRuleValues
@@ -302,7 +309,7 @@ function RuleFieldsEditor({ inherited, values, onChange }: RuleFieldsEditorProps
   const effectiveCompare = values.compareAtStrategy ?? inherited.compareAtStrategy ?? 'msrp'
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
       {/* Target margin */}
       <div>
         <div className="flex items-center gap-1 mb-1">
@@ -454,6 +461,53 @@ function RuleFieldsEditor({ inherited, values, onChange }: RuleFieldsEditorProps
           </button>
         ) : (
           <span className="text-muted italic">{inherited.velocityModifierEnabled != null ? (inherited.velocityModifierEnabled ? 'on' : 'off') : '—'}</span>
+        )}
+      </div>
+
+      {/* Min $ profit per unit (dollar floor) */}
+      <div>
+        <div className="flex items-center gap-1 mb-1">
+          <span
+            className={`font-medium ${values.minUnitProfitUsd == null ? 'text-muted' : 'text-ink'}`}
+            title="Sell is held at or above cost + this amount, rounded up to .99. Setting it (even $0) also rounds prices under $20 to the nearest .99 that keeps target margin instead of always rounding down."
+          >
+            Min $ profit
+          </span>
+          <button
+            onClick={() => onChange({
+              ...values,
+              minUnitProfitUsd: values.minUnitProfitUsd != null
+                ? null
+                : inherited.minUnitProfitUsd ?? DEFAULT_MIN_UNIT_PROFIT_USD,
+            })}
+            className={`text-[10px] px-1.5 py-0.5 rounded transition-colors ${
+              values.minUnitProfitUsd != null
+                ? 'bg-coral/10 text-coral hover:bg-coral/20'
+                : 'bg-cream-2 text-muted hover:text-ink'
+            }`}
+          >
+            {values.minUnitProfitUsd != null ? 'revert' : 'override'}
+          </button>
+        </div>
+        {values.minUnitProfitUsd != null ? (
+          <div className="flex items-center gap-1">
+            <span className="text-muted">$</span>
+            <input
+              type="number"
+              inputMode="decimal"
+              min={0}
+              max={100}
+              step={0.5}
+              value={values.minUnitProfitUsd}
+              onChange={e => {
+                const v = parseFloat(e.target.value)
+                onChange({ ...values, minUnitProfitUsd: Number.isFinite(v) ? Math.max(0, Math.min(100, v)) : 0 })
+              }}
+              className="w-20 border border-line rounded-lg px-2 py-1 bg-white text-ink focus:outline-none focus:ring-1 focus:ring-coral/50"
+            />
+          </div>
+        ) : (
+          <span className="text-muted italic">{inherited.minUnitProfitUsd != null ? `$${inherited.minUnitProfitUsd.toFixed(2)}` : 'none'}</span>
         )}
       </div>
     </div>
@@ -641,6 +695,7 @@ function PricingRulesCard({ groups, globalRule }: PricingRulesCardProps) {
         map_behavior: vals.mapBehavior,
         compare_at_strategy: vals.compareAtStrategy,
         velocity_modifier_enabled: vals.velocityModifierEnabled,
+        min_unit_profit_usd: vals.minUnitProfitUsd,
       })
     }
     return patches
@@ -743,6 +798,7 @@ function PricingRulesCard({ groups, globalRule }: PricingRulesCardProps) {
     mapBehavior: 'at_map',
     compareAtStrategy: 'msrp',
     velocityModifierEnabled: false,
+    minUnitProfitUsd: null,
   }
   const effectiveGlobal = getValues('global', 'global', globalRule)
   const globalDisplay: GroupRuleValues = {
@@ -751,6 +807,7 @@ function PricingRulesCard({ groups, globalRule }: PricingRulesCardProps) {
     mapBehavior:             effectiveGlobal.mapBehavior             ?? GLOBAL_FALLBACK.mapBehavior,
     compareAtStrategy:       effectiveGlobal.compareAtStrategy       ?? GLOBAL_FALLBACK.compareAtStrategy,
     velocityModifierEnabled: effectiveGlobal.velocityModifierEnabled ?? GLOBAL_FALLBACK.velocityModifierEnabled,
+    minUnitProfitUsd:        effectiveGlobal.minUnitProfitUsd        ?? GLOBAL_FALLBACK.minUnitProfitUsd,
   }
 
   return (
@@ -1055,6 +1112,7 @@ function PricingRulesCard({ groups, globalRule }: PricingRulesCardProps) {
                     mapBehavior: gVals.mapBehavior ?? globalDisplay.mapBehavior,
                     compareAtStrategy: gVals.compareAtStrategy ?? globalDisplay.compareAtStrategy,
                     velocityModifierEnabled: gVals.velocityModifierEnabled ?? globalDisplay.velocityModifierEnabled,
+                    minUnitProfitUsd: gVals.minUnitProfitUsd ?? globalDisplay.minUnitProfitUsd,
                   }
 
                   return (
@@ -1097,6 +1155,7 @@ function PricingRulesCard({ groups, globalRule }: PricingRulesCardProps) {
                                     mapBehavior: sgVals.mapBehavior ?? sgInherited.mapBehavior,
                                     compareAtStrategy: sgVals.compareAtStrategy ?? sgInherited.compareAtStrategy,
                                     velocityModifierEnabled: sgVals.velocityModifierEnabled ?? sgInherited.velocityModifierEnabled,
+                                    minUnitProfitUsd: sgVals.minUnitProfitUsd ?? sgInherited.minUnitProfitUsd,
                                   }
                                   return (
                                     <div key={pt.productType} className="pl-3 border-l-2 border-cream-2">

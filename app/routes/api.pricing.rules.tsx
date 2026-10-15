@@ -4,6 +4,7 @@ import { db } from '~/lib/db.server'
 import { pricingRules } from '../../db/schema'
 import { invalidatePricingRuleCache } from '~/lib/pricing-rules.server'
 import { pricingRulesFromCSV } from '~/lib/pricing-rules-csv.server'
+import { isValidMinUnitProfit } from '~/lib/pricing-rules-csv'
 import { kickPricingRecompute } from '~/lib/pricing-kick.server'
 import { and, eq } from 'drizzle-orm'
 
@@ -15,6 +16,8 @@ interface RulePatch {
   map_behavior?: string | null
   compare_at_strategy?: string | null
   velocity_modifier_enabled?: boolean | null
+  /** Omitted (undefined) leaves the stored value alone, so an older CSV without the column cannot wipe it. */
+  min_unit_profit_usd?: number | null
 }
 
 // ---------------------------------------------------------------------------
@@ -40,6 +43,9 @@ async function applyPatches(patches: RulePatch[], updatedBy: string): Promise<Re
       mapBehavior: p.map_behavior ?? null,
       compareAtStrategy: p.compare_at_strategy ?? null,
       velocityModifierEnabled: p.velocity_modifier_enabled ?? null,
+      ...(p.min_unit_profit_usd !== undefined
+        ? { minUnitProfitUsd: p.min_unit_profit_usd != null ? String(p.min_unit_profit_usd) : null }
+        : {}),
       updatedBy,
       updatedAt: new Date(),
     }
@@ -123,6 +129,9 @@ export async function action({ request }: ActionFunctionArgs) {
     }
     if (p.compare_at_strategy != null && !VALID_COMPARE.has(p.compare_at_strategy)) {
       return Response.json({ ok: false, error: `Invalid compare_at_strategy: ${p.compare_at_strategy}` }, { status: 400 })
+    }
+    if (p.min_unit_profit_usd != null && !isValidMinUnitProfit(p.min_unit_profit_usd)) {
+      return Response.json({ ok: false, error: `Invalid min_unit_profit_usd: ${p.min_unit_profit_usd} (must be 0-100 dollars)` }, { status: 400 })
     }
   }
 
