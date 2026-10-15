@@ -1158,6 +1158,12 @@ fold the results into the summary:
   than three is a failure, not a saving.
 - **Rail `ctaLink` audit:** confirm every published rail has a `ctaLink` matching its products, and
   that at least two wayfinder tiles point at collections.
+- **Step 7.5 confirmation:** state explicitly whether `design-critic` posted a verdict this run. If
+  Step 7.5 was skipped, name the specific reason (turn cap, traffic gate, etc.) in this bullet, not
+  only in prose elsewhere. Four consecutive runs (1351, 1371, 1410, 1431) shipped with zero
+  design-critic events and no stated reason for any of them (ticket #15389) because Step 7.5's own
+  "named failure" rule lived only in its own section, not in this checklist every run actually works
+  through — a step that is allowed to skip without saying so will skip.
 - The summary states: today's theme, the hero product and why, what changed versus yesterday, and
   what will change next run. On Mondays, include the recon memo.
 
