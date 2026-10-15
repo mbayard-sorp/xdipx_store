@@ -398,6 +398,58 @@ describe('generic staging-word false positives (#15409, run 1438)', () => {
   })
 })
 
+// Ticket #15618 (content run 1456, 2026-10-15): a catalog title that bundles
+// an accessory into the title itself ("... with Storage Pouch ...") made the
+// hero/embed match structurally unpassable, because the ALL-distinctive-
+// tokens rule required "storage" and "pouch" to appear in hero copy that
+// never depicts the accessory. Live case: biird-lumii-clitoral-suction-
+// stimulator-lilac, title "Lumii Clitoral Suction Stimulator with Storage
+// Pouch Lilac", hero alt faithfully names lumii/clitoral/suction/stimulator
+// but not the pouch.
+describe('bundled-accessory clause in title does not block a faithful hero match (#15618)', () => {
+  const LUMII: CatalogProduct[] = [
+    {
+      handle: 'biird-lumii-clitoral-suction-stimulator-lilac',
+      title: 'Lumii Clitoral Suction Stimulator with Storage Pouch Lilac',
+    },
+  ]
+
+  it('the raw title alone still carries the accessory tokens (the bug root cause)', () => {
+    // distinctiveTokens() itself tokenizes verbatim; the fix strips the
+    // accessory clause inside productName() before calling it, not here.
+    expect(distinctiveTokens('Lumii Clitoral Suction Stimulator with Storage Pouch Lilac')).toEqual([
+      'lumii',
+      'clitoral',
+      'suction',
+      'stimulator',
+      'storage',
+      'pouch',
+    ])
+  })
+
+  it('heroNamesAnyProduct is true for a hero naming the product but not its storage pouch', () => {
+    const post: AuditBlogPost = {
+      slug: 'is-it-normal-to-enjoy-sex-without-an-orgasm',
+      heroImageAlt: 'a Lumii clitoral suction stimulator resting in warm coral daylight',
+      imagePrompt: null,
+      embedHandles: ['biird-lumii-clitoral-suction-stimulator-lilac'],
+    }
+    expect(heroNamesAnyProduct(post, LUMII)).toBe(true)
+  })
+
+  it('does not false-flag the hero as a mismatch against its own embed', () => {
+    const posts: AuditBlogPost[] = [
+      {
+        slug: 'is-it-normal-to-enjoy-sex-without-an-orgasm',
+        heroImageAlt: 'a Lumii clitoral suction stimulator resting in warm coral daylight',
+        imagePrompt: null,
+        embedHandles: ['biird-lumii-clitoral-suction-stimulator-lilac'],
+      },
+    ]
+    expect(findHeroEmbedMismatches(posts, LUMII)).toHaveLength(0)
+  })
+})
+
 // Ticket #11543, THIRD-PLUS OCCURRENCE: heroImageAlt is a customer-facing,
 // LLM-ingested string no gate reviews, and it routinely carries spec claims
 // whose only source is our own Emma-rewritten Shopify title — which the

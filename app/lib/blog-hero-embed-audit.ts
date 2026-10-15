@@ -92,6 +92,22 @@ function normalize(s: string): string {
 }
 
 /**
+ * Strips a trailing bundled-accessory clause ("with Storage Pouch", "with
+ * Case", "with Remote", …) from a product name before tokenizing (ticket
+ * #15618). Shopify catalog titles routinely bundle an accessory into the
+ * title itself ("Lumii Clitoral Suction Stimulator with Storage Pouch
+ * Lilac"), and the hero image never depicts the accessory, so requiring
+ * EVERY distinctive token (storage, pouch included) made a faithful hero of
+ * the product itself permanently unmatchable. The accessory clause is not
+ * part of what distinguishes one SKU's brand/model from another, so dropping
+ * it before tokenizing is the same move GENERIC_TOKENS makes for individual
+ * words, scoped to a whole clause instead.
+ */
+function stripAccessoryClause(name: string): string {
+  return name.replace(/\bwith\s+.+$/i, '').trim()
+}
+
+/**
  * The name a product is recognizable by: its title, or its handle words.
  *
  * Falls back to the handle when the title is empty, and ALSO when a
@@ -105,7 +121,8 @@ function normalize(s: string): string {
  * read discards.
  */
 function productName(p: CatalogProduct): string {
-  const titleName = p.title && p.title.trim() ? normalize(p.title) : null
+  const rawTitle = p.title && p.title.trim() ? stripAccessoryClause(p.title) : null
+  const titleName = rawTitle ? normalize(rawTitle) : null
   if (titleName && distinctiveTokens(titleName).length > 0) return titleName
   return normalize(p.handle.replace(/-/g, ' '))
 }
