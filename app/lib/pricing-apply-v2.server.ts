@@ -15,7 +15,7 @@
 
 import { db } from './db.server'
 import { pricingAuditLog, pipelineSettings, nalpacPriceHistory } from '../../db/schema'
-import { eq, sql } from 'drizzle-orm'
+import { eq, inArray, sql } from 'drizzle-orm'
 import {
   computePrice,
   computeDiscontinuedPrice,
@@ -36,6 +36,8 @@ import { getGroupForProductType } from './pricing-rules.server'
 import { computeVelocityBucket } from './pricing-velocity.server'
 import { updateVariantPricing, normalizeMetafieldKey, setVariantLaunchPrice } from './shopify.server'
 import type { VelocityBucket } from './pricing-engine-v2.server'
+import { resolveEngineCost, engineCostNote } from './engine-cost'
+import type { FeedCostSnapshot } from './engine-cost'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -337,6 +339,41 @@ async function getFeedMapForSku(sku: string | null | undefined): Promise<number 
   }
 }
 
+/**
+ * Today's feed list wholesale and sale-feed membership per SKU, from the same
+ * cost-sync snapshot. resolveEngineCost reads it to replace a lapsed Nalpac
+ * sale cost the Nalpac app left in Shopify's unit cost. One query per call;
+ * a read failure degrades to "no feed data" (unit cost as before), never a
+ * failed reprice.
+ */
+export async function loadFeedCosts(skus: readonly string[]): Promise<Map<string, FeedCostSnapshot>> {
+  const out = new Map<string, FeedCostSnapshot>()
+  const wanted = [...new Set(skus.filter(Boolean))]
+  if (wanted.length === 0) return out
+  try {
+    const rows = await db
+      .select({
+        sku:        nalpacPriceHistory.sku,
+        wholesale:  nalpacPriceHistory.wholesale,
+        inSale:     nalpacPriceHistory.inSale,
+        observedAt: nalpacPriceHistory.observedAt,
+      })
+      .from(nalpacPriceHistory)
+      .where(inArray(nalpacPriceHistory.sku, wanted))
+    for (const r of rows) {
+      const w = r.wholesale != null ? parseFloat(r.wholesale) : NaN
+      out.set(r.sku, {
+        wholesale:  Number.isFinite(w) && w > 0 ? w : null,
+        inSale:     r.inSale,
+        observedAt: r.observedAt,
+      })
+    }
+  } catch (err) {
+    console.warn('[pricing-apply-v2] feed cost lookup failed (using unit cost):', err)
+  }
+  return out
+}
+
 /** Pure: setting brands plus every default brand, deduped case-insensitively. */
 export function withDefaultMapBrands(brands: readonly string[]): string[] {
   const out = [...DEFAULT_MAP_BRANDS]
@@ -443,13 +480,20 @@ async function recomputeFromData(
   product: ProductInput,
   variant: VariantInput,
   ctx: RunContext,
+  feed: FeedCostSnapshot | null = null,
 ): Promise<RecomputeVariantResult> {
   const { variantId } = variant
   const { trigger, mode, thresholds, mapBrands, msrpCeiling, ladder } = ctx
 
-  // Prefer Shopify's native variant Cost per item (inventoryItem.unitCost).
-  // Fall back to the legacy xdipx.wholesale_cost product metafield only if unset.
-  const cost        = variant.unitCost ?? product.metafields.wholesaleCost
+  // Prefer Shopify's native variant Cost per item (inventoryItem.unitCost),
+  // falling back to the legacy xdipx.wholesale_cost metafield, unless the
+  // unit cost is a lapsed Nalpac sale cost (see engine-cost.ts).
+  const engineCost  = resolveEngineCost({
+    unitCost:      variant.unitCost,
+    metafieldCost: product.metafields.wholesaleCost,
+    feed,
+  })
+  const cost        = engineCost.cost
   // MAP is a per-brand contractual floor (owner rule 2026-08-29): honor the
   // feed's MAP only for the MAP brands. Every other vendor resolves MAP to null
   // so it prices off the markup rules instead of being held at MAP/MSRP.
@@ -557,7 +601,7 @@ async function recomputeFromData(
 
   const deltaPct = oldSell > 0 ? (newSell - oldSell) / oldSell : null
   const rationale = buildRationale({
-    oldCost:    cost,
+    oldCost:    engineCost.source === 'feed' ? engineCost.replacedUnitCost : cost,
     newCost:    cost,
     oldSell,
     newSell,
@@ -573,7 +617,7 @@ async function recomputeFromData(
     ...(msrp           != null       ? { msrp }                      : {}),
     ...(deltaPct       != null       ? { deltaPct }                  : {}),
     approvalThreshold: thresholds[mode],
-  })
+  }) + engineCostNote(engineCost)
 
   let auditId: number | null = null
   let auditFailed = false
@@ -587,7 +631,9 @@ async function recomputeFromData(
         groupId:      group?.groupId    ?? null,
         subGroupId:   group?.subGroupId ?? null,
         trigger,
-        oldCost:      cost   != null ? String(cost)   : null,
+        oldCost:      engineCost.source === 'feed' && engineCost.replacedUnitCost != null
+          ? String(engineCost.replacedUnitCost)
+          : cost != null ? String(cost) : null,
         newCost:      cost   != null ? String(cost)   : null,
         oldMap:       map    != null ? String(map)    : null,
         newMap:       map    != null ? String(map)    : null,
@@ -767,7 +813,9 @@ export async function recomputeVariant(
   const msrpCeiling = await getMsrpCeilingEnabled()
   const ladder      = await getClearanceLadder()
 
-  return recomputeFromData(product, variant, { trigger, mode, thresholds, mapBrands, msrpCeiling, ladder })
+  const feed = (await loadFeedCosts([variant.sku])).get(variant.sku) ?? null
+
+  return recomputeFromData(product, variant, { trigger, mode, thresholds, mapBrands, msrpCeiling, ladder }, feed)
 }
 
 
@@ -852,6 +900,7 @@ export async function dryRunRuleChange(opts: {
   let capped = false
 
   const products = await bulkFetchProductsForPricing()
+  const feedCosts = await loadFeedCosts(products.flatMap(p => p.variants.map(v => v.sku)))
 
   for (const product of products) {
     if (capped) break
@@ -883,9 +932,12 @@ export async function dryRunRuleChange(opts: {
           if (patch) cfg = { ...cfg, ...patch }
         }
 
-        // Prefer Shopify's native variant Cost per item (inventoryItem.unitCost).
-        // Fall back to the legacy xdipx.wholesale_cost product metafield only if unset.
-        const cost = variant.unitCost ?? product.metafields.wholesaleCost
+        // Same cost precedence as recomputeFromData (engine-cost.ts).
+        const cost = resolveEngineCost({
+          unitCost:      variant.unitCost,
+          metafieldCost: product.metafields.wholesaleCost,
+          feed:          feedCosts.get(variant.sku) ?? null,
+        }).cost
         const isDiscontinued = discontinuedAt != null || group?.usesClearanceLadder === true || productType === DISCONTINUED_PRODUCT_TYPE
         // MAP is brand-scoped (owner rule 2026-08-29) and lifted for discontinued
         // items, except a contractual (Nalpac-verified) MAP, which always binds.
@@ -1196,6 +1248,7 @@ export async function recomputeCatalog(opts: {
 
     const page = await fetchPricingProductsPage({ cursor })
     counts.pages++
+    const feedCosts = await loadFeedCosts(page.products.flatMap(p => p.variants.map(v => v.sku)))
 
     for (const product of page.products) {
       for (const variant of product.variants) {
@@ -1203,7 +1256,7 @@ export async function recomputeCatalog(opts: {
         counts.total++
         dayTotal++
         try {
-          const result = await recomputeFromData(product, variant, ctx)
+          const result = await recomputeFromData(product, variant, ctx, feedCosts.get(variant.sku) ?? null)
           if (result.auditFailed)                      counts.auditWriteFailures++
           if (result.error)                            counts.errors++
           else if (result.status === 'auto_applied')   counts.autoApplied++
