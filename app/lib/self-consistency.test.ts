@@ -135,6 +135,52 @@ describe('numbered enumerations: count-mismatch inline (own list disagrees with 
   })
 })
 
+describe('criterion-phrase divergence (run 1475 shape)', () => {
+  // Run 1475: the controls criterion existed at six sites. The accuracy
+  // gate's cycle-2 pass caught "A worn device retires all three at once"
+  // contradicting the Ferri paragraph's own admission that the page cannot
+  // settle where the controls live. Represented here as the two-site shape
+  // this checker is scoped to: a prescriptive-cue rule about a named
+  // subject, stated with almost no shared wording at a second site.
+  it('flags a criterion restated with no shared wording at a second site', () => {
+    const report = analyzeParagraphs([
+      {
+        section: 'Picking one',
+        text: 'For controls, you want everything built into the handle so your hands can always reach it.',
+      },
+      {
+        section: 'Ferri paragraph',
+        text: 'A worn device retires all three controls at once, and the page cannot settle where the controls live.',
+      },
+    ])
+    const hit = report.findings.find(f => f.kind === 'criterion-divergence' && f.token === 'controls')
+    expect(hit).toBeDefined()
+    expect(hit?.sites).toHaveLength(2)
+    expect(hit?.sites.some(s => s.section === 'Ferri paragraph')).toBe(true)
+  })
+
+  it('does not flag two sites that restate the same criterion in similar words', () => {
+    const report = analyzeParagraphs([
+      {
+        section: 'Body',
+        text: 'For controls, you want everything built into the handle so your hands can always reach it.',
+      },
+      {
+        section: 'FAQ',
+        text: 'Look for controls built into the handle, within reach of your hands.',
+      },
+    ])
+    expect(report.findings.some(f => f.kind === 'criterion-divergence')).toBe(false)
+  })
+
+  it('does not flag a single mention of a subject with no second site', () => {
+    const report = analyzeParagraphs([
+      { section: 'Body', text: 'You want controls built into the handle.' },
+    ])
+    expect(report.findings.some(f => f.kind === 'criterion-divergence')).toBe(false)
+  })
+})
+
 describe('analyzeDraft — portable text structure, including the FAQ block', () => {
   it('counts a cross-site mismatch when one site lands only in the FAQ block', () => {
     const report = analyzeDraft({
