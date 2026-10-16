@@ -35,6 +35,19 @@
  *      FAQ block included) promises or delivers a different number for the
  *      same enumeration, or the promise's own inline list does not match the
  *      number it just stated.
+ *   4. `criterion-divergence` — a sentence states a RULE about a named
+ *      buying-guide subject ("controls", "lube", "material", "position")
+ *      using a modal/prescriptive cue ("you want", "look for", "depends on",
+ *      "should"), and a DIFFERENT site states a rule about the SAME subject
+ *      whose wording shares almost no content words with the first — the
+ *      run 1475 shape (the controls criterion existed at six sites; one said
+ *      a worn device "retires all three at once", another said "the page
+ *      cannot settle where the controls live"). Unlike the ingress-code and
+ *      enumeration checks above, there is no shared reusable token to key on
+ *      here, so this clusters by subject noun and flags low word-overlap
+ *      between cluster members instead of an exact contradiction. False
+ *      positives are cheap — the writer reads every flagged cluster anyway —
+ *      and the cost of a miss is a whole spent repair attempt.
  *
  * This deliberately does NOT catch a contradiction between two clauses that
  * share no reusable token (run 1239's wash-instruction-vs-crevice-wash shape
@@ -215,9 +228,96 @@ function inlineListMismatch(site: PromiseSite): { count: number; items: string[]
   return { count: items.length, items }
 }
 
+// ─── Criterion-phrase divergence: same subject, different predicate ───────────
+
+/**
+ * Named buying-guide subjects this pass clusters criterion statements by.
+ * Deliberately a closed, domain vocabulary — the same tractable-subset
+ * posture as ENUM_NOUNS above — rather than a general noun extractor: a
+ * post's "rule system" recurs on a small set of buying-guide subjects, and
+ * widening this to arbitrary nouns would just re-flag unrelated sentences
+ * that happen to share a word. Seeded from run 1475's incident subject and
+ * its three ticket-named siblings; add a subject here only once a second
+ * real incident names it, the same bar the rest of this module's
+ * token/bucket vocabularies use.
+ */
+const CRITERION_SUBJECTS = ['controls', 'lube', 'material', 'position']
+
+/**
+ * Modal/prescriptive cues that mark a sentence as STATING A RULE about its
+ * subject, rather than merely mentioning it ("the controls are on the base"
+ * is not a rule; "the controls depend on the model" is).
+ */
+const PRESCRIPTIVE_RE =
+  /\b(you want|look for|the answer is|depends on|retires?|should|must|need(?:s)? to|has to|have to)\b/i
+
+const CRITERION_STOPWORDS = new Set([
+  'a', 'an', 'and', 'are', 'as', 'at', 'be', 'but', 'by', 'for', 'if', 'in',
+  'into', 'is', 'it', 'its', "it's", 'no', 'nor', 'not', 'of', 'on', 'or',
+  'such', 'that', 'the', 'their', 'then', 'there', 'these', 'they', 'this',
+  'to', 'was', 'will', 'with', 'you', 'your', "you're", 'all', 'once', 'can',
+  'do', 'does', 'did', 'so', 'than', 'too', 'very', 'just', 'only', 'also',
+  'what', 'which', 'who', 'whom', 'when', 'where', 'how', 'each', 'other',
+  'some', 'any', 'both', 'own', 'same',
+])
+
+/**
+ * How similar two criterion statements about the same subject must be to
+ * count as restating one rule rather than diverging from it. Set low
+ * deliberately: a false positive here costs the writer one glance at a
+ * cluster they were already going to read; a missed divergence costs a
+ * whole spent repair attempt (run 1475).
+ */
+const CRITERION_SIMILARITY_FLOOR = 0.2
+
+interface CriterionSite {
+  subject: string
+  section: string
+  sentence: string
+  paragraphIndex: number
+  words: Set<string>
+}
+
+function contentWords(sentence: string): Set<string> {
+  const words = sentence
+    .toLowerCase()
+    .replace(/[^a-z0-9'\s]/g, ' ')
+    .split(/\s+/)
+    .filter(w => w.length >= 3 && !CRITERION_STOPWORDS.has(w))
+  return new Set(words)
+}
+
+function jaccard(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0
+  let intersection = 0
+  for (const w of a) if (b.has(w)) intersection++
+  const union = a.size + b.size - intersection
+  return union === 0 ? 0 : intersection / union
+}
+
+function scanCriterionSentence(
+  sentence: string,
+  section: string,
+  paragraphIndex: number,
+): CriterionSite[] {
+  if (!PRESCRIPTIVE_RE.test(sentence)) return []
+  const lower = sentence.toLowerCase()
+  const sites: CriterionSite[] = []
+  for (const subject of CRITERION_SUBJECTS) {
+    if (new RegExp(`\\b${subject}s?\\b`, 'i').test(lower)) {
+      sites.push({ subject, section, sentence, paragraphIndex, words: contentWords(sentence) })
+    }
+  }
+  return sites
+}
+
 // ─── Report shape ───────────────────────────────────────────────────────────
 
-export type SelfConsistencyFindingKind = 'undefined-token' | 'conflicting-instruction' | 'count-mismatch'
+export type SelfConsistencyFindingKind =
+  | 'undefined-token'
+  | 'conflicting-instruction'
+  | 'count-mismatch'
+  | 'criterion-divergence'
 
 export interface SelfConsistencySite {
   section: string
@@ -239,7 +339,7 @@ export interface SelfConsistencyReport {
   overLimit: boolean
 }
 
-function toSite(t: TokenSentence | PromiseSite): SelfConsistencySite {
+function toSite(t: TokenSentence | PromiseSite | CriterionSite): SelfConsistencySite {
   return { section: t.section, sentence: t.sentence, paragraphIndex: t.paragraphIndex }
 }
 
@@ -331,6 +431,43 @@ export function analyzeParagraphs(paragraphs: DraftParagraph[]): SelfConsistency
         kind: 'count-mismatch',
         token: noun,
         message: `"${noun}" is promised as different numbers in different places: ${[...numbers].join(' vs ')}.`,
+        sites: sites.map(toSite),
+      })
+    }
+  }
+
+  // ── Criterion-phrase divergence ──
+  const criterionSites: CriterionSite[] = []
+  paragraphs.forEach((para, paragraphIndex) => {
+    for (const sentence of splitSentences(para.text)) {
+      criterionSites.push(...scanCriterionSentence(sentence, para.section, paragraphIndex))
+    }
+  })
+
+  const bySubject = new Map<string, CriterionSite[]>()
+  for (const site of criterionSites) {
+    const list = bySubject.get(site.subject) ?? []
+    list.push(site)
+    bySubject.set(site.subject, list)
+  }
+
+  for (const [subject, sites] of bySubject) {
+    if (sites.length < 2) continue
+    let diverges = false
+    for (let i = 0; i < sites.length && !diverges; i++) {
+      for (let j = i + 1; j < sites.length; j++) {
+        if (sites[i]!.sentence === sites[j]!.sentence) continue
+        if (jaccard(sites[i]!.words, sites[j]!.words) < CRITERION_SIMILARITY_FLOOR) {
+          diverges = true
+          break
+        }
+      }
+    }
+    if (diverges) {
+      findings.push({
+        kind: 'criterion-divergence',
+        token: subject,
+        message: `"${subject}" is stated as a rule at ${sites.length} site(s) that do not agree with each other; re-read every site in this cluster before publishing.`,
         sites: sites.map(toSite),
       })
     }
