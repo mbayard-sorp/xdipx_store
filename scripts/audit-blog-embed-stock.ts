@@ -58,7 +58,11 @@ const sanity = createClient({
   projectId,
   dataset: process.env['SANITY_DATASET'] ?? 'production',
   apiVersion: '2024-10-01',
-  useCdn: true,
+  // Step 6c re-runs this same sweep right after a handle remediation to
+  // confirm the post is clean (routine-content-daily.md). The CDN lags the
+  // live dataset, so useCdn:true made that confirmation read the pre-edit
+  // document and report the just-fixed post as still dead (ticket #16009).
+  useCdn: false,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   token: process.env['SANITY_API_TOKEN'],
 } as any)
