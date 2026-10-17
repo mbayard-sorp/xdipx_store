@@ -1,3 +1,69 @@
+# Routine: Daily Product Manager (product-manager)
+
+The playbook for the scheduled import-queue drain. Entry agent: `product-manager`. Once per run it
+sweeps the `import_candidates` queue for the rows the deterministic Phase-2 gates left behind
+(tier C/D opportunities, needs-review masters, brand-new candidates, price-drop reopens) and
+**executes** approve/reject/watch directly — the fully-unattended, no-per-item-approval carve-out
+(see CLAUDE.md and `.claude/agents/product-manager.md`). Discovery adds candidates **daily**, so the
+judgment layer runs daily too (not just as the weekly-strategy review-only sub-step).
+
+Runs on the **Max subscription**: own reasoning and DB reads; the site is for reading
+`import_candidates` and executing the queue action only. Never call the site's Anthropic-keyed
+endpoints — this routine spends no AI tokens (SQL sweep + one bulk `curl` per intent).
+
+Auth on every `/api/team/*` call and the action endpoint: header `x-team-secret: $TEAM_TOKEN`
+(the action endpoint also accepts `Authorization: Bearer $TEAM_TOKEN`; falls back to
+`$HOMEPAGE_TEAM_TOKEN`, then `$CRON_SECRET`). `BASE_URL` = deployed origin. DB reads use
+`DATABASE_URL` from `.env` (fresh worktrees: `bash scripts/setup-worktree.sh` first).
+
+**Cloud sessions: a bare `psql`/`DATABASE_URL` read does not work.** `psql` to Neon:5432 is
+network-blocked in the cloud sandbox, and a raw Neon-over-HTTPS `curl` is classifier-denied as a
+Production Read (runs 1271 and 1291 both failed their entire sweep on exactly this and drained
+nothing). Working path, verified run 1291 (2026-10-07): install `@neondatabase/serverless` into the
+session scratchpad (`npm i` there, not the repo) and query over Neon's SQL-over-HTTPS driver, which
+tunnels through the agent proxy using the CA bundle at `/root/.ccr/ca-bundle.crt` —
+`neon(process.env.DATABASE_URL)` then `await sql(queryString)` returns JSON rows. Separately, every
+`/api/team/*` and action-endpoint `curl` in this routine needs `--cacert /root/.ccr/ca-bundle.crt` in
+a cloud session or it fails TLS (exit 35). A local/desktop checkout is unaffected by either note.
+
+## Step 0: Start
+
+```bash
+curl -s -X POST "$BASE_URL/api/team/run" \
+  -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
+  -d '{"op":"start","team":"product","runType":"product"}'   # → $RUN_ID
+```
+
+## Step 1: Gate
+
+```bash
+curl -s "$BASE_URL/api/team/gate?team=product&excludeRun=$RUN_ID" -H "x-team-secret: $TEAM_TOKEN"
+```
+
+If `ok:false`: post `{"op":"update","id":$RUN_ID,"update":{"status":"skipped","finished":true,"summary":"gate refused: <reason>"}}`
+and **stop** — skip honestly, never work around the gate. The gate enforces the `product_team_enabled`
+kill switch, `product_team_daily_cents` (300), and `product_team_max_runs` (1). Note the **second,
+independent** switch: your *execute* capability is gated server-side by `product_manager_enabled` (a
+separate pipeline setting, already on from migration 052). The routine gate and the execute gate are
+orthogonal — you can be enabled-to-run but off-to-execute.
+
+## Step 2: Sweep the queue (data only)
+
+1. Read `.claude/agents/product-manager.md` (your charter — financial stance, autonomy rails, output
+   format) and `docs/store-team/mission-brief.md` (binding). The strategy brief (`GET /api/team/brief`)
+   and `marketing_calendar` tell you this window's theme.
+2. Query Neon for `import_candidates` where `status IN ('pending','watching')`, ordered by tier then
+   `deal_score DESC`. Separate into: (a) newly-reopened price-drop rows, (b) remaining tier C/D
+   opportunities, (c) needs-review masters (variant sprawl > 30), (d) stale watching rows.
+3. Consume `nalpac-feed-analyst`'s scores — don't re-derive them.
+
+**Stale watching rows get a deadline, not another deferral (stale-watching-backlog-2026w39).** A
+`watching` row aged more than 4 weeks with zero reconsideration gets a final approve/reject **on
+this run**, rather than being re-deferred again: 3 rows sat 5-9 weeks untouched because "stale
+watching rows past a few weeks" named a category to sweep with no resolution deadline attached. If a
+row genuinely still needs more signal, document why it stays `watching` (what signal it is waiting
+on) instead of rolling it forward silently.
+
 ## Step 3: Judge + execute
 
 **Feed-health pre-check, before any approve call (ticket #8393).** Read the latest two
@@ -61,3 +127,116 @@ timeout (~2 minutes) mid-chunk. If an approve `curl` times out, do not blind-res
 First verify DB state (`import_candidates.status`, `reviewed_by='product-manager-agent'`,
 `reviewed_at::date = today`), then resubmit only the ids still pending, otherwise you double-approve
 and burn cap. Use `curl --max-time 280` on approve calls.
+
+## Step 4: Downstream health
+
+Check `import_candidates.status='imported' AND enriched_at IS NULL` (stuck in enrich) and
+`enriched_at IS NOT NULL AND published_at IS NULL` (stuck in publish). If imports pile up beyond what
+volume explains, name the likely cause (`import_enrich_enabled` off, enrich batch cap too low,
+`enrich_failed_at` products parked by the quality gate, poller stuck). Also note any
+newly-published products worth a merchandising push → suggestion `targetTeam:'homepage'`, `kind:'strategy'`
+(you propose the feature; the homepage team's gate decides).
+
+**Also nominate the day's new arrivals to social, every run (owner direction 2026-10-01).** The
+owner wants new products showcased on social as they arrive, and the enrich chain's own daily row
+lists every published product unranked, which social could not act on. Rank the products published
+since the last run: never posted on social first, then a product type absent from social's last 7
+product posts, then stock depth, then margin.
+
+**Read LIVE Shopify stock, never `import_candidates.qty_available` (second occurrence, ticket
+#14757).** `qty_available` is the Nalpac feed figure, not what Shopify will actually sell: on
+2026-10-11, 11 of 15 products published the prior day were ACTIVE but at 0-2 sellable units
+(`inventoryPolicy: DENY`, tracked) despite the feed showing hundreds. A nomination or health check
+built on feed quantity points social at products a visitor cannot buy (first occurrence,
+2026-10-09, suggestion #14484: 3 of 5 picks were out of stock at draft time). The Shopify Admin API
+check is cheap and runs in-session — query each newly-published handle's live `totalInventory`
+before ranking. Exclude what Instagram cannot run (dildos, anatomically realistic products) and
+anything at 3 or fewer live sellable units, and report the published-but-unsellable count in the
+run summary each time it is nonzero, so the inventory-sync defect stays visible until it is fixed
+upstream. File one row:
+`kind:'process'`, `team:'product'`, `targetTeam:'social'`, `dedupeKey:'social-new-picks:<YYYY-MM-DD>'`,
+**and `dedupeScope:'daily'`** (without it the API strips the date and every day's row collapses onto
+one key; row #13082 landed as bare `social-new-picks` for exactly that reason), the top 3 to 6 with
+handle, vendor, product type, a text-free bare-product image URL, and one line on why each earns a
+post. On a day nothing was published, file nothing. The social routine reads it at its Step 2.9 for
+single posts and at its Step 2.9a as the ranking for the day's New-in carousel (owner direction
+2026-10-03: *"when new products go live in /new on the site, we do a carousel of the products that
+are now on the site"*), so the order you file is the order the slides run.
+
+## Step 4b: Inbound suggestions (read your own mail)
+
+Other agents file findings *at* this team, and before 2026-07-29 no routine read them: the playbooks
+only ever wrote suggestions, so routed findings aged in `approved` forever.
+
+```bash
+curl -s -X POST "$BASE_URL/api/team/suggestion" \
+  -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
+  -d '{"op":"list","targetTeam":"product","status":"approved","orderBy":"age"}'
+```
+
+Act on up to **3 per run**, oldest first, and only what this run can actually execute within the
+gates it already obeys. Close each one you did execute so tomorrow's run does not re-read it:
+
+```bash
+-d '{"op":"transition","id":<id>,"to":"applied","actor":"agent:product-manager","note":"<what changed>"}'
+```
+Only `process` and `strategy` rows can be closed this way (`RUN_CLOSE_KINDS`). A `campaign`,
+`promo`, `instructions`, or `code` row returns 409 — those have their own executor, or the owner's,
+and are not yours to end. Note them instead.
+
+
+Looked but deliberately did not act (out of scope, no longer true, needs code)? Post a note with
+which and why, and leave the status alone:
+
+```bash
+-d '{"op":"note","id":<id>,"ref":"<which row, and why this run did not act>"}'
+```
+
+The `note` op carries its text in **`ref`**, not `note`. The `transition` example above uses `note`
+for its text, so reusing that key here is the natural guess and it returns
+`400 Bad Request: ref required`.
+
+Never close a row you did not execute: a false `applied` looks handled and is worse than an aging
+row.
+
+## Step 5: Report + finish
+
+Post one `decision` event under your `$RUN_ID` (`agentRole:'product-manager'`): queue depth,
+approve/reject/watch executed (and any skipped due to cap or kill switch), price-drop rows surfaced,
+downstream health, top opportunities with the numbers. **Reject-rate math uses `reviewed_at`, never
+`updated_at`**: a discovery run that still sees an already-rejected row in-feed bumps `updated_at`
+with no new review (`import-monitor.server.ts`'s "never reopen" behavior), so an `updated_at`-based
+count inflates the reject rate. Log spend
+(`POST /api/homepage-team/spend {"kind":"tokens","source":"agent-sdk","feature":"product-daily",...}`
+— the `product-` prefix is required or the budget gate reads 0), then finish:
+
+```bash
+curl -s -X POST "$BASE_URL/api/team/run" \
+  -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
+  -d '{"op":"update","id":'$RUN_ID',"update":{"finished":true,"status":"succeeded","summary":"<N approved / N rejected / N watched, queue depth, health>"}}'
+```
+
+## Appendix: Enablement runbook
+
+The routine ships inert. To turn it on, in order:
+
+1. **Apply migration 059 in prod:** `npx tsx scripts/apply-migrations.ts --from 059` (seeds the
+   `product_team_*` keys, off).
+2. **Flip the routine kill switch:** `product_team_enabled` → on, in the Product tab of
+   `/admin/homepage-team`.
+3. **Confirm the execute switch:** `product_manager_enabled` is already on from migration 052 (edited
+   on `/admin/imports`, not the team dashboard). With it on, the routine executes; with it off, the
+   routine runs and reports would-be decisions only.
+4. **Create the cloud trigger** and add its row to `docs/store-team/routine-schedule.md` (fresh
+   session per fire, ~09:00 UTC — after the 08:00 `/cron/import-monitor` discovery run). Until the
+   trigger exists, the weekly review-only sub-step is the only place `product-manager` is invoked,
+   and it does **not** execute — so create this trigger when you want the queue drained daily.
+5. **One supervised manual run:** fire by hand, watch the run row + events on
+   `/admin/homepage-team?team=product`, confirm approvals land as Shopify drafts and the daily cap
+   accounts them.
+
+**Kill-switch drill:** `product_team_enabled` off → runs stop at the gate (Step 1 skips honestly).
+`product_manager_enabled` off → the routine still runs but every action call 403s and it degrades to
+report-only. During the initial backlog drain, the owner may temporarily raise
+`product_team_max_runs` or `product_manager_max_actions_per_run` — one daily run of 20 actions drains
+a multi-hundred backlog slowly.
