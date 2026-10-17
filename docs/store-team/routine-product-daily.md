@@ -85,6 +85,16 @@ approvals to theme-critical picks only** and lead the run by re-flagging the enr
 filling the cap. When enrich is keeping pace, approve normally up to the cap. Approval volume is gated
 on downstream health, not just on the per-run action cap.
 
+**Also gate approval volume on publish-time buyable share (owner blocker #588,
+nalpac-inventory-sync).** Products that publish ACTIVE have recently been reading Shopify inventory 0
+at both the Nalpac and Entrenue locations despite healthy feed stock (as much as ~71% of recent
+publishes unbuyable; see the weekly brief of 2026-10-12). Enrich can be perfectly healthy while every
+new draft publishes unsellable, so this is a separate, additional check, not a substitute for the
+enrich-health gate above. Sample live Shopify `totalInventory` (Admin API, the Step 4 check already
+in-session) of products published since the last run. If buyable share is materially depressed, or
+owner blocker #588 is still open, throttle approvals to theme-critical picks only and lead the run by
+re-flagging the sync defect, exactly as the enrich-stall branch above does.
+
 For each candidate apply editorial + strategic judgment (catalog fit, current theme, image quality,
 brand quality, needs-review complexity). **Margin is not a factor** (`<financial_stance>`). Decide
 approve / reject (with reason) / watch, then execute with the **bulk `ids` form**, one call per intent:
