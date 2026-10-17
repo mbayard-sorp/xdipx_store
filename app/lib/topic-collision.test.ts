@@ -193,4 +193,50 @@ describe('analyzeTopicCollision — the three evidenced incidents (#14988)', () 
     expect(() => analyzeTopicCollision(draft, priors)).not.toThrow()
     expect(analyzeTopicCollision(draft, priors).collision).toBe(false)
   })
+
+  it('does not flag the mandatory "Frequently asked questions" or mechanical "Sources" H2 against any prior post (#16008)', () => {
+    const draft = {
+      title: 'A Wholly Different Topic About Travel Lube',
+      body: [
+        block('h2', 'Which Bottles Actually Seal'),
+        block('h2', 'Frequently asked questions'),
+        block('h2', 'Sources'),
+      ],
+    }
+    const priors = [{
+      slug: 'does-anal-have-to-hurt',
+      title: 'Does Anal Have to Hurt?',
+      body: [
+        block('h2', 'Dilators Versus Plugs For A Beginner'),
+        block('h2', 'Frequently Asked Questions'),
+        block('h2', 'Sources'),
+      ],
+    }]
+
+    const report = analyzeTopicCollision(draft, priors)
+    expect(report).toEqual({ headingHits: [], titleHits: [], embedHits: [], collision: false })
+  })
+
+  it('still flags a genuine H2 collision sitting alongside the mandatory FAQ heading', () => {
+    const draft = {
+      title: 'A Wholly Different Title',
+      body: [
+        block('h2', 'Numbing Products'),
+        block('h2', 'Frequently asked questions'),
+      ],
+    }
+    const priors = [{
+      slug: 'does-anal-have-to-hurt',
+      title: 'Does Anal Have to Hurt?',
+      body: [
+        block('h2', 'Numbing Products'),
+        block('h2', 'Frequently asked questions'),
+      ],
+    }]
+
+    const report = analyzeTopicCollision(draft, priors)
+    expect(report.collision).toBe(true)
+    expect(report.headingHits.some(h => h.priorHeading === 'Numbing Products')).toBe(true)
+    expect(report.headingHits.some(h => h.priorHeading === 'Frequently asked questions')).toBe(false)
+  })
 })
