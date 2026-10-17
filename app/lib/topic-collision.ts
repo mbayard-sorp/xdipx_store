@@ -109,6 +109,27 @@ export function extractProductEmbeds(body: unknown): string[] {
   return out
 }
 
+// ─── Structural headings ────────────────────────────────────────────────────
+
+/**
+ * Headings the content routine itself mandates to repeat, verbatim, on every
+ * post that carries them — the H2-vs-H2 Jaccard check otherwise flags every
+ * single post against itself on these, with no way to ever clear (ticket
+ * #16008, four runs: 1438, 1456, 1475, 1494). fresh-language.ts's 6-gram
+ * floor protects it from this for free (a 3-word heading can never reach a
+ * 6-word shingle); Jaccard has no such floor, so this list is the explicit
+ * equivalent. "Frequently asked questions" is mandatory on every post
+ * (routine-content-daily.md's content quality bar); "Sources" is inserted
+ * mechanically, verbatim, whenever the accuracy gate returns a citation
+ * (Step 5). Both are format, not content: comparing them tells you nothing
+ * about whether two posts share a topic.
+ */
+const STRUCTURAL_HEADINGS = new Set(['frequently asked questions', 'sources'])
+
+function isStructuralHeading(heading: string): boolean {
+  return STRUCTURAL_HEADINGS.has(heading.trim().toLowerCase())
+}
+
 // ─── Analysis ───────────────────────────────────────────────────────────────
 
 export interface TopicCollisionCandidate {
@@ -189,7 +210,7 @@ export function analyzeTopicCollision(
   const titleThreshold = opts.titleThreshold ?? 0.6
   const minSharedEmbeds = opts.minSharedEmbeds ?? 2
 
-  const draftHeadings = extractH2Headings(draft.body)
+  const draftHeadings = extractH2Headings(draft.body).filter(h => !isStructuralHeading(h))
   const draftEmbeds = new Set(extractProductEmbeds(draft.body))
   const draftTitleTokens = draft.title ? normalizeTokenSet(draft.title) : new Set<string>()
 
@@ -214,6 +235,7 @@ export function analyzeTopicCollision(
     }
 
     for (const priorHeading of extractH2Headings(prior.body)) {
+      if (isStructuralHeading(priorHeading)) continue
       const priorHeadingTokens = normalizeTokenSet(priorHeading)
       for (const draftHeading of draftHeadings) {
         const overlap = jaccard(normalizeTokenSet(draftHeading), priorHeadingTokens)
