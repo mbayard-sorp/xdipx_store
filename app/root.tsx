@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import {
   isRouteErrorResponse,
   Links,
@@ -14,7 +14,6 @@ import {
 import { data } from 'react-router'
 import type { LoaderFunctionArgs, LinksFunction } from 'react-router'
 
-import { BotIdClient } from 'botid/client'
 import stylesheet from './app.css?url'
 // Same physical files app.css's @fontsource @font-face rules reference — Vite
 // dedupes them into one hashed asset, so these ?url imports resolve to the
@@ -28,34 +27,10 @@ import { resolveGa4 } from '~/lib/ga4-config.server'
 import { isQaAgeBypassRequest } from '~/lib/qa-preview.server'
 import { isPermanentlyUnindexableStatus } from '~/lib/seo'
 
-// Each route is listed twice: the bare path, and the `.data` twin that React
-// Router's single fetch actually POSTs to when the submit goes through a
-// fetcher (fetcher.submit / <fetcher.Form>). BotID's client matches the
-// protect path against the request pathname exactly (wildcards aside), so
-// without the twin the fetcher's POST carried no challenge header and
-// checkBotId() on the server classed every real visitor as a bot (403).
-// Found by the 2026-10-18 lead-funnel audit on /api/lead; the waitlist and
-// review forms submit the same way.
-const BOTID_PROTECTED_ROUTES = [
-  { path: '/api/waitlist',      method: 'POST' },
-  { path: '/api/waitlist.data', method: 'POST' },
-  { path: '/api/reviews',       method: 'POST' },
-  { path: '/api/reviews.data',  method: 'POST' },
-  { path: '/api/lead',          method: 'POST' },
-  { path: '/api/lead.data',     method: 'POST' },
-]
-
-// botid serializes its runtime via Function.toString(), which produces
-// different source on Node vs the browser. SSR-rendering it causes a
-// hydration mismatch in <Layout> that breaks event handlers on the page
-// (e.g. the wishlist heart). Mount it after hydration instead — the
-// script still loads in time for any protected POST.
-function BotIdMount() {
-  const [mounted, setMounted] = useState(false)
-  useEffect(() => { setMounted(true) }, [])
-  if (!mounted) return null
-  return <BotIdClient protect={BOTID_PROTECTED_ROUTES} />
-}
+// BotID is initialized in app/entry.client.tsx before hydration (the routes
+// live in app/lib/botid-routes.ts). The old <BotIdMount> rendered BotID's
+// inline init script after hydration through innerHTML, which browsers never
+// execute, so the challenge header was never attached; see that file.
 
 // Initialize Sentry after hydration rather than at module-eval time, and load
 // the SDK itself via a dynamic import rather than a static one. A static
@@ -306,7 +281,6 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <Meta />
         <Links />
-        <BotIdMount />
         {analyticsBootstrap && (
           <script dangerouslySetInnerHTML={{ __html: analyticsBootstrap }} />
         )}
