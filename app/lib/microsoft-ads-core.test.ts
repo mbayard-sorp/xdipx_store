@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   SANDBOX_DEVELOPER_TOKEN, decryptToken, describeErrors, encryptToken, extractErrors, isThrottle,
-  missingConfig, msAdsConfig, msAdsEnv, requestHeaders, serviceUrl,
+  missingConfig, msAdsConfig, msAdsEnv, msAdsScope, requestHeaders, serviceUrl,
 } from '~/lib/microsoft-ads-core'
 import { platformForLane } from '~/lib/ad-render-rules'
 
@@ -24,6 +24,11 @@ describe('environment', () => {
     expect(sandbox).toMatchObject({ env: 'sandbox', developerToken: SANDBOX_DEVELOPER_TOKEN, customerId: '10', accountId: '20' })
     const prod = msAdsConfig({ ...env, MSADS_ENV: 'production' })
     expect(prod).toMatchObject({ env: 'production', developerToken: 'PRODTOKEN', customerId: '1', accountId: '2' })
+  })
+
+  it('asks for the si.ads resource in sandbox and ads in production', () => {
+    expect(msAdsScope('sandbox')).toBe('https://si.ads.microsoft.com/msads.manage offline_access')
+    expect(msAdsScope('production')).toBe('https://ads.microsoft.com/msads.manage offline_access')
   })
 
   it('names the missing vars for the active environment', () => {

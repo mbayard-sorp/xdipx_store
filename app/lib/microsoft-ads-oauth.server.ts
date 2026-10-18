@@ -28,7 +28,7 @@
 import crypto from 'node:crypto'
 import { createCookie } from 'react-router'
 import { requireSecret } from './env.server'
-import { MSADS_AUTHORIZE_URL, MSADS_SCOPE, MSADS_TOKEN_URL, msAdsConfig } from './microsoft-ads-core'
+import { MSADS_AUTHORIZE_URL, MSADS_TOKEN_URL, msAdsConfig, msAdsEnv, msAdsScope } from './microsoft-ads-core'
 
 const isProd = process.env['NODE_ENV'] === 'production'
 
@@ -71,7 +71,7 @@ export function getMsAdsAuthUrl(redirectUri: string, state: string): string {
     response_type: 'code',
     response_mode: 'query',
     redirect_uri:  redirectUri,
-    scope:         MSADS_SCOPE,
+    scope:         msAdsScope(msAdsEnv()),
     state,
     // Always show the account picker. The browser may already be signed in
     // to a work tenant, and the Ads account to connect is a different login.
@@ -101,7 +101,7 @@ async function requestToken(body: URLSearchParams): Promise<MsAdsTokenSet> {
   const c = msAdsConfig()
   body.set('client_id', c.clientId)
   body.set('client_secret', c.clientSecret)
-  body.set('scope', MSADS_SCOPE)
+  body.set('scope', msAdsScope(c.env))
 
   const res = await fetch(MSADS_TOKEN_URL, {
     method:  'POST',

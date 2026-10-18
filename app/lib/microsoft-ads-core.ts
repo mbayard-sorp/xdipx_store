@@ -29,7 +29,17 @@ export type MsAdsService =
 /** Microsoft's shared sandbox developer token, published in its sandbox guide. Not a secret. */
 export const SANDBOX_DEVELOPER_TOKEN = 'BBD37VB98'
 
-export const MSADS_SCOPE = 'https://ads.microsoft.com/msads.manage offline_access'
+/**
+ * The OAuth scope differs by environment even though both use the same
+ * login.microsoftonline.com endpoints: sandbox APIs only accept tokens minted
+ * for the si.ads.microsoft.com resource and return 105 InvalidCredentials for
+ * a production-scoped token. Source: MSA_PROD in BingAds-Python-SDK
+ * bingads/authorization.py, which the SDK uses for sandbox by default.
+ */
+export function msAdsScope(env: MsAdsEnv): string {
+  const resource = env === 'sandbox' ? 'https://si.ads.microsoft.com' : 'https://ads.microsoft.com'
+  return `${resource}/msads.manage offline_access`
+}
 
 /** `common` covers both Entra work accounts and personal Microsoft accounts. Sandbox uses the same endpoints. */
 export const MSADS_AUTHORIZE_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize'

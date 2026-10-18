@@ -26,6 +26,10 @@ There is no official Node SDK, so the client calls REST with `fetch`. Request sh
 
 Sandbox and production are separate Microsoft accounts with separate IDs. Tokens are stored per environment, so switching `MSADS_ENV` needs a fresh connect for that environment the first time.
 
+Both environments sign in through login.microsoftonline.com, but they need different OAuth scopes: `https://si.ads.microsoft.com/msads.manage` for sandbox and `https://ads.microsoft.com/msads.manage` for production. A production-scoped token gets error 105 InvalidCredentials from every sandbox API. `msAdsScope()` picks the right one.
+
+The sandbox only accepts Microsoft accounts on outlook.com. Sign up for the sandbox directly with that address (Sign up now, skip payment). Inviting an outlook.com user into a sandbox customer made with another email did not work in testing.
+
 | Variable | Sandbox | Production |
 |---|---|---|
 | `MSADS_CLIENT_ID` | shared | shared |
@@ -64,6 +68,7 @@ Rotating `MSADS_TOKEN_KEY` makes every stored token unreadable. Reconnect after 
 
 | Symptom | Cause | Fix |
 |---|---|---|
+| Error 105 `InvalidCredentials` right after a successful connect | Token scoped for the other environment, or the login has no Ads user in that environment | Check `MSADS_ENV`, then sign in to the sandbox or production Ads UI with the same login to confirm it reaches an account |
 | "is not connected: Microsoft rejected the stored refresh token (invalid_grant)" | Consent lost: password change, revoked app, or token expiry | Reconnect at `/api/microsoft-ads-connect` |
 | "stored token cannot be decrypted" | `MSADS_TOKEN_KEY` changed | Reconnect |
 | `AADSTS50011` on the Microsoft page | Redirect URI mismatch | The URI must match the Entra app byte for byte; check `APP_URL` or set `MSADS_REDIRECT_URI` |
