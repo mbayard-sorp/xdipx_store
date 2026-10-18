@@ -3795,6 +3795,115 @@ export async function pushProductToShopify(doc: ProductPageDoc): Promise<void> {
   }
 }
 
+export type MapSweepProduct = {
+  id: string
+  handle: string
+  title: string
+  vendor: string
+  /** Lowest variant price (the one most at risk of sitting below MAP). */
+  price: number
+  /** SKU of that lowest-priced variant. */
+  sku: string
+  /** Every variant SKU, for the feed fallback lookup. */
+  skus: string[]
+  mapPriceMetafield: number | null
+  mapRestricted: boolean
+}
+
+/**
+ * Read-only. All ACTIVE products for one vendor with the fields the
+ * map_restricted sweep (scripts/map-restricted-sweep.ts, ticket #16147) needs.
+ */
+export async function fetchActiveProductsForMapSweep(vendor: string): Promise<MapSweepProduct[]> {
+  type Node = {
+    id: string; handle: string; title: string; vendor: string
+    variants: { nodes: { sku: string | null; price: string }[] }
+    mapPrice: { value: string } | null
+    mapRestricted: { value: string } | null
+  }
+  const out: MapSweepProduct[] = []
+  const q = `vendor:'${vendor.replace(/'/g, "\\'")}' status:active`
+  let after: string | null = null
+  for (;;) {
+    const data: { products: { nodes: Node[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } } } =
+      await adminGraphQL(`
+        query MapSweep($q: String!, $after: String) {
+          products(first: 50, after: $after, query: $q) {
+            nodes {
+              id handle title vendor
+              variants(first: 100) { nodes { sku price } }
+              mapPrice: metafield(namespace: "xdipx", key: "map_price") { value }
+              mapRestricted: metafield(namespace: "xdipx", key: "map_restricted") { value }
+            }
+            pageInfo { hasNextPage endCursor }
+          }
+        }
+      `, { q, after })
+    for (const p of data.products.nodes) {
+      // The search query is a prefix/token match; keep exact vendor only.
+      if (p.vendor.toLowerCase() !== vendor.toLowerCase()) continue
+      const variants = p.variants.nodes
+      const low = [...variants].sort((a, b) => Number(a.price) - Number(b.price))[0]
+      const mp = p.mapPrice ? Number(p.mapPrice.value) : NaN
+      out.push({
+        id: p.id,
+        handle: p.handle,
+        title: p.title,
+        vendor: p.vendor,
+        price: low ? Number(low.price) : 0,
+        sku: low?.sku ?? '',
+        skus: variants.map(v => v.sku ?? '').filter(Boolean),
+        mapPriceMetafield: Number.isFinite(mp) && mp > 0 ? mp : null,
+        mapRestricted: p.mapRestricted?.value === 'true',
+      })
+    }
+    if (!data.products.pageInfo.hasNextPage) break
+    after = data.products.pageInfo.endCursor
+  }
+  return out
+}
+
+/**
+ * Writes xdipx.map_restricted=true on the given products, 25 per call. Touches
+ * no other field. Returns the number written; throws on any userError.
+ */
+export async function setMapRestrictedTrue(productGids: string[]): Promise<number> {
+  let written = 0
+  for (let i = 0; i < productGids.length; i += 25) {
+    const batch = productGids.slice(i, i + 25).map(ownerId => ({
+      ownerId, namespace: 'xdipx', key: 'map_restricted', type: 'boolean', value: 'true',
+    }))
+    const r = await adminGraphQL<{ metafieldsSet: { userErrors: { field: string[]; message: string }[] } }>(`
+      mutation MapRestrictedSet($metafields: [MetafieldsSetInput!]!) {
+        metafieldsSet(metafields: $metafields) { userErrors { field message } }
+      }
+    `, { metafields: batch })
+    if (r.metafieldsSet.userErrors.length > 0) {
+      throw new Error(`metafieldsSet rejected: ${r.metafieldsSet.userErrors.map(e => e.message).join('; ')}`)
+    }
+    written += batch.length
+  }
+  return written
+}
+
+/** Read-only. A collection's current smart-collection ruleSet, or null if manual. */
+export async function fetchCollectionRuleSet(collectionGid: string): Promise<{
+  title: string
+  appliedDisjunctively: boolean
+  rules: { column: string; relation: string; condition: string }[]
+} | null> {
+  const d = await adminGraphQL<{ collection: null | { title: string; ruleSet: null | {
+    appliedDisjunctively: boolean
+    rules: { column: string; relation: string; condition: string }[]
+  } } }>(`
+    query CollRules($id: ID!) {
+      collection(id: $id) { title ruleSet { appliedDisjunctively rules { column relation condition } } }
+    }
+  `, { id: collectionGid })
+  if (!d.collection?.ruleSet) return null
+  return { title: d.collection.title, ...d.collection.ruleSet }
+}
+
 /**
  * Set a single metafield on any owner (Product or ProductVariant), overwriting
  * any existing value at the same namespace+key. Idempotent.
