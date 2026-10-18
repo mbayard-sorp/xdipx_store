@@ -582,6 +582,25 @@ export const instagramTokenRefreshes = pgTable('instagram_token_refreshes', {
   attemptedIdx: index('idx_instagram_token_refreshes_attempted').on(t.attemptedAt),
 }))
 
+// Microsoft Advertising OAuth refresh-token store (migration 125). Append-only,
+// newest successful row per env wins, so a failed refresh never clobbers the
+// last good token. Microsoft rotates refresh tokens, which is why this lives in
+// the DB and not a Vercel env var. refreshTokenEnc is AES-256-GCM ciphertext
+// keyed by MSADS_TOKEN_KEY. See app/lib/microsoft-ads-token.server.ts.
+export const microsoftAdsTokens = pgTable('microsoft_ads_tokens', {
+  id:              serial('id').primaryKey(),
+  env:             varchar('env', { length: 16 }).notNull(),      // sandbox|production
+  // NULL on a failed attempt.
+  refreshTokenEnc: text('refresh_token_enc'),
+  scope:           text('scope'),
+  source:          varchar('source', { length: 16 }).notNull(),   // connect|refresh
+  success:         boolean('success').notNull(),
+  error:           text('error'),
+  attemptedAt:     timestamp('attempted_at', { withTimezone: true }).defaultNow().notNull(),
+}, t => ({
+  envAttemptedIdx: index('idx_microsoft_ads_tokens_env_attempted').on(t.env, t.attemptedAt),
+}))
+
 export const adminRoles = pgTable('admin_roles', {
   id:              serial('id').primaryKey(),
   neonAuthUserId:  varchar('neon_auth_user_id', { length: 60 }).notNull().unique(),
@@ -1870,7 +1889,7 @@ export const strategyBriefs = pgTable('strategy_briefs', {
  */
 export const adCampaigns = pgTable('ad_campaigns', {
   id:                 serial('id').primaryKey(),
-  platform:           varchar('platform', { length: 20 }).notNull(),   // meta|x|google|reddit|other
+  platform:           varchar('platform', { length: 20 }).notNull(),   // meta|x|google|microsoft|reddit|other
   name:               varchar('name', { length: 120 }).notNull(),
   objective:          varchar('objective', { length: 40 }).notNull(),
   status:             varchar('status', { length: 16 }).notNull().default('proposed'), // proposed|approved|launched|paused|ended|rejected

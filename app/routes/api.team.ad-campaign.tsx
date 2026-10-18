@@ -16,7 +16,7 @@
 import type { ActionFunctionArgs } from 'react-router'
 import { assertTeamAuth, createAdCampaign, listAdCampaigns } from '~/lib/team.server'
 
-const PLATFORMS = ['meta', 'x', 'google', 'reddit', 'other']
+const PLATFORMS = ['meta', 'x', 'google', 'microsoft', 'reddit', 'other']
 
 export async function action({ request }: ActionFunctionArgs) {
   assertTeamAuth(request)

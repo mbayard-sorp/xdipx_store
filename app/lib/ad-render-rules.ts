@@ -24,6 +24,15 @@ import { getAdFormat, type AdFormat } from '~/lib/ad-formats'
  */
 export const OBJECT_ONLY_LANES: readonly string[] = ['meta', 'snap', 'newsletter', 'google', 'microsoft']
 
+/**
+ * The ad_campaigns.platform value for an idea's lane. Lanes with a platform
+ * integration keep their own name so pushes and metrics can key on it;
+ * everything else is 'other'.
+ */
+export function platformForLane(lane: string): string {
+  return lane === 'meta' || lane === 'google' || lane === 'microsoft' ? lane : 'other'
+}
+
 /** Lanes that may use the on-skin and bodyscape axes (adult at the nudity definition, owned at 3.2a). */
 export const ON_SKIN_LANES: readonly string[] = ['adult', 'owned']
 
