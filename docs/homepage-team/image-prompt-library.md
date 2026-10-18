@@ -2730,3 +2730,16 @@ the same explicit `--prompt` repeated on upload (#10682/#9369).
 - **Rounds:** 3, 8 candidates. Fidelity gate blocked silhouette drift twice ("compact oval", then "symmetrical oval"). Passed once the prompt described the real form: long slim flat oval, pink rim, black body, black disc at the top end, two dots, round pink button at the lower end.
 - **Lesson (embed-match collision):** "palm" and "power" in the prompt matched `palm-power-massager`. Say "open hand facing upward" and "round pink button". The shipped `imagePrompt` is the generation prompt with those three wordings swapped (palm up, power button, flat on the palm), no other change.
 - **Lesson (Ferri):** the only photo is box + device; the composite stripped the box cleanly. Pass `--label-tolerant`.
+
+### §0-P keeper, content run 1513 (2026-10-18)
+
+Fantasy X-Tensions Elite Uncut Open-Ended Enhancement Sleeve 7 Inch
+(`fantasy-x-tensions-elite-uncut-7-in-open-ended-silicone-enhancement-sleeve`), `comparisons`,
+archetype B, sincere staging, single product, post `penis-sleeve-vs-penis-extender`.
+cluster: enhancement-sleeves
+cast: none
+- **Ref-image:** second Shopify photo `84184B.jpg` (clean unpackaged; the first photo is a box with heavy copy). Atlas `seedream-4.5-edit`, 2 rounds x 2 candidates, round 2 candidate 2 shipped, marginal pass: soft lavender-to-near-white falloff, slightly more saturated than flat `#F3E8FB` at the top, small warm glow at the base, product a touch more orange than the packshot caramel. →
+  `image-a6ff70ffa7a8e0d81fd48be23e877f1e011d25c2-2304x1728-jpg`
+- **Keeper prompt:** the round-2 prompt: flat pale uniform plum-soft (#F3E8FB) "almost white, same tone edge to edge", "soft even diffused daylight, evenly lit throughout", one short shadow beside the base, one blurred sage leaf sprig, plus the no-gradient / no-vignette / no-dark-areas / no-light-beam / no-color-wedge negatives and the no people / hands / packaging / text list.
+- **Reject (round 1, both candidates):** "soft directional daylight falling from one side" on a plum-soft ground produced a saturated purple wedge, dark-purple upper corners and an orange light streak. Do not use directional-light wording on a tinted ground; use "soft even diffused daylight, evenly lit throughout".
+- **Lesson (embed-match pre-flight):** `check-hero-embed-match.ts` needs EVERY distinctive token of the catalog title in `heroImageAlt` + `imagePrompt` ("fantasy x tensions elite uncut open ended enhancement sleeve inch"). A generic description fails it. Prefix the upload `--prompt` with the full product title (incl. "7 Inch"), and keep the alt free of spec claims (no material, no dimensions).
