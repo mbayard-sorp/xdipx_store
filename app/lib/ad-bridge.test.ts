@@ -135,6 +135,10 @@ describe('bridge host gate', () => {
     expect(bridgeHostSupportPath('/__manifest')).toBe(true)
     expect(bridgeHostSupportPath('/api/consent')).toBe(true)
     expect(bridgeHostSupportPath('/api/lead')).toBe(true)
+    // Single fetch posts the funnel form to the .data twin (2026-10-18 audit P0).
+    expect(bridgeHostSupportPath('/api/lead.data')).toBe(true)
+    expect(bridgeHostSupportPath('/api/consent.data')).toBe(true)
+    expect(bridgeHostSupportPath('/api/lead.data.data')).toBe(false)
     expect(bridgeHostSupportPath('/api/cart')).toBe(false)
     expect(bridgeHostSupportPath('/')).toBe(false)
   })

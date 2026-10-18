@@ -63,7 +63,16 @@ export function bridgeSlugFromPath(pathname: string): string | null {
  * Paths the bridge page itself needs besides its slug: React Router's route
  * discovery manifest, the consent log the cookie banner posts to, and the
  * lead endpoint the two-door funnel page posts its form to.
+ *
+ * The lead form submits through a React Router fetcher, and single fetch
+ * rewrites that POST to `/api/lead.data`. The gate used to accept only the
+ * bare path, so on the real host every Door A submission 404'd before it
+ * reached the action and the page fell into the not-found boundary (found by
+ * the 2026-10-18 funnel audit, a test lead on production). Accept the
+ * `.data` twin of each support path, the same way bridgeSlugFromPath does.
  */
+const SUPPORT_PATHS = new Set(['/__manifest', '/api/consent', '/api/lead'])
+
 export function bridgeHostSupportPath(pathname: string): boolean {
-  return pathname === '/__manifest' || pathname === '/api/consent' || pathname === '/api/lead'
+  return SUPPORT_PATHS.has(pathname.replace(/\.data$/i, ''))
 }

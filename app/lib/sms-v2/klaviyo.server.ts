@@ -69,6 +69,22 @@ export async function subscribeToSms(
     return
   }
 
+  // The subscription job accepts identifiers and subscriptions only; custom
+  // properties on it are a 400 (found by the 2026-10-18 funnel audit), so the
+  // attribution goes through profile-import first.
+  await klaviyoFetch('/profile-import/', 'POST', {
+    data: {
+      type: 'profile',
+      attributes: {
+        phone_number: phone,
+        properties: {
+          sms_source: opts.source,
+          sms_consent_at: opts.consentTimestamp.toISOString(),
+        },
+      },
+    },
+  })
+
   await klaviyoFetch('/profile-subscription-bulk-create-jobs/', 'POST', {
     data: {
       type: 'profile-subscription-bulk-create-job',
@@ -79,10 +95,6 @@ export async function subscribeToSms(
               type: 'profile',
               attributes: {
                 phone_number: phone,
-                properties: {
-                  sms_source: opts.source,
-                  sms_consent_at: opts.consentTimestamp.toISOString(),
-                },
                 subscriptions: {
                   sms: {
                     marketing: {
