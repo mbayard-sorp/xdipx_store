@@ -21,7 +21,7 @@ import { LANE_FORMATS, PLATE_IMAGE_SIZE, TEXT_FORMAT_ID, getAdFormat, isTextForm
 import {
   AdLaneCeilingError, GATE_ORDER, aggregateGates, buildExportPayload, buildPlatePrompt, chooseLayout,
   conceptUsesPlate, emptyGates, getConcept, isGatesJson, normaliseSlogan, notRun, pickSlogan, planPlate,
-  type GateResult, type GatesJson, type LayoutTemplate, type PlatePlan,
+  platformForLane, type GateResult, type GatesJson, type LayoutTemplate, type PlatePlan,
 } from '~/lib/ad-render-rules'
 import { fidelityGateResult, policyGate, textGateResult, visionGateResult, voiceGate } from '~/lib/ad-copy-gates.server'
 import type { VisionVerdict } from '~/lib/social-vision-gate.server'
@@ -199,10 +199,6 @@ async function generateOnSkinPlate(a: { plan: PlatePlan; prompt: string; format:
 export interface EnqueuedCreative { ideaId: number; creativeId: number; format: string; slogan: string | null; existing: boolean }
 export interface EnqueueSkip { ideaId: number; format?: string; reason: string }
 export interface EnqueueResult { created: EnqueuedCreative[]; skipped: EnqueueSkip[] }
-
-function platformForLane(lane: string): string {
-  return lane === 'meta' ? 'meta' : lane === 'google' ? 'google' : 'other'
-}
 
 /** Normalised slogans used by OTHER ideas' creatives in the last 30 days. */
 async function recentSlogans(excludeIdeaId: number): Promise<Set<string>> {

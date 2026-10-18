@@ -11,8 +11,9 @@
  * Hard rule from plan section 5: a platform push control never renders while
  * ads_spend_enabled is off, and never for a lane whose exporter cannot push.
  * With the valve on, a Meta creative with a ready payload gets one extra button,
- * "Create paused draft in Meta", with pending, success and error states and the
- * resulting external id.
+ * "Create paused draft in Meta", and a Microsoft creative with a ready export
+ * gets "Push to Microsoft (paused)". Both have pending, success and error
+ * states and show the resulting external id.
  */
 import { useEffect, useState } from 'react'
 import { useFetcher } from 'react-router'
@@ -43,7 +44,7 @@ export function ExportState({
 }: {
   state: ExportStateView
   creativeId: number
-  /** Admin route that handles build-export, view-payload, push-meta-draft and render-creative. */
+  /** Admin route that handles build-export, view-payload, push-meta-draft, push-microsoft and render-creative. */
   action: string
   filename: string
   /** The platform push control renders only while this is true. */
@@ -62,6 +63,9 @@ export function ExportState({
 
   const submit = (intent: string) => fetcher.submit({ intent, creativeId: String(creativeId) }, { method: 'post', action })
   const isMeta = state.exporter === 'meta-paused-draft'
+  const isMicrosoft = state.pushTo === 'microsoft'
+  const platformName = isMicrosoft ? 'Microsoft' : 'Meta'
+  const pushBtn = 'inline-flex min-h-11 items-center rounded-full border border-line bg-paper px-3 text-sm font-medium text-ink hover:border-ink-4 disabled:opacity-60 touch-manipulation'
 
   let body: React.ReactNode
   switch (state.kind) {
@@ -115,9 +119,19 @@ export function ExportState({
               type="button"
               disabled={pushing}
               onClick={() => pushFetcher.submit({ intent: 'push-meta-draft', creativeId: String(creativeId) }, { method: 'post', action })}
-              className="inline-flex min-h-11 items-center rounded-full border border-line bg-paper px-3 text-sm font-medium text-ink hover:border-ink-4 disabled:opacity-60 touch-manipulation"
+              className={pushBtn}
             >
               {pushing ? 'Creating draft' : 'Create paused draft in Meta'}
+            </button>
+          )}
+          {spendEnabled && isMicrosoft && (
+            <button
+              type="button"
+              disabled={pushing}
+              onClick={() => pushFetcher.submit({ intent: 'push-microsoft', creativeId: String(creativeId) }, { method: 'post', action })}
+              className={pushBtn}
+            >
+              {pushing ? 'Pushing to Microsoft' : 'Push to Microsoft (paused)'}
             </button>
           )}
         </>
@@ -143,10 +157,10 @@ export function ExportState({
     case 'in-platform':
       body = (
         <>
-          <span className={`${pillBase} border-ink-4 text-ink-2`}>{isMeta ? 'In Meta, paused' : 'In platform, paused'}</span>
+          <span className={`${pillBase} border-ink-4 text-ink-2`}>{isMeta || isMicrosoft ? `In ${platformName}, paused` : 'In platform, paused'}</span>
           {state.externalUrl && (
             <a href={state.externalUrl} target="_blank" rel="noreferrer" className={btn}>
-              Open in Ads Manager <ExternalIcon size={12} />
+              {isMicrosoft ? 'Open in Microsoft Ads' : 'Open in Ads Manager'} <ExternalIcon size={12} />
             </a>
           )}
         </>
@@ -165,7 +179,11 @@ export function ExportState({
       </div>
       {state.kind === 'failed' && state.message && <p className="break-words text-xs text-red-800">{state.message}</p>}
       {state.kind === 'in-platform' && state.externalId && (
-        <p className="font-mono text-[11px] text-ink-3 break-all">Meta ad {state.externalId}. Flip it live in Ads Manager when you are ready.</p>
+        <p className="font-mono text-[11px] text-ink-3 break-all">
+          {isMicrosoft
+            ? `Microsoft ad ${state.externalId}. Flip it live in Microsoft Advertising when you are ready.`
+            : `Meta ad ${state.externalId}. Flip it live in Ads Manager when you are ready.`}
+        </p>
       )}
       {built && built.ok === false && built.error && state.kind !== 'failed' && <p role="alert" className="break-words text-xs text-red-800">{built.error}</p>}
       {built && built.ok === true && built.summary && !busy && (
@@ -180,7 +198,9 @@ export function ExportState({
         </p>
       )}
       {pushed && pushed.ok === true && !pushing && (
-        <p role="status" className="font-mono text-[11px] text-ink-3 break-all">Created paused draft in Meta, ad {pushed.externalAdId}.</p>
+        <p role="status" className="font-mono text-[11px] text-ink-3 break-all">
+          {isMicrosoft ? `Pushed to Microsoft, paused. Ad ${pushed.externalAdId}.` : `Created paused draft in Meta, ad ${pushed.externalAdId}.`}
+        </p>
       )}
       {sheet && payloadFetcher.data?.payload !== undefined && (
         <PayloadSheet

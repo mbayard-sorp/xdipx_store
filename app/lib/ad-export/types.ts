@@ -3,9 +3,10 @@
  * Client-safe (no server imports) so ExportState can read it.
  *
  * Plan section 2: nothing uploads while ads_spend_enabled is false. An exporter
- * BUILDS a file or a payload and a build is always safe. Only `push` can touch
- * a platform, only the Meta exporter has one, and it refuses with `spend_disabled`
- * unless the valve is on.
+ * BUILDS a file or a payload and a build is always safe. Only a push can touch
+ * a platform: the Meta paused draft push and the Microsoft Search push
+ * (microsoft-push.server.ts). Both refuse with `spend_disabled` unless the
+ * valve is on, and both create everything paused.
  */
 
 export type ExporterId = 'google-editor-csv' | 'meta-paused-draft' | 'banner-zip'

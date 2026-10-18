@@ -21,10 +21,12 @@ export interface ExportStateView {
   retry?: 'render' | 'export'
   /** Hearted, finished and exportable: the Build action may render. */
   canBuild?: boolean
-  /** Meta ad id once the paused draft exists in the platform. */
+  /** Platform ad id once the paused objects exist there (Meta or Microsoft). */
   externalId?: string | null
-  /** Ads Manager deep link for that ad. */
+  /** Deep link into the platform's ads UI for that ad. */
   externalUrl?: string | null
+  /** The platform this lane can push to, when it can push at all. */
+  pushTo?: 'meta' | 'microsoft' | null
 }
 
 export interface CreativeListItem {

@@ -11,7 +11,9 @@
  * action (never the team token), and throws `spend_disabled` unless
  * ads_spend_enabled is true. TikTok has no entry: paid TikTok is prohibited for
  * this catalog (docs/ads-policy.md), and a stub that could one day be keyed on
- * was the failure mode this registry removes.
+ * was the failure mode this registry removes. The microsoft lane's push is not
+ * on the exporter: it rebuilds its API payload from the idea and lives in
+ * microsoft-push.server.ts, called from service.server.ts.
  */
 import { EXPORTER_BY_LANE, exporterForLane, type ExporterId } from './types'
 import { ExportRefusal, type ExportBuild, type ExportCreative, type ExportIdea } from './common'
