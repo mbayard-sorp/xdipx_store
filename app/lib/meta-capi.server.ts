@@ -11,6 +11,10 @@ export interface CapiUserData {
   fbc?: string | null
   /** SHA-256 hashed email. Only populated when consentGranted = true. */
   em?: string | undefined
+  /** SHA-256 hashed E.164 digits. Stripped like `em` when consent is not granted. */
+  ph?: string | undefined
+  /** SHA-256 hashed lowercase first name. Stripped like `em` when consent is not granted. */
+  fn?: string | undefined
 }
 
 export interface CapiCustomData {
@@ -21,13 +25,20 @@ export interface CapiCustomData {
   num_items?: number
 }
 
+/** Custom data for a Lead: no products, just which surface captured it. */
+export interface CapiLeadData {
+  content_name: string
+  content_category?: string
+}
+
 export interface CapiEvent {
-  event_name: 'ViewContent' | 'AddToCart' | 'Purchase'
+  event_name: 'ViewContent' | 'AddToCart' | 'Purchase' | 'Lead'
   event_id: string
   event_time: number
   action_source: 'website'
+  event_source_url?: string
   user_data: CapiUserData
-  custom_data: CapiCustomData
+  custom_data: CapiCustomData | CapiLeadData
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -95,6 +106,47 @@ export function fireCapiEvent(
   return eventId
 }
 
+/**
+ * Send a Lead for a captured signup and return its event id for the browser
+ * pixel's dedup. Awaited, not fire-and-forget: Vercel discards work started
+ * after the response is sent, so a voided send here would never leave.
+ * Never throws; a failed send is logged and the signup still succeeds.
+ */
+export async function sendCapiLead(
+  request: Request,
+  opts: { email: string; phone?: string | null; firstName?: string | null; contentName: string; category?: string },
+): Promise<string> {
+  const eventId = generateEventId()
+  const consentGranted = getMarketingConsent(request)
+  const { fbp, fbc } = getFbCookies(request)
+  const clientIp = getClientIPOrNull(request)
+  const result = await sendCapiEvent(
+    {
+      event_name:       'Lead',
+      event_id:         eventId,
+      event_time:       Math.floor(Date.now() / 1000),
+      action_source:    'website',
+      ...(request.headers.get('referer') ? { event_source_url: request.headers.get('referer')! } : {}),
+      user_data: {
+        ...(clientIp ? { client_ip_address: clientIp } : {}),
+        client_user_agent: request.headers.get('user-agent') ?? undefined,
+        fbp,
+        fbc,
+        em: hashPII(opts.email),
+        ...(opts.phone ? { ph: hashPII(opts.phone.replace(/\D/g, '')) } : {}),
+        ...(opts.firstName ? { fn: hashPII(opts.firstName) } : {}),
+      },
+      custom_data: {
+        content_name: opts.contentName,
+        ...(opts.category ? { content_category: opts.category } : {}),
+      },
+    },
+    { consentGranted },
+  )
+  if (!result.ok && !result.skipped) console.error('[meta-capi] Lead not delivered:', result.error)
+  return eventId
+}
+
 // ─── Core sender ──────────────────────────────────────────────────────────────
 
 /**
@@ -127,6 +179,8 @@ export async function sendCapiEvent(
   const user_data: CapiUserData = { ...event.user_data }
   if (!opts.consentGranted) {
     delete user_data.em
+    delete user_data.ph
+    delete user_data.fn
   }
 
   const payload: Record<string, unknown> = {
@@ -136,6 +190,7 @@ export async function sendCapiEvent(
         event_id:      event.event_id,
         event_time:    event.event_time,
         action_source: event.action_source,
+        ...(event.event_source_url ? { event_source_url: event.event_source_url } : {}),
         user_data,
         custom_data:   event.custom_data,
       },

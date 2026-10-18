@@ -54,6 +54,16 @@ export function trackFbPageView(): void {
 }
 
 /**
+ * Fire a Lead browser pixel event for a captured signup. The eventId comes
+ * from the server's CAPI Lead so Meta counts the pair once.
+ */
+export function trackFbLead(contentName: string, eventId: string): void {
+  if (typeof window === 'undefined') return
+  if (typeof window.fbq !== 'function') return
+  window.fbq('track', 'Lead', { content_name: contentName }, { eventID: eventId })
+}
+
+/**
  * Fire an AddToCart browser pixel event.
  * The eventId must match the one generated server-side so Meta deduplicates
  * the browser + CAPI pair into a single conversion.

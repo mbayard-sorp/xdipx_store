@@ -21,6 +21,10 @@ import { CookieConsent } from '~/components/store/CookieConsent'
 import { plainHeadline, splitHeadline } from '~/lib/ad-bridge-copy'
 import { buildBridgeDestination, getAdBridgePage, pickBridgePackshot } from '~/lib/ad-bridge.server'
 import { getLaneSubset } from '~/lib/ad-lane-subset.server'
+import { LeadFunnelView } from '~/components/funnel/LeadFunnelView'
+import { getLeadFunnelPage, type FunnelUtm } from '~/lib/lead-funnel'
+import { LEAD_OFFER } from '~/lib/lead-interests'
+import { getStoredUTM } from '~/lib/attribution.server'
 import { trackCtaClick } from '~/lib/analytics.client'
 import { isBridgeHost, isBridgeHostRequest, requestHost, BRIDGE_HOST } from '~/lib/bridge-host.server'
 import { trackFbPageView } from '~/lib/meta-pixel.client'
@@ -37,6 +41,30 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   if (!isBridgeHostRequest(request)) throw new Response('Not found', { status: 404 })
 
   const slug = (params['slug'] ?? '').toLowerCase()
+
+  // The paid-lead funnel's two-door pages live in code (app/lib/lead-funnel.ts).
+  const funnel = getLeadFunnelPage(slug)
+  if (funnel) {
+    const url = new URL(request.url)
+    const stored = getStoredUTM(request)
+    const param = (k: string) => url.searchParams.get(`utm_${k}`)
+    const utm: FunnelUtm = {
+      source: param('source') ?? stored?.source ?? null,
+      medium: param('medium') ?? stored?.medium ?? null,
+      campaign: param('campaign') ?? stored?.campaign ?? null,
+      content: param('content') ?? stored?.content ?? null,
+    }
+    const onHost = isBridgeHost(requestHost(request.headers))
+    const origin = onHost ? `https://${BRIDGE_HOST}` : url.origin
+    return {
+      kind: 'funnel' as const,
+      page: funnel,
+      utm,
+      terms: LEAD_OFFER.terms,
+      canonical: `${origin}/${funnel.slug}`,
+    }
+  }
+
   const preview = isPreviewRequest(request)
   const page = await getAdBridgePage(slug, preview)
   if (!page || (!page.live && !preview)) throw new Response('Not found', { status: 404 })
@@ -68,6 +96,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const origin = onBridgeHost ? `https://${BRIDGE_HOST}` : new URL(request.url).origin
 
   return {
+    kind: 'bridge' as const,
     slug: page.slug,
     headline: page.headline,
     claim: page.claim,
@@ -83,6 +112,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
   if (!data) return [{ title: 'Not found' }, { name: 'robots', content: 'noindex' }]
+  if (data.kind === 'funnel') {
+    return [
+      { title: `${plainHeadline(data.page.headline)} | xdipx` },
+      { name: 'description', content: data.page.intro },
+      { name: 'robots', content: 'noindex' },
+      { tagName: 'link', rel: 'canonical', href: data.canonical },
+    ]
+  }
   return [
     { title: `${plainHeadline(data.headline)} | xdipx` },
     { name: 'description', content: data.claim },
@@ -153,9 +190,11 @@ function AgeGate() {
   )
 }
 
-export default function BridgePage() {
+type LoaderData = Awaited<ReturnType<typeof loader>>
+type BridgeData = Extract<LoaderData, { kind: 'bridge' }>
+
+export default function BridgeRoute() {
   const d = useLoaderData<typeof loader>()
-  const { before, em, after } = splitHeadline(d.headline)
 
   useEffect(() => {
     trackFbPageView()
@@ -168,6 +207,18 @@ export default function BridgePage() {
     <main className="min-h-[100svh] bg-paper text-ink">
       <style dangerouslySetInnerHTML={{ __html: GATE_CSS }} />
       <script dangerouslySetInnerHTML={{ __html: AGE_PRECHECK }} />
+      {d.kind === 'funnel' ? <LeadFunnelView page={d.page} utm={d.utm} terms={d.terms} /> : <BridgeView d={d} />}
+      <AgeGate />
+      <CookieConsent />
+      <Analytics ga4Id={ga4Id} />
+    </main>
+  )
+}
+
+function BridgeView({ d }: { d: BridgeData }) {
+  const { before, em, after } = splitHeadline(d.headline)
+  return (
+    <>
 
       {d.preview && !d.live && (
         <p className="bg-plum-soft px-4 py-2 text-center font-body text-xs text-plum-2">
@@ -225,10 +276,6 @@ export default function BridgePage() {
           <p className="mt-4 font-body text-xs text-ink-4">For adults, 18 and over. Billing reads XDIPX.</p>
         </div>
       </div>
-
-      <AgeGate />
-      <CookieConsent />
-      <Analytics ga4Id={ga4Id} />
-    </main>
+    </>
   )
 }

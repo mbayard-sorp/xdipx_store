@@ -196,7 +196,7 @@ export function trackBeginCheckout(items: GA4Item[], value: number, currency = '
 // event-scoped custom dimension in the GA4 admin (owner-only action) or the
 // parameter is collected but unreadable in reports, like panel_click's were.
 
-export type LeadLocation = 'home' | 'pdp' | 'category' | 'admin-gallery'
+export type LeadLocation = 'home' | 'pdp' | 'category' | 'admin-gallery' | 'bridge'
 
 export function trackGenerateLead(location: LeadLocation) {
   gtag('event', 'generate_lead', { lead_location: location })

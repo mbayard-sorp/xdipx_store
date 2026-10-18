@@ -134,6 +134,7 @@ describe('bridge host gate', () => {
   it('support paths are the manifest and the consent log only', () => {
     expect(bridgeHostSupportPath('/__manifest')).toBe(true)
     expect(bridgeHostSupportPath('/api/consent')).toBe(true)
+    expect(bridgeHostSupportPath('/api/lead')).toBe(true)
     expect(bridgeHostSupportPath('/api/cart')).toBe(false)
     expect(bridgeHostSupportPath('/')).toBe(false)
   })
