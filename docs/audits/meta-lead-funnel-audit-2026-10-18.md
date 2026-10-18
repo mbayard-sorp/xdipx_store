@@ -214,3 +214,18 @@ tickets are on the improvement bus.
 code, no failing creative in a shared draft, a proven test lead before spend, budget sized to
 learning, optimize only for a received event, 25+ with no cap), with a changelog entry, and the
 daily ads routine's gate table and the ads-manager agent definition point at M1 to M8.
+
+## Follow-through, all-hands session later the same day
+
+Owner direction: "Use the /all-hands team to fill in as many gaps as possible and work with me to
+complete any actions I need to complete." What moved:
+
+| Gap | Done by agents | Still the owner's |
+|---|---|---|
+| P0-1 Door A fix | PR #1674 CI green, ticket #16142 QA-verified; the release engine merges it. Post-deploy production test lead still to run | Nothing, unless the engine stalls |
+| P0-3 welcome email | PR #1679: flow `SCL5eV` created as a draft in Klaviyo (trigger Added to List `UHiJc9`, email 1 at once with the code and the picked shelf, email 2 day 3, zero-order filter), templates `V8QfHr` and `QUXs5Q`, all strings through the voice gate; tickets #16143 at pr_open | Blocker 741: set the flow live |
+| P1-4 stock welcome series | Three Emma templates `UvPd6N`, `S6ngXG`, `XtDVv9` saved in Klaviyo; ticket #16144 at pr_open | Blocker 736 (pause) and 742 (swap) |
+| P1-5 attribution report | PR #1677: `GET /api/team/lead-funnel-report`, card on the Ad Studio Spend tab, routine paragraph; ticket #16145 at pr_open | Nothing |
+| P2-2 bridge error boundary | PR #1676; ticket #16146 at pr_open | Nothing |
+| P2-3 and P1-2 MAP | PR #1678: sweep script plus two dry runs in `docs/audits/map-restricted-sweep-dry-run-2026-10-18.md`; ticket #16147 at pr_open. Lovense has 3 unflagged products (Calor, Kraken 6-pack, Gemini); Dame has 25 of 27 at MAP; LELO 4 above MAP and 27 below; Womanizer and We-Vibe all priced below their stored MAP; Satisfyer has no MAP data at all | Blocker 733: the vendor ruling. The data says Dame is the one exposure that matters |
+| M8 standing direction | PR #1675, ticket #16148 QA-verified | Owner merge: `docs/ads-policy.md` is outside the agent allowlist |
