@@ -37,7 +37,7 @@ bash scripts/team-api.sh GET  gate 'team=ads&excludeRun=<RUN_ID>'
 ```
 
 Read in full at the start of each pass, before any drafting, in this order: `docs/ads-policy.md`
-(especially §Meta strategic lane M1 to M7 and the copy-register table),
+(especially §Meta strategic lane M1 to M8 and the copy-register table),
 `docs/emma-voice.md` marketing addendum, `docs/store-team/ad-creative-concept-bank-2026-10-03.md`,
 `docs/store-team/ad-owner-notes.md`, `docs/store-team/mission-brief.md`.
 
@@ -64,7 +64,7 @@ Hard rules, every string, every idea:
 
 | Destination | Register | Notes |
 |---|---|---|
-| Meta bridge lane | 3-4 | Gates M1 to M7 are hard checks (below). Paused drafts only, 25+ |
+| Meta bridge lane | 3-4 | Gates M1 to M8 are hard checks (below). Paused drafts only, 25+ |
 | Google Search, Microsoft Search | 4-5 for factual product text | Text only. RSA headlines max 30 characters, descriptions max 90 |
 | Snapchat (18+, non-graphic) | 6-7 | Object and typographic creative |
 | Vetted adult ad networks | 10 | Banners 300x250, 728x90, 300x100, 900x250. Nudity definition is the imagery ceiling. Full explicit arousal at 10; porn-copy and the leering voice are off the dial and ship nowhere. UTMs mandatory |
@@ -75,7 +75,7 @@ Hard rules, every string, every idea:
 A register tier outside its row is a defect, not a style choice. If a concept only works above its
 destination's ceiling, it is filed for a destination where it fits, or it dies.
 
-## Meta gates M1 to M7 (hard checks on every Meta idea)
+## Meta gates M1 to M8 (hard checks on every Meta idea)
 
 Run these as yes/no checks before filing. A Meta idea that fails any one is not filed; post a
 `decision` event naming the gate. Source of truth: `docs/ads-policy.md` §Meta strategic lane. If this
@@ -90,6 +90,7 @@ list and that section disagree, the policy wins.
 | M5 catalog | Curated Meta subset with renamed display titles only. Never the raw feed, never Advantage+ catalog or DPA |
 | M6 never | No persona pages, fake bylines, invented-author advertorials, rotating domains, shorteners, countdowns, orgasm claims |
 | M7 health | Read `GET team/status` and the open suggestions for a Meta rejection. One rejection stops new Meta ideas until the owner decides. A second rejection citing the same policy, or any account restriction, pauses the lane |
+| M8 lead funnel | Exclusion audiences for existing customers and subscribers on the ad set; the offer claim matches what the Shopify code enforces; no failing creative staged in the same draft; one marked test lead proved end to end on curious.xdipx.com before spend; budget sized to about 50 Leads a week from a stated CPL, else labelled a smoke test; the pixel has received the optimized event |
 
 Until the bridge host ships (plan PR-D), a Meta idea may be filed against a planned
 `https://curious.xdipx.com/<idea slug>` URL, and its `policy_check` says "M1 depends on PR-D; not
@@ -232,7 +233,7 @@ labeled brand-awareness in `one_liner` or dropped.
 factual product text per ads-policy.md copy-register table; no Display or search partners; final URL
 verified 200." Adult network: "Vetted adult ad network, register 10 per emma-voice v5.8 and the
 ads-policy.md register table; imagery at the nudity-definition ceiling; UTMs present." Meta: name each
-of M1 to M7 as passed in one clause each. A `policy_check` that only says "complies" is rejected by
+of M1 to M8 as passed in one clause each. A `policy_check` that only says "complies" is rejected by
 the API and by you.
 
 Before filing, run the self-gates on every string: humanizer pass, hard rules 1 to 9, the ladder row

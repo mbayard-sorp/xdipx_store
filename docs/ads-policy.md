@@ -160,6 +160,33 @@ Meta proposals until the owner has read it and decided. A rejection pattern (a s
 citing the same policy, or any account-level restriction) pauses the whole lane, and only the owner
 reopens it.
 
+**M8. Lead funnel and launch readiness (owner direction 2026-10-18, codified from
+`docs/audits/meta-lead-funnel-audit-2026-10-18.md`).**
+- Paid Meta always excludes existing customers and existing email subscribers. Every Meta ad set,
+  lead or sales, carries two exclusion audiences: the Shopify customer list and the Klaviyo
+  subscriber lists (Email List, Daily Deal Subscribers, Paid leads). An ad set without both is not
+  launch-ready, whatever else passes, and the `policyCheck` names the two audience ids.
+- The offer in the ad is the offer the Shopify discount enforces. "First order" appears only when
+  the code is restricted to zero-order customers; otherwise it is "your order". The landing page
+  states the full terms (minimum, once per customer, vendor exclusions) next to the code, and so
+  does every email that carries the code.
+- Nothing that fails a gate is staged in the Ads Manager draft next to something that passes. A
+  draft publishes as one set. Failing creative is deleted from the account or kept outside it (Ad
+  Studio, Sanity); it is never parked as a "hold" campaign, because one click publishes it.
+- Before the first dollar, the funnel is proven with one marked test lead, end to end, on the
+  production host: a 200 on the lead POST, a Klaviyo profile on the paid-leads list with
+  `interest` and the `utm_*` properties, a Lead in Events Manager with server and browser deduped
+  on one event id, and the first welcome email live. A funnel that cannot show all four is not
+  launch-ready, and the proof is written into the ticket that unblocks spend.
+- Budget is sized to learning, not to a default. A Lead-optimized ad set wants about 50 Leads a
+  week to leave the learning phase, so the daily budget is the stated cost per lead times 50,
+  divided by 7, and the proposal shows that arithmetic next to the break-even CPL from the
+  economics helper (`docs/store-team/routine-ads-daily.md` §Shared helper). A budget below that is
+  a creative smoke test and is labelled as one; it is never described as a conversion test.
+- An ad set optimizes only for an event the dataset has already received. `custom_event_type:
+  LEAD` with zero Lead events on the pixel in the last 28 days is flagged in the `policyCheck`.
+- M4 clarified: 25+ means an age floor of 25 and no ceiling.
+
 ## Organic social
 
 Organic posting is a different policy surface from ads and is governed by each platform's
@@ -474,6 +501,14 @@ killed. "It'll probably slip through review" is never a compliance case.
   (kind `instructions`, target `ads`), citing the source.
 
 ## Changelog
+
+- **2026-10-18**, owner direction during the paid Meta lead funnel audit
+  (`docs/audits/meta-lead-funnel-audit-2026-10-18.md`). §Meta strategic lane gains M8: paid Meta
+  always excludes existing customers and existing subscribers; the ad's offer claim is the one the
+  Shopify code enforces; failing creative is never staged in the same draft as passing creative;
+  spend waits for one marked test lead proven end to end on the production host; budget is sized to
+  about 50 Leads a week from a stated CPL; an ad set optimizes only for an event the pixel has
+  received; and M4's 25+ has no upper cap. The daily ads routine's gate table mirrors the new row.
 
 - **2026-10-03**, owner decision ("codify both"), from `docs/store-team/ad-studio-v2-plan.md` §1
   decisions 1 and 2. Meta moves from Prohibited to a strategic lane for the pleasure catalog, gated
