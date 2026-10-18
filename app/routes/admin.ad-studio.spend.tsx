@@ -24,6 +24,8 @@ import { CsvDropZone } from '~/components/admin/ads/CsvDropZone'
 import { PlanVsActual } from '~/components/admin/ads/PlanVsActual'
 import { RuleRecipes } from '~/components/admin/ads/RuleRecipes'
 import { SpendBand } from '~/components/admin/ads/SpendBand'
+import { LeadFunnelCard } from '~/components/admin/ads/LeadFunnelCard'
+import { buildLeadFunnelReport } from '~/lib/lead-funnel-report.server'
 import { BandSkeleton, CapSkeleton, ErrorSlab } from '~/components/admin/ads/StateSlabs'
 
 export const meta: MetaFunction = () => [{ title: 'Spend - Ad Studio - xdipx Admin' }]
@@ -34,7 +36,8 @@ const MAX_FILE_BYTES = 8 * 1024 * 1024
 export async function loader({ request }: LoaderFunctionArgs) {
   await requireAdmin(request)
   const [admin, overview] = await Promise.all([getAdminUser(request), getSpendOverview()])
-  return { isOwner: admin?.role === 'owner', overview }
+  // Streamed (not awaited): Klaviyo + GA4 reads must not block the spend tab.
+  return { isOwner: admin?.role === 'owner', overview, leadFunnel: buildLeadFunnelReport() }
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -85,7 +88,7 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function SpendTab() {
-  const { isOwner, overview: o } = useLoaderData<typeof loader>()
+  const { isOwner, overview: o, leadFunnel } = useLoaderData<typeof loader>()
   const navigation = useNavigation()
   const loading = navigation.state === 'loading' && navigation.location?.pathname === ACTION_PATH
 
@@ -116,6 +119,9 @@ export default function SpendTab() {
           <CsvDropZone actionPath={ACTION_PATH} />
         </div>
         <div className="order-5 lg:col-span-2">
+          <LeadFunnelCard report={leadFunnel} />
+        </div>
+        <div className="order-6 lg:col-span-2">
           <RuleRecipes thresholds={o.thresholds} grossMarginPct={o.grossMarginPct} isOwner={isOwner} actionPath={ACTION_PATH} />
         </div>
       </div>

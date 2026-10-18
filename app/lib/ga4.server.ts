@@ -47,7 +47,7 @@ export interface HomepageSignals {
   dataGaps: string[]
 }
 
-interface GaReport {
+export interface GaReport {
   rows?: Array<{
     dimensionValues?: Array<{ value?: string }>
     metricValues?: Array<{ value?: string }>
@@ -106,6 +106,22 @@ async function runReport(propertyId: string, token: string, body: unknown): Prom
     throw new Error(`GA4 runReport ${res.status}: ${text.slice(0, 200)}`)
   }
   return (await res.json()) as GaReport
+}
+
+/**
+ * Authenticated one-off runReport for callers outside this module (the lead
+ * funnel report). Returns null when GA4 is not configured; throws on API errors
+ * so the caller can record the gap.
+ */
+export async function runGa4Report(body: unknown): Promise<GaReport | null> {
+  const propertyId = (process.env['GA4_PROPERTY_ID'] ?? '').replace(/^properties\//, '').trim()
+  if (!propertyId) return null
+  const auth = loadAuth()
+  if (!auth) return null
+  const client = await auth.getClient()
+  const token = (await client.getAccessToken()).token
+  if (!token) return null
+  return runReport(propertyId, token, body)
 }
 
 async function fetchSignals(windowDays: number): Promise<HomepageSignals> {
