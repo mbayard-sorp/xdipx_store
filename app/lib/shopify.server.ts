@@ -3089,6 +3089,24 @@ export async function createCartWithLines(
   return rawCartToCart(data.cartCreate.cart)
 }
 
+/**
+ * Replace the cart's discount codes. Shopify accepts any code here and
+ * reports whether it applies on `discountCodes[].applicable` once the cart
+ * meets the code's terms (CURIOUS15 needs $30 of eligible items), so an
+ * empty cart carrying the code is expected, not an error.
+ */
+export async function applyCartDiscountCodes(cartId: string, codes: string[]): Promise<Cart | null> {
+  const data = await storefront<{ cartDiscountCodesUpdate: { cart: RawCart | null } }>(`
+    mutation CartDiscountCodesUpdate($cartId: ID!, $codes: [String!]!) {
+      cartDiscountCodesUpdate(cartId: $cartId, discountCodes: $codes) {
+        cart { ${CART_FRAGMENT} }
+        userErrors { field message }
+      }
+    }
+  `, { cartId, codes })
+  return data.cartDiscountCodesUpdate.cart ? rawCartToCart(data.cartDiscountCodesUpdate.cart) : null
+}
+
 export async function getCart(cartId: string): Promise<Cart | null> {
   const data = await storefront<{ cart: RawCart | null }>(`
     query GetCart($id: ID!) { cart(id: $id) { ${CART_FRAGMENT} } }

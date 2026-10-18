@@ -31,6 +31,7 @@ import { isPermanentlyUnindexableStatus } from '~/lib/seo'
 const BOTID_PROTECTED_ROUTES = [
   { path: '/api/waitlist',  method: 'POST' },
   { path: '/api/reviews',   method: 'POST' },
+  { path: '/api/lead',      method: 'POST' },
 ]
 
 // botid serializes its runtime via Function.toString(), which produces

@@ -61,6 +61,42 @@ export async function subscribeToList(
   })
 }
 
+/**
+ * Subscribe a paid-funnel lead (curious.xdipx.com) to email marketing on the
+ * paid-leads list, with first name, phone and attribution on the profile.
+ * The phone rides as a profile attribute only; SMS consent is a separate,
+ * explicit call (subscribeToSms) made only when the visitor ticked the box.
+ * Falls back to the daily-deal list when KLAVIYO_LIST_ID_PAID_LEADS is unset
+ * so a lead is never dropped, and says so in the log.
+ */
+export async function subscribeLead(opts: {
+  email: string
+  firstName?: string
+  phone?: string | null
+  properties: Record<string, unknown>
+}): Promise<void> {
+  let listId = process.env['KLAVIYO_LIST_ID_PAID_LEADS']
+  if (!listId) {
+    console.warn('[klaviyo.subscribeLead] KLAVIYO_LIST_ID_PAID_LEADS unset, using the daily-deal list')
+    listId = process.env['KLAVIYO_LIST_ID_DAILY_DEAL']!
+  }
+  const profileAttrs: Record<string, unknown> = {
+    email: opts.email,
+    subscriptions: { email: { marketing: { consent: 'SUBSCRIBED' } } },
+    properties: opts.properties,
+  }
+  if (opts.firstName) profileAttrs['first_name'] = opts.firstName
+  if (opts.phone) profileAttrs['phone_number'] = opts.phone
+
+  await klaviyoFetch('/profile-subscription-bulk-create-jobs/', 'POST', {
+    data: {
+      type: 'profile-subscription-bulk-create-job',
+      attributes: { profiles: { data: [{ type: 'profile', attributes: profileAttrs }] } },
+      relationships: { list: { data: { type: 'list', id: listId } } },
+    },
+  })
+}
+
 export async function subscribeToDailyDeal(
   email: string,
   firstName?: string,

@@ -61,8 +61,9 @@ export function bridgeSlugFromPath(pathname: string): string | null {
 
 /**
  * Paths the bridge page itself needs besides its slug: React Router's route
- * discovery manifest and the consent log the cookie banner posts to.
+ * discovery manifest, the consent log the cookie banner posts to, and the
+ * lead endpoint the two-door funnel page posts its form to.
  */
 export function bridgeHostSupportPath(pathname: string): boolean {
-  return pathname === '/__manifest' || pathname === '/api/consent'
+  return pathname === '/__manifest' || pathname === '/api/consent' || pathname === '/api/lead'
 }
