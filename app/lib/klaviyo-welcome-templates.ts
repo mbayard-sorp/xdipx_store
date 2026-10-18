@@ -39,6 +39,9 @@ import { CTA_WHITELIST, type CtaLabel } from './klaviyo-flow-templates'
 import { buildShopUrl, buildStartUrl } from './lead-funnel'
 import { LEAD_INTERESTS, LEAD_OFFER, type LeadInterestSlug } from './lead-interests'
 
+/** coral-soft from app/app.css, flattened to hex for email clients (the design system has no tint token). */
+const CORAL_SOFT = '#FFE6DD'
+
 export type WelcomeFlowSlug = 'paid-leads-welcome' | 'email-list-welcome'
 
 export const WELCOME_FLOW_NAMES: Record<WelcomeFlowSlug, string> = {
@@ -246,7 +249,7 @@ export function renderWelcomeEmail(spec: WelcomeEmailSpec): RenderedWelcomeEmail
     ? `
 <tr><td class="x-px x-bg" bgcolor="${C.paper}" align="left" style="background-color:${C.paper};padding:28px 40px 0 40px;">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-<td ${cell(C.coralSoft, 'x-card')}border-radius:14px;padding:22px 24px;">
+<td ${cell(CORAL_SOFT, 'x-card')}border-radius:14px;padding:22px 24px;">
 <p class="x-ink3" style="margin:0 0 6px 0;font-family:${BODY_FONT};font-size:12px;line-height:16px;letter-spacing:0.12em;text-transform:uppercase;color:${C.ink3};">Your code</p>
 <p class="x-ink" style="margin:0;font-family:'JetBrains Mono',Menlo,Consolas,monospace;font-size:30px;line-height:36px;letter-spacing:0.08em;color:${C.ink};">${LEAD_OFFER.code}</p>
 <p class="x-ink2" style="margin:10px 0 0 0;font-family:${BODY_FONT};font-size:14px;line-height:21px;color:${C.ink2};">${LEAD_OFFER.terms}</p>
