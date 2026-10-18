@@ -372,6 +372,18 @@ fired and its one-tap recommendation; post each as a `decision` event. This step
 spend guard is the one rule the server may auto-apply, and that is server-side, not yours. Never call
 any platform tool to pause, scale or refresh anything.
 
+Lead funnel (paid Meta leads): also read the attribution report and carry it into the run summary.
+
+```bash
+bash scripts/team-api.sh GET team/lead-funnel-report
+```
+
+It returns, for the last 30 days, leads, lead-to-order rate and revenue per `utm_content` (the
+creative) and per `interest`, plus `gaps` naming anything it could not read. Take spend per ad from
+`ads_get_ad_entities` and report CPL (spend divided by leads) per `utm_content`, next to that
+creative's lead-to-order rate. Recommend only; a creative with leads and zero orders is a note, not a pause.
+Not-live fallback is the same as above: a 404 posts `skipped: lead_funnel_report_not_live`.
+
 ### Step 5. Retro and inbound suggestions
 
 Read suggestions targeted at ads, oldest first, and act only on what this run can execute within these
