@@ -15,9 +15,10 @@
 
 import { useEffect, useState } from 'react'
 import type { LoaderFunctionArgs, MetaFunction } from 'react-router'
-import { useLoaderData, useRouteLoaderData } from 'react-router'
+import { data, useLoaderData, useRouteError, useRouteLoaderData } from 'react-router'
 import { Analytics } from '~/components/store/Analytics'
 import { CookieConsent } from '~/components/store/CookieConsent'
+import { BRIDGE_404, STOREFRONT_404, isBridgeError } from '~/lib/bridge-error'
 import { plainHeadline, splitHeadline } from '~/lib/ad-bridge-copy'
 import { buildBridgeDestination, getAdBridgePage, pickBridgePackshot } from '~/lib/ad-bridge.server'
 import { getLaneSubset } from '~/lib/ad-lane-subset.server'
@@ -38,7 +39,7 @@ const IMG_SIZE = 750
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   // Host gate first: on xdipx.com (or anywhere else) this page does not exist.
-  if (!isBridgeHostRequest(request)) throw new Response('Not found', { status: 404 })
+  if (!isBridgeHostRequest(request)) throw data(STOREFRONT_404, { status: 404 })
 
   const slug = (params['slug'] ?? '').toLowerCase()
 
@@ -67,7 +68,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   const preview = isPreviewRequest(request)
   const page = await getAdBridgePage(slug, preview)
-  if (!page || (!page.live && !preview)) throw new Response('Not found', { status: 404 })
+  if (!page || (!page.live && !preview)) throw data(BRIDGE_404, { status: 404 })
 
   // The lane subset supplies a display title with no category word, used as the
   // packshot's alt text. Failure is non-fatal.
@@ -75,7 +76,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     getProductByHandle(page.productHandle).catch(() => null),
     getLaneSubset(page.lane, preview).catch(() => []),
   ])
-  if (!product && !page.imageUrl) throw new Response('Not found', { status: 404 })
+  if (!product && !page.imageUrl) throw data(BRIDGE_404, { status: 404 })
 
   const displayTitle = subset.find(e => e.productHandle === page.productHandle)?.displayTitle ?? ''
 
@@ -128,6 +129,33 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
     // Canonical points at itself on the bridge host (ads-policy M1).
     { tagName: 'link', rel: 'canonical', href: data.canonical },
   ]
+}
+
+/**
+ * Funnel-native error view for the bridge host (ticket #16146, ads-policy M1):
+ * the bridge host never serves a xdipx.com page. A storefront 404 (loader marks
+ * it `bridge: false`) is re-thrown so the root boundary renders it as before.
+ */
+export function ErrorBoundary() {
+  const error = useRouteError()
+  if (!isBridgeError(error)) throw error
+  return (
+    <main data-bridge-error className="flex min-h-[100svh] items-center justify-center bg-paper px-4 text-ink">
+      <div className="w-full max-w-sm text-center">
+        <p className="kicker text-ink-3">xdipx</p>
+        <h1 className="mt-2 font-display text-[2rem] leading-[1.08] text-ink">Something went wrong on our side</h1>
+        <p className="mt-3 font-body text-base leading-relaxed text-ink-2">
+          The page is still here. Give it another go.
+        </p>
+        <a
+          href="/hello"
+          className="mt-5 flex min-h-[52px] w-full items-center justify-center rounded-full bg-coral px-6 font-body text-base font-semibold text-white"
+        >
+          Show me
+        </a>
+      </div>
+    </main>
+  )
 }
 
 export function headers() {
