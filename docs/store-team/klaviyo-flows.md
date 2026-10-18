@@ -34,6 +34,27 @@ no helper in the codebase changes a flow's status. Nothing can send until the ow
 5. Set each flow to Live, one at a time. Cart first.
 6. For browse abandonment, see the next section. Do not build it by hand yet.
 
+## Welcome flows (tickets #16143 and #16144, built 2026-10-18)
+
+Code: `app/lib/klaviyo-welcome-templates.ts` (pure specs and renderer, same design system as the
+flow emails), `scripts/klaviyo-welcome-setup.ts` (dry run by default; creates missing templates and
+the draft flow; never sets anything live; sends nothing). Every string passed `emma-empathy-reviewer`
+on 2026-10-18 (4 BLOCKs and 28 REVISEs applied before creation).
+
+| Object | Id | State | Notes |
+|---|---|---|---|
+| `xdipx Paid leads welcome` flow | `SCL5eV` | **Draft** | Trigger Added to List `UHiJc9` (Paid leads). Email 1 at once, email 2 at day 3. Filter: zero Placed Order in the last 30 days. Each email branches on the profile property `interest` (the seven slugs in `app/lib/lead-interests.ts`) and links the shelf through `/discount/CURIOUS15?redirect=...`, so the code is on the cart; no interest falls back to `/start` |
+| `xdipx paid-leads-welcome welcome-0h` | `V8QfHr` | Template | Code block with the full terms from `LEAD_OFFER` |
+| `xdipx paid-leads-welcome welcome-3d` | `QUXs5Q` | Template | Code block again, one more look at the shelf |
+| `xdipx email-list-welcome hello-0h` | `UvPd6N` | Template | Replaces the stock K60 "Welcome to the family!" in flow `XpAtS7` |
+| `xdipx email-list-welcome hello-3d` | `S6ngXG` | Template | Replaces "Let's stay connected" |
+| `xdipx email-list-welcome hello-7d` | `XtDVv9` | Template | Replaces "Check out our best sellers"; links the homepage pick |
+
+Owner steps (blockers on the list): set `SCL5eV` live once blockers 561 (AUP) and 564 (sending
+domain) are done; in `XpAtS7`, swap each message's template for the matching `xdipx email-list-welcome`
+one and keep the delays (0, day 3, day 7). Re-render after copy changes with
+`npx tsx scripts/klaviyo-welcome-setup.ts --update-templates`.
+
 ## Browse abandonment: wired, waiting on its first event (ticket #13384)
 
 The plan said the client "already fires" Viewed Product. As of this ticket it actually does, from the
