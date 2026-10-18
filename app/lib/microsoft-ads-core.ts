@@ -166,6 +166,8 @@ function collect(value: unknown, out: MsAdsErrorItem[]): void {
  * Pull every error Microsoft reported out of a response body. REST faults put
  * them under Errors / OperationErrors / BatchErrors; a call that partly
  * succeeds returns 200 with PartialErrors, so this runs on success bodies too.
+ * Criterion and negative keyword adds report NestedPartialErrors instead: one
+ * entry per failed batch item, each with its own BatchErrors list.
  */
 export function extractErrors(body: unknown): { fault: MsAdsErrorItem[]; partial: MsAdsErrorItem[] } {
   const fault: MsAdsErrorItem[] = []
@@ -176,6 +178,15 @@ export function extractErrors(body: unknown): { fault: MsAdsErrorItem[]; partial
   collect(b['OperationErrors'], fault)
   collect(b['BatchErrors'], fault)
   collect(b['PartialErrors'], partial)
+  if (Array.isArray(b['NestedPartialErrors'])) {
+    for (const raw of b['NestedPartialErrors']) {
+      if (!raw || typeof raw !== 'object') continue
+      const nested = raw as Record<string, unknown>
+      const before = partial.length
+      collect(nested['BatchErrors'], partial)
+      if (partial.length === before) collect([raw], partial)
+    }
+  }
   return { fault, partial }
 }
 

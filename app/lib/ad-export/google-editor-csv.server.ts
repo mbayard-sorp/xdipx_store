@@ -84,7 +84,7 @@ function dedupe(lines: readonly string[]): string[] {
   return out
 }
 
-function campaignNameFor(ideas: readonly ExportIdea[], now: Date): string {
+export function campaignNameFor(ideas: readonly ExportIdea[], now: Date): string {
   for (const i of ideas) {
     const c = i.audience?.['campaign']
     if (typeof c === 'string' && c.trim()) return c.trim().slice(0, 80)
@@ -340,6 +340,12 @@ export interface GoogleBuildInput {
   now?: Date
 }
 
+/** The lowest explicit daily budget among the ideas, never above the daily valve. */
+export function searchDailyBudgetCents(ideas: readonly ExportIdea[], dailyCapCents: number): number {
+  const explicit = ideas.map(i => i.audience?.['daily_budget_cents']).filter((n): n is number => typeof n === 'number' && n > 0)
+  return Math.max(100, Math.min(dailyCapCents, explicit.length ? Math.min(...explicit) : dailyCapCents))
+}
+
 export function buildSearchExport(input: GoogleBuildInput): ExportBuild {
   if (input.ideas.length === 0) throw new ExportRefusal('no_subjects', 'No ideas to export.')
   // Search exports carry no image, so the creative gate runs in the registry
@@ -355,9 +361,7 @@ export function buildSearchExport(input: GoogleBuildInput): ExportBuild {
   for (const g of groups) for (const i of googleTextIssues({ headlines: g.headlines, descriptions: g.descriptions, finalUrl: g.finalUrl, paths: [g.path1, g.path2] })) issues.push(`Idea #${g.idea.id}: ${i}`)
   if (issues.length) throw new ExportRefusal('policy', issues)
 
-  // Budget: the lowest explicit daily budget among the ideas, never above the daily valve.
-  const explicit = input.ideas.map(i => i.audience?.['daily_budget_cents']).filter((n): n is number => typeof n === 'number' && n > 0)
-  const budgetCents = Math.max(100, Math.min(input.dailyCapCents, explicit.length ? Math.min(...explicit) : input.dailyCapCents))
+  const budgetCents = searchDailyBudgetCents(input.ideas, input.dailyCapCents)
 
   const table = input.lane === 'google' ? googleTable(groups, campaign, budgetCents) : microsoftTable(groups, campaign, budgetCents)
   const bytes = serialiseTable(table, input.lane)

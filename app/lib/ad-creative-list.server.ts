@@ -68,8 +68,11 @@ function exportView(
   const exportErr = payload && typeof payload['exportError'] === 'string' ? (payload['exportError'] as string) : null
   if (exportErr) return { kind: 'failed', message: exportErr, exporter, retry: 'export' }
   if (payload && payload['exporting'] === true) return { kind: 'building', exporter }
+  const pushTo = row.lane === 'meta' ? 'meta' as const : row.lane === 'microsoft' ? 'microsoft' as const : null
   if (row.externalAdId) {
-    return { kind: 'in-platform', exporter, externalId: row.externalAdId, externalUrl: adsManagerUrl(row.externalAdId) }
+    const push = payload && typeof payload['push'] === 'object' ? (payload['push'] as Record<string, unknown>) : null
+    const externalUrl = pushTo === 'microsoft' ? microsoftAdsUrl(push?.['env'] === 'production' ? 'production' : 'sandbox') : adsManagerUrl(row.externalAdId)
+    return { kind: 'in-platform', exporter, externalId: row.externalAdId, externalUrl, pushTo }
   }
   const file = payload && typeof payload['export'] === 'object' ? (payload['export'] as Record<string, unknown>) : null
   if (payload && payload['status'] === 'ready' && file) {
@@ -79,6 +82,7 @@ function exportView(
       downloadUrl: typeof file['url'] === 'string' ? (file['url'] as string) : null,
       filename: typeof file['filename'] === 'string' ? (file['filename'] as string) : null,
       hasPayload: exporter === 'meta-paused-draft' && typeof payload['meta'] === 'object' && payload['meta'] !== null,
+      pushTo,
     }
   }
   const finished = row.format === 'text' ? row.status === 'draft' : row.status === 'draft' && !!assetUrl && renderState !== 'queued'
@@ -91,6 +95,16 @@ function adsManagerUrl(adId: string): string | null {
   if (!raw) return null
   const acct = raw.replace(/^act_/, '')
   return `https://adsmanager.facebook.com/adsmanager/manage/ads?act=${encodeURIComponent(acct)}&selected_ad_ids=${encodeURIComponent(adId)}`
+}
+
+/** Microsoft Advertising ads list for the account the push used. Customer and account ids are not secrets. */
+function microsoftAdsUrl(env: 'sandbox' | 'production'): string | null {
+  const sandbox = env === 'sandbox'
+  const cid = process.env[sandbox ? 'MSADS_SANDBOX_CUSTOMER_ID' : 'MSADS_CUSTOMER_ID']?.trim()
+  const aid = process.env[sandbox ? 'MSADS_SANDBOX_ACCOUNT_ID' : 'MSADS_ACCOUNT_ID']?.trim()
+  if (!cid || !aid) return null
+  const host = sandbox ? 'https://ui.sandbox.bingads.microsoft.com' : 'https://ui.ads.microsoft.com'
+  return `${host}/campaign/vnext/ads?aid=${encodeURIComponent(aid)}&cid=${encodeURIComponent(cid)}`
 }
 
 export async function listCreatives(f: ListCreativesFilters = {}): Promise<{ items: CreativeListItem[]; nextCursor: number | null }> {
