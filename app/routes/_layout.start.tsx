@@ -152,18 +152,7 @@ export default function StartPage() {
         </Reveal>
       )}
 
-      <section aria-label="Browse by interest" className="mt-10">
-        {pickedTile && <p className="kicker mb-4">Or try another</p>}
-        <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {rest.map((tile, index) => (
-            <Reveal as="li" key={tile.slug} index={index}>
-              <InterestTile tile={tile} />
-            </Reveal>
-          ))}
-        </ul>
-      </section>
-
-      <Reveal variant="fade" className="mt-12">
+      <Reveal variant="fade" disabled delay={0.12} className="mt-6">
         <aside className="rounded-[var(--radius)] bg-coral-soft px-5 py-5 sm:flex sm:items-center sm:justify-between sm:gap-6 sm:px-6">
           <div>
             <p className="kicker !text-ink-2">A small welcome</p>
@@ -177,6 +166,17 @@ export default function StartPage() {
           </a>
         </aside>
       </Reveal>
+
+      <section aria-label="Browse by interest" className="mt-10">
+        {pickedTile && <p className="kicker mb-4">Or try another</p>}
+        <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {rest.map((tile, index) => (
+            <Reveal as="li" key={tile.slug} index={index}>
+              <InterestTile tile={tile} />
+            </Reveal>
+          ))}
+        </ul>
+      </section>
 
       <p className="mt-8 text-center text-xs text-ink-3">
         Plain box, plain label. Your statement reads XDIPX.
