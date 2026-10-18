@@ -229,3 +229,31 @@ complete any actions I need to complete." What moved:
 | P2-2 bridge error boundary | PR #1676; ticket #16146 at pr_open | Nothing |
 | P2-3 and P1-2 MAP | PR #1678: sweep script plus two dry runs in `docs/audits/map-restricted-sweep-dry-run-2026-10-18.md`; ticket #16147 at pr_open. Lovense has 3 unflagged products (Calor, Kraken 6-pack, Gemini); Dame has 25 of 27 at MAP; LELO 4 above MAP and 27 below; Womanizer and We-Vibe all priced below their stored MAP; Satisfyer has no MAP data at all | Blocker 733: the vendor ruling. The data says Dame is the one exposure that matters |
 | M8 standing direction | PR #1675, ticket #16148 QA-verified | Owner merge: `docs/ads-policy.md` is outside the agent allowlist |
+
+## Addendum: the fourth fault, and the production proof (same day, 20:25 UTC)
+
+After PR #1674 deployed, the owner's own test lead still failed with "Something went wrong on our
+side". Vercel runtime logs showed `Possible misconfiguration of Vercel BotId` for every POST to
+`/api/lead.data` and, from the page's own JS, to the bare `/api/lead` as well, from two different
+browsers. So the `.data` twin was not the whole story: BotID had never initialized on the site.
+`<BotIdClient>` renders its init as an inline `<script>` through `dangerouslySetInnerHTML`, and
+`root.tsx` mounted it after hydration to dodge an SSR mismatch; a script inserted through innerHTML
+never executes, so `fetch` was never patched and no protected POST ever carried the challenge
+header. Every real visitor to `/api/lead`, `/api/waitlist` and `/api/reviews` has been answered
+403 since that mount shipped, which is why the waitlist list is empty and no review has landed in
+90 days. Fixed in [PR #1680](https://github.com/mbayard-sorp/xdipx_store/pull/1680) (ticket
+#16152): `initBotId()` runs in `app/entry.client.tsx` before `hydrateRoot`.
+
+Production proof, owner's browser, 20:25:42 UTC: Klaviyo profile `01M58B227PGYKX4YMAZR7T88HE`
+created with `first_name`, `interest=curious`, `lead_source`, `lead_offer_code`, and
+`utm_source=meta`, `utm_medium=paid_social`, `utm_campaign=curious_lead`, `utm_content=owner-test`;
+email consent SUBSCRIBED on list `UHiJc9` once Klaviyo's bulk job applied (the job takes about three
+minutes; a side test with the app's exact order, profile-import then job, subscribed in 180
+seconds). The owner also ticked SMS consent with a phone: `consent_log` row 468 was written and the
+server logged `KLAVIYO_SMS_LIST_ID not set, skipping SMS subscribe`, which is blocker 731 observed
+live. No BotID or Klaviyo warning for the request. The Lead event's appearance in Events Manager is
+for the owner to eyeball; the dataset stats endpoint lags by hours.
+
+Test records to delete in Klaviyo when done: profiles for `funnel-audit-20261018@example.com`,
+`funnel-audit-20261018@xdipx.com`, `funnel-audit-20261018-seq@example.com`,
+`funnel-audit-20261018-jobonly@example.com`, and the owner's `xdipx.sandbox@outlook.com`.
