@@ -27,9 +27,34 @@ async function klaviyoFetch<T>(
 }
 
 /**
- * Subscribe a profile to a list. Optional `properties` are custom profile
- * properties (e.g. signup_source, utm_source) set via the bulk-subscribe
- * payload's profile attributes, so attribution lands in the same call.
+ * Create or update a profile by email or phone: first name and custom
+ * properties (signup_source, utm_*, interest, ...). Klaviyo's subscription
+ * job endpoint accepts only identifiers and subscriptions on its profile
+ * objects; sending `first_name` or `properties` there is a 400 ("not a valid
+ * field for the resource 'profile'"), which is why every subscribe that
+ * carried attribution failed until the 2026-10-18 funnel audit. So the
+ * profile fields go through profile-import first, then the subscription job
+ * carries identifiers only.
+ */
+export async function upsertProfile(opts: {
+  email?: string | null | undefined
+  phone?: string | null | undefined
+  firstName?: string | null | undefined
+  properties?: Record<string, unknown> | undefined
+}): Promise<void> {
+  const attributes: Record<string, unknown> = {}
+  if (opts.email) attributes['email'] = opts.email
+  if (opts.phone) attributes['phone_number'] = opts.phone
+  if (opts.firstName) attributes['first_name'] = opts.firstName
+  if (opts.properties && Object.keys(opts.properties).length > 0) attributes['properties'] = opts.properties
+  if (!attributes['email'] && !attributes['phone_number']) return
+  await klaviyoFetch('/profile-import/', 'POST', { data: { type: 'profile', attributes } })
+}
+
+/**
+ * Subscribe a profile to a list. Optional first name and custom properties
+ * (e.g. signup_source, utm_source) are written to the profile first via
+ * upsertProfile, then the list subscription is created with the email alone.
  */
 export async function subscribeToList(
   listId: string,
@@ -37,21 +62,16 @@ export async function subscribeToList(
   firstName?: string,
   properties?: Record<string, unknown>,
 ): Promise<void> {
-  const profileAttrs: Record<string, unknown> = {
-    email,
-    subscriptions: {
-      email: { marketing: { consent: 'SUBSCRIBED' } },
-    },
+  if (firstName || (properties && Object.keys(properties).length > 0)) {
+    await upsertProfile({ email, firstName, properties })
   }
-  if (firstName) profileAttrs.first_name = firstName
-  if (properties && Object.keys(properties).length > 0) profileAttrs.properties = properties
 
   await klaviyoFetch('/profile-subscription-bulk-create-jobs/', 'POST', {
     data: {
       type: 'profile-subscription-bulk-create-job',
       attributes: {
         profiles: {
-          data: [{ type: 'profile', attributes: profileAttrs }],
+          data: [{ type: 'profile', attributes: { email, subscriptions: { email: { marketing: { consent: 'SUBSCRIBED' } } } } }],
         },
       },
       relationships: {
@@ -80,12 +100,14 @@ export async function subscribeLead(opts: {
     console.warn('[klaviyo.subscribeLead] KLAVIYO_LIST_ID_PAID_LEADS unset, using the daily-deal list')
     listId = process.env['KLAVIYO_LIST_ID_DAILY_DEAL']!
   }
+  // Profile fields first (profile-import), then the email subscription with
+  // identifiers only; see upsertProfile for why they cannot ride together.
+  await upsertProfile({ email: opts.email, phone: opts.phone, firstName: opts.firstName, properties: opts.properties })
+
   const profileAttrs: Record<string, unknown> = {
     email: opts.email,
     subscriptions: { email: { marketing: { consent: 'SUBSCRIBED' } } },
-    properties: opts.properties,
   }
-  if (opts.firstName) profileAttrs['first_name'] = opts.firstName
   if (opts.phone) profileAttrs['phone_number'] = opts.phone
 
   await klaviyoFetch('/profile-subscription-bulk-create-jobs/', 'POST', {
