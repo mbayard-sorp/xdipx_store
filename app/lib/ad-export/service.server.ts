@@ -5,6 +5,7 @@
  *   buildExport({ creativeIds } | { ideaId }, actor)   the build(creativeIds | ideaId) facade
  *   getExportStatus(target)
  *   pushCreativeToMeta(creativeId, actor)              admin route only, valve gated
+ *   pushCreativeToMicrosoft(creativeId, actor)         admin route only, valve gated
  *
  * What lives in export_payload after a build (PR-G reads destination_url and
  * utm_content from it, PR-C wrote the skeleton keys):
@@ -12,7 +13,8 @@
  *   destination_url (UTM'd), utm_content,
  *   export  { exporter, filename, contentType, url, bytes, summary, builtAt, builtBy, variant }
  *   meta    { payload, preview }           Meta lane only
- *   push    { adId, campaignId, adSetId, creativeId, imageHash, pushedAt }   after a real push
+ *   push    { adId, campaignId, adSetId, creativeId, imageHash, pushedAt }   after a real Meta push
+ *   push    { platform: 'microsoft', env, campaignName, campaignId, adGroupId, keywordIds, adId, pushedAt }
  *
  * Storage choice: Vercel Blob, same store and helper as the rendered PNGs
  * (blob.server.ts), URL recorded in export_payload.export.url. No new table and
@@ -31,6 +33,10 @@ import { getExporter, type ExportContext, type LoadedSubjects } from './registry
 import { exporterForLane, type StoredExportFile } from './types'
 import { MetaPushError, isMetaDraftPayload } from './meta-payload'
 import { metaCredentialsFromEnv, type MetaPushDeps, type MetaPushResult } from './meta-push.server'
+import { assembleAdGroup, campaignNameFor, searchDailyBudgetCents } from './google-editor-csv.server'
+import { assertCreativesExportable } from './policy'
+import { MsPushError, buildMicrosoftPayload, type MsPushPartial } from './microsoft-payload'
+import { pushMicrosoftSearch, type MsPushDeps, type MsPushResult } from './microsoft-push.server'
 
 export type ExportTarget = { creativeIds: number[]; ideaId?: undefined } | { ideaId: number; creativeIds?: undefined }
 
@@ -333,6 +339,123 @@ export async function pushCreativeToMeta(creativeId: number, actor: string, deps
     if (err instanceof MetaPushError && err.code === 'api_error') {
       await db.update(adCreatives).set({
         exportPayload: { ...p, push: { partial: err.partial, error: err.message, at: new Date().toISOString() } },
+        updatedAt: new Date(),
+      }).where(eq(adCreatives.id, creativeId))
+    }
+    throw err
+  }
+}
+
+export async function defaultMicrosoftPushDeps(): Promise<MsPushDeps> {
+  const core = await import('~/lib/microsoft-ads-core')
+  const { msAdsCall } = await import('~/lib/microsoft-ads.server')
+  return {
+    spendEnabled: getAdsSpendEnabled,
+    missingConfig: () => core.missingConfig(),
+    env: () => core.msAdsEnv(),
+    accountId: () => core.msAdsConfig().accountId,
+    dailyCapCents: getAdsMediaDailyCapCents,
+    call: async (service, path, body) => {
+      const r = await msAdsCall<never>(service, path, body)
+      return { data: r.data, partial: r.partial }
+    },
+  }
+}
+
+function msPartialFrom(push: Record<string, unknown>, env: string): MsPushPartial | null {
+  if (push['platform'] !== 'microsoft' || push['env'] !== env) return null
+  const src = push['adId'] ? push : payloadObject(push['partial'])
+  const str = (v: unknown) => (typeof v === 'string' && v ? v : undefined)
+  const out: MsPushPartial = {}
+  const campaignId = str(src['campaignId'])
+  const adGroupId = str(src['adGroupId'])
+  const adId = str(src['adId'])
+  if (campaignId) out.campaignId = campaignId
+  if (adGroupId) out.adGroupId = adGroupId
+  if (adId) out.adId = adId
+  if (src['negativesAdded'] === true || push['adId']) out.negativesAdded = true
+  if (src['targetsAdded'] === true || push['adId']) out.targetsAdded = true
+  if (Array.isArray(src['keywordIds']) && src['keywordIds'].length) out.keywordIds = (src['keywordIds'] as unknown[]).map(String)
+  return out
+}
+
+/**
+ * Create the paused Search campaign, ad group, keywords and ad in Microsoft
+ * Advertising for one microsoft text creative. The valve is checked before the
+ * database is read. The creative must already have a built export (the Editor
+ * CSV), so the same hearted, gate and text checks have passed once; the push
+ * payload is then rebuilt from the idea and run through the Microsoft guard.
+ * Never exposed to the team token.
+ */
+export async function pushCreativeToMicrosoft(creativeId: number, actor: string, depsIn?: Partial<MsPushDeps>): Promise<MsPushResult> {
+  const deps: MsPushDeps = { ...(await defaultMicrosoftPushDeps()), ...depsIn }
+  if (!(await deps.spendEnabled())) throw new MsPushError('spend_disabled', 'Spend is off (ads_spend_enabled is false). Nothing was sent to Microsoft.')
+
+  const [row] = await db.select({ c: adCreatives }).from(adCreatives).where(eq(adCreatives.id, creativeId)).limit(1)
+  if (!row) throw new MsPushError('not_exportable', `Creative #${creativeId} was not found.`)
+  if (row.c.lane !== 'microsoft') throw new MsPushError('not_exportable', 'Only Microsoft creatives push to Microsoft Advertising.')
+  if (row.c.externalAdId) throw new MsPushError('already_pushed', `Creative #${creativeId} is already in Microsoft as ad ${row.c.externalAdId}.`)
+  const p = payloadObject(row.c.exportPayload)
+  const file = payloadObject(p['export'])
+  if (p['status'] !== 'ready' || file['exporter'] !== 'google-editor-csv') {
+    throw new MsPushError('not_exportable', 'Build the export first. The push runs only on a creative whose export built cleanly.')
+  }
+
+  let subjects: LoadedSubjects
+  try {
+    subjects = await loadSubjects({ creativeIds: [creativeId] })
+    assertCreativesExportable(subjects.creatives, { needAsset: false })
+  } catch (err) {
+    if (err instanceof ExportRefusal) throw new MsPushError('not_exportable', err.issues.slice(0, 4).join(' '))
+    throw err
+  }
+  const idea = subjects.ideas[0]!
+  const cap = await deps.dailyCapCents()
+  let payload
+  try {
+    const group = assembleAdGroup(idea, { creativeId, campaign: campaignNameFor(subjects.ideas, new Date()), dailyCapCents: cap })
+    payload = buildMicrosoftPayload({ ...group, ideaId: idea.id }, { dailyBudgetCents: searchDailyBudgetCents([idea], cap), registerTier: idea.registerTier })
+  } catch (err) {
+    if (err instanceof ExportRefusal) throw new MsPushError('not_exportable', err.issues.slice(0, 4).join(' '))
+    throw err
+  }
+
+  // Resume this creative's own partial push, else reuse a campaign of the same name in the same environment.
+  const env = deps.env()
+  let existing: MsPushPartial = msPartialFrom(payloadObject(p['push']), env) ?? {}
+  if (!existing.campaignId) {
+    const siblings = await db.select({ p: adCreatives.exportPayload }).from(adCreatives).where(eq(adCreatives.lane, 'microsoft'))
+    for (const s of siblings) {
+      const push = payloadObject(payloadObject(s.p)['push'])
+      if (push['campaignName'] !== payload.campaign.Name) continue
+      const done = msPartialFrom(push, env)
+      if (done?.campaignId && done.negativesAdded && done.targetsAdded) {
+        existing = { campaignId: done.campaignId, negativesAdded: true, targetsAdded: true }
+        break
+      }
+    }
+  }
+
+  try {
+    const res = await pushMicrosoftSearch(payload, existing, deps)
+    await db.update(adCreatives).set({
+      externalAdId: res.externalAdId,
+      exportPayload: { ...p, push: { platform: 'microsoft', ...res, pushedBy: actor } },
+      updatedAt: new Date(),
+    }).where(eq(adCreatives.id, creativeId))
+    await db.update(adCampaigns).set({
+      externalCampaignId: res.campaignId.slice(0, 64),
+      plannedDailyCents: Math.round(payload.campaign.DailyBudget * 100),
+      updatedAt: new Date(),
+    }).where(eq(adCampaigns.id, row.c.adCampaignId))
+    return res
+  } catch (err) {
+    if (err instanceof MsPushError && err.code === 'api_error') {
+      await db.update(adCreatives).set({
+        exportPayload: {
+          ...p,
+          push: { platform: 'microsoft', env, campaignName: payload.campaign.Name, partial: err.partial, error: err.message, at: new Date().toISOString() },
+        },
         updatedAt: new Date(),
       }).where(eq(adCreatives.id, creativeId))
     }

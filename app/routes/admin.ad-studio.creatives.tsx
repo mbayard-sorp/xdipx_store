@@ -20,7 +20,8 @@ import { renderCreative } from '~/lib/ad-render.server'
 import { getAdsSpendEnabled } from '~/lib/ad-settings.server'
 import { ExportRefusal } from '~/lib/ad-export/common'
 import { MetaPushError } from '~/lib/ad-export/meta-payload'
-import { buildExport, getMetaPayload, pushCreativeToMeta } from '~/lib/ad-export/service.server'
+import { MsPushError } from '~/lib/ad-export/microsoft-payload'
+import { buildExport, getMetaPayload, pushCreativeToMeta, pushCreativeToMicrosoft } from '~/lib/ad-export/service.server'
 import { getAdFormat } from '~/lib/ad-formats'
 import { isFeedbackFilter } from '~/lib/ad-creative-feedback-reasons'
 import { Reveal } from '~/components/motion/Reveal'
@@ -109,6 +110,19 @@ export async function action({ request }: ActionFunctionArgs) {
       return { ok: true as const, externalAdId: res.externalAdId }
     } catch (err) {
       if (err instanceof MetaPushError) return { ok: false as const, errorCode: err.code, error: err.message }
+      return { ok: false as const, error: err instanceof Error ? err.message : 'The push failed.' }
+    }
+  }
+  if (intent === 'push-microsoft') {
+    // The only caller of the Microsoft push. The valve is checked inside, before anything else is read or sent.
+    const admin = await getAdminUser(request)
+    const id = Number(form.get('creativeId'))
+    if (!Number.isInteger(id) || id <= 0) return { ok: false as const, error: 'Bad creative id' }
+    try {
+      const res = await pushCreativeToMicrosoft(id, admin?.email || 'owner')
+      return { ok: true as const, externalAdId: res.externalAdId, warnings: res.warnings }
+    } catch (err) {
+      if (err instanceof MsPushError) return { ok: false as const, errorCode: err.code, error: err.message }
       return { ok: false as const, error: err instanceof Error ? err.message : 'The push failed.' }
     }
   }
