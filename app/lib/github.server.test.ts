@@ -61,6 +61,14 @@ describe('matchProtectedGlobs', () => {
     ['scripts/build-vercel.mjs', 'the build script'],
     // Migrations, before content refinement gets a look at them.
     ['db/migrations/071_new_thing.sql', 'migration'],
+    // Ad spend controls.
+    ['app/lib/ad-platform-apply.server.ts', 'the ad platform applier'],
+    ['app/lib/ad-settings.server.ts', 'ads valves'],
+    ['app/lib/ad-settings-defaults.ts', 'ads valve defaults'],
+    ['app/lib/ad-spend-core.ts', 'ad spend math'],
+    ['app/lib/ads/channels/apply.server.ts', 'the channel apply seam'],
+    ['app/lib/ads/channels/meta/mutate.server.ts', 'Meta mutate path'],
+    ['app/lib/ads/channels/microsoft/mutate.server.ts', 'a second channel mutate path'],
   ]
 
   for (const [path, why] of protectedPaths) {
@@ -78,6 +86,11 @@ describe('matchProtectedGlobs', () => {
     'studio/schemaTypes/index.js',
     'app/app.css',
     'README-reviews.md',
+    // Ads code that reads, never spends.
+    'app/lib/ads/channels/meta/insights.server.ts',
+    'app/lib/ad-metrics.server.ts',
+    // The channel glob is one segment wide, so a deeper file is not swept in.
+    'app/lib/ads/channels/meta/v2/mutate.server.ts',
   ]
 
   for (const path of safePaths) {
@@ -250,6 +263,12 @@ describe('classifyChangedFiles', () => {
       'scripts/apply-additive-migrations.ts',
       'scripts/build-vercel.mjs',
       'db/migrations/**',
+      'app/lib/ad-platform-apply.server.ts',
+      'app/lib/ad-settings.server.ts',
+      'app/lib/ad-settings-defaults.ts',
+      'app/lib/ad-spend-core.ts',
+      'app/lib/ads/channels/apply.server.ts',
+      'app/lib/ads/channels/*/mutate.server.ts',
     ]) {
       expect(PROTECTED_GLOBS).toContain(glob)
     }
