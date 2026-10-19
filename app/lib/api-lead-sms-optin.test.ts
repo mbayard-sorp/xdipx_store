@@ -5,7 +5,7 @@
  * and a sender is being built), so the ON block pins today's behavior. With
  * the switch off, the two-door page renders no phone or SMS fields, and the
  * action must hold the same line against a client that sends them anyway:
- * no phone on the Klaviyo profile, no subscribeToSms, no consent_log row, and
+ * no phone on the Klaviyo profile, no enrollLeadSms, no consent_log row, and
  * a stray smsConsent must not 400 the signup.
  *
  * Lives in app/lib/ so flatRoutes() does not treat it as a route module.
@@ -20,7 +20,7 @@ const mocks = vi.hoisted(() => ({
   logConsent: vi.fn(),
   subscribeLead: vi.fn(),
   sendCapiLead: vi.fn(),
-  subscribeToSms: vi.fn(),
+  enrollLeadSms: vi.fn(),
   normalizePhoneToE164: vi.fn(),
   isLeadSmsOptinEnabled: vi.fn(),
 }))
@@ -31,7 +31,7 @@ vi.mock('~/lib/attribution.server', () => ({ getStoredUTM: mocks.getStoredUTM })
 vi.mock('~/lib/consent.server', () => ({ logConsent: mocks.logConsent }))
 vi.mock('~/lib/klaviyo.server', () => ({ subscribeLead: mocks.subscribeLead }))
 vi.mock('~/lib/meta-capi.server', () => ({ sendCapiLead: mocks.sendCapiLead }))
-vi.mock('~/lib/sms-v2/klaviyo.server', () => ({ subscribeToSms: mocks.subscribeToSms }))
+vi.mock('~/lib/lead-sms.server', () => ({ enrollLeadSms: mocks.enrollLeadSms }))
 vi.mock('~/lib/sms-v2/web-sms-link.server', () => ({ normalizePhoneToE164: mocks.normalizePhoneToE164 }))
 vi.mock('~/lib/lead-sms-optin.server', () => ({ isLeadSmsOptinEnabled: mocks.isLeadSmsOptinEnabled }))
 
@@ -57,7 +57,7 @@ beforeEach(() => {
   mocks.checkRateLimit.mockResolvedValue({ ok: true })
   mocks.getStoredUTM.mockReturnValue(null)
   mocks.subscribeLead.mockResolvedValue(undefined)
-  mocks.subscribeToSms.mockResolvedValue(undefined)
+  mocks.enrollLeadSms.mockResolvedValue({ outcome: 'pending', id: 1, messageSid: 'SM1' })
   mocks.logConsent.mockResolvedValue(undefined)
   mocks.sendCapiLead.mockResolvedValue('evt-1')
   mocks.normalizePhoneToE164.mockReturnValue(PHONE)
@@ -81,7 +81,7 @@ describe('/api/lead with lead SMS opt-in OFF (kill switch flipped)', () => {
     expect(mocks.subscribeLead).toHaveBeenCalledTimes(1)
     expect(mocks.subscribeLead.mock.calls[0]![0]).toMatchObject({ email: 'ann@example.com', firstName: 'Ann', phone: null })
     expect(mocks.normalizePhoneToE164).not.toHaveBeenCalled()
-    expect(mocks.subscribeToSms).not.toHaveBeenCalled()
+    expect(mocks.enrollLeadSms).not.toHaveBeenCalled()
     expect(mocks.logConsent).not.toHaveBeenCalled()
     expect(mocks.sendCapiLead.mock.calls[0]![1]).toMatchObject({ phone: null })
   })
@@ -89,7 +89,7 @@ describe('/api/lead with lead SMS opt-in OFF (kill switch flipped)', () => {
   it('does not 400 a stray smsConsent without a phone', async () => {
     const res = await post({ ...lead, phone: '', smsConsent: true })
     expect(res.status).toBe(200)
-    expect(mocks.subscribeToSms).not.toHaveBeenCalled()
+    expect(mocks.enrollLeadSms).not.toHaveBeenCalled()
   })
 
   it('does not reject a malformed phone, because it never looks at it', async () => {
@@ -110,13 +110,12 @@ describe('/api/lead with lead SMS opt-in OFF (kill switch flipped)', () => {
 describe('/api/lead with lead SMS opt-in ON (default)', () => {
   beforeEach(() => mocks.isLeadSmsOptinEnabled.mockResolvedValue(true))
 
-  it('subscribes SMS and logs consent when the box was ticked', async () => {
+  it('enrolls the number in the Twilio double opt-in and logs consent when the box was ticked', async () => {
     const res = await post(lead)
     expect(res.status).toBe(200)
     expect(mocks.subscribeLead.mock.calls[0]![0]).toMatchObject({ phone: PHONE })
-    expect(mocks.subscribeToSms).toHaveBeenCalledTimes(1)
-    expect(mocks.subscribeToSms.mock.calls[0]![0]).toBe(PHONE)
-    expect(mocks.subscribeToSms.mock.calls[0]![1]).toMatchObject({ source: 'curious-hello' })
+    expect(mocks.enrollLeadSms).toHaveBeenCalledTimes(1)
+    expect(mocks.enrollLeadSms.mock.calls[0]![0]).toMatchObject({ phone: PHONE, email: 'ann@example.com', firstName: 'Ann', interest: 'wands', source: 'curious-hello' })
     expect(mocks.logConsent).toHaveBeenCalledTimes(1)
     expect(mocks.logConsent.mock.calls[0]![1]).toMatchObject({ consentType: 'all', policyVersion: 'lead-v1' })
   })
@@ -125,7 +124,7 @@ describe('/api/lead with lead SMS opt-in ON (default)', () => {
     const res = await post({ ...lead, smsConsent: false })
     expect(res.status).toBe(200)
     expect(mocks.subscribeLead.mock.calls[0]![0]).toMatchObject({ phone: PHONE })
-    expect(mocks.subscribeToSms).not.toHaveBeenCalled()
+    expect(mocks.enrollLeadSms).not.toHaveBeenCalled()
     expect(mocks.logConsent).not.toHaveBeenCalled()
   })
 

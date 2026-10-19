@@ -8,18 +8,21 @@
  *      phone, interest and the ad's UTMs on the profile (the welcome series
  *      splits on `interest`);
  *   2. only when the SMS box was ticked AND the lead SMS opt-in kill switch
- *      is on (app/lib/lead-sms-optin.server.ts, default on, owner blocker
- *      731), subscribes the number to SMS and logs that consent. With the
- *      switch off, phone and smsConsent are dropped before validation even if
- *      a client sends them: no phone on the profile, no SMS subscribe, no
- *      consent_log row;
+ *      is on (app/lib/lead-sms-optin.server.ts, default on), enrolls the
+ *      number in the Twilio double opt-in (app/lib/lead-sms.server.ts: a
+ *      pending lead_sms_subscriptions row plus one confirmation text, nothing
+ *      for a number in sms_optouts) and logs that consent. Klaviyo SMS is not
+ *      used for leads (owner blocker 731 is superseded by this path). With
+ *      the switch off, phone and smsConsent are dropped before validation
+ *      even if a client sends them: no phone on the profile, no enrollment,
+ *      no consent_log row;
  *   3. sends a Meta Lead through CAPI and returns its event id so the
  *      browser pixel's Lead dedupes against it;
  *   4. returns the code, its terms, and the shop link that puts the code on
  *      the cart.
  * Klaviyo failure is the only hard failure: without the subscribe there is no
- * lead. SMS, consent log and CAPI failures are logged and never cost the
- * visitor their code.
+ * lead. SMS enrollment, consent log and CAPI failures are logged and never
+ * cost the visitor their code.
  */
 
 import type { ActionFunctionArgs } from 'react-router'
@@ -30,9 +33,9 @@ import { subscribeLead } from '~/lib/klaviyo.server'
 import { LEAD_OFFER } from '~/lib/lead-interests'
 import { buildShopUrl, validateLeadInput, type FunnelUtm } from '~/lib/lead-funnel'
 import { isLeadSmsOptinEnabled } from '~/lib/lead-sms-optin.server'
+import { enrollLeadSms } from '~/lib/lead-sms.server'
 import { sendCapiLead } from '~/lib/meta-capi.server'
 import { checkRateLimit, rateLimited } from '~/lib/rate-limit.server'
-import { subscribeToSms } from '~/lib/sms-v2/klaviyo.server'
 import { normalizePhoneToE164 } from '~/lib/sms-v2/web-sms-link.server'
 
 /** Version stamp for the consent wording the visitor saw (consent_log.policy_version, max 10 chars). */
@@ -121,9 +124,16 @@ export async function action({ request }: ActionFunctionArgs) {
 
   if (smsOptin && phone && lead.smsConsent) {
     try {
-      await subscribeToSms(phone, { source: `curious-${lead.slug}`, consentTimestamp: now })
+      await enrollLeadSms({
+        phone,
+        email: lead.email,
+        firstName: lead.firstName,
+        interest: lead.interest,
+        source: `curious-${lead.slug}`,
+        consentedAt: now,
+      })
     } catch (err) {
-      console.error('[api.lead] SMS subscribe failed:', err)
+      console.error('[api.lead] SMS enrollment failed:', err)
     }
     try {
       await logConsent(request, { sessionId: `lead:sms:${now.getTime()}`, consentType: 'all', policyVersion: LEAD_CONSENT_VERSION })

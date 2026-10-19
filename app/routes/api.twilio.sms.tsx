@@ -9,6 +9,14 @@
  * in SMS_V2_PHONES forces v2 for specific phones (dark-launch). The global
  * SMS_PIPELINE_VERSION env controls the default (defaults to 'v1').
  * processSmsMessageV2 is a byte-identical pass-through to v1 in Phase 0.5.
+ *
+ * Paid-lead double opt-in (app/lib/lead-sms.server.ts) runs first on every
+ * inbound: YES or START from a number with a pending lead_sms_subscriptions
+ * row confirms it and sends the welcome text through the messaging service,
+ * STOP flips the row to opted_out. STOP/START/HELP then continue into the
+ * compliance path below exactly as before (sms_optouts, the carrier replies).
+ * A bare YES that confirmed a lead is answered by the welcome alone, so the
+ * route returns empty TwiML instead of running the age gate on it.
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from 'react-router'
 import { twiml, verifyTwilioRequest, xmlEscape } from '~/lib/twilio.server'
@@ -18,6 +26,7 @@ import { VALVE_KEYS } from '~/lib/team-keys'
 import { processSmsMessageV2 } from '~/lib/sms-v2/processor.server'
 import { withTurnLogging } from '~/lib/sms-v2/turn-logger.server'
 import { pickPipelineVersion } from '~/lib/sms-v2/pipeline-flag.server'
+import { handleLeadSmsInbound } from '~/lib/lead-sms.server'
 
 /**
  * Build a TwiML response with one <Message> per segment. Segments with a
@@ -65,6 +74,11 @@ async function handleSmsAction(request: Request): Promise<Response> {
   const from = (params['From'] ?? '').trim()
   const body = (params['Body'] ?? '').trim()
   const twilioSid = params['MessageSid'] ?? params['SmsMessageSid'] ?? ''
+
+  const leadOutcome = await handleLeadSmsInbound(from, body, twilioSid)
+  if ((leadOutcome === 'confirmed' || leadOutcome === 'resumed') && !isComplianceKeyword(body)) {
+    return twiml(EMPTY_TWIML)
+  }
 
   const version = pickPipelineVersion(from)
   const input = { from, body, twilioSid, simulated: false }

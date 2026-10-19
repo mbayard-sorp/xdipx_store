@@ -55,6 +55,12 @@ domain) are done; in `XpAtS7`, swap each message's template for the matching `xd
 one and keep the delays (0, day 3, day 7). Re-render after copy changes with
 `npx tsx scripts/klaviyo-welcome-setup.ts --update-templates`.
 
+## Lead SMS is on Twilio, not Klaviyo
+
+SMS consent from the paid-lead funnel (curious.xdipx.com/hello) never touches Klaviyo. It runs the
+double opt-in registered on the xdipx A2P campaign through Twilio number +16239001188: see
+`lead-sms.md`. Klaviyo SMS (blocker 731) is superseded.
+
 ## Browse abandonment: wired, waiting on its first event (ticket #13384)
 
 The plan said the client "already fires" Viewed Product. As of this ticket it actually does, from the

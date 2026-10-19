@@ -129,12 +129,26 @@ export function xmlEscape(s: string): string {
     .replace(/'/g, '&apos;')
 }
 
-/** Send an SMS via Twilio REST API. Returns the message SID on success. */
+/**
+ * Send an SMS via Twilio REST API. Returns the message SID on success.
+ *
+ * With TWILIO_MESSAGING_SERVICE_SID set, the message is sent through that
+ * messaging service (the A2P 10DLC campaign's sender pool, which carries the
+ * registered opt-in flow and carrier throughput), and Twilio picks the From
+ * number from the pool. Without it, From falls back to TWILIO_PHONE_NUMBER
+ * as before.
+ */
 export async function sendSms(to: string, body: string): Promise<string> {
   const sid = process.env['TWILIO_ACCOUNT_SID']
   const token = process.env['TWILIO_AUTH_TOKEN']
   const from = process.env['TWILIO_PHONE_NUMBER']
-  if (!sid || !token || !from) throw new Error('Twilio env vars not set')
+  const messagingServiceSid = process.env['TWILIO_MESSAGING_SERVICE_SID']
+  if (!sid || !token) throw new Error('Twilio env vars not set')
+  if (!messagingServiceSid && !from) throw new Error('Twilio env vars not set')
+
+  const params = new URLSearchParams({ To: to, Body: body })
+  if (messagingServiceSid) params.set('MessagingServiceSid', messagingServiceSid)
+  else params.set('From', from!)
 
   const auth = Buffer.from(`${sid}:${token}`).toString('base64')
   const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
@@ -143,7 +157,7 @@ export async function sendSms(to: string, body: string): Promise<string> {
       Authorization: `Basic ${auth}`,
       'Content-Type': 'application/x-www-form-urlencoded',
     },
-    body: new URLSearchParams({ To: to, From: from, Body: body }).toString(),
+    body: params.toString(),
   })
   if (!res.ok) {
     const err = await res.text().catch(() => '')
