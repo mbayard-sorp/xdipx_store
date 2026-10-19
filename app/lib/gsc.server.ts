@@ -212,3 +212,67 @@ export async function runGscSnapshot(): Promise<GscSnapshotResult> {
     },
   }
 }
+
+// ---------------------------------------------------------------------------
+// Content-lane weekly impressions (ticket #16369, split from #16280)
+//
+// The content routine publishes to /notebook/ and /compare/ but nothing told
+// it whether any of those URLs ever earned a GSC impression. gsc_snapshots'
+// top_pages is the weekly top-100-pages list the GSC searchAnalytics 'page'
+// dimension query already returns (runGscSnapshot above); this reads the
+// latest snapshot and sums impressions for the content lane's own prefixes,
+// same LIKE-pattern-over-top_pages approach sitemap.server.ts already uses
+// for the product-handle signal. A 0 here is an honest answer (not in the
+// top 100), not an error.
+// ---------------------------------------------------------------------------
+
+export interface ContentImpressionsSummary {
+  periodStart: string | null
+  periodEnd: string | null
+  notebookImpressions: number
+  compareImpressions: number
+  totalImpressions: number
+  /** How many top_pages rows matched either prefix. */
+  pagesSeen: number
+}
+
+/** Pure: sum impressions for /notebook/ and /compare/ pages out of a top_pages array. */
+export function summarizeContentImpressions(
+  topPages: ReadonlyArray<{ page?: string | null; impressions?: number | null }>,
+): Pick<ContentImpressionsSummary, 'notebookImpressions' | 'compareImpressions' | 'totalImpressions' | 'pagesSeen'> {
+  let notebookImpressions = 0
+  let compareImpressions = 0
+  let pagesSeen = 0
+  for (const row of topPages) {
+    const page = row.page ?? ''
+    const impressions = row.impressions ?? 0
+    if (page.includes('/notebook/')) {
+      notebookImpressions += impressions
+      pagesSeen++
+    } else if (page.includes('/compare/')) {
+      compareImpressions += impressions
+      pagesSeen++
+    }
+  }
+  return { notebookImpressions, compareImpressions, totalImpressions: notebookImpressions + compareImpressions, pagesSeen }
+}
+
+/** Reads the latest gsc_snapshots row and reports the content lane's weekly impressions. */
+export async function getWeeklyContentImpressions(): Promise<ContentImpressionsSummary> {
+  const rows = await sql`
+    SELECT period_start::text AS period_start, period_end::text AS period_end, top_pages
+    FROM gsc_snapshots ORDER BY captured_at DESC LIMIT 1
+  ` as unknown as Array<{
+    period_start: string | null
+    period_end: string | null
+    top_pages: Array<{ page?: string | null; impressions?: number | null }>
+  }>
+
+  const snapshot = rows[0]
+  if (!snapshot) {
+    return { periodStart: null, periodEnd: null, notebookImpressions: 0, compareImpressions: 0, totalImpressions: 0, pagesSeen: 0 }
+  }
+
+  const summary = summarizeContentImpressions(snapshot.top_pages ?? [])
+  return { periodStart: snapshot.period_start, periodEnd: snapshot.period_end, ...summary }
+}
