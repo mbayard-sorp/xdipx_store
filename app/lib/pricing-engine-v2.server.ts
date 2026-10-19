@@ -84,6 +84,23 @@ export function enforceMapFloor(price: number, map: number | null | undefined): 
 }
 
 /**
+ * Wholesale-floor invariant (ticket #16352): a sell price may never clear at
+ * or below cost, regardless of which sub-path (computePrice,
+ * computeDiscontinuedPrice, or a write path that bypasses both entirely --
+ * a manual edit, or a price set before this floor existed and never
+ * recomputed) produced it. Pure clamp mirroring enforceMapFloor, so it can
+ * be applied as a last-line guard at every write site, not only inside the
+ * compute functions that already carry a (satisfiable only when
+ * margin_floor_pct is sane) cost-based floor. Returns the price unchanged
+ * when cost is absent or non-positive.
+ */
+export function enforceWholesaleFloor(price: number, cost: number | null | undefined, minMarkupPct: number): number {
+  if (cost == null || cost <= 0) return price
+  const floor = round2(cost * (1 + minMarkupPct))
+  return price < floor ? floor : price
+}
+
+/**
  * Psychological rounding: result ends in .99 and is <= input.
  * Convention: floor(n) - 0.01. e.g. 24.37 -> floor=24 -> 23.99.
  * For n < 1 we skip the ladder and return round2(n).

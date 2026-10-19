@@ -4,6 +4,7 @@ import {
   computeDiscontinuedPrice,
   computePrice,
   enforceMapFloor,
+  enforceWholesaleFloor,
   roundPsychological,
   roundUpPsychological,
   ABSOLUTE_PRICE_FLOOR_DEFAULT,
@@ -14,6 +15,11 @@ import {
   SMART_ROUND_MAX_USD,
   type PricingConfig,
 } from './pricing-engine-v2.server'
+
+// Mirrors the module-private round2 (Math.round(n * 100) / 100) for expected values.
+function round2(n: number): number {
+  return Math.round(n * 100) / 100
+}
 
 // Default config used across most tests
 function cfg(overrides: Partial<PricingConfig> = {}): PricingConfig {
@@ -595,6 +601,70 @@ describe('enforceMapFloor', () => {
 
   it('rounds the clamped MAP to 2 decimals', () => {
     expect(enforceMapFloor(10, 12.345)).toBe(12.35)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// enforceWholesaleFloor (ticket #16352 write-path invariant)
+// ---------------------------------------------------------------------------
+
+describe('enforceWholesaleFloor', () => {
+  it('raises a below-cost price to cost + markup', () => {
+    expect(enforceWholesaleFloor(12.99, 14.98, 0.08)).toBe(round2(14.98 * 1.08))
+  })
+
+  it('leaves an above-floor price alone', () => {
+    expect(enforceWholesaleFloor(29.99, 14.98, 0.08)).toBe(29.99)
+  })
+
+  it('no cost (null/undefined) -> price unchanged', () => {
+    expect(enforceWholesaleFloor(9.99, null, 0.08)).toBe(9.99)
+    expect(enforceWholesaleFloor(9.99, undefined, 0.08)).toBe(9.99)
+  })
+
+  it('cost of 0 or negative -> price unchanged', () => {
+    expect(enforceWholesaleFloor(9.99, 0, 0.08)).toBe(9.99)
+    expect(enforceWholesaleFloor(9.99, -5, 0.08)).toBe(9.99)
+  })
+
+  it('rounds the clamped floor to 2 decimals', () => {
+    expect(enforceWholesaleFloor(1, 10, 0.08)).toBe(10.80)
+  })
+
+  // The ticket's own evidence: SKU 93861 sold at $12.99 against $14.98
+  // wholesale -- a price strictly below cost that neither computePrice nor
+  // computeDiscontinuedPrice's own internal floor would produce today, which
+  // is exactly why this is a last-line write-path guard, not only a compute
+  // step. A write path that bypasses both compute functions entirely (manual
+  // edit, stale pre-floor price) must still be caught here.
+  it('catches the below-cost evidence case from the ticket', () => {
+    expect(enforceWholesaleFloor(12.99, 14.98, 0.08)).toBeGreaterThan(14.98)
+  })
+
+  it('composes with computePrice: a result that cleared below cost (e.g. a near-zero margin_floor_pct) is still raised to the wholesale floor', () => {
+    const result = computePrice({
+      cost: 14.98,
+      map: null,
+      msrp: null,
+      cfg: cfg({ target_margin_pct: 0.001, margin_floor_pct: 0.001 }),
+    })
+    expect(result).not.toBeNull()
+    // computePrice's own floor alone barely clears cost; the wholesale-floor
+    // guard still raises it to the configured minimum markup.
+    const guarded = enforceWholesaleFloor(result!.sell, 14.98, 0.08)
+    expect(guarded).toBeGreaterThanOrEqual(round2(14.98 * 1.08))
+  })
+
+  it('composes with computeDiscontinuedPrice: a deep clearance markdown that would otherwise clear near cost is still raised to the wholesale floor', () => {
+    const result = computeDiscontinuedPrice({
+      cost: 14.98,
+      msrp: null,
+      daysDiscontinued: 10_000,
+      cfg: { target_margin_pct: 0.05, margin_floor_pct: 0.001 },
+    })
+    expect(result).not.toBeNull()
+    const guarded = enforceWholesaleFloor(result!.sell, 14.98, 0.08)
+    expect(guarded).toBeGreaterThanOrEqual(round2(14.98 * 1.08))
   })
 })
 
