@@ -271,6 +271,17 @@ This runs the corrected published-perspective GROQ (`*[_type == "blogPost" && sl
 One `step` event with the chosen topic, slug, source (brief / plan / strategy-brief fallback /
 resumed-draft), and whether it was a fresh topic or a resume.
 
+**Sourceability pre-check (ticket #16127), immediately after the slug pre-check and before Step 4
+drafting.** For each candidate embed handle, attempt one first-party trace: a manufacturer page, a
+`mfgProductSpecs` doc whose `sourceVersion` is **not** a description parse, or a spec metafield. A
+`mfgProductSpecs` doc with `sourceVersion: "description-parse-v1"` is our own AI-written copy
+wearing a manufacturer doc type, not a first-party source, name it as such rather than trusting the
+doc type. If none of a topic's candidates traces to a first-party source, record a `step` event and
+choose a post shape whose claims stay category-level, before any prose is written around an embed
+that cannot carry a specific claim. Settling this before drafting turns a multi-cycle voice/accuracy
+gate rework (run 1513: four reworks across a seven-cycle gate count, on a post whose prose was
+otherwise clean on first submit) into a 30-second topic-scoping input.
+
 ## Step 4: Draft the post (Sanity, status draft)
 
 **Comparison-doc authoring, Sunday quota only (content-plan §2, #3892; owner decision 2026-09-20,
