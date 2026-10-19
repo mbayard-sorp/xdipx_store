@@ -3244,6 +3244,45 @@ export async function updateProductMetafield(
   invalidateCache(`shopify:p:`)
 }
 
+/**
+ * Batch-read the current `xdipx.discontinued_at` metafield value straight from
+ * Shopify for a list of product ids. Ground truth for "has this SKU already
+ * been marked discontinued", so a caller's write guard never has to trust a
+ * KV-backed cache alone: `kvGet`/`kvSet` (kv.server.ts) silently fall back to
+ * an in-memory store on any real-KV failure, which is lost the moment the
+ * serverless instance that held it recycles. Keyed by bare numeric product id.
+ */
+export async function getDiscontinuedAtForProducts(productIds: string[]): Promise<Map<string, string | null>> {
+  const result = new Map<string, string | null>()
+  if (productIds.length === 0) return result
+  const BATCH = 100
+
+  for (let i = 0; i < productIds.length; i += BATCH) {
+    const batch = productIds.slice(i, i + BATCH)
+    const gids = batch.map(id => id.startsWith('gid://') ? id : `gid://shopify/Product/${id}`)
+    const data = await adminGraphQL<{
+      nodes: Array<{ id: string; metafield: { value: string } | null } | null>
+    }>(`
+      query DiscontinuedAtForProducts($ids: [ID!]!) {
+        nodes(ids: $ids) {
+          ... on Product {
+            id
+            metafield(namespace: "xdipx", key: "discontinued_at") { value }
+          }
+        }
+      }
+    `, { ids: gids })
+
+    for (const node of data.nodes) {
+      if (!node) continue
+      const numericId = node.id.replace('gid://shopify/Product/', '')
+      result.set(numericId, node.metafield?.value ?? null)
+    }
+  }
+
+  return result
+}
+
 /** Update the canonical Shopify product.descriptionHtml (body_html). */
 export async function updateProductDescriptionHtml(
   productId: string,

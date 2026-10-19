@@ -379,7 +379,7 @@ export async function runDiscontinuedSweep(): Promise<{
 }> {
   const { fetchAllNalpacFeeds } = await import('./nalpac-feeds.server')
   const { classifyFeedAbsence, DISCONTINUED_GRACE_DAYS_DEFAULT } = await import('./discontinued-state')
-  const { adminGraphQL, updateProductMetafield } = await import('./shopify.server')
+  const { adminGraphQL, updateProductMetafield, getDiscontinuedAtForProducts } = await import('./shopify.server')
 
   const feeds = await fetchAllNalpacFeeds()
   if (feeds.errors.length > 0) {
@@ -425,9 +425,31 @@ export async function runDiscontinuedSweep(): Promise<{
   }
 
   // 2. Mark the state on Shopify (once per SKU).
+  //
+  // The local `written` Set is a KV-backed cache, not the source of truth: a
+  // real KV op that fails falls back to a per-instance in-memory store
+  // (kv.server.ts), which is gone the moment that instance recycles, so
+  // `written` can read back empty for a SKU that was already marked days ago.
+  // Ticket #16326: that cache miss made the sweep re-stamp `discontinued_at`
+  // with today's date every run for ~22 SKUs, so `daysDisc` in
+  // pricing-apply-v2.server.ts never advanced past 0 and the clearance ladder
+  // never progressed. Before writing, check Shopify itself for any SKU the
+  // local cache doesn't already know about, and self-heal `written` from it
+  // instead of blindly re-writing.
+  const unconfirmed = cls.discontinued.filter(d => !written.has(d.sku))
+  const groundTruth = await getDiscontinuedAtForProducts(
+    unconfirmed.map(d => productBySku.get(d.sku)!).filter((id): id is string => Boolean(id)),
+  )
+
   for (const { sku, since } of cls.discontinued) {
     if (written.has(sku)) continue
     const productId = productBySku.get(sku)!
+    if (groundTruth.get(productId)) {
+      // Already set on Shopify; the KV cache just didn't know. Self-heal it
+      // without re-writing, so `discontinued_at` stays on its original date.
+      written.add(sku)
+      continue
+    }
     try {
       await updateProductMetafield(productId, 'discontinued_at', since, 'date')
       written.add(sku)
