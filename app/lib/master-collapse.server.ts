@@ -98,6 +98,9 @@ export interface MasterRecord {
   colors:           string[]
   sizes:            string[]
   fluidOz:          string[]
+  /** Summed from the feed's 'Nalpac qty available' column (ticket #16275),
+   *  not 'Total qty available' — Shopify's real availability tracks the
+   *  Nalpac number, and Total can include non-shippable Entrenue stock. */
   totalQty:         number
   /** Median wholesale across variants. */
   wholesale:        number
@@ -325,8 +328,18 @@ export function collapseMasters(
       if (snap.msrp > 0)      msrps.push(snap.msrp)
       if (snap.mapPrice != null && snap.mapPrice > 0) maps.push(snap.mapPrice)
 
-      // Qty
-      const qty = snap.qty ?? 0
+      // Qty — ticket #16275: gate and display on the feed's own 'Nalpac qty
+      // available' column, not `snap.qty` ('Total qty available', which
+      // includes Entrenue stock). Measured 2026-10-19: of 105 import
+      // candidates published 10-12..10-19, 38 (36%) went live at Shopify qty
+      // 0, and every one of those 38 had Nalpac-column qty 0 in the feed
+      // despite a nonzero Total — Shopify tracks the Nalpac number, so Total
+      // was admitting rows with no actually-shippable stock. `totalQty`
+      // keeps its name (it still feeds every downstream gate/display by that
+      // name) but its source changes here, once, for the whole pipeline.
+      const nalpacQtyRaw = row?.['Nalpac qty available']
+      const nalpacQtyParsed = nalpacQtyRaw !== undefined ? parseInt(nalpacQtyRaw, 10) : NaN
+      const qty = isNaN(nalpacQtyParsed) ? 0 : nalpacQtyParsed
       totalQty += qty
       if (qty > 0) inStockCount++
 
