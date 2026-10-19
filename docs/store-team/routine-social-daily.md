@@ -1954,9 +1954,15 @@ background coffee mug (publish-gate REVISE, design-doctrine §4.1) and deferred 
 rework whose reused asset carried a legible wrong-brand `LELO` wordmark at 4x (an automatic
 publish-gate BLOCK), both defects that these checks catch a run earlier when run on the reused frame.
 
-1. **High-zoom wordmark check.** For any product whose real packshot carries a printed wordmark or a
-   molded compliance mark on the body (e.g. the Le Wand handle logo, the Renegade Emperor ring's
-   CE/UKCA band), **download the candidate and crop-and-zoom the specific mark region to at least 4x** —
+1. **High-zoom wordmark check.** Mandatory on EVERY cast-composite candidate whose real packshot
+   shows ANY printed text or box art, not only the SKUs named on the known-risk list below (ticket
+   #16118): that list is where a defect gets added after it has already burned a slot, so a SKU not
+   yet on it still has to clear this check. Default to occlusion or colour-only framing (angle the
+   label away, grip over it, crop it out) for any such product, and reserve full-label exposure for
+   a product that has already cleared a high-zoom check once clean. For any product whose real
+   packshot carries a printed wordmark or a molded compliance mark on the body (e.g. the Le Wand
+   handle logo, the Renegade Emperor ring's CE/UKCA band), **download the candidate and
+   crop-and-zoom the specific mark region to at least 4x** —
    do not eyeball the full-resolution frame, which is what keeps passing garbled marks the publish gate
    then catches at 6x (id95 Le Wand Classique passed a full-frame eyeball QA yet the gate BLOCKed its
    garbled neck glyph; same failure as id72/id83). Compare the zoomed crop directly to the packshot.
