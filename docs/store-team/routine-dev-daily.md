@@ -68,6 +68,15 @@ curl -s -X POST "$BASE_URL/api/team/suggestion" \
        "filter":{"kind":"code","status":"approved"}}'
 ```
 
+**`[opus-build]` rows are never claimed here (owner direction 2026-10-19).** The owner directed
+that the ads control plane program (`docs/store-team/ads-control-plane-plan.md` §10, ADR-018) is
+built only by Opus 5.5 agents. Its tickets open with `[opus-build]` and carry
+`program: ads-control-plane`. This pass runs on Sonnet, so it does not claim them. If a claim
+returns one anyway (the claim filter cannot see tags), transition it straight back to `approved`
+with a note naming the tag; do not block it, do not open a PR, and do not spend an attempt. Those
+rows are built in owner-started Opus 5.5 sessions, which claim them by id, open the `ticket/<id>`
+PR, and hand off to QA and the release engine exactly as this routine does.
+
 **Social zero-day tickets are claimed first (owner direction 2026-09-06).** Before the general claim
 above, list `{op:'list', status:'approved', kind:'code', team:'social'}` and claim by `id` any row
 whose text begins `Zero-post day on` (dedupe key `social-zero-day:<platform>`, priority 1). These

@@ -69,13 +69,17 @@ Verified against the code 2026-08-12; auto-approve line re-verified against live
 
 - **Teams:** homepage, social, ads, email, strategy, content, product, video, support. `team` is
   required on create; the API 400s without it.
-- **Auto-approve** (`{team}_team_auto_approve_suggestions`) is ON for all nine teams as of
-  2026-09-25: every row created since 2026-09-15 under every team, email included, landed with
-  `decided_by='auto'`. A fresh create therefore goes straight to `approved` whatever the team.
-  The valve is per team and owner-flippable on that team's tab of `/admin/homepage-team`, so do
-  not trust this line blindly: after filing, read the row back (`{"op":"get","id":…}`) and if it
-  sits at `proposed`, that team's valve is off and the row needs the owner's triage click; say so
-  in "Needs you". Auto-approve does not apply to a create that already carries an open `pr` link;
+- **Auto-approve** (`{team}_team_auto_approve_suggestions`) is ON for eight teams and OFF for
+  `ads` as of 2026-10-19 (read from the nine `pipeline_settings` rows; `ads` was written `false`
+  on 2026-10-04 by owner decision). A row filed under `ads` sits at `proposed` until the owner
+  approves it; that is deliberate, and the ads control plane build lane depends on it
+  (`docs/store-team/ads-control-plane-plan.md` §10). Auto-approve keys off the team that
+  ACTS (`team.server.ts` around line 941), so filing under `team:'strategy'` with
+  `targetTeam:'ads'` does not dodge it: rows 16414 to 16417 (2026-10-19) landed `proposed` that
+  way. Every ads-bound row, instructions included, needs the owner's click while the valve is off. The valve is per team and owner-flippable on that team's tab of
+  `/admin/homepage-team`, so do not trust this line blindly: after filing, read the row back
+  (`{"op":"get","id":…}`) and if it sits at `proposed`, that team's valve is off and the row needs
+  the owner's triage click; say so in "Needs you". Auto-approve does not apply to a create that already carries an open `pr` link;
   those land at `pr_open` by design.
 - **Kinds and who executes them:**
   - `code`: R-DEV claims approved rows at 14:00 and 20:00 UTC, opens a PR, QA verifies, the
