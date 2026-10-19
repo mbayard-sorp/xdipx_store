@@ -66,6 +66,7 @@ vi.mock('./pricing-engine-v2.server', () => ({
   computeDiscontinuedPrice: () => null,
   applyVelocityModifier: (c: unknown) => c,
   enforceMapFloor: (sell: number) => sell,
+  enforceWholesaleFloor: (sell: number) => sell,
   roundUpPsychological: (n: number) => n,
   ABSOLUTE_PRICE_FLOOR_DEFAULT: 2.99,
   DEFAULT_CLEARANCE_LADDER: [[30, 0.15], [60, 0.25], [90, 0.35], [10_000, 0.5]],

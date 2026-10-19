@@ -21,6 +21,7 @@ import {
   computeDiscontinuedPrice,
   applyVelocityModifier,
   enforceMapFloor,
+  enforceWholesaleFloor,
   roundUpPsychological,
   ABSOLUTE_PRICE_FLOOR_DEFAULT,
   DEFAULT_CLEARANCE_LADDER,
@@ -108,6 +109,29 @@ export async function getClearanceLadder(): Promise<ClearanceLadder> {
 
 /** The product type whose rule row is the discontinued (clearance) group. */
 export const DISCONTINUED_PRODUCT_TYPE = 'Discontinued'
+
+/**
+ * pipeline_settings key: minimum markup over wholesale cost a repriced sell
+ * price must clear, as a fraction (0.08 = cost + 8%). Reuses
+ * monitor_p2_min_markup_pct (import-monitor.server.ts's Phase 2 import gate)
+ * rather than inventing a second markup-floor setting, per ticket #16352 --
+ * same default (0.08) as that call site.
+ */
+export const MIN_MARKUP_SETTING_KEY = 'monitor_p2_min_markup_pct'
+export const MIN_MARKUP_DEFAULT = 0.08
+
+export async function getMinMarkupPct(): Promise<number> {
+  try {
+    const rows = await db
+      .select({ value: pipelineSettings.value })
+      .from(pipelineSettings)
+      .where(eq(pipelineSettings.key, MIN_MARKUP_SETTING_KEY))
+      .limit(1)
+    const n = parseFloat(rows[0]?.value ?? '')
+    if (isFinite(n) && n >= 0 && n < 1) return n
+  } catch { /* fall through */ }
+  return MIN_MARKUP_DEFAULT
+}
 
 export async function getDigestMinDelta(): Promise<number> {
   try {
@@ -447,6 +471,8 @@ interface RunContext {
   msrpCeiling: boolean
   /** Clearance markdown steps for discontinued items. */
   ladder: ClearanceLadder
+  /** Minimum markup over wholesale cost (monitor_p2_min_markup_pct); see enforceWholesaleFloor. */
+  minMarkupPct: number
 }
 
 // Minimal variant/product data the compute core needs. Matches both the
@@ -483,7 +509,7 @@ async function recomputeFromData(
   feed: FeedCostSnapshot | null = null,
 ): Promise<RecomputeVariantResult> {
   const { variantId } = variant
-  const { trigger, mode, thresholds, mapBrands, msrpCeiling, ladder } = ctx
+  const { trigger, mode, thresholds, mapBrands, msrpCeiling, ladder, minMarkupPct } = ctx
 
   // Prefer Shopify's native variant Cost per item (inventoryItem.unitCost),
   // falling back to the legacy xdipx.wholesale_cost metafield, unless the
@@ -575,6 +601,17 @@ async function recomputeFromData(
 
   if (newSell == null) {
     return { status: 'skipped_no_change', auditId: null, applied: false, error: 'cannot compute price: missing cost' }
+  }
+
+  // Wholesale-floor invariant (ticket #16352): neither compute path above
+  // guarantees a price strictly above cost on its own (computeDiscontinuedPrice's
+  // internal floor is satisfiable at margin_floor_pct ~0, i.e. barely above
+  // cost, and a misconfigured/zero floor is not caught here), so re-clamp
+  // unconditionally before MAP, which is allowed to push the price higher.
+  const wholesaleFloored = enforceWholesaleFloor(newSell, cost, minMarkupPct)
+  if (wholesaleFloored !== newSell) {
+    newSell = wholesaleFloored
+    if (newCompare != null && newCompare <= newSell) newCompare = null
   }
 
   // The discontinued ladder and an ignore_map config both skip computePrice's
@@ -683,9 +720,13 @@ async function recomputeFromData(
       // as is an explicit ignore_map config, unless the MAP is contractual.
       const mapFloor = contractualMap
         ?? (!isDiscontinued && cfg.map_behavior !== 'ignore_map' ? map : null)
-      const guardedSell = enforceMapFloor(newSell, mapFloor)
+      // Wholesale-floor invariant (ticket #16352): same last-line guard as the
+      // MAP floor above, so nothing reaches Shopify at or below cost either,
+      // whatever produced `newSell`.
+      let guardedSell = enforceMapFloor(newSell, mapFloor)
+      guardedSell = enforceWholesaleFloor(guardedSell, cost, minMarkupPct)
       if (guardedSell !== newSell) {
-        console.warn(`[pricing-apply-v2] MAP floor guard raised ${sku} from $${newSell} to $${guardedSell}`)
+        console.warn(`[pricing-apply-v2] price floor guard raised ${sku} from $${newSell} to $${guardedSell}`)
       }
       await updateVariantPricing(
         variantId,
@@ -812,10 +853,11 @@ export async function recomputeVariant(
   const mapBrands   = await getMapBrands()
   const msrpCeiling = await getMsrpCeilingEnabled()
   const ladder      = await getClearanceLadder()
+  const minMarkupPct = await getMinMarkupPct()
 
   const feed = (await loadFeedCosts([variant.sku])).get(variant.sku) ?? null
 
-  return recomputeFromData(product, variant, { trigger, mode, thresholds, mapBrands, msrpCeiling, ladder }, feed)
+  return recomputeFromData(product, variant, { trigger, mode, thresholds, mapBrands, msrpCeiling, ladder, minMarkupPct }, feed)
 }
 
 
@@ -1233,7 +1275,8 @@ export async function recomputeCatalog(opts: {
   const mapBrands   = await getMapBrands()
   const msrpCeiling = await getMsrpCeilingEnabled()
   const ladder      = await getClearanceLadder()
-  const ctx: RunContext = { trigger: opts.trigger, mode, thresholds, mapBrands, msrpCeiling, ladder }
+  const minMarkupPct = await getMinMarkupPct()
+  const ctx: RunContext = { trigger: opts.trigger, mode, thresholds, mapBrands, msrpCeiling, ladder, minMarkupPct }
 
   for (;;) {
     // Budget is checked at the page boundary, before fetching more work.
