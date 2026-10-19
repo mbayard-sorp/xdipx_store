@@ -4104,6 +4104,12 @@ export const XDIPX_LOCATION_IDS = [
   'gid://shopify/Location/85557477547', // Nalpac
 ] as const
 
+/** Bare numeric location ids, as the REST `inventory_levels.json` endpoint
+ *  returns `location_id` (never the gid form). Derived from XDIPX_LOCATION_IDS
+ *  so the two can never drift apart. */
+const ENTRENUE_LOCATION_NUMERIC_ID = XDIPX_LOCATION_IDS[0].replace('gid://shopify/Location/', '')
+const NALPAC_LOCATION_NUMERIC_ID   = XDIPX_LOCATION_IDS[1].replace('gid://shopify/Location/', '')
+
 /**
  * Sales-channel publication names imported products are published to. Matched
  * by name because publication GIDs are not stable across stores/environments.
@@ -4296,46 +4302,94 @@ export async function createShopifyProductFromFeed(product: ProductScore, handle
   return String(res.product.id)
 }
 
+/** A variant's fresh per-location quantities, read from the feed's own split columns. */
+export interface VariantInventoryResyncTarget {
+  nalpacQty: number | null
+  entrenueQty: number | null
+}
+
+export interface VariantInventoryResyncResult {
+  resynced: number
+  skippedNoFeedRow: number
+  failed: number
+}
+
 /**
- * Push a fresh absolute available quantity to a product's first variant
- * (ticket #14756). `createShopifyProductFromFeed` sets `inventory_quantity`
- * once, at import time; enrichment can take 2+ days before a product
- * actually goes live, and nothing re-reads the feed in between, so a SKU
- * whose stock changed since import (either direction) goes live carrying a
- * stale number — confirmed live: Pipedream Moist Water-Based Lube's Nalpac
- * feed qty read 2137 while Shopify's totalInventory sat at 0.
+ * Push fresh per-location available quantities to every variant of a
+ * product, by its own SKU (ticket #16273, follow-up to #14756/#15375).
+ * `createShopifyProductFromFeed` sets `inventory_quantity` once, at import
+ * time; enrichment can take 2+ days before a product actually goes live, and
+ * nothing re-reads the feed in between, so a SKU whose stock changed since
+ * import (either direction) goes live carrying a stale number — confirmed
+ * live: Pipedream Moist Water-Based Lube's Nalpac feed qty read 2137 while
+ * Shopify's totalInventory sat at 0.
  *
- * Resolves the variant's inventory_item_id, then the location(s) it is
- * already stocked at (set at creation, so always at least one), and sets
- * the absolute quantity at each via the same `inventory_levels/set.json`
- * REST endpoint the rest of this file already uses for inventory writes.
- * No-ops quietly (not an error) when the product has no resolvable variant
- * or inventory item — this is a best-effort resync, never a reason to fail
- * the publish that already succeeded.
+ * The previous version (#14756) read only `variants[0]` and wrote the SAME
+ * combined total to every location the item was stocked at. That silently
+ * skipped every other variant on a multi-variant product (measured: 8 of 31
+ * multi-variant products published 10-14..10-17 had a sellable first variant
+ * with sibling variants stuck at 0 despite real feed stock) and, once a
+ * product is stocked at both xdipx locations, double-counted the real
+ * on-hand in Shopify's combined total. `qtyBySku` keys on each variant's own
+ * SKU and carries the Nalpac/Entrenue quantities separately
+ * (nalpac-feeds.server.ts reads them straight off the feed's 'Nalpac qty
+ * available' / 'Entrenue qty available' columns), so each location is set
+ * from its own number. A location whose quantity reads `null` on an
+ * incomplete feed row is left untouched rather than zeroed.
+ *
+ * Returns counts instead of swallowing every outcome into a console.warn, so
+ * a caller's result row can show the gap instead of hiding it (ticket
+ * #16273's cause 2: `publish:{failed:0,published:16}` reported no failures
+ * while the resync for every one of those 16 silently no-op'd).
  */
-export async function syncVariantInventoryQuantity(numericProductId: string, availableQty: number): Promise<void> {
+export async function syncVariantInventoryQuantity(
+  numericProductId: string,
+  qtyBySku: ReadonlyMap<string, VariantInventoryResyncTarget>,
+): Promise<VariantInventoryResyncResult> {
   const id = numericProductId.replace('gid://shopify/Product/', '')
   const productRes = await shopifyAdmin<{
-    product: { variants: { inventory_item_id: number | null }[] } | null
+    product: { variants: { sku: string | null; inventory_item_id: number | null }[] } | null
   }>(`/products/${id}.json?fields=id,variants`, 'GET')
 
-  const inventoryItemId = productRes.product?.variants[0]?.inventory_item_id
-  if (!inventoryItemId) return
+  const variants = productRes.product?.variants ?? []
+  const result: VariantInventoryResyncResult = { resynced: 0, skippedNoFeedRow: 0, failed: 0 }
 
-  const levelsRes = await shopifyAdmin<{
-    inventory_levels: { location_id: number }[]
-  }>(`/inventory_levels.json?inventory_item_ids=${inventoryItemId}`, 'GET')
+  for (const variant of variants) {
+    if (!variant.sku || !variant.inventory_item_id) continue
+    const target = qtyBySku.get(variant.sku)
+    if (!target || (target.nalpacQty == null && target.entrenueQty == null)) {
+      result.skippedNoFeedRow++
+      continue
+    }
 
-  const locationIds = levelsRes.inventory_levels.map(l => l.location_id)
-  if (locationIds.length === 0) return
+    try {
+      const levelsRes = await shopifyAdmin<{
+        inventory_levels: { location_id: number }[]
+      }>(`/inventory_levels.json?inventory_item_ids=${variant.inventory_item_id}`, 'GET')
 
-  for (const locationId of locationIds) {
-    await shopifyAdmin('/inventory_levels/set.json', 'POST', {
-      location_id:       locationId,
-      inventory_item_id: inventoryItemId,
-      available:         availableQty,
-    })
+      let wrote = false
+      for (const level of levelsRes.inventory_levels) {
+        const locationId = String(level.location_id)
+        const qty = locationId === NALPAC_LOCATION_NUMERIC_ID   ? target.nalpacQty
+          :         locationId === ENTRENUE_LOCATION_NUMERIC_ID ? target.entrenueQty
+          :         null
+        if (qty == null) continue
+        await shopifyAdmin('/inventory_levels/set.json', 'POST', {
+          location_id:       level.location_id,
+          inventory_item_id: variant.inventory_item_id,
+          available:         qty,
+        })
+        wrote = true
+      }
+      if (wrote) result.resynced++
+      else result.skippedNoFeedRow++
+    } catch (err) {
+      result.failed++
+      console.warn(`[shopify] syncVariantInventoryQuantity failed for sku=${variant.sku} product ${numericProductId}:`, err instanceof Error ? err.message : err)
+    }
   }
+
+  return result
 }
 
 /** Read a product's Shopify product_type. Returns null when unset. */

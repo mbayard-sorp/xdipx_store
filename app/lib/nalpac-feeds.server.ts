@@ -38,6 +38,11 @@ export interface NalpacPriceSnapshot {
   wholesale: number
   mapPrice: number | null
   qty: number | null
+  /** Per-location split of `qty` (ticket #16273), from the feed's own 'Nalpac
+   *  qty available' / 'Entrenue qty available' columns. Only populated from
+   *  the main feed; undefined (not just null) on a sale-only snapshot. */
+  nalpacQty?: number | null
+  entrenueQty?: number | null
   inSaleFeed: boolean
   inNewFeed: boolean
   inTop100Feed: boolean
@@ -116,6 +121,13 @@ function skuOf(row: RawRow): string {
   return (row['SKU'] ?? row['Sku'] ?? '').trim()
 }
 
+/** `parseInt` that reports "no column" (undefined/NaN) as null, same shape as `qty` below. */
+function parseQtyCol(val: string | undefined): number | null {
+  if (val === undefined) return null
+  const n = parseInt(val, 10)
+  return isNaN(n) ? null : n
+}
+
 function snapshotFromMain(row: RawRow): NalpacPriceSnapshot {
   const msrp      = parseNum(row['MSRP'])
   const wholesale = parseNum(row['Wholesale'] ?? row['Cost'])
@@ -131,6 +143,8 @@ function snapshotFromMain(row: RawRow): NalpacPriceSnapshot {
     wholesale,
     mapPrice:         rawMap > 0 ? rawMap : null,
     qty:              qty !== null && !isNaN(qty) ? qty : null,
+    nalpacQty:        parseQtyCol(row['Nalpac qty available']),
+    entrenueQty:      parseQtyCol(row['Entrenue qty available']),
     inSaleFeed:       false,
     inNewFeed:        false,
     inTop100Feed:     false,

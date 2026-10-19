@@ -92,9 +92,18 @@ async function main() {
   if (candidates.length === 0) return
 
   let freshQtyBySku = new Map<string, number | null>()
+  let feedQtyBySku = new Map<string, { nalpacQty: number | null; entrenueQty: number | null }>()
   try {
     const { snapshots } = await fetchAllNalpacFeeds()
     freshQtyBySku = new Map([...snapshots].map(([sku, snap]) => [sku, snap.qty]))
+    // ticket #16273: syncVariantInventoryQuantity now resyncs every variant of
+    // a product by its own SKU and per-location quantity, not one combined
+    // total written to every location. Passing the whole feed map (not a
+    // single-SKU subset) lets it resolve this product's OTHER variants too.
+    feedQtyBySku = new Map([...snapshots].map(([sku, snap]) => [sku, {
+      nalpacQty:   snap.nalpacQty ?? null,
+      entrenueQty: snap.entrenueQty ?? null,
+    }]))
   } catch (err) {
     console.error('Nalpac feed fetch failed — cannot resync without a fresh qty read:', err instanceof Error ? err.message : err)
     process.exit(1)
@@ -134,7 +143,7 @@ async function main() {
 
     console.log(`  ${APPLY ? 'correcting' : 'would correct'} sku=${c.sku} "${c.title ?? '(no title)'}" productId=${c.productId}: Shopify ${current} -> feed ${feedQty}`)
     if (APPLY) {
-      await syncVariantInventoryQuantity(c.productId, feedQty)
+      await syncVariantInventoryQuantity(c.productId, feedQtyBySku)
     }
     corrected++
   }
