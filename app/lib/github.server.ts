@@ -906,6 +906,9 @@ export async function createRevertBranch(
  *   6. db/migrations/**, refined by content: see refineMigrationProtection
  *      below. A provably additive migration rides the ordinary lane; anything
  *      else stops for the owner.
+ *   7. Ad spend controls: the platform applier, the ads valves, the spend
+ *      math, and each channel's mutate path. These decide whether money moves
+ *      on an ad platform and how much.
  *
  * Deliberately dropped, and what that means:
  *   - checkout/cart route and lib code, auth and session, server/cron*.ts,
@@ -962,6 +965,19 @@ export const PROTECTED_GLOBS: readonly string[] = [
 
   // --- 6. migrations, refined by content (refineMigrationProtection) ---
   'db/migrations/**',
+
+  // --- 7. ad spend controls ---
+  // The applier seam is about to reach Meta. These files decide whether a
+  // rule may pause, resume, or rebudget an ad, and by how much, so a change
+  // to cap logic is a change to how the owner's money is spent.
+  'app/lib/ad-platform-apply.server.ts',
+  'app/lib/ad-settings.server.ts',
+  'app/lib/ad-settings-defaults.ts',
+  'app/lib/ad-spend-core.ts',
+  'app/lib/ads/channels/apply.server.ts',
+  // One segment wide: matches ads/channels/meta/mutate.server.ts, not a
+  // deeper path. A new channel's mutate file is protected the day it lands.
+  'app/lib/ads/channels/*/mutate.server.ts',
 ]
 
 const RE_SPECIALS = /[.+?^${}()|[\]\\]/g
