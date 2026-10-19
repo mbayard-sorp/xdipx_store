@@ -73,9 +73,10 @@ Verified against the code 2026-08-12; auto-approve line re-verified against live
   `ads` as of 2026-10-19 (read from the nine `pipeline_settings` rows; `ads` was written `false`
   on 2026-10-04 by owner decision). A row filed under `ads` sits at `proposed` until the owner
   approves it; that is deliberate, and the ads control plane build lane depends on it
-  (`docs/store-team/ads-control-plane-plan.md` §10). A standing instruction aimed at the ads
-  routine files under `team:'strategy'` with `targetTeam:'ads'`, which auto-approves and still
-  routes to agent-editor. The valve is per team and owner-flippable on that team's tab of
+  (`docs/store-team/ads-control-plane-plan.md` §10). Auto-approve keys off the team that
+  ACTS (`team.server.ts` around line 941), so filing under `team:'strategy'` with
+  `targetTeam:'ads'` does not dodge it: rows 16414 to 16417 (2026-10-19) landed `proposed` that
+  way. Every ads-bound row, instructions included, needs the owner's click while the valve is off. The valve is per team and owner-flippable on that team's tab of
   `/admin/homepage-team`, so do not trust this line blindly: after filing, read the row back
   (`{"op":"get","id":…}`) and if it sits at `proposed`, that team's valve is off and the row needs
   the owner's triage click; say so in "Needs you". Auto-approve does not apply to a create that already carries an open `pr` link;
