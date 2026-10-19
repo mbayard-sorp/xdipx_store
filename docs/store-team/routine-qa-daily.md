@@ -105,8 +105,13 @@ not a Step 6 verdict call.
 Pull the branch and read it locally. Git works in a cloud session; the GitHub API does not, because
 egress is restricted to xdipx.com.
 
+**Fetch `headRef`, never assume `ticket/<id>` (ticket #16162).** A PR's branch is not always named
+`ticket/<id>` — a PR opened from an interactive session lands on `claude/...` instead. Read
+`headRef` from the Step 3 `GET /api/team/pr?number=<n>` response above and fetch/checkout that
+branch name:
+
 ```bash
-git fetch origin ticket/<id> && git checkout ticket/<id>
+git fetch origin "<headRef>" && git checkout "<headRef>"
 git diff origin/main...HEAD
 ```
 
@@ -120,8 +125,8 @@ observed live on 2026-08-10: a delegated subagent saw the shared tree jump to `t
 under your own scratch path so concurrent or interleaved reviews cannot race:
 
 ```bash
-git fetch origin ticket/<id>
-git worktree add "$QA_WORKTREE_DIR/ticket-<id>" ticket/<id>   # per-PR, per-scratch-path
+git fetch origin "<headRef>"
+git worktree add "$QA_WORKTREE_DIR/ticket-<id>" "<headRef>"   # per-PR, per-scratch-path; headRef from Step 3's PR read, not assumed from the ticket id
 git -C "$QA_WORKTREE_DIR/ticket-<id>" diff origin/main...HEAD
 # ... run static checks inside that worktree; git worktree remove it when done
 ```
