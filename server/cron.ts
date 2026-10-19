@@ -450,7 +450,19 @@ export function createCronRoutes() {
         }
       }
 
-      res.json({ ok: true, invitesDue: due.length, invitesSent, reminderTotal: invites.length, remindersSent: sent })
+      // Silent-drop guard (ticket #16267): file a ticket, never block the send
+      // loops above on it, if orders have fired the fulfillment webhook over
+      // the past week but zero invites exist to show for it.
+      const { runReviewFunnelSilentDropCheck } = await import('../app/lib/review-funnel-check.server.js')
+      const funnelCheck = await runReviewFunnelSilentDropCheck().catch(err => {
+        console.error('[cron:review-reminders] funnel check failed (ignored)', err)
+        return null
+      })
+
+      res.json({
+        ok: true, invitesDue: due.length, invitesSent, reminderTotal: invites.length, remindersSent: sent,
+        ...(funnelCheck ? { funnelCheck } : {}),
+      })
     } catch (err) {
       console.error('[cron:review-reminders]', err)
       res.status(500).json({ error: String(err) })
