@@ -2437,6 +2437,40 @@ export const adRuleEvents = pgTable('ad_rule_events', {
 }))
 
 /**
+ * Ads Control Plane entity mirror (migration 128, ADR-018). One row per
+ * campaign, ad set, ad or creative as the platform reports it, keyed by
+ * (platform, external_id). Filled by the entity sync cron, read by the
+ * console. creative_id points back at the Ad Studio creative when known.
+ */
+export const adPlatformEntities = pgTable('ad_platform_entities', {
+  id:                  bigserial('id', { mode: 'number' }).primaryKey(),
+  platform:            text('platform').notNull(),
+  accountId:           text('account_id').notNull(),
+  level:               text('level').$type<AdPlatformEntityLevel>().notNull(), // campaign|adset|ad|creative (CHECK in SQL)
+  externalId:          text('external_id').notNull(),
+  parentExternalId:    text('parent_external_id'),
+  name:                text('name'),
+  status:              text('status'),
+  effectiveStatus:     text('effective_status'),
+  objective:           text('objective'),
+  dailyBudgetCents:    integer('daily_budget_cents'),
+  lifetimeBudgetCents: integer('lifetime_budget_cents'),
+  bidStrategy:         text('bid_strategy'),
+  creativeId:          integer('creative_id').references(() => adCreatives.id, { onDelete: 'set null' }),
+  reviewFeedback:      jsonb('review_feedback').$type<Record<string, unknown> | null>(),
+  raw:                 jsonb('raw').$type<Record<string, unknown> | null>(),
+  firstSeenAt:         timestamp('first_seen_at', { withTimezone: true }).notNull().defaultNow(),
+  lastSyncedAt:        timestamp('last_synced_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => ({
+  platformExternalUq: uniqueIndex('idx_ad_platform_entities_platform_external').on(t.platform, t.externalId),
+  levelIdx: index('idx_ad_platform_entities_level').on(t.platform, t.level),
+  parentIdx: index('idx_ad_platform_entities_parent').on(t.parentExternalId),
+  creativeIdx: index('idx_ad_platform_entities_creative').on(t.creativeId),
+}))
+
+export type AdPlatformEntityLevel = 'campaign' | 'adset' | 'ad' | 'creative'
+
+/**
  * Outreach pipeline (077): vetted guest-post / brand-partnership targets.
  * One row per domain. Seeded from docs/store-team/outreach-prospects.md by
  * scripts/seed-outreach-prospects.ts; the offsite-scout adds more through
