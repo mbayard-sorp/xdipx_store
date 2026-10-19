@@ -6,8 +6,8 @@
  * with the bound value pulled out of the eq() condition so phone and id
  * filters behave. Twilio is a mocked sendSms: no test here can text anyone.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { leadSmsSubscriptions, pipelineSettings, smsOptouts } from '../../db/schema'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { leadSmsSubscriptions, smsOptouts } from '../../db/schema'
 
 type Row = Record<string, unknown> & { id: number }
 
@@ -15,11 +15,12 @@ const h = vi.hoisted(() => ({
   sendSms: vi.fn<(to: string, body: string) => Promise<string>>(),
   optouts: new Set<string>(),
   subs: [] as Array<Record<string, unknown> & { id: number }>,
-  settings: {} as Record<string, string>,
+  switchOn: true,
   nextId: 1,
 }))
 
 vi.mock('~/lib/twilio.server', () => ({ sendSms: h.sendSms }))
+vi.mock('~/lib/lead-sms-optin.server', () => ({ isLeadSmsOptinEnabled: async () => h.switchOn }))
 
 /** Bound values inside a drizzle SQL condition (eq(col, value) carries a Param chunk). */
 function boundValues(cond: unknown): unknown[] {
@@ -34,7 +35,6 @@ vi.mock('~/lib/db.server', () => {
     const [v] = boundValues(cond)
     if (table === smsOptouts) return [...h.optouts].filter(p => v === undefined || p === v).map((p, i) => ({ id: i + 1, phone: p }))
     if (table === leadSmsSubscriptions) return h.subs.filter(r => v === undefined || r['phone'] === v || r['id'] === v)
-    if (table === pipelineSettings) return Object.entries(h.settings).filter(([k]) => v === undefined || k === v).map(([key, value], i) => ({ id: i + 1, key, value }))
     throw new Error('unexpected table')
   }
   const selectChain = (table: unknown, cond?: unknown) => {
@@ -84,16 +84,12 @@ const GSM7 = /^[A-Za-z0-9 @£$¥èéùìòÇØøÅåΔ_ΦΓΛΩΠΨΣΘΞÆæß�
 const TWO_SEGMENTS = 306
 
 beforeEach(() => {
-  process.env['LEAD_SMS_OPTIN_ENABLED'] = '1'
+  h.switchOn = true
   h.sendSms.mockReset()
   h.sendSms.mockResolvedValue('SM_sent')
   h.optouts.clear()
   h.subs.length = 0
-  h.settings = {}
   h.nextId = 1
-})
-afterEach(() => {
-  delete process.env['LEAD_SMS_OPTIN_ENABLED']
 })
 
 describe('enrollLeadSms', () => {
@@ -117,17 +113,11 @@ describe('enrollLeadSms', () => {
     expect(h.sendSms).not.toHaveBeenCalled()
   })
 
-  it('does nothing when the switch is off (no env override, no valve row)', async () => {
-    delete process.env['LEAD_SMS_OPTIN_ENABLED']
+  it('does nothing when the lead SMS opt-in kill switch is off', async () => {
+    h.switchOn = false
     expect(await enrollLeadSms(LEAD)).toEqual({ outcome: 'disabled' })
     expect(h.subs).toHaveLength(0)
     expect(h.sendSms).not.toHaveBeenCalled()
-  })
-
-  it('reads the lead_sms_optin_enabled valve row when the env override is absent', async () => {
-    delete process.env['LEAD_SMS_OPTIN_ENABLED']
-    h.settings['lead_sms_optin_enabled'] = 'true'
-    expect((await enrollLeadSms(LEAD)).outcome).toBe('pending')
   })
 
   it('keeps the row pending when the confirmation send fails', async () => {

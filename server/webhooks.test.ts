@@ -5,6 +5,7 @@ vi.mock('../app/lib/reviews.server.js', () => ({
   getReviewSettings: vi.fn(async () => ({ inviteDelayDays: 3 })),
   createInvite: vi.fn(async () => ({})),
   getInvitedProductIdsForOrder: vi.fn(async () => new Set<string>()),
+  recordOrderFulfillmentOutcome: vi.fn(async () => undefined),
 }))
 
 // Guards the inventory webhook's back-in-stock branch: a notification must fire
@@ -268,13 +269,15 @@ describe('handleOrderFulfilled', () => {
     return mod as unknown as {
       createInvite: ReturnType<typeof vi.fn>
       getInvitedProductIdsForOrder: ReturnType<typeof vi.fn>
+      recordOrderFulfillmentOutcome: ReturnType<typeof vi.fn>
     }
   }
 
   it('logs a failure instead of silently returning when the payload has no email', async () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const { createInvite } = await mocks()
+    const { createInvite, recordOrderFulfillmentOutcome } = await mocks()
     createInvite.mockClear()
+    recordOrderFulfillmentOutcome.mockClear()
 
     await handleOrderFulfilled({ ...baseOrder } as Parameters<typeof handleOrderFulfilled>[0])
 
@@ -283,12 +286,31 @@ describe('handleOrderFulfilled', () => {
     // must be loud (same silent-success class as ADR-009).
     expect(spy.mock.calls.some(c => String(c[0]).includes('no email in the payload'))).toBe(true)
     expect(createInvite).not.toHaveBeenCalled()
+    // ticket #16267: a silent drop here must leave a durable trace, not just
+    // a console line that rolls off.
+    expect(recordOrderFulfillmentOutcome).toHaveBeenCalledWith('111', 'no_email_pii_redacted', expect.any(String))
     spy.mockRestore()
   })
 
-  it('falls back to customer.email when order.email is empty', async () => {
-    const { createInvite } = await mocks()
+  it('records no_line_items when the order has nothing to invite on (ticket #16267)', async () => {
+    const { createInvite, recordOrderFulfillmentOutcome } = await mocks()
     createInvite.mockClear()
+    recordOrderFulfillmentOutcome.mockClear()
+
+    await handleOrderFulfilled({
+      ...baseOrder,
+      email: 'buyer@example.com',
+      line_items: [],
+    } as Parameters<typeof handleOrderFulfilled>[0])
+
+    expect(createInvite).not.toHaveBeenCalled()
+    expect(recordOrderFulfillmentOutcome).toHaveBeenCalledWith('111', 'no_line_items')
+  })
+
+  it('falls back to customer.email when order.email is empty', async () => {
+    const { createInvite, recordOrderFulfillmentOutcome } = await mocks()
+    createInvite.mockClear()
+    recordOrderFulfillmentOutcome.mockClear()
 
     await handleOrderFulfilled({
       ...baseOrder,
@@ -301,6 +323,8 @@ describe('handleOrderFulfilled', () => {
       shopifyProductId: 'gid://shopify/Product/100',
       shopifyOrderId: '111',
     })
+    // ticket #16267: a real invite records 'invited', not a fault outcome.
+    expect(recordOrderFulfillmentOutcome).toHaveBeenCalledWith('111', 'invited')
   })
 
   it('falls back to the note_attributes _customer_email when email/contact_email/customer.email are all empty (ticket #9329)', async () => {
@@ -341,5 +365,20 @@ describe('handleOrderFulfilled', () => {
 
     expect(createInvite).toHaveBeenCalledTimes(1)
     expect(createInvite.mock.calls[0]![0]).toMatchObject({ shopifyProductId: 'gid://shopify/Product/200' })
+  })
+
+  it('records no_invite_created when every line item is already invited (ticket #16267)', async () => {
+    const { createInvite, getInvitedProductIdsForOrder, recordOrderFulfillmentOutcome } = await mocks()
+    createInvite.mockClear()
+    recordOrderFulfillmentOutcome.mockClear()
+    getInvitedProductIdsForOrder.mockResolvedValueOnce(new Set(['gid://shopify/Product/100']))
+
+    await handleOrderFulfilled({
+      ...baseOrder,
+      email: 'buyer@example.com',
+    } as Parameters<typeof handleOrderFulfilled>[0])
+
+    expect(createInvite).not.toHaveBeenCalled()
+    expect(recordOrderFulfillmentOutcome).toHaveBeenCalledWith('111', 'no_invite_created')
   })
 })

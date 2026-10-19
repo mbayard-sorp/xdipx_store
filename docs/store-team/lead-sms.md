@@ -27,8 +27,8 @@ The campaign's registered message flow is: the person submits a number with the 
 curious.xdipx.com/hello, receives a confirmation text, and must reply YES or START before joining the
 list. Nothing marketing goes to a number that has not replied. The sequence in code:
 
-1. `/api/lead` with a phone and `smsConsent` (and the `lead_sms_optin_enabled` switch on, or
-   `LEAD_SMS_OPTIN_ENABLED=1`) calls `enrollLeadSms()`: one `lead_sms_subscriptions` row at
+1. `/api/lead` with a phone and `smsConsent` (and the `lead_sms_optin_enabled` kill switch on, which
+   is its default; `LEAD_SMS_OPTIN_ENABLED=0` forces it off) calls `enrollLeadSms()`: one `lead_sms_subscriptions` row at
    `pending` and one confirmation text. A number already in `sms_optouts` gets a row at `opted_out`
    and no text, so the consent is on record without a send.
 2. The person replies YES (or START). `handleLeadSmsInbound()` runs first on every inbound text in the
@@ -77,8 +77,8 @@ out before the YES. Run changed strings through `emma-empathy-reviewer`.
 
 1. Set `TWILIO_MESSAGING_SERVICE_SID=MG50cde7ba82c18e8491424c6d86674218` in Vercel production.
 2. Clear blocker 731 as superseded by this path.
-3. Turn the `lead_sms_optin_enabled` switch on (or set `LEAD_SMS_OPTIN_ENABLED=1`) when the
-   /hello page should ask for a phone number again.
+3. Nothing to flip: `lead_sms_optin_enabled` is on by default. Set it to `false` (Ad Studio Spend
+   tab) to stop asking for phones without a deploy.
 
 ## Not built, on purpose
 

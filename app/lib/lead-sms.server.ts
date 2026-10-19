@@ -24,21 +24,19 @@
  * No further sends exist. Copy is support register (2 to 3): plain facts, the
  * offer terms in full, the carrier closers the campaign's samples carry.
  *
- * Gate: on when LEAD_SMS_OPTIN_ENABLED=1 is in the environment or the
- * `lead_sms_optin_enabled` pipeline_settings row is 'true' (the valve the
- * /hello page reads to show the phone field at all). A missing row reads as
- * off, and a DB error reads as off.
+ * Gate: the same kill switch the /hello page reads to show the phone field
+ * at all (app/lib/lead-sms-optin.server.ts: `lead_sms_optin_enabled`, default
+ * on, LEAD_SMS_OPTIN_ENABLED=0 forces off).
  */
 
 import { desc, eq } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
-import { leadSmsSubscriptions, pipelineSettings, smsOptouts } from '../../db/schema'
+import { leadSmsSubscriptions, smsOptouts } from '../../db/schema'
 import { buildShopUrl } from '~/lib/lead-funnel'
 import { getLeadInterest, LEAD_OFFER, type LeadInterestSlug } from '~/lib/lead-interests'
+import { isLeadSmsOptinEnabled } from '~/lib/lead-sms-optin.server'
 import { START_WORDS, STOP_WORDS, complianceKeyword } from '~/lib/sms-processor.server'
 import { sendSms } from '~/lib/twilio.server'
-
-export const LEAD_SMS_VALVE_KEY = 'lead_sms_optin_enabled'
 
 /** How each interest reads inside a text ("You asked about <this>"). */
 const INTEREST_SMS_PHRASE: Record<LeadInterestSlug, string> = {
@@ -57,31 +55,6 @@ const WELCOME_SLUG = 'sms'
 
 /** Bodies that confirm a pending number, after complianceKeyword() normalisation. */
 const YES_WORDS = new Set(['y', 'yes', 'yeah', 'yep', 'yup', 'ok', 'okay', 'confirm'])
-
-export function leadSmsOptinEnvOverride(): boolean {
-  return process.env['LEAD_SMS_OPTIN_ENABLED'] === '1'
-}
-
-/**
- * Same reading as the /hello page's switch: env override, else the valve row.
- * Reads the row directly rather than through getValve() because the key is
- * added to VALVE_KEYS by the sibling valve PR; once both are on main this can
- * call isLeadSmsOptinEnabled() from app/lib/lead-sms-optin.server.ts instead.
- */
-export async function isLeadSmsEnabled(): Promise<boolean> {
-  if (leadSmsOptinEnvOverride()) return true
-  try {
-    const [row] = await db
-      .select({ value: pipelineSettings.value })
-      .from(pipelineSettings)
-      .where(eq(pipelineSettings.key, LEAD_SMS_VALVE_KEY))
-      .limit(1)
-    return row?.value === 'true'
-  } catch (err) {
-    console.error('[lead-sms] valve read failed, treating as off', err)
-    return false
-  }
-}
 
 /** The text a consented number gets. Built from the campaign's registered opt-in message, accurate for this funnel. */
 export function confirmationSms(interest: LeadInterestSlug | null): string {
@@ -140,7 +113,7 @@ async function isInOptouts(phone: string): Promise<boolean> {
  * no message sid (nothing retries it in this version).
  */
 export async function enrollLeadSms(input: EnrollLeadSmsInput): Promise<EnrollLeadSmsResult> {
-  if (!(await isLeadSmsEnabled())) return { outcome: 'disabled' }
+  if (!(await isLeadSmsOptinEnabled())) return { outcome: 'disabled' }
 
   const optedOut = await isInOptouts(input.phone)
   const now = new Date()

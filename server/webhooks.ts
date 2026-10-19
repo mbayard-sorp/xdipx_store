@@ -535,23 +535,27 @@ export async function handleOrderFulfilled(order: ShopifyFulfilledOrder): Promis
   // silent-success class as ADR-009). The fallback chain covers payloads where
   // `email` is empty but contact_email, customer.email, or (ticket #9329) the
   // account-holder's own email stamped onto note_attributes survives.
+  const { getReviewSettings, createInvite, getInvitedProductIdsForOrder, recordOrderFulfillmentOutcome } =
+    await import('../app/lib/reviews.server.js')
+
   const reviewerEmail = order.email || order.contact_email || order.customer?.email
     || customerEmailFromNoteAttributes(order.note_attributes) || null
   if (!reviewerEmail) {
+    const reason = 'email/contact_email/customer.email all empty — PII likely redacted on the Basic plan'
     console.error(
-      `[webhook:order-fulfilled] order ${order.id} (#${order.order_number}) has no email in the payload ` +
-      `(email/contact_email/customer.email all empty — PII likely redacted on the Basic plan); ` +
+      `[webhook:order-fulfilled] order ${order.id} (#${order.order_number}) has no email in the payload (${reason}); ` +
       `cannot create review invites. Owner action: upgrade plan or grant PII access, then run ` +
       `scripts/backfill-review-invites.ts for this order.`,
     )
+    await recordOrderFulfillmentOutcome(String(order.id), 'no_email_pii_redacted', reason)
     return
   }
   if (!Array.isArray(order.line_items) || order.line_items.length === 0) {
     console.warn(`[webhook:order-fulfilled] order ${order.id} has no line items, nothing to invite`)
+    await recordOrderFulfillmentOutcome(String(order.id), 'no_line_items')
     return
   }
 
-  const { getReviewSettings, createInvite, getInvitedProductIdsForOrder } = await import('../app/lib/reviews.server.js')
   const settings = await getReviewSettings()
 
   // Shopify fires orders/fulfilled per fulfillment event and retries failed
@@ -566,6 +570,7 @@ export async function handleOrderFulfilled(order: ShopifyFulfilledOrder): Promis
   // job sends invites whose send_after has passed and fires the Klaviyo
   // "Review Invite Sent" event at actual send time.
   const sendAfter = new Date(Date.now() + settings.inviteDelayDays * 24 * 60 * 60 * 1000)
+  let invited = false
 
   for (const lineItem of order.line_items) {
     if (!lineItem.sku) continue
@@ -598,8 +603,10 @@ export async function handleOrderFulfilled(order: ShopifyFulfilledOrder): Promis
       reviewerEmail,
       reviewerName,
       sendAfter,
-    }).catch(err => console.error('[webhook:invite-create]', err))
+    }).then(() => { invited = true }).catch(err => console.error('[webhook:invite-create]', err))
   }
+
+  await recordOrderFulfillmentOutcome(String(order.id), invited ? 'invited' : 'no_invite_created')
 }
 
 // ─── Product created handler ──────────────────────────────────────────────

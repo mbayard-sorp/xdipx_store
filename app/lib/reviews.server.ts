@@ -599,6 +599,57 @@ export async function getInvitedProductIdsForOrder(shopifyOrderId: string): Prom
   return new Set(rows.map(r => r['shopify_product_id'] as string))
 }
 
+export type OrderFulfillmentWebhookOutcome =
+  | 'invited' | 'no_email_pii_redacted' | 'no_line_items' | 'no_invite_created'
+
+/**
+ * Durable record of what `handleOrderFulfilled` (server/webhooks.ts) did with
+ * a fulfilled order, so a stretch of fulfillments that all die on the no-email
+ * branch is visible in the data rather than only in rolled-off function logs
+ * (ticket #16267: 0 of 38 recent fulfilled orders produced a review invite,
+ * and nothing had recorded that this was happening). Never throws — a faulty
+ * write here must not take down the webhook handler it is only observing.
+ */
+export async function recordOrderFulfillmentOutcome(
+  shopifyOrderId: string,
+  outcome: OrderFulfillmentWebhookOutcome,
+  reason?: string,
+): Promise<void> {
+  try {
+    await sql`
+      INSERT INTO order_fulfillment_webhook_log (shopify_order_id, outcome, reason)
+      VALUES (${shopifyOrderId}, ${outcome}, ${reason ?? null})
+    `
+  } catch (err) {
+    console.error('[reviews] recordOrderFulfillmentOutcome failed (ignored):', err)
+  }
+}
+
+/** Rows `recordOrderFulfillmentOutcome` wrote in the last `days` days, any outcome. */
+export async function countFulfillmentWebhookLogSince(days: number): Promise<number> {
+  const rows = await sql`
+    SELECT count(*)::int AS n FROM order_fulfillment_webhook_log
+    WHERE created_at > now() - (${days} || ' days')::interval
+  `
+  return Number(rows[0]?.['n'] ?? 0)
+}
+
+/**
+ * `review_invites` rows touched in the last `days` days. The table has no
+ * `created_at`: `sent_at` defaults to `now()` at INSERT time (createInvite
+ * never sets it) and stays there until `markInviteSent` overwrites it at
+ * actual send time, so it reads as "created" for a still-`scheduled` row and
+ * "sent" for one the daily cron has since delivered. Either way, zero rows
+ * touched in the window is the right "nothing happened here lately" signal.
+ */
+export async function countInvitesCreatedSince(days: number): Promise<number> {
+  const rows = await sql`
+    SELECT count(*)::int AS n FROM review_invites
+    WHERE sent_at > now() - (${days} || ' days')::interval
+  `
+  return Number(rows[0]?.['n'] ?? 0)
+}
+
 /** Scheduled invites whose send_after has passed — the daily cron sends these. */
 export async function getDueScheduledInvites(limit = 200): Promise<ReviewInvite[]> {
   const rows = await sql`
