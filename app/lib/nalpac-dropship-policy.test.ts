@@ -49,7 +49,7 @@ describe('dropshipRestriction', () => {
 
 describe('isNalpacMapVerifiedBrand', () => {
   it('matches the verification list under both feed and vendor spellings', () => {
-    for (const v of ['Lovense', 'Playground', 'Hello Playground', 'SVibe', 'Snail Vibe', 'spareparts', 'Gun Oil']) {
+    for (const v of ['Lovense', 'Playground', 'Hello Playground', 'SVibe', 'Snail Vibe', 'spareparts', 'Gun Oil', 'Aneros', 'ANEROS']) {
       expect(isNalpacMapVerifiedBrand(v)).toBe(true)
     }
     expect(isNalpacMapVerifiedBrand('Blush')).toBe(false)

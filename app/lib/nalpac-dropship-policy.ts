@@ -4,6 +4,7 @@
  *
  * Source: Nalpac's "Restricted from Dropship Sales" notice, received by the
  * owner 2026-10-09. The Lovense and Playground MAP agreements are signed.
+ * Aneros was added 2026-10-19 after its own MAP compliance warning.
  *
  * Pure module (no I/O), so every import gate and the pricing engine share one
  * list and the tests can pin it.
@@ -57,6 +58,11 @@ export const DROPSHIP_BLOCKED_SKUS: readonly string[] = ['98510']
  * clearance exemption. Spelled as the brand appears in the feed and as our
  * Shopify vendor; Snail Vibe ships as "SVibe" and Hello Playground as
  * "Playground", and both spellings are listed so either source matches.
+ *
+ * Aneros is not on Nalpac's list. It enforces MAP itself: its 2026-10-19
+ * compliance warning found 11 listings below MAP and threatened a Do Not Sell
+ * listing, which would cut off supply through every distributor. It gets the
+ * same contractual floor, so it lives here rather than in a separate list.
  */
 export const NALPAC_MAP_VERIFIED_BRANDS: readonly string[] = [
   'Lovense',
@@ -71,6 +77,7 @@ export const NALPAC_MAP_VERIFIED_BRANDS: readonly string[] = [
   'Snail Vibe',
   'SVibe',
   'SpareParts',
+  'Aneros',
 ]
 
 export interface DropshipCheckInput {
