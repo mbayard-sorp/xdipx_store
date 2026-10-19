@@ -1,11 +1,12 @@
 /**
- * /api/lead under the lead SMS opt-in switch (owner blocker 731).
+ * /api/lead under the lead SMS opt-in kill switch (owner blocker 731).
  *
- * With the switch off, the two-door page renders no phone or SMS fields, and
- * the action must hold the same line against a client that sends them anyway:
+ * The switch is on by default (the owner's Twilio number is A2P-registered
+ * and a sender is being built), so the ON block pins today's behavior. With
+ * the switch off, the two-door page renders no phone or SMS fields, and the
+ * action must hold the same line against a client that sends them anyway:
  * no phone on the Klaviyo profile, no subscribeToSms, no consent_log row, and
- * a stray smsConsent must not 400 the signup. With the switch on, the
- * pre-switch behavior holds unchanged.
+ * a stray smsConsent must not 400 the signup.
  *
  * Lives in app/lib/ so flatRoutes() does not treat it as a route module.
  */
@@ -67,7 +68,7 @@ afterEach(() => {
   else process.env['NODE_ENV'] = ORIG_NODE_ENV
 })
 
-describe('/api/lead with lead SMS opt-in OFF (default)', () => {
+describe('/api/lead with lead SMS opt-in OFF (kill switch flipped)', () => {
   beforeEach(() => mocks.isLeadSmsOptinEnabled.mockResolvedValue(false))
 
   it('drops phone and smsConsent even when the client sends both', async () => {
@@ -106,7 +107,7 @@ describe('/api/lead with lead SMS opt-in OFF (default)', () => {
   })
 })
 
-describe('/api/lead with lead SMS opt-in ON', () => {
+describe('/api/lead with lead SMS opt-in ON (default)', () => {
   beforeEach(() => mocks.isLeadSmsOptinEnabled.mockResolvedValue(true))
 
   it('subscribes SMS and logs consent when the box was ticked', async () => {
@@ -135,5 +136,32 @@ describe('/api/lead with lead SMS opt-in ON', () => {
     const bad = await post(lead)
     expect(bad.status).toBe(400)
     expect((await bad.json()).error).toBe('invalid_phone')
+  })
+})
+
+describe('lead SMS opt-in switch defaults', () => {
+  it('env override: 0 forces off, 1 forces on, anything else defers to the valve', async () => {
+    vi.doUnmock('~/lib/lead-sms-optin.server')
+    vi.doMock('~/lib/team.server', () => ({
+      getKillSwitch: vi.fn(async () => true),
+      VALVE_KEYS: { leadSmsOptin: 'lead_sms_optin_enabled' },
+    }))
+    const { isLeadSmsOptinEnabled, leadSmsOptinEnvOverride } = await import('~/lib/lead-sms-optin.server')
+    const orig = process.env['LEAD_SMS_OPTIN_ENABLED']
+    try {
+      process.env['LEAD_SMS_OPTIN_ENABLED'] = '0'
+      expect(leadSmsOptinEnvOverride()).toBe(false)
+      expect(await isLeadSmsOptinEnabled()).toBe(false)
+      process.env['LEAD_SMS_OPTIN_ENABLED'] = '1'
+      expect(await isLeadSmsOptinEnabled()).toBe(true)
+      delete process.env['LEAD_SMS_OPTIN_ENABLED']
+      expect(leadSmsOptinEnvOverride()).toBeNull()
+      // Missing row reads as on through getKillSwitch (fail-open): the default is on.
+      expect(await isLeadSmsOptinEnabled()).toBe(true)
+    } finally {
+      if (orig === undefined) delete process.env['LEAD_SMS_OPTIN_ENABLED']
+      else process.env['LEAD_SMS_OPTIN_ENABLED'] = orig
+      vi.doUnmock('~/lib/team.server')
+    }
   })
 })

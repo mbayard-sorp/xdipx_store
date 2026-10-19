@@ -5,8 +5,10 @@
  * which owns the age gate, consent banner and analytics shell.
  *
  * The phone input and the SMS consent box exist only while `smsOptin` is on
- * (the lead_sms_optin_enabled valve, owner blocker 731): with no approved SMS
- * sending path there is nothing to consent to, so the page does not ask.
+ * (the lead_sms_optin_enabled kill switch, default on, owner blocker 731):
+ * with the switch off there is nothing to consent to, so the page does not
+ * ask. The prop defaults to false so a caller that forgets it asks for less,
+ * never more.
  */
 
 import { useEffect, useRef, useState } from 'react'

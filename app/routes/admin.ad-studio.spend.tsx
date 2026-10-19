@@ -44,7 +44,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     isOwner: admin?.role === 'owner',
     overview,
     leadFunnel: buildLeadFunnelReport(),
-    leadSmsOptin: { enabled: smsOptin, envForced: leadSmsOptinEnvOverride() },
+    leadSmsOptin: { enabled: smsOptin, envForced: leadSmsOptinEnvOverride() !== null },
   }
 }
 
@@ -73,14 +73,14 @@ export async function action({ request }: ActionFunctionArgs) {
 
     if (intent === 'toggle-lead-sms-optin') {
       if (!isOwner) return { ok: false as const, intent, error: 'Only the owner can change this.' }
-      if (leadSmsOptinEnvOverride()) return { ok: false as const, intent, error: 'LEAD_SMS_OPTIN_ENABLED=1 is set in the environment, so the valve cannot turn it off.' }
+      if (leadSmsOptinEnvOverride() !== null) return { ok: false as const, intent, error: 'LEAD_SMS_OPTIN_ENABLED is set in the environment, so the valve does not decide this.' }
       const next = String(form.get('next') ?? '') === 'true' ? 'true' : 'false'
       await setPipelineSettingAudited(VALVE_KEYS.leadSmsOptin, next, 'owner', 'admin.ad-studio.spend')
       return {
         ok: true as const,
         intent,
         message: next === 'true'
-          ? 'Lead SMS opt-in is on. /hello asks for a phone number and SMS consent again.'
+          ? 'Lead SMS opt-in is on. /hello asks for a phone number and SMS consent.'
           : 'Lead SMS opt-in is off. /hello asks for email only and /api/lead ignores phone and SMS consent.',
       }
     }

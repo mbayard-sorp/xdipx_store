@@ -7,11 +7,12 @@
  *   1. subscribes the email to the paid-leads Klaviyo list with first name,
  *      phone, interest and the ad's UTMs on the profile (the welcome series
  *      splits on `interest`);
- *   2. only when the SMS box was ticked AND the lead SMS opt-in switch is on
- *      (app/lib/lead-sms-optin.server.ts, owner blocker 731), subscribes the
- *      number to SMS and logs that consent. With the switch off, phone and
- *      smsConsent are dropped before validation even if a client sends them:
- *      no phone on the profile, no SMS subscribe, no consent_log row;
+ *   2. only when the SMS box was ticked AND the lead SMS opt-in kill switch
+ *      is on (app/lib/lead-sms-optin.server.ts, default on, owner blocker
+ *      731), subscribes the number to SMS and logs that consent. With the
+ *      switch off, phone and smsConsent are dropped before validation even if
+ *      a client sends them: no phone on the profile, no SMS subscribe, no
+ *      consent_log row;
  *   3. sends a Meta Lead through CAPI and returns its event id so the
  *      browser pixel's Lead dedupes against it;
  *   4. returns the code, its terms, and the shop link that puts the code on

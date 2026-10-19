@@ -5,16 +5,17 @@ import type { LeadFunnelReport } from '~/lib/lead-funnel-report.server'
 
 export interface LeadSmsOptinState {
   enabled: boolean
-  /** LEAD_SMS_OPTIN_ENABLED=1 is set, so the valve cannot turn it off. */
+  /** LEAD_SMS_OPTIN_ENABLED is set to 0 or 1, so the valve is not what decides. */
   envForced: boolean
 }
 
 type ToggleData = { ok: true; message: string } | { ok: false; error: string }
 
 /**
- * The lead_sms_optin_enabled valve (owner blocker 731). Off means /hello asks
- * for email only and /api/lead drops phone and SMS consent; on restores the
- * phone input and the SMS consent box. Owner-only, audited on the server.
+ * The lead_sms_optin_enabled kill switch (owner blocker 731), default on. Off
+ * means /hello asks for email only and /api/lead drops phone and SMS consent;
+ * on (the default) keeps the phone input and the SMS consent box. Owner-only,
+ * audited on the server.
  */
 function SmsOptinControl({ state, isOwner, actionPath }: { state: LeadSmsOptinState; isOwner: boolean; actionPath: string }) {
   const fetcher = useFetcher<ToggleData>()
@@ -28,8 +29,8 @@ function SmsOptinControl({ state, isOwner, actionPath }: { state: LeadSmsOptinSt
           SMS opt-in on /hello: <span className={optimistic ? 'text-plum' : 'text-ink-3'}>{optimistic ? 'on' : 'off'}</span>
         </div>
         <p className="text-xs text-ink-3">
-          Off until an SMS sending path is carrier-approved (blocker 731). Off hides the phone and consent fields and /api/lead ignores both.
-          {state.envForced ? ' Forced on by LEAD_SMS_OPTIN_ENABLED=1.' : ''}
+          Kill switch for the SMS path (blocker 731), on by default. Off hides the phone and consent fields and /api/lead ignores both, no deploy needed.
+          {state.envForced ? ' Set by LEAD_SMS_OPTIN_ENABLED in the environment, so the valve does not decide.' : ''}
         </p>
         {result && !result.ok && !pending ? <p className="mt-1 text-xs text-coral">{result.error}</p> : null}
         {result && result.ok && !pending ? <p className="mt-1 text-xs text-ink-3">{result.message}</p> : null}
