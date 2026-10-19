@@ -478,4 +478,11 @@ export const VALVE_KEYS = {
   videoProgram:       'video_program_enabled',
   chatEnabled:        'chat_enabled',
   smsAgentEnabled:    'sms_agent_enabled',
+  // Paid-lead funnel SMS opt-in (owner blocker 731). Until an SMS sending path
+  // is carrier-approved for a sex-toy store (Klaviyo SMS or Twilio 10DLC), the
+  // two-door page must not ask for a phone number or SMS consent at all, and
+  // /api/lead must not subscribe anyone to SMS. Default OFF with no migration
+  // seed: getValve treats the missing row as off. LEAD_SMS_OPTIN_ENABLED=1
+  // in the environment is the equivalent switch for a preview deploy.
+  leadSmsOptin:       'lead_sms_optin_enabled',
 } as const

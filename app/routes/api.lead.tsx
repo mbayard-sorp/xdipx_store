@@ -7,8 +7,11 @@
  *   1. subscribes the email to the paid-leads Klaviyo list with first name,
  *      phone, interest and the ad's UTMs on the profile (the welcome series
  *      splits on `interest`);
- *   2. only when the SMS box was ticked, subscribes the number to SMS and
- *      logs that consent;
+ *   2. only when the SMS box was ticked AND the lead SMS opt-in switch is on
+ *      (app/lib/lead-sms-optin.server.ts, owner blocker 731), subscribes the
+ *      number to SMS and logs that consent. With the switch off, phone and
+ *      smsConsent are dropped before validation even if a client sends them:
+ *      no phone on the profile, no SMS subscribe, no consent_log row;
  *   3. sends a Meta Lead through CAPI and returns its event id so the
  *      browser pixel's Lead dedupes against it;
  *   4. returns the code, its terms, and the shop link that puts the code on
@@ -25,6 +28,7 @@ import { logConsent } from '~/lib/consent.server'
 import { subscribeLead } from '~/lib/klaviyo.server'
 import { LEAD_OFFER } from '~/lib/lead-interests'
 import { buildShopUrl, validateLeadInput, type FunnelUtm } from '~/lib/lead-funnel'
+import { isLeadSmsOptinEnabled } from '~/lib/lead-sms-optin.server'
 import { sendCapiLead } from '~/lib/meta-capi.server'
 import { checkRateLimit, rateLimited } from '~/lib/rate-limit.server'
 import { subscribeToSms } from '~/lib/sms-v2/klaviyo.server'
@@ -71,6 +75,14 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   const utm: FunnelUtm = getStoredUTM(request) ?? {}
+  // Switch off: the page never rendered the fields, so anything here came from
+  // a stale tab or a hand-built request. Strip it before validation so a stray
+  // smsConsent cannot even 400 the signup.
+  const smsOptin = await isLeadSmsOptinEnabled()
+  if (!smsOptin) {
+    delete body['phone']
+    delete body['smsConsent']
+  }
   const parsed = validateLeadInput(body)
 
   // Honeypot: look successful, do nothing.
@@ -82,7 +94,7 @@ export async function action({ request }: ActionFunctionArgs) {
   const lead = parsed.value
 
   let phone: string | null = null
-  if (lead.phone) {
+  if (smsOptin && lead.phone) {
     phone = normalizePhoneToE164(lead.phone)
     if (!phone) return Response.json({ error: 'invalid_phone' }, { status: 400 })
   }
@@ -106,7 +118,7 @@ export async function action({ request }: ActionFunctionArgs) {
     return Response.json({ error: 'subscribe_failed' }, { status: 502 })
   }
 
-  if (phone && lead.smsConsent) {
+  if (smsOptin && phone && lead.smsConsent) {
     try {
       await subscribeToSms(phone, { source: `curious-${lead.slug}`, consentTimestamp: now })
     } catch (err) {

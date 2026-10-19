@@ -3,6 +3,10 @@
  * One question, then Door A (the code, for a name and an email) or Door B
  * (just looking, on to /start). Rendered by app/routes/bridge.$slug.tsx,
  * which owns the age gate, consent banner and analytics shell.
+ *
+ * The phone input and the SMS consent box exist only while `smsOptin` is on
+ * (the lead_sms_optin_enabled valve, owner blocker 731): with no approved SMS
+ * sending path there is nothing to consent to, so the page does not ask.
  */
 
 import { useEffect, useRef, useState } from 'react'
@@ -44,10 +48,12 @@ export function LeadFunnelView({
   page,
   utm,
   terms,
+  smsOptin = false,
 }: {
   page: LeadFunnelPage
   utm: FunnelUtm
   terms: string
+  smsOptin?: boolean
 }) {
   const { before, em, after } = splitHeadline(page.headline)
   const [interest, setInterest] = useState<LeadInterestSlug | null>(null)
@@ -76,8 +82,8 @@ export function LeadFunnelView({
       {
         firstName: String(form.get('firstName') ?? ''),
         email: String(form.get('email') ?? ''),
-        phone: String(form.get('phone') ?? ''),
-        smsConsent,
+        phone: smsOptin ? String(form.get('phone') ?? '') : '',
+        smsConsent: smsOptin && smsConsent,
         interest,
         slug: page.slug,
         company: String(form.get('company') ?? ''),
@@ -162,19 +168,23 @@ export function LeadFunnelView({
               Email
               <input name="email" type="email" autoComplete="email" inputMode="email" required maxLength={254} className={field} />
             </label>
-            <label className="mt-3 block font-body text-sm font-semibold text-ink">
-              Phone <span className="font-normal text-ink-3">(optional)</span>
-              <input name="phone" type="tel" autoComplete="tel" inputMode="tel" maxLength={32} className={field} />
-            </label>
-            <label className="mt-3 flex items-start gap-3 font-body text-xs leading-relaxed text-ink-2">
-              <input
-                type="checkbox"
-                checked={smsConsent}
-                onChange={e => setSmsConsent(e.target.checked)}
-                className="mt-0.5 h-5 w-5 shrink-0 accent-plum"
-              />
-              <span>{SMS_CONSENT_TEXT}</span>
-            </label>
+            {smsOptin ? (
+              <>
+                <label className="mt-3 block font-body text-sm font-semibold text-ink">
+                  Phone <span className="font-normal text-ink-3">(optional)</span>
+                  <input name="phone" type="tel" autoComplete="tel" inputMode="tel" maxLength={32} className={field} />
+                </label>
+                <label className="mt-3 flex items-start gap-3 font-body text-xs leading-relaxed text-ink-2">
+                  <input
+                    type="checkbox"
+                    checked={smsConsent}
+                    onChange={e => setSmsConsent(e.target.checked)}
+                    className="mt-0.5 h-5 w-5 shrink-0 accent-plum"
+                  />
+                  <span>{SMS_CONSENT_TEXT}</span>
+                </label>
+              </>
+            ) : null}
 
             {error ? (
               <p role="alert" className="mt-3 font-body text-sm font-semibold text-coral">

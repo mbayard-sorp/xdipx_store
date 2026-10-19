@@ -26,6 +26,9 @@ import { RuleRecipes } from '~/components/admin/ads/RuleRecipes'
 import { SpendBand } from '~/components/admin/ads/SpendBand'
 import { LeadFunnelCard } from '~/components/admin/ads/LeadFunnelCard'
 import { buildLeadFunnelReport } from '~/lib/lead-funnel-report.server'
+import { isLeadSmsOptinEnabled, leadSmsOptinEnvOverride } from '~/lib/lead-sms-optin.server'
+import { setPipelineSettingAudited } from '~/lib/settings.server'
+import { VALVE_KEYS } from '~/lib/team-keys'
 import { BandSkeleton, CapSkeleton, ErrorSlab } from '~/components/admin/ads/StateSlabs'
 
 export const meta: MetaFunction = () => [{ title: 'Spend - Ad Studio - xdipx Admin' }]
@@ -35,9 +38,14 @@ const MAX_FILE_BYTES = 8 * 1024 * 1024
 
 export async function loader({ request }: LoaderFunctionArgs) {
   await requireAdmin(request)
-  const [admin, overview] = await Promise.all([getAdminUser(request), getSpendOverview()])
+  const [admin, overview, smsOptin] = await Promise.all([getAdminUser(request), getSpendOverview(), isLeadSmsOptinEnabled()])
   // Streamed (not awaited): Klaviyo + GA4 reads must not block the spend tab.
-  return { isOwner: admin?.role === 'owner', overview, leadFunnel: buildLeadFunnelReport() }
+  return {
+    isOwner: admin?.role === 'owner',
+    overview,
+    leadFunnel: buildLeadFunnelReport(),
+    leadSmsOptin: { enabled: smsOptin, envForced: leadSmsOptinEnvOverride() },
+  }
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -61,6 +69,20 @@ export async function action({ request }: ActionFunctionArgs) {
         : await importShopCampaignsCsv(buf, { source: 'shop', commit })
       if (!commit) return { ok: true as const, intent: 'import-preview' as const, result }
       return { ok: true as const, intent: 'import-commit' as const, result, message: `Imported ${result.fileRows} rows.` }
+    }
+
+    if (intent === 'toggle-lead-sms-optin') {
+      if (!isOwner) return { ok: false as const, intent, error: 'Only the owner can change this.' }
+      if (leadSmsOptinEnvOverride()) return { ok: false as const, intent, error: 'LEAD_SMS_OPTIN_ENABLED=1 is set in the environment, so the valve cannot turn it off.' }
+      const next = String(form.get('next') ?? '') === 'true' ? 'true' : 'false'
+      await setPipelineSettingAudited(VALVE_KEYS.leadSmsOptin, next, 'owner', 'admin.ad-studio.spend')
+      return {
+        ok: true as const,
+        intent,
+        message: next === 'true'
+          ? 'Lead SMS opt-in is on. /hello asks for a phone number and SMS consent again.'
+          : 'Lead SMS opt-in is off. /hello asks for email only and /api/lead ignores phone and SMS consent.',
+      }
     }
 
     if (intent === 'save-caps' || intent === 'save-rules' || intent === 'save-margin') {
@@ -88,7 +110,7 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function SpendTab() {
-  const { isOwner, overview: o, leadFunnel } = useLoaderData<typeof loader>()
+  const { isOwner, overview: o, leadFunnel, leadSmsOptin } = useLoaderData<typeof loader>()
   const navigation = useNavigation()
   const loading = navigation.state === 'loading' && navigation.location?.pathname === ACTION_PATH
 
@@ -119,7 +141,7 @@ export default function SpendTab() {
           <CsvDropZone actionPath={ACTION_PATH} />
         </div>
         <div className="order-5 lg:col-span-2">
-          <LeadFunnelCard report={leadFunnel} />
+          <LeadFunnelCard report={leadFunnel} smsOptin={leadSmsOptin} isOwner={isOwner} actionPath={ACTION_PATH} />
         </div>
         <div className="order-6 lg:col-span-2">
           <RuleRecipes thresholds={o.thresholds} grossMarginPct={o.grossMarginPct} isOwner={isOwner} actionPath={ACTION_PATH} />

@@ -24,6 +24,7 @@ import { buildBridgeDestination, getAdBridgePage, pickBridgePackshot } from '~/l
 import { getLaneSubset } from '~/lib/ad-lane-subset.server'
 import { LeadFunnelView } from '~/components/funnel/LeadFunnelView'
 import { getLeadFunnelPage, type FunnelUtm } from '~/lib/lead-funnel'
+import { isLeadSmsOptinEnabled } from '~/lib/lead-sms-optin.server'
 import { LEAD_OFFER } from '~/lib/lead-interests'
 import { getStoredUTM } from '~/lib/attribution.server'
 import { trackCtaClick } from '~/lib/analytics.client'
@@ -57,11 +58,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     }
     const onHost = isBridgeHost(requestHost(request.headers))
     const origin = onHost ? `https://${BRIDGE_HOST}` : url.origin
+    // Phone + SMS consent render only while an SMS sending path is enabled
+    // (blocker 731); /api/lead applies the same switch server-side.
+    const smsOptin = await isLeadSmsOptinEnabled()
     return {
       kind: 'funnel' as const,
       page: funnel,
       utm,
       terms: LEAD_OFFER.terms,
+      smsOptin,
       canonical: `${origin}/${funnel.slug}`,
     }
   }
@@ -235,7 +240,7 @@ export default function BridgeRoute() {
     <main className="min-h-[100svh] bg-paper text-ink">
       <style dangerouslySetInnerHTML={{ __html: GATE_CSS }} />
       <script dangerouslySetInnerHTML={{ __html: AGE_PRECHECK }} />
-      {d.kind === 'funnel' ? <LeadFunnelView page={d.page} utm={d.utm} terms={d.terms} /> : <BridgeView d={d} />}
+      {d.kind === 'funnel' ? <LeadFunnelView page={d.page} utm={d.utm} terms={d.terms} smsOptin={d.smsOptin} /> : <BridgeView d={d} />}
       <AgeGate />
       <CookieConsent />
       <Analytics ga4Id={ga4Id} />
