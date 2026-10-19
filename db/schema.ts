@@ -2683,3 +2683,28 @@ export const emailCampaignMetrics = pgTable('email_campaign_metrics', {
 }, t => ({
   campaignKeyIdx: index('idx_email_campaign_metrics_campaign_key').on(t.campaignKey),
 }))
+
+// Twilio double opt-in rows for SMS consent on the paid-lead funnel
+// (migration 126). One row per form consent; the newest row per phone is the
+// live one. status: pending | confirmed | opted_out. See
+// app/lib/lead-sms.server.ts and docs/store-team/lead-sms.md.
+export const leadSmsSubscriptions = pgTable('lead_sms_subscriptions', {
+  id:                serial('id').primaryKey(),
+  phone:             varchar('phone', { length: 20 }).notNull(),
+  email:             text('email').notNull(),
+  firstName:         text('first_name').notNull(),
+  interest:          text('interest'),
+  source:            text('source').notNull(),
+  status:            text('status').notNull().default('pending'),
+  consentedAt:       timestamp('consented_at', { withTimezone: true }).notNull(),
+  confirmedAt:       timestamp('confirmed_at', { withTimezone: true }),
+  confirmedVia:      text('confirmed_via'),
+  welcomeSentAt:     timestamp('welcome_sent_at', { withTimezone: true }),
+  optedOutAt:        timestamp('opted_out_at', { withTimezone: true }),
+  confirmMessageSid: text('confirm_message_sid'),
+  welcomeMessageSid: text('welcome_message_sid'),
+  createdAt:         timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => ({
+  phoneCreatedIdx: index('idx_lead_sms_subscriptions_phone_created').on(t.phone, t.createdAt),
+  statusIdx:       index('idx_lead_sms_subscriptions_status').on(t.status),
+}))
