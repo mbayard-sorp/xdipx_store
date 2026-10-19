@@ -1248,6 +1248,21 @@ Compare against the plan and last run's post (published? still draft? which gate
 failure has now happened twice and you can name both runs, and at most 2 rows per run: see the
 intake doctrine in `improvement-loop.md`. Zero rows is the expected outcome of a clean run.
 
+**Weekly impression check (ticket #16369).** 96 posts had shipped with nobody in the content lane
+ever told whether any of them earned a GSC impression. Run the content lane's own impression report
+and fold its numbers into the retro's `decision` event, so the lane sees this every run instead of
+never:
+
+```bash
+npx tsx scripts/content-gsc-impressions.ts
+```
+
+A fresh `gsc_snapshots` row only lands weekly (Monday 06:00 UTC), so most days this reports the same
+window as yesterday -- that is expected, not a bug. Report the `/notebook/` and `/compare/`
+impression counts (even when both are 0 -- that is the honest, reportable answer when neither
+surface made the GSC top-100-pages list) in the retro note. This is a reporting step, not a gate:
+nothing here blocks publishing.
+
 Note the `kind` below. This example said `process` until 2026-08-02 and was copy-pasted straight
 into the queue with no executor eleven times in two weeks. A playbook or agent-definition edit is
 `instructions`; something needing engineering is `code`; `process` is only for a decision that
