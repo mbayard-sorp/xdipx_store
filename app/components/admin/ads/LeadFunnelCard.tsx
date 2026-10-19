@@ -1,7 +1,58 @@
 import { Suspense } from 'react'
-import { Await } from 'react-router'
+import { Await, useFetcher } from 'react-router'
 import { ResponsiveTable } from '~/components/admin/ResponsiveTable'
 import type { LeadFunnelReport } from '~/lib/lead-funnel-report.server'
+
+export interface LeadSmsOptinState {
+  enabled: boolean
+  /** LEAD_SMS_OPTIN_ENABLED is set to 0 or 1, so the valve is not what decides. */
+  envForced: boolean
+}
+
+type ToggleData = { ok: true; message: string } | { ok: false; error: string }
+
+/**
+ * The lead_sms_optin_enabled kill switch (owner blocker 731), default on. Off
+ * means /hello asks for email only and /api/lead drops phone and SMS consent;
+ * on (the default) keeps the phone input and the SMS consent box. Owner-only,
+ * audited on the server.
+ */
+function SmsOptinControl({ state, isOwner, actionPath }: { state: LeadSmsOptinState; isOwner: boolean; actionPath: string }) {
+  const fetcher = useFetcher<ToggleData>()
+  const pending = fetcher.state !== 'idle'
+  const optimistic = pending && fetcher.formData ? fetcher.formData.get('next') === 'true' : state.enabled
+  const result = fetcher.data
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-line bg-paper-2 p-3 md:flex-row md:items-center md:justify-between">
+      <div>
+        <div className="text-sm font-medium text-ink">
+          SMS opt-in on /hello: <span className={optimistic ? 'text-plum' : 'text-ink-3'}>{optimistic ? 'on' : 'off'}</span>
+        </div>
+        <p className="text-xs text-ink-3">
+          Kill switch for the SMS path (blocker 731), on by default. Off hides the phone and consent fields and /api/lead ignores both, no deploy needed.
+          {state.envForced ? ' Set by LEAD_SMS_OPTIN_ENABLED in the environment, so the valve does not decide.' : ''}
+        </p>
+        {result && !result.ok && !pending ? <p className="mt-1 text-xs text-coral">{result.error}</p> : null}
+        {result && result.ok && !pending ? <p className="mt-1 text-xs text-ink-3">{result.message}</p> : null}
+      </div>
+      {isOwner && !state.envForced ? (
+        <fetcher.Form method="post" action={actionPath}>
+          <input type="hidden" name="intent" value="toggle-lead-sms-optin" />
+          <input type="hidden" name="next" value={String(!state.enabled)} />
+          <button
+            type="submit"
+            disabled={pending}
+            className="min-h-10 rounded-full border border-ink/20 px-4 text-sm font-semibold text-ink disabled:opacity-60"
+          >
+            {pending ? 'Saving' : state.enabled ? 'Turn off' : 'Turn on'}
+          </button>
+        </fetcher.Form>
+      ) : (
+        <span className="text-xs text-ink-3">{state.envForced ? 'Set by env' : 'Owner only'}</span>
+      )}
+    </div>
+  )
+}
 
 const usd = (n: number) => `$${n.toFixed(2)}`
 const pct = (n: number) => `${(n * 100).toFixed(1)}%`
@@ -92,11 +143,24 @@ function Body({ r }: { r: LeadFunnelReport }) {
   )
 }
 
-export function LeadFunnelCard({ report }: { report: Promise<LeadFunnelReport> }) {
+export function LeadFunnelCard({
+  report,
+  smsOptin,
+  isOwner,
+  actionPath,
+}: {
+  report: Promise<LeadFunnelReport>
+  smsOptin: LeadSmsOptinState
+  isOwner: boolean
+  actionPath: string
+}) {
   return (
     <section className="rounded-xl border border-line bg-paper p-4">
       <h2 className="font-display text-lg text-ink">Lead funnel, last 30 days</h2>
       <p className="mb-3 text-xs text-ink-3">Paid leads joined to Klaviyo Placed Order after capture.</p>
+      <div className="mb-4">
+        <SmsOptinControl state={smsOptin} isOwner={isOwner} actionPath={actionPath} />
+      </div>
       <Suspense fallback={<p className="text-sm text-ink-3">Reading Klaviyo and GA4...</p>}>
         <Await resolve={report} errorElement={<p className="text-sm text-coral">Lead funnel report failed to load.</p>}>
           {r => <Body r={r} />}
