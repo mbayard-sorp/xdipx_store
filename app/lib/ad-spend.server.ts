@@ -5,6 +5,8 @@
  *                        planned-versus-actual rows, rule thresholds
  *   saveMediaCaps()      owner-only cap edit through setPipelineSettingAudited
  *   saveRuleValues()     owner-only rule recipe edit, same setter
+ *   saveAutoApply()      owner-only automation switch, same setter
+ *   saveAutomationLimits() owner-only automation numbers, same setter
  *   getSimulationExit()  the four exit-criteria lines, real numbers
  *
  * Media (ad platforms) and compute (image renders) are never summed into one
@@ -18,6 +20,7 @@ import {
 import {
   ADS_SETTING_KEYS, getAdsGrossMarginPct, getAdsMediaDailyCapCents, getAdsMediaMonthlyCapCents, getAdsRuleThresholds,
   getAdsSimulationExitOk, getAdsSpendEnabled, type AdsRuleKey,
+  ADS_AUTOMATION_BOUNDS, getAdsAutomationSettings, type AdsAutomationSettings,
 } from '~/lib/ad-settings.server'
 import { setPipelineSettingAudited, type SettingsActor } from '~/lib/settings.server'
 import { addDays, todayUtc } from '~/lib/ad-metrics.server'
@@ -49,13 +52,15 @@ export interface SpendOverview {
   plan30: PlanRow[]
   thresholds: Record<AdsRuleKey, number>
   grossMarginPct: number
+  automation: AdsAutomationSettings
 }
 
 export async function getSpendOverview(now: Date = new Date()): Promise<SpendOverview> {
   const today = todayUtc(now)
   const monthStart = `${today.slice(0, 7)}-01`
-  const [monthlyCapCents, dailyCapCents, spendEnabled, thresholds, grossMarginPct] = await Promise.all([
+  const [monthlyCapCents, dailyCapCents, spendEnabled, thresholds, grossMarginPct, automation] = await Promise.all([
     getAdsMediaMonthlyCapCents(), getAdsMediaDailyCapCents(), getAdsSpendEnabled(), getAdsRuleThresholds(), getAdsGrossMarginPct(),
+    getAdsAutomationSettings(),
   ])
 
   const from30 = addDays(today, -29)
@@ -93,7 +98,7 @@ export async function getSpendOverview(now: Date = new Date()): Promise<SpendOve
     computeTodayCents, computeCapCents,
     plan7: buildPlanVsActual({ ...base, windowDays: 7 }),
     plan30: buildPlanVsActual({ ...base, windowDays: 30 }),
-    thresholds, grossMarginPct,
+    thresholds, grossMarginPct, automation,
   }
 }
 
@@ -149,6 +154,53 @@ export async function saveGrossMargin(raw: unknown, actor: SettingsActor = 'owne
   if (!Number.isFinite(n) || n < 1 || n > 100) throw new SpendInputError('Gross margin must be a percent from 1 to 100.')
   await setPipelineSettingAudited(ADS_SETTING_KEYS.grossMarginPct, String(n), actor, SOURCE)
   return { value: n, message: `Gross margin set to ${n}%. Break-even moves with it.` }
+}
+
+/**
+ * Turn auto-apply on or off. It only lets machines apply actions that lower
+ * spend, and only while ads_spend_enabled is also on.
+ */
+export async function saveAutoApply(next: boolean, actor: SettingsActor = 'owner'): Promise<{ value: boolean; message: string }> {
+  await setPipelineSettingAudited(ADS_SETTING_KEYS.autoApplyEnabled, next ? 'true' : 'false', actor, SOURCE)
+  return {
+    value: next,
+    message: next
+      ? 'Auto-apply is on. Rules can now pause and brake on their own, but only while spend is on.'
+      : 'Auto-apply is off. Rules only write dry-run rows.',
+  }
+}
+
+export interface AutomationLimitsSave { maxActionsPerDay: number; maxStepPct: number; leadCplCeilingCents: number; message: string }
+
+function wholeNumberIn(raw: unknown, bounds: { min: number; max: number }): number | null {
+  const t = String(raw ?? '').trim()
+  if (!/^\d+$/.test(t)) return null
+  const n = Number(t)
+  return n >= bounds.min && n <= bounds.max ? n : null
+}
+
+/** Save the daily action cap, the budget step limit and the lead CPL ceiling together. */
+export async function saveAutomationLimits(
+  input: { maxActionsPerDay: unknown; maxStepPct: unknown; leadCplCeiling: unknown },
+  actor: SettingsActor = 'owner',
+): Promise<AutomationLimitsSave> {
+  const b = ADS_AUTOMATION_BOUNDS
+  const maxActionsPerDay = wholeNumberIn(input.maxActionsPerDay, b.autoActionsMaxPerDay)
+  if (maxActionsPerDay == null) {
+    throw new SpendInputError(`Actions per day must be a whole number from ${b.autoActionsMaxPerDay.min} to ${b.autoActionsMaxPerDay.max}.`)
+  }
+  const maxStepPct = wholeNumberIn(input.maxStepPct, b.budgetMaxStepPct)
+  if (maxStepPct == null) {
+    throw new SpendInputError(`Budget step must be a whole percent from ${b.budgetMaxStepPct.min} to ${b.budgetMaxStepPct.max}.`)
+  }
+  const leadCplCeilingCents = parseDollarsToCents(input.leadCplCeiling)
+  if (leadCplCeilingCents == null || leadCplCeilingCents < b.leadCplCeilingCents.min || leadCplCeilingCents > b.leadCplCeilingCents.max) {
+    throw new SpendInputError(`Lead price ceiling must be from $${b.leadCplCeilingCents.min / 100} to $${b.leadCplCeilingCents.max / 100}.`)
+  }
+  await setPipelineSettingAudited(ADS_SETTING_KEYS.autoActionsMaxPerDay, String(maxActionsPerDay), actor, SOURCE)
+  await setPipelineSettingAudited(ADS_SETTING_KEYS.budgetMaxStepPct, String(maxStepPct), actor, SOURCE)
+  await setPipelineSettingAudited(ADS_SETTING_KEYS.leadCplCeilingCents, String(leadCplCeilingCents), actor, SOURCE)
+  return { maxActionsPerDay, maxStepPct, leadCplCeilingCents, message: 'Automation limits saved.' }
 }
 
 // ---------------------------------------------------------------------------

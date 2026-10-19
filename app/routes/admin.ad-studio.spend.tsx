@@ -3,7 +3,7 @@
  *
  * Cap control (owner-only edit), media versus compute bands, planned versus
  * actual per campaign and lane, the CSV drop zone, and the rules recipes
- * (collapsed). Every write goes through setPipelineSettingAudited with actor
+ * (collapsed), and the Automation section (the four auto-apply valves). Every write goes through setPipelineSettingAudited with actor
  * 'owner' and source 'admin.ad-studio.spend'. Admins (non-owners) see
  * everything read-only; the action refuses their saves.
  *
@@ -17,8 +17,9 @@ import { getAdminUser, requireAdmin } from '~/lib/session.server'
 import { AdMetricsError, importGoogleAdsCsv, importShopCampaignsCsv } from '~/lib/ad-metrics.server'
 import { RULE_IDS, type RuleId } from '~/lib/ad-rules-core'
 import {
-  SpendInputError, getSpendOverview, saveGrossMargin, saveMediaCaps, saveRuleValues,
+  SpendInputError, getSpendOverview, saveAutoApply, saveAutomationLimits, saveGrossMargin, saveMediaCaps, saveRuleValues,
 } from '~/lib/ad-spend.server'
+import { AutomationControls } from '~/components/admin/ads/AutomationControls'
 import { CapControl } from '~/components/admin/ads/CapControl'
 import { CsvDropZone } from '~/components/admin/ads/CsvDropZone'
 import { PlanVsActual } from '~/components/admin/ads/PlanVsActual'
@@ -85,6 +86,20 @@ export async function action({ request }: ActionFunctionArgs) {
       }
     }
 
+    if (intent === 'toggle-auto-apply' || intent === 'save-automation') {
+      if (!isOwner) return { ok: false as const, intent, error: 'Only the owner can change this.' }
+      if (intent === 'toggle-auto-apply') {
+        const saved = await saveAutoApply(String(form.get('next') ?? '') === 'true', 'owner')
+        return { ok: true as const, intent, message: saved.message }
+      }
+      const saved = await saveAutomationLimits({
+        maxActionsPerDay: form.get('maxActionsPerDay'),
+        maxStepPct: form.get('maxStepPct'),
+        leadCplCeiling: form.get('leadCplCeiling'),
+      }, 'owner')
+      return { ok: true as const, intent, message: saved.message }
+    }
+
     if (intent === 'save-caps' || intent === 'save-rules' || intent === 'save-margin') {
       if (!isOwner) return { ok: false as const, intent, error: 'Only the owner can change this.' }
       if (intent === 'save-caps') {
@@ -144,6 +159,9 @@ export default function SpendTab() {
           <LeadFunnelCard report={leadFunnel} smsOptin={leadSmsOptin} isOwner={isOwner} actionPath={ACTION_PATH} />
         </div>
         <div className="order-6 lg:col-span-2">
+          <AutomationControls data={{ ...o.automation, spendEnabled: o.spendEnabled }} isOwner={isOwner} actionPath={ACTION_PATH} />
+        </div>
+        <div className="order-7 lg:col-span-2">
           <RuleRecipes thresholds={o.thresholds} grossMarginPct={o.grossMarginPct} isOwner={isOwner} actionPath={ACTION_PATH} />
         </div>
       </div>

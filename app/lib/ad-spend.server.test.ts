@@ -46,11 +46,16 @@ vi.mock('~/lib/db.server', async () => {
   }
 })
 
-import { SpendInputError, saveGrossMargin, saveMediaCaps, saveRuleValues } from '~/lib/ad-spend.server'
+import { SpendInputError, saveAutoApply, saveAutomationLimits, saveGrossMargin, saveMediaCaps, saveRuleValues } from '~/lib/ad-spend.server'
 import {
   MAX_MONTHLY_CAP_CENTS, buildPlanVsActual, monthProjection, parseDollarsToCents, routineStreak,
 } from '~/lib/ad-spend-core'
-import { getAdsMediaDailyCapCents, getAdsMediaMonthlyCapCents, getAdsRuleThreshold } from '~/lib/ad-settings.server'
+import {
+  ADS_AUTO_ACTIONS_MAX_PER_DAY_DEFAULT, ADS_AUTO_APPLY_ENABLED_DEFAULT, ADS_BUDGET_MAX_STEP_PCT_DEFAULT,
+  ADS_LEAD_CPL_CEILING_CENTS_DEFAULT, ADS_SETTING_KEYS,
+  getAdsAutoActionsMaxPerDay, getAdsAutoApplyEnabled, getAdsAutomationSettings, getAdsBudgetMaxStepPct,
+  getAdsLeadCplCeilingCents, getAdsMediaDailyCapCents, getAdsMediaMonthlyCapCents, getAdsRuleThreshold,
+} from '~/lib/ad-settings.server'
 
 beforeEach(() => {
   mem.settings.clear(); mem.audit.length = 0; mem.invalidated = 0; mem.tables.clear()
@@ -103,6 +108,82 @@ describe('cap and rule saves go through the audited setter', () => {
     expect(mem.audit[0]).toMatchObject({ key: 'ads_gross_margin_pct', newValue: '50', actor: 'owner' })
     await expect(saveGrossMargin('0')).rejects.toBeInstanceOf(SpendInputError)
     await expect(saveGrossMargin('101')).rejects.toBeInstanceOf(SpendInputError)
+  })
+})
+
+describe('automation valves (ads control plane phase 0b)', () => {
+  it('uses the agreed keys and conservative defaults', () => {
+    expect(ADS_SETTING_KEYS).toMatchObject({
+      autoApplyEnabled: 'ads_auto_apply_enabled',
+      autoActionsMaxPerDay: 'ads_auto_actions_max_per_day',
+      budgetMaxStepPct: 'ads_budget_max_step_pct',
+      leadCplCeilingCents: 'ads_lead_cpl_ceiling_cents',
+    })
+    expect(ADS_AUTO_APPLY_ENABLED_DEFAULT).toBe(false)
+    expect(ADS_AUTO_ACTIONS_MAX_PER_DAY_DEFAULT).toBe(10)
+    expect(ADS_BUDGET_MAX_STEP_PCT_DEFAULT).toBe(20)
+    expect(ADS_LEAD_CPL_CEILING_CENTS_DEFAULT).toBe(800)
+    for (const k of Object.values(ADS_SETTING_KEYS)) expect(k.length).toBeLessThanOrEqual(50)
+  })
+
+  it('reads the defaults when no row exists', async () => {
+    expect(await getAdsAutoApplyEnabled()).toBe(false)
+    expect(await getAdsAutoActionsMaxPerDay()).toBe(10)
+    expect(await getAdsBudgetMaxStepPct()).toBe(20)
+    expect(await getAdsLeadCplCeilingCents()).toBe(800)
+    expect(await getAdsAutomationSettings()).toEqual({
+      autoApplyEnabled: false, autoApplyAllowed: false, autoActionsMaxPerDay: 10, budgetMaxStepPct: 20, leadCplCeilingCents: 800,
+    })
+  })
+
+  it('reads stored values, and falls back to the default for junk or out-of-range rows', async () => {
+    mem.settings.set('ads_auto_apply_enabled', 'true')
+    mem.settings.set('ads_auto_actions_max_per_day', '4')
+    mem.settings.set('ads_budget_max_step_pct', '15')
+    mem.settings.set('ads_lead_cpl_ceiling_cents', '650')
+    expect(await getAdsAutoApplyEnabled()).toBe(true)
+    expect(await getAdsAutoActionsMaxPerDay()).toBe(4)
+    expect(await getAdsBudgetMaxStepPct()).toBe(15)
+    expect(await getAdsLeadCplCeilingCents()).toBe(650)
+    mem.settings.set('ads_auto_apply_enabled', 'maybe')
+    mem.settings.set('ads_auto_actions_max_per_day', '500')
+    mem.settings.set('ads_budget_max_step_pct', '0')
+    mem.settings.set('ads_lead_cpl_ceiling_cents', 'eight dollars')
+    expect(await getAdsAutoApplyEnabled()).toBe(false)
+    expect(await getAdsAutoActionsMaxPerDay()).toBe(10)
+    expect(await getAdsBudgetMaxStepPct()).toBe(20)
+    expect(await getAdsLeadCplCeilingCents()).toBe(800)
+  })
+
+  it('allows auto-apply only when both auto-apply and spend are on', async () => {
+    mem.settings.set('ads_auto_apply_enabled', 'true')
+    expect((await getAdsAutomationSettings()).autoApplyAllowed).toBe(false)
+    mem.settings.set('ads_spend_enabled', 'true')
+    expect((await getAdsAutomationSettings()).autoApplyAllowed).toBe(true)
+    mem.settings.set('ads_auto_apply_enabled', 'false')
+    expect((await getAdsAutomationSettings()).autoApplyAllowed).toBe(false)
+  })
+
+  it('saves the switch and the limits through the audited setter as the owner', async () => {
+    await saveAutoApply(true, 'owner')
+    expect(await getAdsAutoApplyEnabled()).toBe(true)
+    const out = await saveAutomationLimits({ maxActionsPerDay: '5', maxStepPct: '25', leadCplCeiling: '$6.50' }, 'owner')
+    expect(out).toMatchObject({ maxActionsPerDay: 5, maxStepPct: 25, leadCplCeilingCents: 650 })
+    expect(await getAdsAutoActionsMaxPerDay()).toBe(5)
+    expect(await getAdsBudgetMaxStepPct()).toBe(25)
+    expect(await getAdsLeadCplCeilingCents()).toBe(650)
+    expect(mem.audit.map(a => a['key'])).toEqual([
+      'ads_auto_apply_enabled', 'ads_auto_actions_max_per_day', 'ads_budget_max_step_pct', 'ads_lead_cpl_ceiling_cents',
+    ])
+    expect(mem.audit.every(a => a['actor'] === 'owner' && a['source'] === 'admin.ad-studio.spend')).toBe(true)
+  })
+
+  it('refuses limits out of range and writes nothing', async () => {
+    await expect(saveAutomationLimits({ maxActionsPerDay: '2.5', maxStepPct: '20', leadCplCeiling: '8' })).rejects.toThrow(/Actions per day/)
+    await expect(saveAutomationLimits({ maxActionsPerDay: '10', maxStepPct: '80', leadCplCeiling: '8' })).rejects.toThrow(/Budget step/)
+    await expect(saveAutomationLimits({ maxActionsPerDay: '10', maxStepPct: '20', leadCplCeiling: '0.10' })).rejects.toThrow(/Lead price ceiling/)
+    await expect(saveAutomationLimits({ maxActionsPerDay: '10', maxStepPct: '20', leadCplCeiling: '500' })).rejects.toBeInstanceOf(SpendInputError)
+    expect(mem.audit).toHaveLength(0)
   })
 })
 

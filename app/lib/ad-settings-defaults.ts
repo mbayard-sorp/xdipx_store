@@ -10,6 +10,11 @@ export const ADS_SETTING_KEYS = {
   grossMarginPct: 'ads_gross_margin_pct',
   /** Owner's go for leaving simulation (plan section 2 exit criteria). Read-only chip in the sheet. */
   simulationExitOk: 'ads_simulation_exit_ok',
+  // Ads control plane automation valves (plan sections 5 and 9.4). Owner-written only.
+  autoApplyEnabled: 'ads_auto_apply_enabled',
+  autoActionsMaxPerDay: 'ads_auto_actions_max_per_day',
+  budgetMaxStepPct: 'ads_budget_max_step_pct',
+  leadCplCeilingCents: 'ads_lead_cpl_ceiling_cents',
 } as const
 
 export const ADS_SIMULATION_EXIT_OK_DEFAULT = false
@@ -60,3 +65,26 @@ export type AdsRuleKey = keyof typeof ADS_RULE_DEFAULTS
 
 /** Gross margin used for break-even CPA and ROAS, in percent (research E.2: about 45). */
 export const ADS_GROSS_MARGIN_PCT_DEFAULT = 45
+
+/**
+ * Machines may apply spend-decreasing rule actions to a platform. Separate from
+ * ads_spend_enabled, and both must be on before anything auto-applies. Stays off
+ * until the owner has read 14 days of dry-run rows (plan section 5).
+ */
+export const ADS_AUTO_APPLY_ENABLED_DEFAULT = false
+/** Most automatic actions the machine may take in one UTC day. */
+export const ADS_AUTO_ACTIONS_MAX_PER_DAY_DEFAULT = 10
+/** Largest budget change one action may make, in percent of the current budget. */
+export const ADS_BUDGET_MAX_STEP_PCT_DEFAULT = 20
+/**
+ * The owner's list-building price per lead, in cents ($8, blocker 732). Lead
+ * campaign rules compare CPL to this, never to break-even (plan section 9.1).
+ */
+export const ADS_LEAD_CPL_CEILING_CENTS_DEFAULT = 800
+
+/** Accepted range for each automation number. A stored value outside it reads as the default. */
+export const ADS_AUTOMATION_BOUNDS = {
+  autoActionsMaxPerDay: { min: 0, max: 50 },
+  budgetMaxStepPct: { min: 1, max: 50 },
+  leadCplCeilingCents: { min: 50, max: 10000 },
+} as const
