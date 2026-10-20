@@ -8,12 +8,14 @@ import {
   integer,
   json,
   jsonb,
+  numeric,
   pgTable,
   real,
   serial,
   smallint,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   uuid,
   varchar,
@@ -2415,7 +2417,8 @@ export const adCreativeDailyMetrics = pgTable('ad_creative_daily_metrics', {
   clicks:          integer('clicks').notNull().default(0),
   orders:          integer('orders').notNull().default(0),
   netRevenueCents: integer('net_revenue_cents').notNull().default(0),
-  source:          varchar('source', { length: 12 }).notNull().default('csv'), // csv|mcp|shopify
+  leads:           integer('leads'), // migration 129; API rows (source 'api') fill it
+  source:          varchar('source', { length: 12 }).notNull().default('csv'), // csv|mcp|shopify|api
   createdAt:       timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, t => ({
   dayIdx: index('idx_ad_metrics_day').on(t.day),
@@ -2469,6 +2472,39 @@ export const adPlatformEntities = pgTable('ad_platform_entities', {
 }))
 
 export type AdPlatformEntityLevel = 'campaign' | 'adset' | 'ad' | 'creative'
+
+/**
+ * Ads Control Plane daily insights (migration 129, ADR-018). One row per
+ * platform entity per day as the platform's insights API reports it, keyed
+ * by (platform, level, external_id, day). The hourly pull re-upserts today's
+ * row. platform_purchases and platform_purchase_value_cents are the
+ * platform's claim; order_attribution stays the revenue source of truth.
+ * actions keeps every action count returned, keyed by action type.
+ */
+export const adPlatformInsightsDaily = pgTable('ad_platform_insights_daily', {
+  id:                         bigserial('id', { mode: 'number' }).primaryKey(),
+  platform:                   text('platform').notNull(),
+  level:                      text('level').$type<AdPlatformEntityLevel>().notNull(),
+  externalId:                 text('external_id').notNull(),
+  day:                        date('day').notNull(),
+  spendCents:                 integer('spend_cents').notNull().default(0),
+  impressions:                integer('impressions').notNull().default(0),
+  reach:                      integer('reach'),
+  frequency:                  numeric('frequency', { precision: 8, scale: 3 }),
+  clicks:                     integer('clicks').notNull().default(0),
+  linkClicks:                 integer('link_clicks'),
+  leads:                      integer('leads'),
+  platformPurchases:          integer('platform_purchases'),
+  platformPurchaseValueCents: integer('platform_purchase_value_cents'),
+  actions:                    jsonb('actions').$type<Record<string, number> | null>(),
+  pulledAt:                   timestamp('pulled_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => ({
+  // Postgres's default name for the inline UNIQUE in migration 129.
+  platformLevelExternalDayUq: unique('ad_platform_insights_daily_platform_level_external_id_day_key')
+    .on(t.platform, t.level, t.externalId, t.day),
+  platformDayIdx: index('idx_ad_platform_insights_daily_platform_day').on(t.platform, t.day),
+  externalDayIdx: index('idx_ad_platform_insights_daily_external_day').on(t.externalId, t.day),
+}))
 
 /**
  * Outreach pipeline (077): vetted guest-post / brand-partnership targets.
