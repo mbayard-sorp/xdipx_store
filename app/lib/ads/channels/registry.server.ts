@@ -10,6 +10,7 @@
  */
 import type { ChannelAdapter, ChannelCapabilities, ChannelId, PolicyState } from './types'
 import { metaAdapter } from './meta/adapter.server'
+import { microsoftAdapter } from './microsoft/adapter.server'
 
 interface ChannelBase<Id extends ChannelId = ChannelId> {
   id: Id
@@ -28,8 +29,8 @@ const CHANNELS: readonly ChannelEntry[] = [
     policyNote: 'Written policy bars the category; owner-codified strategic lane under gates M1 to M7 (2026-10-03).',
   },
   {
-    id: 'microsoft', label: 'Microsoft Advertising', policyState: 'allowed', adapter: null,
-    policyNote: 'Allowed through the Adult Advertising Program for approved advertisers; search text only. Adapter is phase 6d.',
+    id: 'microsoft', label: 'Microsoft Advertising', policyState: 'restricted', adapter: microsoftAdapter,
+    policyNote: 'Allowed only through the Adult Advertising Program, search text only. Account 188472831 is Pending in the program, so the adapter reads and pulls insights but mutates nothing.',
   },
   {
     id: 'google', label: 'Google Ads', policyState: 'restricted', adapter: null,

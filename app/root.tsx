@@ -22,7 +22,7 @@ import newsreaderLatinWoff2 from '@fontsource-variable/newsreader/files/newsread
 import dmSansLatinWoff2 from '@fontsource-variable/dm-sans/files/dm-sans-latin-wght-normal.woff2?url'
 import { BRAND_TITLE, BRAND_DESCRIPTION } from '~/lib/brand'
 import { SITE_ORIGIN } from '~/lib/social-meta'
-import { captureUTM, captureFbClickId, captureGoogleClickId } from '~/lib/attribution.server'
+import { captureUTM, captureFbClickId, captureGoogleClickId, captureMicrosoftClickId } from '~/lib/attribution.server'
 import { resolveGa4 } from '~/lib/ga4-config.server'
 import { isQaAgeBypassRequest } from '~/lib/qa-preview.server'
 import { isPermanentlyUnindexableStatus } from '~/lib/seo'
@@ -158,6 +158,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // which makes offline conversion import keyed on this id the only path, and a
   // click not captured here can never be attributed after the fact.
   const gclidCookies = captureGoogleClickId(request)
+  // Microsoft Advertising clicks carry ?msclkid=. Same reasoning as gclid.
+  const msclkidCookies = captureMicrosoftClickId(request)
 
   const ga4 = await resolveGa4()
 
@@ -165,6 +167,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   for (const cookie of utmCookies) headers.append('Set-Cookie', cookie)
   for (const cookie of fbcCookies) headers.append('Set-Cookie', cookie)
   for (const cookie of gclidCookies) headers.append('Set-Cookie', cookie)
+  for (const cookie of msclkidCookies) headers.append('Set-Cookie', cookie)
 
   return data({
     utm,
