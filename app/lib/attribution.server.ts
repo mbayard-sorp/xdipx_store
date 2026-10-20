@@ -6,6 +6,8 @@ const FBC_COOKIE = '_fbc'
 /** Google click id (gclid/gbraid/wbraid). Namespaced: unlike _fbc there is no
  *  Google-owned cookie we need to stay format-compatible with. */
 const GCLID_COOKIE = '__xdipx_gclid'
+/** Microsoft Advertising click id (msclkid), namespaced the same way. */
+const MSCLKID_COOKIE = '__xdipx_msclkid'
 const THIRTY_DAYS = 60 * 60 * 24 * 30
 /** Meta's own _fbc lifetime. Matching it keeps our cookie and theirs in sync. */
 const NINETY_DAYS = 60 * 60 * 24 * 90
@@ -190,6 +192,52 @@ export function getStoredGoogleClickId(request: Request): GoogleClickId | null {
     const parsed = JSON.parse(raw) as GoogleClickId
     if (!parsed?.id || !GOOGLE_CLICK_PARAMS.includes(parsed.type)) return null
     return parsed
+  } catch { return null }
+}
+
+/**
+ * Microsoft Advertising clicks arrive with `?msclkid=` when auto-tagging is on.
+ * Capture it into the `__xdipx_msclkid` cookie for the same reason as gclid:
+ * UET is the only other writer, checkout is off-domain, and an offline
+ * conversion upload keyed on this id is the only way a Microsoft click gets
+ * credit for an order. A click not captured here cannot be matched later.
+ *
+ * Last click wins. Writes nothing when the param is absent, so ordinary
+ * requests stay Set-Cookie free and edge-cacheable.
+ */
+export interface MicrosoftClickId {
+  id: string
+  capturedAt: string
+}
+
+export function captureMicrosoftClickId(request: Request, nowMs: number = Date.now()): string[] {
+  let id: string | null
+  try { id = new URL(request.url).searchParams.get('msclkid') } catch { return [] }
+  if (!id) return []
+
+  const found: MicrosoftClickId = { id, capturedAt: new Date(nowMs).toISOString() }
+  const domain = fbCookieDomain(request)
+  return [serializeCookie(MSCLKID_COOKIE, JSON.stringify(found), {
+    httpOnly: false, // same posture as __xdipx_gclid
+    path: '/',
+    sameSite: 'lax', // an ad click is a top-level cross-site navigation
+    maxAge: NINETY_DAYS, // Microsoft accepts offline conversions up to 90 days from click
+    ...(domain ? { domain } : {}),
+    ...(process.env['NODE_ENV'] === 'production' ? { secure: true } : {}),
+  })]
+}
+
+/**
+ * Read the stored Microsoft click id. The cart action writes it as the
+ * `_msclkid` cart attribute so it reaches the order's note_attributes, where
+ * server/webhooks.ts clickIdsFromNoteAttributes reads it.
+ */
+export function getStoredMicrosoftClickId(request: Request): MicrosoftClickId | null {
+  const raw = parseCookie(request.headers.get('Cookie') ?? '')[MSCLKID_COOKIE]
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw) as MicrosoftClickId
+    return typeof parsed?.id === 'string' && parsed.id ? parsed : null
   } catch { return null }
 }
 

@@ -32,8 +32,17 @@ describe('channel registry', () => {
     for (const c of listChannels().filter(c => c.policyState === 'prohibited')) expect(c.hasAdapter).toBe(false)
   })
 
-  it('has adapters only for Meta in this phase', () => {
-    expect(listChannels().filter(c => c.hasAdapter).map(c => c.id)).toEqual(['meta'])
+  it('has adapters for Meta and Microsoft in this phase', () => {
+    expect(listChannels().filter(c => c.hasAdapter).map(c => c.id)).toEqual(['meta', 'microsoft'])
+  })
+
+  it('lists Microsoft as restricted with read and insights, and no mutations while the program is pending', () => {
+    const ms = listChannels().find(c => c.id === 'microsoft')
+    expect(ms).toMatchObject({ policyState: 'restricted', hasAdapter: true })
+    expect(ms?.capabilities).toEqual({ read: true, insights: true, mutate: [], audiences: 'none', preview: false })
+    expect(ms?.policyNote).toMatch(/Adult Advertising Program/)
+    expect(ms?.policyNote).toMatch(/188472831 is Pending/)
+    expect(getChannel('microsoft')?.adapter?.id).toBe('microsoft')
   })
 
   it('lists ids once each, with a policy note on every row', () => {
