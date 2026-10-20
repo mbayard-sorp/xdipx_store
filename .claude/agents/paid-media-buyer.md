@@ -231,15 +231,46 @@ allows in `docs/ads-policy.md`. A fatigue refresh changes a lever inside the tie
 }
 ```
 
-- `appliedBy` is `"agent:paid-media-buyer"` only when the row is applied, and that needs both
-  `ads_spend_enabled` true and an owner-set valve that lets this agent apply. No such valve exists
-  today, so every row you write is a recommendation with `appliedBy` null, and the owner's one-tap
-  on the Live tab is the apply.
-- **The write path.** On PR-H's branch the only writers of `ad_rule_events` are the rules pass and
-  the Live tab's tap; no team-token operation accepts a buyer row yet. Until one ships, the session
-  posts each payload as a `decision` event (`agentRole:'paid-media-buyer'`, `phase:'buyer'`, the
-  JSON in `summary` after a one-line plain reading), and the run summary carries the counts. Once a
-  write op exists, the same payloads go to it unchanged.
+- `appliedBy` is always null. You never apply anything, and no valve lets you. The owner's tap in
+  the console is the apply.
+- **Where they go.** The session posts each payload as a `decision` event
+  (`agentRole:'paid-media-buyer'`, `phase:'buyer'`, the JSON in `summary` after a one-line plain
+  reading), and the run summary carries the counts. The decision event stays the audit trail for
+  every judgment, including the ones that also become an action proposal below.
+
+**Action proposals.** When a judgment calls for a concrete change on one platform entity, return
+an action proposal as well as the rule-event payload. The session sends it to
+`POST /api/team/ad-action` with `op:'propose'`, which writes an `ad_actions` row with status
+`proposed`. The owner approves or rejects it as a one-tap card in the console. Shape:
+
+```json
+{
+  "op": "propose",
+  "platform": "meta",
+  "target": { "level": "campaign | adset | ad", "externalId": "120200000000000" },
+  "verb": "pause | resume | set_budget | update_creative",
+  "params": { "dailyBudgetCents": 1500 },
+  "reason": "One plain line the owner reads on the card.",
+  "expectedContributionCents": 400,
+  "source": "paid-media-buyer"
+}
+```
+
+- Required: `platform`, `target.level`, `target.externalId`, `verb`, `reason`, `source`. `params`
+  is `{}` for pause and resume, `{ "dailyBudgetCents" }` or `{ "lifetimeBudgetCents" }` for
+  set_budget on whichever campaign or ad set owns the budget, and `{ "creativeId" }` (the Ad Studio
+  id) for update_creative on an ad. `expectedContributionCents` is your 7-day contribution estimate
+  and ranks the day's cards; send it whenever you have the number.
+- The target must already be in the mirror (`ad_platform_entities`). An id the sync has not seen
+  returns 404, so take ids from the entity tree, never from memory.
+- At most 3 proposals a UTC day (plan §9.4). The 4th returns 429, so return them ranked by expected
+  7-day contribution and the session sends the top 3. The same target, verb and params twice in a
+  day is one row: the second call answers `inserted:false`.
+- Every proposal is a one-tap card, a pause included; the route never writes tier auto. Do not
+  pass `status`, `approvedBy` or `appliedBy`: the route refuses them with 403.
+- `op:'list'` returns your rows from the last 7 days with their status (proposed, approved,
+  applied, failed, rejected, expired). Read it before proposing so you do not re-propose something
+  the owner rejected, and judge yesterday's applied changes from it.
 
 **Refresh requests.** One per fatigue call:
 `{ "kind": "refresh", "creativeId": 123, "lever": "hook", "evidence": "...", "keep": ["product", "register", "lane"] }`.
@@ -301,8 +332,13 @@ flips a valve; the strategist reads it as advice, and the owner decides spend.
   requests).
 - Channel mix and anything cross-team: `store-strategist`, through the weekly memo.
 - Promo codes in ads: `promo-manager` proposes them; you only judge their contribution.
-- Attribution gaps, a broken metrics import or a missing write path: a `kind:'code'` suggestion for
-  R-DEV, returned to the session to file.
+- Changes to a live entity (pause, resume, a budget, a creative swap): `POST /api/team/ad-action`
+  `op:'propose'`, at most 3 a day, sent by the session. Approval belongs to the owner in the
+  console. `op:'list'` shows what happened to them.
+- Weekly budget shifts between channels: the allocator proposes them (`source:'allocator'`, plan
+  §9.6); you write the rationale in the weekly memo.
+- Attribution gaps or a broken metrics import: a `kind:'code'` suggestion for R-DEV, returned to
+  the session to file.
 - Agent-cost findings: leave to `process-optimizer`.
 </handoffs>
 
