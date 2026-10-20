@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from 'vitest'
-import { ChannelNotEnabledError } from '../errors'
 import type { PolicyMirrorRow } from '../types'
 import { budgetCents, createMetaAdapter, metaAudienceKind, normalizeMetaAudience, normalizeMetaEntity, normalizeMetaInsight } from './adapter.server'
 import { GraphError, type GraphClient, type GraphJson } from './graph.server'
@@ -195,12 +194,15 @@ describe('metaAdapter', () => {
       .resolves.toMatchObject({ valid: false, error: 'network' })
   })
 
-  it('throws NotEnabled for createPaused and hands mutate to the injected metaMutate', async () => {
+  it('hands createPaused and mutate to the injected metaCreatePaused and metaMutate', async () => {
     const g = fakeGraph({})
     const mutate = vi.fn(async () => ({ applied: true }))
-    const a = createMetaAdapter({ graph: g.graph, credentials: creds, mutate })
+    const createPaused = vi.fn(async () => ({ campaignId: 'c1', adSetId: 's1', creativeId: 'k1', adId: 'a1' }))
+    const a = createMetaAdapter({ graph: g.graph, credentials: creds, mutate, createPaused })
     expect(a.capabilities.mutate).toEqual(['pause', 'resume', 'set_budget'])
-    await expect(a.createPaused({})).rejects.toBeInstanceOf(ChannelNotEnabledError)
+    const input = { payload: {}, adCreativeId: 900 }
+    await expect(a.createPaused(input)).resolves.toEqual({ campaignId: 'c1', adSetId: 's1', creativeId: 'k1', adId: 'a1' })
+    expect(createPaused).toHaveBeenCalledWith(input)
     const m = { verb: 'pause' as const, target: { platform: 'meta' as const, level: 'ad' as const, externalId: '1' }, params: {} }
     await expect(a.mutate(m)).resolves.toEqual({ applied: true })
     expect(mutate).toHaveBeenCalledWith(m)
