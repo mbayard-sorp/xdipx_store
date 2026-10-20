@@ -912,6 +912,39 @@ export function createCronRoutes() {
   })
 
   /**
+   * GET|POST /cron/ads-sync-entities
+   * Schedule: every 6 hours at :35 (ticket #16405, ads control plane phase 1c).
+   * Mirrors every campaign, ad set and ad from each channel that has a
+   * readable adapter and a valid token into ad_platform_entities. Reads the
+   * platforms, writes only our own table. A channel with a bad token is
+   * skipped here; the token health probe (phase 1d) files the blocker.
+   *
+   * Responds 500 when any channel's sync failed, `skipped` when no channel
+   * could run, so cron_runs tells the three apart. Awaited before
+   * responding: Vercel discards work that continues after the response.
+   */
+  cronRoute('/ads-sync-entities', async (_req, res) => {
+    try {
+      const { syncAllChannels } = await import('../app/lib/ads/sync.server.js')
+      const channels = await syncAllChannels()
+      const failed = channels.filter(c => c.outcome === 'failed')
+      const synced = channels.filter(c => c.outcome === 'synced')
+      if (failed.length > 0) {
+        res.status(500).json({ ok: false, error: `sync failed for ${failed.map(c => c.channel).join(', ')}`, channels })
+        return
+      }
+      if (synced.length === 0) {
+        res.json({ ok: true, skipped: 'no channel with a readable adapter and a valid token', channels })
+        return
+      }
+      res.json({ ok: true, channels })
+    } catch (err) {
+      console.error('[cron/ads-sync-entities] failed:', err)
+      res.status(500).json({ ok: false, error: (err as Error).message })
+    }
+  })
+
+  /**
    * GET|POST /cron/social-asset-auto-archive
    * Schedule: daily. Archives unpicked social_media_assets rows past a
    * tunable age threshold (default 60 days, `social_library_auto_archive_days`

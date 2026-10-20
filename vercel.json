@@ -189,6 +189,10 @@
     {
       "path": "/cron/email-metrics-pull",
       "schedule": "0 12 * * *"
+    },
+    {
+      "path": "/cron/ads-sync-entities",
+      "schedule": "35 */6 * * *"
     }
   ]
 }
