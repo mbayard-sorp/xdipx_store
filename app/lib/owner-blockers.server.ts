@@ -300,6 +300,17 @@ async function instagramTokenHealthy(): Promise<ProbeVerdict> {
 }
 
 /**
+ * Re-run one ad channel's token health check (ticket #16406). Arg is the
+ * channel id. Same verdict /cron/ads-token-health filed on, so the row closes
+ * itself the day a rotated token reads valid and outside the 14-day window.
+ * A platform that could not be asked, or a channel with no adapter, is null.
+ */
+async function adTokenHealthy(channel: string): Promise<ProbeVerdict> {
+  const { probeChannelToken } = await import('~/lib/ads/token-health.server')
+  return probeChannelToken(channel)
+}
+
+/**
  * `table|keyColumn|keyValue|column|expectedValue` — does one identified row hold
  * one expected value?
  *
@@ -438,6 +449,7 @@ const RUNNERS: Record<string, (arg: string) => Promise<ProbeVerdict>> = {
   endpoint_200:  endpoint200,
   credential_live: credentialLive,
   instagram_token_healthy: instagramTokenHealthy,
+  ad_token_healthy: adTokenHealthy,
   row_matches:   rowMatches,
   migration_applied: migrationApplied,
   order_fulfilled: orderFulfilled,

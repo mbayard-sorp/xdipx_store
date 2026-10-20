@@ -192,7 +192,11 @@ describe('the cron expectation manifest', () => {
     // hours: +4 rows a day. Phase 1 of the ads control plane is done only
     // after 24h of green cron_runs for this route, and the ads lane acts on
     // a stale mirror, so it clears the same "next actor" bar.
-    expect(RECORDED_CRON_ROUTES.size).toBeLessThanOrEqual(22)
+    // Raised 22 -> 23 for /cron/ads-token-health (ticket #16406), DAILY: +1
+    // row a day. The row carries each channel's token reading and whether a
+    // blocker was filed, and its next actor is the ads lane: a failed run
+    // means a dying Meta token could go unwarned.
+    expect(RECORDED_CRON_ROUTES.size).toBeLessThanOrEqual(23)
   })
 
   it('records the surfaces whose failure has a next actor', () => {

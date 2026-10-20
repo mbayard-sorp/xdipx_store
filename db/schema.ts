@@ -2474,6 +2474,25 @@ export const adPlatformEntities = pgTable('ad_platform_entities', {
 export type AdPlatformEntityLevel = 'campaign' | 'adset' | 'ad' | 'creative'
 
 /**
+ * Latest token health per ad channel (migration 131, plan §3.4). One row per
+ * channel, overwritten daily by /cron/ads-token-health so the console can
+ * show token state without calling the platform.
+ */
+export const adChannelHealth = pgTable('ad_channel_health', {
+  channel:             text('channel').primaryKey(),
+  checkedAt:           timestamp('checked_at', { withTimezone: true }).notNull().defaultNow(),
+  state:               text('state').$type<AdChannelHealthState>().notNull(), // ok|expiring|invalid|unknown (CHECK in SQL)
+  valid:               boolean('valid').notNull(),
+  expiresAt:           timestamp('expires_at', { withTimezone: true }),
+  dataAccessExpiresAt: timestamp('data_access_expires_at', { withTimezone: true }),
+  scopes:              jsonb('scopes').$type<string[]>().notNull().default([]),
+  error:               text('error'),
+  envVar:              text('env_var'),
+})
+
+export type AdChannelHealthState = 'ok' | 'expiring' | 'invalid' | 'unknown'
+
+/**
  * Ads Control Plane daily insights (migration 129, ADR-018). One row per
  * platform entity per day as the platform's insights API reports it, keyed
  * by (platform, level, external_id, day). The hourly pull re-upserts today's
