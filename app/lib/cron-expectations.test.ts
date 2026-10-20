@@ -192,7 +192,13 @@ describe('the cron expectation manifest', () => {
     // hours: +4 rows a day. Phase 1 of the ads control plane is done only
     // after 24h of green cron_runs for this route, and the ads lane acts on
     // a stale mirror, so it clears the same "next actor" bar.
-    expect(RECORDED_CRON_ROUTES.size).toBeLessThanOrEqual(22)
+    //
+    // Raised 22 -> 23 for /cron/ads-insights (ticket #16408), HOURLY: +24
+    // rows a day, the largest raise here and still small next to the
+    // pollers this cap exists to catch. It is a money event: R7, the account
+    // spend guard, reads the spend this route writes, so a silent failure is
+    // a spend guard running blind. The ads lane is its next actor.
+    expect(RECORDED_CRON_ROUTES.size).toBeLessThanOrEqual(23)
   })
 
   it('records the surfaces whose failure has a next actor', () => {
@@ -210,6 +216,8 @@ describe('the cron expectation manifest', () => {
       // Money-adjacent, and one of the three that used to bypass the wrapper
       // entirely with a bare router.post.
       '/cron/purchase-reconcile',
+      // R7, the account spend guard, reads the spend it writes.
+      '/cron/ads-insights',
     ]) {
       expect(isRecordedCronRoute(route), route).toBe(true)
     }

@@ -225,14 +225,9 @@ export function importShopCampaignsCsv(buffer: ArrayBuffer | Uint8Array, opts: {
   return runImport(buffer, { source: opts.source, commit: opts.commit ?? false })
 }
 
-/**
- * Meta insights arrive through the Meta Ads MCP connector, which PR-E
- * authorizes and wires (the owner grants the connector there). Nothing here
- * calls Meta. Until then the routine imports Meta numbers by CSV if at all.
- */
-export async function importMetaInsights(_opts?: { since?: string }): Promise<never> {
-  throw new AdMetricsError('importMetaInsights is not configured: the Meta Ads connector is wired in PR-E.', 'not_configured')
-}
+// Meta spend no longer comes through here. The hourly /cron/ads-insights pull
+// (app/lib/ads/insights.server.ts) writes it to ad_creative_daily_metrics with
+// source 'api'. The CSV path above stays for Google Ads and Shop Campaigns.
 
 // ---------------------------------------------------------------------------
 // Shopify order attribution
@@ -488,7 +483,7 @@ export async function runDailyMetrics(now: Date = new Date()) {
   const yesterday = addDays(today, -1)
   const attribution = await attributeShopifyOrders(yesterday)
   const rollup = [await rollupDaily(yesterday), await rollupDaily(today)]
-  return { today, yesterday, attribution, rollup, importMeta: 'not_configured' as const }
+  return { today, yesterday, attribution, rollup }
 }
 
 // ---------------------------------------------------------------------------

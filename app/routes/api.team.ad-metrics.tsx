@@ -7,11 +7,12 @@
  *   daily_profit_summary.ad_spend, then run rules R1 to R8 (PR-H): one
  *   ad_rule_events recommendation per firing, and R7 applied on its own. The
  *   ads routine's Pass 2 calls this.
- *   -> { today, yesterday, attribution, rollup, importMeta, rules }
+ *   -> { today, yesterday, attribution, rollup, rules }
  *   `rules` is the run summary, or { ok: false, error } when the rules pass
  *   failed (the metrics half still landed; read the error, do not retry blind).
- *   Meta insights are not pulled here: the Meta connector is wired in PR-E, so
- *   `importMeta` reads "not_configured".
+ *   Meta insights are not pulled here: /cron/ads-insights pulls them hourly
+ *   into ad_creative_daily_metrics (source 'api'), so the rollup already
+ *   counts Meta spend.
  *
  * { op: 'import-preview' | 'import-commit' }   multipart/form-data
  *   fields: op, file (the exported report), source ('google' | 'shop')

@@ -945,6 +945,46 @@ export function createCronRoutes() {
   })
 
   /**
+   * GET|POST /cron/ads-insights
+   * Schedule: hourly at :05 (ticket #16408, ads control plane phase 2b).
+   * Pulls ad-level daily insights for today and yesterday from every channel
+   * with insights capability and a valid token, upserts
+   * ad_platform_insights_daily and ad_creative_daily_metrics (source 'api'),
+   * then rolls the pulled days up into daily_profit_summary.ad_spend. The
+   * 09:00 UTC run re-pulls the last 7 days, because Meta restates inside its
+   * attribution window, and then runs the rules pass the ads routine runs
+   * through /api/team/ad-metrics. `?restate=1` forces that branch.
+   *
+   * Responds 500 when any channel's pull failed or the rules pass failed,
+   * `skipped` when no channel could run, so cron_runs tells them apart.
+   * Awaited before responding: Vercel discards work after the response.
+   */
+  cronRoute('/ads-insights', async (req, res) => {
+    try {
+      const { runInsightsCron } = await import('../app/lib/ads/insights.server.js')
+      const result = await runInsightsCron({ restate: req.query['restate'] === '1' })
+      const failed = result.channels.filter(c => c.outcome === 'failed')
+      const pulled = result.channels.filter(c => c.outcome === 'pulled')
+      if (failed.length > 0) {
+        res.status(500).json({ ok: false, error: `insights pull failed for ${failed.map(c => c.channel).join(', ')}`, ...result })
+        return
+      }
+      if (result.rules && !result.rules.ok) {
+        res.status(500).json({ ok: false, error: `rules pass failed: ${result.rules.error}`, ...result })
+        return
+      }
+      if (pulled.length === 0) {
+        res.json({ ok: true, skipped: 'no channel with insights and a valid token', ...result })
+        return
+      }
+      res.json({ ok: true, ...result })
+    } catch (err) {
+      console.error('[cron/ads-insights] failed:', err)
+      res.status(500).json({ ok: false, error: (err as Error).message })
+    }
+  })
+
+  /**
    * GET|POST /cron/social-asset-auto-archive
    * Schedule: daily. Archives unpicked social_media_assets rows past a
    * tunable age threshold (default 60 days, `social_library_auto_archive_days`
