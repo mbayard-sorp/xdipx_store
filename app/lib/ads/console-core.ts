@@ -362,8 +362,8 @@ export function assembleOverview(input: OverviewInput, now: Date, failed: string
     alerts.push({
       key: 'pending', severity: 'warn', kind: 'pending',
       title: `${n} proposed action${n === 1 ? '' : 's'} waiting for a decision`,
-      detail: 'The Actions view arrives in phase 4. Until then they wait in the ledger.',
-      href: null,
+      detail: 'Approve or reject them in the Actions view.',
+      href: '/admin/ads/actions',
     })
   }
   // Stable sort: alerts first, warnings after, each group in the order above.

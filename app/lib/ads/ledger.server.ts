@@ -91,7 +91,8 @@ export interface TransitionExtra {
  * throws IllegalAdActionTransitionError otherwise, including when the row
  * is missing or another writer moved it first. The UPDATE is conditioned on
  * the status we read, so two racing writers cannot both win.
- * approved stamps approved_by and approved_at; applied stamps applied_at.
+ * approved and rejected stamp approved_by and approved_at; applied stamps
+ * applied_at.
  */
 export async function transitionAction(
   id: number,
@@ -109,7 +110,9 @@ export async function transitionAction(
 
   const now = new Date()
   const patch: Partial<typeof adActions.$inferInsert> = { status: to }
-  if (to === 'approved') {
+  // A rejection records its decider in the same columns, so the console can
+  // say who said no and when.
+  if (to === 'approved' || to === 'rejected') {
     patch.approvedBy = actor
     patch.approvedAt = now
   }
