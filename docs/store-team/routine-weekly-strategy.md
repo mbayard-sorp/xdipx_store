@@ -270,6 +270,17 @@ suggestion for a sub-specialist that returned nothing. This is the same trust mo
 relays run on elsewhere in the fleet, and it is backed the same way — every endpoint re-validates
 its payload server-side, so a relay error still cannot write something the API itself would refuse.
 
+**Verbatim covers the finding and its evidence, never the executor routing (ticket #16282).** A
+`kind:'process'` row has no claimant: R-DEV claims `kind:'code'`, agent-editor claims
+`kind:'instructions'`, and nothing claims `process`. When a sub-specialist's payload asks for work
+to be done, file it at an executable kind — `code` for a repo diff, `instructions` for a playbook
+or agent-def change, `program`/`promo`/`campaign` where a human executes — and say in the row which
+part you re-routed and why. `process` is reserved for a report with no executor, the same rule
+`program-manager` already follows for milestone work ("never `process`"). This is not licence to
+rewrite a finding; filing a finding where nobody can act on it is filing a finding that was
+softened. State the kind you chose for each row in the brief's rows-filed table so the choice is
+reviewable.
+
 1. `inventory-sentinel` — catalog stock/price sweep → hands you targeted suggestion payloads + a
    scoreboard decision to relay.
 2. `promo-manager` — MAP-guarded promo designs for the coming window → hands you kind `promo`
