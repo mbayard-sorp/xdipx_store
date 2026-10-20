@@ -7,6 +7,9 @@
  * ads_spend_enabled valve. Until then the default applier is a no-op that logs,
  * so nothing here can move money.
  *
+ * Phase 4 retargets this seam onto the channel adapters in app/lib/ads/channels/
+ * (ADR-018); until then it stays the no-op below.
+ *
  * Callers pass `spendEnabled`. With the valve off, platformApply returns
  * without calling anything, simulation or not, so a registered applier cannot
  * be reached by accident.
