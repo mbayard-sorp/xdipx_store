@@ -267,9 +267,28 @@ const defaultAccessToken = async (): Promise<string> => {
   return getMsAdsAccessToken()
 }
 
+// Built here rather than borrowed from ad-export/service.server.ts on purpose:
+// that module reaches ad-compose.server.ts and its ?inline font imports, which
+// the esbuild server bundle (scripts/build-vercel.mjs) cannot load. The cron
+// routes import this adapter through the registry, so the chain must stay
+// free of Vite-only assets.
 const defaultPushDeps = async (): Promise<MsPushDeps> => {
-  const { defaultMicrosoftPushDeps } = await import('~/lib/ad-export/service.server')
-  return defaultMicrosoftPushDeps()
+  const [{ getAdsMediaDailyCapCents, getAdsSpendEnabled }, core, { msAdsCall }] = await Promise.all([
+    import('~/lib/ad-settings.server'),
+    import('~/lib/microsoft-ads-core'),
+    import('~/lib/microsoft-ads.server'),
+  ])
+  return {
+    spendEnabled: getAdsSpendEnabled,
+    missingConfig: () => core.missingConfig(),
+    env: () => core.msAdsEnv(),
+    accountId: () => core.msAdsConfig().accountId,
+    dailyCapCents: getAdsMediaDailyCapCents,
+    call: async (service, path, body) => {
+      const r = await msAdsCall<never>(service, path, body)
+      return { data: r.data, partial: r.partial }
+    },
+  }
 }
 
 /** Map a failed token exchange to the error codes token-health.server.ts reads. */
