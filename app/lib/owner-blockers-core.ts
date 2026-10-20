@@ -151,6 +151,11 @@ export const PROBE_DESCRIPTIONS: Record<string, (arg: string) => string> = {
    * clears once the stored token is more than EXPIRY_WARNING_DAYS from
    * expiring AND a refresh has succeeded within STALE_REFRESH_DAYS. */
   instagram_token_healthy: () => 'the Instagram token is not close to expiring and refreshes are succeeding',
+  /* Arg is an ad channel id from app/lib/ads/channels/registry.server.ts
+   * (e.g. `meta`). Re-runs that channel's token health check (ticket #16406):
+   * clears once the token is valid and neither its own expiry nor Meta's data
+   * access window is inside TOKEN_EXPIRY_WARNING_DAYS. */
+  ad_token_healthy: a => `the ${a} ads token is valid and at least 14 days from expiring`,
   /* Arg is `table|keyColumn|keyValue|column|expectedValue`.
    *
    * The scoped answer to the trap `rows_exist` walks into. `rows_exist` asks

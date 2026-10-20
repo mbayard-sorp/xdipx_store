@@ -741,6 +741,21 @@ export const CRON_EXPECTATIONS: readonly CronExpectation[] = [
       + 'email_campaign_metrics, and flips a campaign to sent. A missed day delays email-analyst\'s '
       + 'read, not anything live.',
   },
+  {
+    route: '/cron/ads-token-health',
+    plane: 'vercel',
+    schedule: '35 8 * * *',
+    periodMinutes: DAILY,
+    graceMinutes: 120,
+    recorded: true,
+    moneyRelevant: false,
+    ownerTeam: 'ads',
+    notes:
+      'Daily token health for every ad channel with an adapter (Meta debug_token, ticket #16406). '
+      + 'Files a self-clearing owner blocker when a token is invalid or inside 14 days of expiry, and '
+      + 'stores the reading in ad_channel_health. A missed day only delays that warning; live spend '
+      + 'is capped platform-side, so this is not a money event.',
+  },
 ]
 
 /** Indexed by route, for the wrapper's per-request lookup. */

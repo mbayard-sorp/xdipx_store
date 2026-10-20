@@ -171,7 +171,14 @@ export function createMetaAdapter(deps: MetaAdapterDeps = {}): ChannelAdapter {
             ...(d['is_valid'] === true ? {} : { error: str(err?.['message']) ?? 'invalid' }),
           }
         } catch (e) {
-          return { valid: false, expiresAt: null, scopes: [], checkedAt, error: e instanceof GraphError ? e.kind : 'unknown' }
+          // Meta answers a revoked or expired bearer token with OAuthException
+          // code 190 (or a 401) before debug_token runs. That is the token
+          // being refused, not a could-not-ask, so it gets its own error code
+          // and the token health cron treats it as authoritative.
+          const rejected = e instanceof GraphError && e.kind === 'api_error'
+            && (e.detail.code === 190 || e.detail.status === 401)
+          const error = rejected ? 'token_rejected' : e instanceof GraphError ? e.kind : 'unknown'
+          return { valid: false, expiresAt: null, scopes: [], checkedAt, error }
         }
       },
     },

@@ -2471,6 +2471,25 @@ export const adPlatformEntities = pgTable('ad_platform_entities', {
 export type AdPlatformEntityLevel = 'campaign' | 'adset' | 'ad' | 'creative'
 
 /**
+ * Latest token health per ad channel (migration 129, plan §3.4). One row per
+ * channel, overwritten daily by /cron/ads-token-health so the console can
+ * show token state without calling the platform.
+ */
+export const adChannelHealth = pgTable('ad_channel_health', {
+  channel:             text('channel').primaryKey(),
+  checkedAt:           timestamp('checked_at', { withTimezone: true }).notNull().defaultNow(),
+  state:               text('state').$type<AdChannelHealthState>().notNull(), // ok|expiring|invalid|unknown (CHECK in SQL)
+  valid:               boolean('valid').notNull(),
+  expiresAt:           timestamp('expires_at', { withTimezone: true }),
+  dataAccessExpiresAt: timestamp('data_access_expires_at', { withTimezone: true }),
+  scopes:              jsonb('scopes').$type<string[]>().notNull().default([]),
+  error:               text('error'),
+  envVar:              text('env_var'),
+})
+
+export type AdChannelHealthState = 'ok' | 'expiring' | 'invalid' | 'unknown'
+
+/**
  * Outreach pipeline (077): vetted guest-post / brand-partnership targets.
  * One row per domain. Seeded from docs/store-team/outreach-prospects.md by
  * scripts/seed-outreach-prospects.ts; the offsite-scout adds more through

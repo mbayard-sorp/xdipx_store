@@ -187,7 +187,12 @@ describe('the cron expectation manifest', () => {
     // numbers with nothing pointing at why, so its next actor is the email
     // lane's own daily routine, the same "next actor" bar every raise above
     // holds to.
-    expect(RECORDED_CRON_ROUTES.size).toBeLessThanOrEqual(21)
+    //
+    // Raised 21 -> 22 for /cron/ads-token-health (ticket #16406), DAILY: +1
+    // row a day. The row carries each channel's token reading and whether a
+    // blocker was filed, and its next actor is the ads lane: a failed run
+    // means a dying Meta token could go unwarned.
+    expect(RECORDED_CRON_ROUTES.size).toBeLessThanOrEqual(22)
   })
 
   it('records the surfaces whose failure has a next actor', () => {

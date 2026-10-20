@@ -189,6 +189,10 @@
     {
       "path": "/cron/email-metrics-pull",
       "schedule": "0 12 * * *"
+    },
+    {
+      "path": "/cron/ads-token-health",
+      "schedule": "35 8 * * *"
     }
   ]
 }
