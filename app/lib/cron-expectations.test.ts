@@ -187,7 +187,12 @@ describe('the cron expectation manifest', () => {
     // numbers with nothing pointing at why, so its next actor is the email
     // lane's own daily routine, the same "next actor" bar every raise above
     // holds to.
-    expect(RECORDED_CRON_ROUTES.size).toBeLessThanOrEqual(21)
+    //
+    // Raised 21 -> 22 for /cron/ads-sync-entities (ticket #16405), every 6
+    // hours: +4 rows a day. Phase 1 of the ads control plane is done only
+    // after 24h of green cron_runs for this route, and the ads lane acts on
+    // a stale mirror, so it clears the same "next actor" bar.
+    expect(RECORDED_CRON_ROUTES.size).toBeLessThanOrEqual(22)
   })
 
   it('records the surfaces whose failure has a next actor', () => {
