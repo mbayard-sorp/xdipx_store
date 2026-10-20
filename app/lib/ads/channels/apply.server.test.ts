@@ -5,6 +5,7 @@ import type { ChannelAdapter, MutationRequest, MutationResult } from './types'
 import type { AdActionRow, NewAdAction } from '../ledger.server'
 import { isLegalTransition, type AdActionStatus } from '../ledger-core'
 import { metaAdapter } from './meta/adapter.server'
+import { ChannelNotEnabledError } from './errors'
 
 const NOW = new Date('2026-10-19T15:00:00Z')
 
@@ -17,6 +18,9 @@ function memoryStore(mirror: MirrorBudgetRow[]) {
     mirrorRows: async ids => mirror.filter(r => ids.includes(r.externalId)),
     countAutoActionsSince: async since => rows.filter(r =>
       r.tier === 'auto' && ['approved', 'applied', 'failed'].includes(r.status) && r.createdAt >= since).length,
+    countAutoPausesSince: async since => rows.filter(r =>
+      r.tier === 'auto' && r.verb === 'pause' && r.status === 'applied' && r.createdAt >= since).length,
+    findByKey: async key => rows.find(r => r.idempotencyKey === key) ?? null,
     insert: async (input: NewAdAction) => {
       if (rows.some(r => r.idempotencyKey === input.idempotencyKey)) return { inserted: false, row: null }
       const row = {
@@ -37,6 +41,7 @@ function memoryStore(mirror: MirrorBudgetRow[]) {
       if (to === 'approved') row.approvedBy = actor
       if (extra.error !== undefined) row.error = extra.error
       if (extra.after !== undefined) row.after = extra.after
+      if (extra.platformResponse !== undefined) row.platformResponse = extra.platformResponse
       return row
     },
   }
@@ -156,20 +161,27 @@ describe('dispatch', () => {
     const r = await dispatch({ verb: 'pause', adExternalId: 'ad1', proposedBy: 'rule:R1', now: NOW }, deps({ store: mem.store, adapter, sync }))
     expect(r).toMatchObject({ status: 'applied', applied: true, tier: 'auto', inserted: true })
     expect(mutate).toHaveBeenCalledTimes(1)
-    expect(mutate).toHaveBeenCalledWith({ verb: 'pause', target: { platform: 'meta', level: 'ad', externalId: 'ad1' }, params: null })
+    expect(mutate).toHaveBeenCalledWith({
+      verb: 'pause', target: { platform: 'meta', level: 'ad', externalId: 'ad1' }, params: null,
+      ledger: { actionId: 1, tier: 'auto', status: 'approved', approvedBy: 'auto' },
+    })
     expect(mem.rows[0]).toMatchObject({ status: 'applied', approvedBy: 'auto' })
     expect(sync).toHaveBeenCalledWith('meta', ['ad1'])
   })
 
-  it('a brake inside the step cap auto-applies; one past it stays dry_run', async () => {
+  it('a brake inside the step cap auto-applies as asked; one past it is clamped to the cap and still auto-applies', async () => {
     const { adapter, mutate } = fakeAdapter(async () => ({ applied: true }))
     const d = deps({ store: mem.store, adapter })
     const small = await dispatch({ verb: 'brake', adExternalId: 'ad1', budgetFactor: 0.85, proposedBy: 'rule:R6', now: NOW }, d)
-    const big = await dispatch({ verb: 'brake', adExternalId: 'ad1', budgetFactor: 0.7, proposedBy: 'rule:R6', now: NOW }, d)
+    const big = await dispatch({ verb: 'brake', adExternalId: 'ad1', budgetFactor: 0.7, proposedBy: 'rule:R6', reason: 'R6 brake', now: NOW }, d)
     expect(small.status).toBe('applied')
-    expect(big.status).toBe('dry_run')
-    expect(mem.rows[1]!.reason).toMatch(/ads_budget_max_step_pct \(20%\)/)
-    expect(mutate).toHaveBeenCalledTimes(1)
+    expect(big.status).toBe('applied')
+    expect(mem.rows[0]).toMatchObject({ params: { dailyBudgetCents: 850, via: 'brake' } })
+    // R6 asks for 30%; ads_budget_max_step_pct is 20, so 1000 goes to 800, not 700.
+    expect(mem.rows[1]).toMatchObject({ tier: 'auto', params: { dailyBudgetCents: 800, via: 'brake' }, after: { dailyBudgetCents: 800 } })
+    expect(mem.rows[1]!.reason).toBe('Brake clamped from 30% to 20% by ads_budget_max_step_pct. R6 brake')
+    expect(mutate).toHaveBeenCalledTimes(2)
+    expect(mutate.mock.calls[1]![0]).toMatchObject({ verb: 'set_budget', params: { dailyBudgetCents: 800 } })
   })
 
   it('stops at the daily auto cap', async () => {
@@ -186,14 +198,16 @@ describe('dispatch', () => {
     expect(mutate).toHaveBeenCalledTimes(2)
   })
 
-  it('the real Meta adapter throws NotEnabled, which lands as failed with the error', async () => {
-    const r = await dispatch(
-      { verb: 'pause', adExternalId: 'ad1', proposedBy: 'rule:R1', now: NOW },
-      { ...deps({ store: mem.store }), adapterFor: () => metaAdapter },
-    )
+  it('an adapter that throws NotEnabled lands as failed with the error', async () => {
+    const { adapter } = fakeAdapter(async m => { throw new ChannelNotEnabledError('meta', `mutate:${m.verb}`) })
+    const r = await dispatch({ verb: 'pause', adExternalId: 'ad1', proposedBy: 'rule:R1', now: NOW }, deps({ store: mem.store, adapter }))
     expect(r).toMatchObject({ status: 'failed', applied: false, error: true })
     expect(mem.rows[0]).toMatchObject({ status: 'failed', tier: 'auto' })
     expect(mem.rows[0]!.error).toMatch(/^not_enabled: mutate:pause is not enabled for channel meta/)
+  })
+
+  it('the real Meta adapter now routes pause, resume and set_budget to mutate', () => {
+    expect(metaAdapter.capabilities.mutate).toEqual(['pause', 'resume', 'set_budget'])
   })
 
   it('a channel with no adapter lands as failed, not applied', async () => {

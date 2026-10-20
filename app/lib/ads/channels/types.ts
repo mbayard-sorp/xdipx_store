@@ -80,12 +80,28 @@ export interface DateRange {
   until: string
 }
 
-export type MutationVerb = 'pause' | 'resume' | 'set_budget' | 'update_creative'
+/**
+ * halt_all pauses every ACTIVE campaign in the account as one ledger action.
+ * It is not listed in capabilities.mutate, which names per-entity verbs.
+ */
+export type MutationVerb = 'pause' | 'resume' | 'set_budget' | 'update_creative' | 'halt_all'
+
+/** The ad_actions row a mutation is applying, as the dispatcher saw it. */
+export interface MutationLedgerContext {
+  actionId: number | null
+  tier: 'auto' | 'approve' | 'owner'
+  /** The row's status when mutate was called. approved, in practice. */
+  status: string
+  /** Who approved the row: auto for the machine, an email or owner for a tap. */
+  approvedBy?: string | null
+}
 
 export interface MutationRequest {
   verb: MutationVerb
   target: EntityRef
   params: unknown
+  /** Set by the dispatcher. Gates that depend on the row (budget step) read it. */
+  ledger?: MutationLedgerContext | undefined
 }
 
 export interface MutationResult {
@@ -93,6 +109,12 @@ export interface MutationResult {
   before?: Record<string, unknown> | null
   after?: Record<string, unknown> | null
   platformResponse?: unknown
+  /** Every platform id the call changed. halt_all touches many campaigns. */
+  touchedIds?: string[]
+  /** True when the adapter already ran read-after-write for touchedIds. */
+  synced?: boolean
+  /** A partial failure worth keeping on an applied row, e.g. one campaign of five refused. */
+  warning?: string | null
 }
 
 /** Ids the platform assigned to what createPaused made. */

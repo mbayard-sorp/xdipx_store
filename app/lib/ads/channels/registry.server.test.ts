@@ -6,7 +6,7 @@ describe('channel registry', () => {
     const meta = getChannel('meta')
     expect(meta?.policyState).toBe('restricted')
     expect(meta?.adapter?.id).toBe('meta')
-    expect(meta?.adapter?.capabilities).toEqual({ read: true, insights: true, mutate: [], audiences: 'read', preview: false })
+    expect(meta?.adapter?.capabilities).toEqual({ read: true, insights: true, mutate: ['pause', 'resume', 'set_budget'], audiences: 'read', preview: false })
   })
 
   it('returns null for a channel the table does not list', () => {
