@@ -31,8 +31,8 @@ vi.mock('~/lib/db.server', () => {
 vi.mock('~/lib/feed-processor.server', () => ({ getPipelineSetting: vi.fn(async () => null) }))
 
 import {
-  AdMetricsError, buildCreativeIndex, buildSampleFeed, computeBreakEven, decodeCsvBuffer, extractOrderUtmContent,
-  foldAttribution, formatRoas, importMetaInsights, MetricsParseError, netRevenueCents, parseDay, parseMetricsCsv, planImport,
+  buildCreativeIndex, buildSampleFeed, computeBreakEven, decodeCsvBuffer, extractOrderUtmContent,
+  foldAttribution, formatRoas, MetricsParseError, netRevenueCents, parseDay, parseMetricsCsv, planImport,
   replayPaused, resolveCreativeId, rollupDaily, sampleDataset, sampleFirings, sumWindow, SAMPLE_END_DAY,
   utmContentOfUrl,
 } from '~/lib/ad-metrics.server'
@@ -338,9 +338,9 @@ describe('replayPaused', () => {
   })
 })
 
-describe('importMetaInsights', () => {
-  it('is a named stub that throws not_configured', async () => {
-    await expect(importMetaInsights()).rejects.toMatchObject({ code: 'not_configured' })
-    await expect(importMetaInsights()).rejects.toBeInstanceOf(AdMetricsError)
+describe('Meta spend source', () => {
+  it('no longer exports the importMetaInsights stub: /cron/ads-insights writes Meta spend as source api', async () => {
+    const mod = await import('~/lib/ad-metrics.server')
+    expect('importMetaInsights' in mod).toBe(false)
   })
 })

@@ -771,6 +771,21 @@ export const CRON_EXPECTATIONS: readonly CronExpectation[] = [
       + 'stores the reading in ad_channel_health. A missed day only delays that warning; live spend '
       + 'is capped platform-side, so this is not a money event.',
   },
+  {
+    route: '/cron/ads-insights',
+    plane: 'vercel',
+    schedule: '5 * * * *',
+    periodMinutes: HOURLY,
+    graceMinutes: 30,
+    recorded: true,
+    moneyRelevant: true,
+    ownerTeam: 'ads',
+    notes:
+      'Pulls ad-level daily insights into ad_platform_insights_daily and ad_creative_daily_metrics '
+      + '(source api), rolls the days into daily_profit_summary.ad_spend, and at 09:00 UTC re-pulls '
+      + 'the last 7 days and runs the rules (ads control plane phase 2b, ticket #16408). A money '
+      + 'event: if this pull fails, R7, the account spend guard, judges stale spend and runs blind.',
+  },
 ]
 
 /** Indexed by route, for the wrapper's per-request lookup. */

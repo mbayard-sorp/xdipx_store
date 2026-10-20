@@ -197,6 +197,10 @@
     {
       "path": "/cron/ads-token-health",
       "schedule": "35 8 * * *"
+    },
+    {
+      "path": "/cron/ads-insights",
+      "schedule": "5 * * * *"
     }
   ]
 }
