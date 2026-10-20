@@ -18,12 +18,15 @@
  *   does a full pull that came back empty.
  *
  * Callers: GET /cron/ads-sync-entities every 6 hours, and syncAfterWrite for
- * phase 5's read-after-write once mutations exist.
+ * phase 5's read-after-write once mutations exist. syncAllChannels also runs
+ * the audiences mirror (audiences.server.ts, phase 6b) after each channel's
+ * entities.
  */
 import { and, asc, eq, inArray, isNull, ne, notInArray, or, sql } from 'drizzle-orm'
 
 import { db as defaultDb, type DB } from '~/lib/db.server'
 import { adCreatives, adPlatformEntities } from '../../../db/schema'
+import { syncChannelAudiences, type AudienceStore, type AudienceSyncResult } from './audiences.server'
 import { getChannel, listChannels } from './channels/registry.server'
 import type { ChannelAdapter, ChannelId, EntityLevel, NormalizedEntity, TokenHealth } from './channels/types'
 
@@ -78,6 +81,8 @@ export interface SyncDeps {
   /** Resolves a channel's adapter. Defaults to the registry. */
   adapterFor?: (channel: ChannelId) => ChannelAdapter | null
   now?: () => Date
+  /** The audience mirror's store, for the audiences pass syncAllChannels runs after entities. */
+  audienceStore?: AudienceStore
 }
 
 export class SyncError extends Error {
@@ -184,6 +189,8 @@ export interface ChannelSyncReport {
   /** Why a channel was skipped or failed. */
   reason?: string
   health?: Pick<TokenHealth, 'valid' | 'expiresAt' | 'error'>
+  /** The audiences pass (phase 6b). Absent when the channel cannot list audiences. */
+  audiences?: { outcome: 'synced' | 'failed'; result?: AudienceSyncResult; reason?: string }
 }
 
 /**
@@ -224,7 +231,22 @@ export async function syncAllChannels(
     }
     try {
       const result = await syncChannelEntities(channel, { ...deps, adapterFor: () => adapter })
-      reports.push({ channel, outcome: 'synced', result, health: healthSummary })
+      const report: ChannelSyncReport = { channel, outcome: 'synced', result, health: healthSummary }
+      // Audiences run after entities so roles read fresh ad set targeting. A
+      // failure here is reported on its own and never fails the entity sync.
+      if (adapter.audiences && adapter.capabilities.audiences !== 'none') {
+        try {
+          const audienceResult = await syncChannelAudiences(channel, {
+            adapterFor: () => adapter,
+            ...(deps.audienceStore ? { store: deps.audienceStore } : {}),
+            ...(deps.now ? { now: deps.now } : {}),
+          })
+          report.audiences = { outcome: 'synced', result: audienceResult }
+        } catch (e) {
+          report.audiences = { outcome: 'failed', reason: (e as Error).message }
+        }
+      }
+      reports.push(report)
     } catch (e) {
       reports.push({ channel, outcome: 'failed', reason: (e as Error).message, health: healthSummary })
     }

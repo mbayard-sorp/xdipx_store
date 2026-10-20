@@ -1,6 +1,6 @@
 /**
- * Meta's ChannelAdapter (plan §3.2, phase 1b). Read only: it lists campaigns,
- * ad sets and ads, pulls daily insights and checks the token, and returns
+ * Meta's ChannelAdapter (plan §3.2, phases 1b and 6b). Read only: it lists campaigns,
+ * ad sets, ads and audiences, pulls daily insights and checks the token, and returns
  * normalized rows. It writes nothing anywhere. Phase 1c upserts the entities
  * into ad_platform_entities; phase 2b stores the insights.
  *
@@ -11,15 +11,19 @@
 import { metaCredentialsFromEnv, type MetaCredentials } from '~/lib/ad-export/meta-push.server'
 import { ChannelNotEnabledError } from '../errors'
 import type {
-  ChannelAdapter, EntityLevel, NormalizedEntity, NormalizedInsightRow, PolicyContext, PolicyRefusal, PolicyVerdict, TokenHealth,
+  ChannelAdapter, EntityLevel, NormalizedAudience, NormalizedEntity, NormalizedInsightRow, PolicyContext, PolicyRefusal, PolicyVerdict, TokenHealth,
 } from '../types'
 import { GraphError, createGraphClient, type GraphClient, type GraphJson } from './graph.server'
 
 const CAMPAIGN_FIELDS = 'id,name,status,effective_status,objective,daily_budget,lifetime_budget,bid_strategy,updated_time'
-// Ad sets carry no objective of their own; it lives on the campaign.
-const ADSET_FIELDS = 'id,name,campaign_id,status,effective_status,daily_budget,lifetime_budget,bid_strategy,updated_time'
+// Ad sets carry no objective of their own; it lives on the campaign. targeting
+// rides along in raw so the audiences mirror can read custom_audiences and
+// excluded_custom_audiences (docs/ads-policy.md M8) without another call.
+const ADSET_FIELDS = 'id,name,campaign_id,status,effective_status,daily_budget,lifetime_budget,bid_strategy,targeting,updated_time'
 // Ads carry no budget or bid strategy. ad_review_feedback is where disapprovals show up.
 const AD_FIELDS = 'id,name,adset_id,status,effective_status,ad_review_feedback,creative{id},updated_time'
+const CUSTOM_AUDIENCE_FIELDS = 'id,name,subtype,approximate_count_lower_bound,approximate_count_upper_bound,delivery_status,operation_status'
+const SAVED_AUDIENCE_FIELDS = 'id,name,approximate_count_lower_bound,approximate_count_upper_bound,operation_status'
 const INSIGHT_FIELDS = 'campaign_id,adset_id,ad_id,date_start,spend,impressions,reach,frequency,clicks,inline_link_clicks,actions,action_values'
 
 // Meta reports the same conversion under several action types. Take the first
@@ -87,6 +91,42 @@ export function normalizeMetaEntity(level: 'campaign' | 'adset' | 'ad', accountI
   }
 }
 
+/** Meta reports -1 (or nothing) when it will not estimate a size. */
+function sizeBound(v: unknown): number | null {
+  const n = typeof v === 'number' ? v : typeof v === 'string' ? Number(v) : NaN
+  return Number.isFinite(n) && n >= 0 ? Math.round(n) : null
+}
+
+/** delivery_status and operation_status arrive as { code, description }. */
+function statusText(...vs: unknown[]): string | null {
+  for (const v of vs) {
+    if (!v || typeof v !== 'object') continue
+    const o = v as Record<string, unknown>
+    const d = str(o['description'])
+    if (d) return d
+    if (o['code'] !== undefined && o['code'] !== null) return String(o['code'])
+  }
+  return null
+}
+
+/** LOOKALIKE is the only custom-audience subtype that is not a plain custom audience. */
+export function metaAudienceKind(subtype: unknown): 'custom' | 'lookalike' {
+  return typeof subtype === 'string' && subtype.toUpperCase() === 'LOOKALIKE' ? 'lookalike' : 'custom'
+}
+
+export function normalizeMetaAudience(source: 'custom' | 'saved', row: GraphJson): NormalizedAudience {
+  return {
+    platform: 'meta',
+    externalId: String(row['id']),
+    name: str(row['name']),
+    kind: source === 'saved' ? 'saved' : metaAudienceKind(row['subtype']),
+    approxSize: sizeBound(row['approximate_count_lower_bound']),
+    approxSizeUpper: sizeBound(row['approximate_count_upper_bound']),
+    status: statusText(row['delivery_status'], row['operation_status']),
+    raw: row,
+  }
+}
+
 const ID_FIELD: Record<'campaign' | 'adset' | 'ad', string> = { campaign: 'campaign_id', adset: 'adset_id', ad: 'ad_id' }
 
 export function normalizeMetaInsight(level: 'campaign' | 'adset' | 'ad', row: GraphJson): NormalizedInsightRow {
@@ -146,7 +186,7 @@ export function createMetaAdapter(deps: MetaAdapterDeps = {}): ChannelAdapter {
 
   return {
     id: 'meta',
-    capabilities: { read: true, insights: true, mutate: [], audiences: 'none', preview: false },
+    capabilities: { read: true, insights: true, mutate: [], audiences: 'read', preview: false },
 
     auth: {
       async health(): Promise<TokenHealth> {
@@ -215,6 +255,24 @@ export function createMetaAdapter(deps: MetaAdapterDeps = {}): ChannelAdapter {
         limit: 500,
       })
       return rows.map(r => normalizeMetaInsight(level, r))
+    },
+
+    audiences: {
+      // Read only. Role (targeting or exclusion) is not a property of the
+      // audience on Meta; app/lib/ads/audiences.server.ts derives it from the
+      // mirrored ad sets' targeting. Saved audiences are a smaller, optional
+      // edge: if that call fails the custom audiences still come back.
+      async list() {
+        const account = accountId()
+        const [custom, saved] = await Promise.all([
+          graph.getAll(`${account}/customaudiences`, { fields: CUSTOM_AUDIENCE_FIELDS, limit: 200 }),
+          graph.getAll(`${account}/saved_audiences`, { fields: SAVED_AUDIENCE_FIELDS, limit: 200 }).catch(() => [] as GraphJson[]),
+        ])
+        return [
+          ...custom.map(r => normalizeMetaAudience('custom', r)),
+          ...saved.map(r => normalizeMetaAudience('saved', r)),
+        ]
+      },
     },
 
     async createPaused() {
