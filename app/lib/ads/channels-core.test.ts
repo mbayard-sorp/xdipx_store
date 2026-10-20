@@ -99,6 +99,30 @@ describe('mutateStateFor', () => {
   })
 })
 
+describe('the ExoClick row', () => {
+  const EXO_CAPS: ChannelCapabilities = { read: true, insights: true, mutate: [], audiences: 'none', preview: false }
+
+  it('gets the full nine-item checklist as an allowed channel', () => {
+    const list = checklistFor('adult:exoclick', 'allowed', [])
+    expect(list?.map(i => i.key)).toEqual(CHECKLIST_ITEMS.map(i => i.key))
+    expect(list?.every(i => !i.checked)).toBe(true)
+  })
+
+  it('stays mutate-blocked with an open checklist, and still blocked once green because mutate is empty', () => {
+    const open = mutateStateFor({ policyState: 'allowed', hasAdapter: true, capabilities: EXO_CAPS, checklist: checklistFor('adult:exoclick', 'allowed', []) })
+    expect(open).toMatchObject({ mutateBlocked: true, checkedCount: 0, reasons: ['9 of 9 checklist items open', 'the adapter has no mutate verbs'] })
+    const green = mutateStateFor({
+      policyState: 'allowed', hasAdapter: true, capabilities: EXO_CAPS,
+      checklist: checklistFor('adult:exoclick', 'allowed', allChecked('adult:exoclick')),
+    })
+    expect(green).toMatchObject({ mutateBlocked: true, checkedCount: 9, reasons: ['the adapter has no mutate verbs'] })
+  })
+
+  it('reads as read and insights on the page', () => {
+    expect(capabilitiesWords(EXO_CAPS)).toBe('read, insights')
+  })
+})
+
 describe('capabilitiesWords', () => {
   it('lists what the adapter can do', () => {
     expect(capabilitiesWords(CAPS)).toBe('read, insights, mutate: pause, resume, audiences: read')

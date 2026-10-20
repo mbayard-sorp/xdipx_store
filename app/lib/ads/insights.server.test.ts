@@ -406,8 +406,8 @@ describe('runInsightsCron', () => {
     const { deps } = cronDeps(T_HOURLY, f.adapter)
     const { channels: _drop, ...rest } = deps
     const r = await runInsightsCron(rest)
-    // Meta and Microsoft are the channels in the registry with insights today.
-    expect(r.channels.map(c => c.channel)).toEqual(['meta', 'microsoft'])
+    // Meta, Microsoft and ExoClick are the channels in the registry with insights today.
+    expect(r.channels.map(c => c.channel)).toEqual(['meta', 'microsoft', 'adult:exoclick'])
   })
 })
 

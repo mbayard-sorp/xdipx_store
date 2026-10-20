@@ -41,6 +41,22 @@ describe('loadChannels', () => {
     expect(prohibited).toEqual(['pinterest', 'reddit', 'tiktok', 'x'])
   })
 
+  it('renders ExoClick from the registry with read and insights, mutate blocked', async () => {
+    const page = await loadChannels(source({
+      health: async () => [{
+        channel: 'adult:exoclick', checkedAt: NOW.toISOString(), state: 'ok', valid: true, expiresAt: null,
+        dataAccessExpiresAt: null, scopes: ['api_token'], error: null, envVar: 'EXOCLICK_API_KEY',
+      }],
+    }))
+    const exo = page.channels.find(c => c.id === 'adult:exoclick')
+    expect(exo).toMatchObject({ label: 'ExoClick', policyState: 'allowed', hasAdapter: true })
+    expect(exo?.capabilities).toEqual({ read: true, insights: true, mutate: [], audiences: 'none', preview: false })
+    expect(exo?.token?.state).toBe('ok')
+    expect(exo?.checklist).toHaveLength(9)
+    expect(exo?.mutate.mutateBlocked).toBe(true)
+    expect(exo?.mutate.reasons).toContain('the adapter has no mutate verbs')
+  })
+
   it('joins token health, sync and pull freshness by platform', async () => {
     const page = await loadChannels(source({
       health: async () => [{
