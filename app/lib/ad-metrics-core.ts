@@ -522,6 +522,9 @@ export const RECOMMENDATION_RANK: Record<Recommendation, number> = {
 
 export const RULE_RECOMMENDATION: Record<string, Recommendation> = {
   R1: 'pause', R2: 'pause', R3: 'pause', R4: 'revive', R5: 'scale', R6: 'brake', R7: 'paused', R8: 'refresh',
+  // Lead campaigns (ticket #16428). L2 can also brake and L7 can also revive; the row's
+  // action and sentence say which. L4 is a notice with no action of its own.
+  L1: 'pause', L2: 'pause', L3: 'pause', L5: 'scale', L6: 'refresh', L8: 'refresh',
 }
 
 export interface RuleFiring {

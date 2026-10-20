@@ -25,20 +25,40 @@
  *     research table does not carry. Both are settings.
  *   - R8 needs frequency, which the metrics table does not store. Without it the
  *     rule stays quiet. The Meta insights import (PR-E) is what supplies it.
+ *
+ * Objective-aware rule sets (ticket #16428, plan section 9.3): a creative whose
+ * mirrored campaign objective is leads gets L1 to L8 (ad-rules-lead-core.ts)
+ * plus R2 on outbound CTR and R7. Sales, other and unknown objectives keep R1
+ * to R8 unchanged. R7 is account level and runs for every set.
+ *   - R7's spend leg compares the trailing 7-day average daily spend to the
+ *     daily cap, not one day: Meta may spend up to 75% over a daily budget on a
+ *     given day, so a single-day test fires on normal pacing. The average runs
+ *     over the days since the account's first spend when that is under 7. One
+ *     day past 1.75x the cap still trips it, since that is beyond what Meta's
+ *     pacing allows.
  */
 import {
   ADS_RULE_DEFAULTS, type AdsRuleKey,
 } from '~/lib/ad-settings-defaults'
 import {
+  evaluateFunnelBreak, evaluateLeadCreative, funnelBreakFirings, resolveL2,
+  type CampaignObjective, type L2Candidate, type LeadAccountInputs, type LeadCreativeSignals, type LeadRuleId,
+} from '~/lib/ad-rules-lead-core'
+import {
   RECOMMENDATION_RANK, RULE_RECOMMENDATION, SAMPLE_END_DAY, ctrPct, formatMoney, formatRoas, netRoas, sumWindow,
   type BreakEven, type DailyPoint, type RuleFiring, type SampleCreative, type WindowTotals,
 } from '~/lib/ad-metrics-core'
 
-export type RuleId = 'R1' | 'R2' | 'R3' | 'R4' | 'R5' | 'R6' | 'R7' | 'R8'
-export const RULE_IDS: readonly RuleId[] = ['R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R7', 'R8']
+export type SalesRuleId = 'R1' | 'R2' | 'R3' | 'R4' | 'R5' | 'R6' | 'R7' | 'R8'
+export type RuleId = SalesRuleId | LeadRuleId
+/** The rules with owner-editable numbers. The L rules read the CPL ceiling valve only. */
+export const RULE_IDS: readonly SalesRuleId[] = ['R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R7', 'R8']
 
-/** What an ad_rule_events row says to do. `none` is a held or cleared firing. */
-export type RuleAction = 'pause' | 'scale' | 'brake' | 'refresh' | 'revive' | 'none'
+/**
+ * What an ad_rule_events row says to do. `none` is a held or cleared firing.
+ * `flag` is a notice with no budget or status change (L4).
+ */
+export type RuleAction = 'pause' | 'scale' | 'brake' | 'refresh' | 'revive' | 'flag' | 'none'
 
 export interface RuleEventHistory {
   id: number
@@ -65,12 +85,20 @@ export interface CreativeRuleInput {
   /** Daily rows, any order, any span. Lifetime is everything passed in. */
   days: DailyPoint[]
   events: RuleEventHistory[]
+  /** The mirrored campaign objective. Missing reads as unknown, which keeps R1 to R8. */
+  objective?: CampaignObjective
+  /** The ad set this creative's ad sits in, from the mirror. L2 brakes and cools down per set. */
+  adsetExternalId?: string | null
+  /** Lead-side inputs. Read only for lead-campaign creatives. */
+  lead?: LeadCreativeSignals
 }
 
 export interface RulesWindow {
   creatives: CreativeRuleInput[]
   /** Account level daily totals (every creative plus account-only rows), at least the last 8 days. */
   accountDays: DailyPoint[]
+  /** Account-level lead inputs (14d lead-to-order, health samples). Null or missing: L3 and L5 stay quiet. */
+  lead?: LeadAccountInputs | null
 }
 
 export interface RulesSettings {
@@ -78,6 +106,8 @@ export interface RulesSettings {
   breakEven: BreakEven
   /** ads_media_daily_cap_cents: the R7 trigger and the R5 per-creative ceiling. */
   dailyCapCents: number
+  /** ads_lead_cpl_ceiling_cents: the L rules' list-building price. Missing reads as the $8 default. */
+  leadCplCeilingCents?: number
 }
 
 export type RuleInputs = Record<string, number | string | boolean | null>
@@ -277,10 +307,25 @@ function evaluateCreative(c: CreativeRuleInput, s: RulesSettings, now: Date): Ru
 // R7 account spend guard
 // ---------------------------------------------------------------------------
 
+/** Meta may spend up to 75% over a daily budget on one day (plan 9.3). Past that, one day trips R7. */
+export const R7_DAY_BACKSTOP_MULTIPLE = 1.75
+
 function evaluateR7(w: RulesWindow, s: RulesSettings, now: Date): R7Result | null {
   const today = ymdUtc(now)
   const todayRow = totals(w.accountDays, today, today)
-  const spendBreach = todayRow.spendCents > s.dailyCapCents
+
+  // Spend: the trailing 7-day average against the cap, over fewer days when the
+  // account is younger than a week, plus a one-day backstop past Meta's pacing room.
+  const from7 = minusDays(today, 6)
+  const firstSpend = w.accountDays.filter(d => d.spendCents > 0 && d.day <= today).map(d => d.day).sort()[0] ?? today
+  const start = firstSpend > from7 ? firstSpend : from7
+  const spanDays = Math.min(7, Math.max(1, Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86_400_000) + 1))
+  const spend7 = totals(w.accountDays, start, today).spendCents
+  const avgDaily = Math.round(spend7 / spanDays)
+  const backstopCents = Math.round(R7_DAY_BACKSTOP_MULTIPLE * s.dailyCapCents)
+  const avgBreach = avgDaily > s.dailyCapCents
+  const dayBreach = todayRow.spendCents > backstopCents
+  const spendBreach = avgBreach || dayBreach
 
   // CPM against the median of the 7 days before today. Needs three days of
   // impressions to mean anything; with fewer the CPM leg stays quiet.
@@ -299,13 +344,15 @@ function evaluateR7(w: RulesWindow, s: RulesSettings, now: Date): R7Result | nul
   if (!spendBreach && !cpmBreach) return null
   const trigger: R7Result['trigger'] = spendBreach && cpmBreach ? 'both' : spendBreach ? 'spend' : 'cpm'
   const parts: string[] = []
-  if (spendBreach) parts.push(`today's spend ${formatMoney(todayRow.spendCents)} passed the ${formatMoney(s.dailyCapCents)} daily cap`)
+  if (avgBreach) parts.push(`average daily spend ${formatMoney(avgDaily)} over the last ${spanDays}d passed the ${formatMoney(s.dailyCapCents)} daily cap`)
+  if (dayBreach) parts.push(`today's spend ${formatMoney(todayRow.spendCents)} passed ${R7_DAY_BACKSTOP_MULTIPLE}x the ${formatMoney(s.dailyCapCents)} daily cap`)
   if (cpmBreach) parts.push(`CPM $${cpmToday!.toFixed(2)} is over ${mult}x its 7-day median of $${med!.toFixed(2)}`)
   return {
     trigger,
     sentence: `R7 paused all: ${parts.join(', and ')}`,
     inputs: {
       todaySpendCents: todayRow.spendCents, dailyCapCents: s.dailyCapCents,
+      avgDailySpendCents: avgDaily, spendDays: spanDays, dayBackstopCents: backstopCents,
       cpmToday: cpmToday == null ? null : Number(cpmToday.toFixed(2)),
       cpmMedian7d: med == null ? null : Number(med.toFixed(2)),
       cpmMultiple: mult, trigger,
@@ -321,7 +368,29 @@ function evaluateR7(w: RulesWindow, s: RulesSettings, now: Date): R7Result | nul
  */
 export function evaluateRules(window: RulesWindow, settings: RulesSettings, now: Date): EvaluatedRules {
   const firings: RuleFired[] = []
-  for (const c of window.creatives) firings.push(...evaluateCreative(c, settings, now))
+  const leadCreatives: CreativeRuleInput[] = []
+  const l2: L2Candidate[] = []
+  const acct = window.lead ?? null
+  for (const c of window.creatives) {
+    if (c.objective === 'leads') {
+      leadCreatives.push(c)
+      const r = evaluateLeadCreative(c, settings, now, acct)
+      firings.push(...r.firings)
+      if (r.l2) l2.push(r.l2)
+    } else {
+      firings.push(...evaluateCreative(c, settings, now))
+    }
+  }
+  if (leadCreatives.length) {
+    firings.push(...resolveL2(l2, leadCreatives, settings, now))
+    // L3 pauses every live lead ad; any other row for those ads is moot.
+    const fb = evaluateFunnelBreak(acct?.healthSamples ?? [], now)
+    if (fb) {
+      const keys = new Set(leadCreatives.map(c => c.key))
+      for (let i = firings.length - 1; i >= 0; i--) if (firings[i]!.creativeKey != null && keys.has(firings[i]!.creativeKey!)) firings.splice(i, 1)
+      firings.push(...funnelBreakFirings(fb, leadCreatives))
+    }
+  }
   const r7 = evaluateR7(window, settings, now)
   if (r7) {
     firings.push({ ruleId: 'R7', creativeKey: null, creativeId: null, action: 'pause', sentence: r7.sentence, inputs: r7.inputs })
@@ -396,6 +465,43 @@ export const RULE_RECIPES: Record<RuleId, RuleRecipe> = {
     parts: ['Flag a refresh when frequency passes ', f('ads_rule_r8_max_frequency', 'Frequency', '', 1, 20, 0.5), ' and CTR falls ', f('ads_rule_r8_ctr_drop_pct', 'CTR drop', '%', 5, 90, 5), '% from its first 3 days.'],
     note: 'Needs frequency, which arrives with the Meta insights import.',
   },
+  // Lead campaigns (plan 9.3). Their numbers are fixed in ad-rules-lead-core.ts; the one
+  // owner-set input is the CPL ceiling (ads_lead_cpl_ceiling_cents, $8 by default).
+  L1: {
+    id: 'L1', title: 'Zero-lead kill (lead campaigns)', revive: 'L7',
+    parts: ['Pause when an ad spends 3x the CPL ceiling with 0 leads, after at least 1,000 impressions and 48h live. Fires once.'],
+    note: 'Lead campaigns get L1 to L8 plus R2 and R7. R1, R3, R5 and R6 judge on orders, which land weeks after a lead.',
+  },
+  L7: {
+    id: 'L7', title: 'Cohort verdict',
+    parts: ['At 40 leads and 30 days old, pause when CPL is over 3x the contribution per lead, or revive once when contribution per lead covers CPL.'],
+  },
+  L2: {
+    id: 'L2', title: 'CPL ceiling',
+    parts: ['Pause when 7d CPL passes 1.5x the CPL ceiling, with at least 5 leads or 5x the ceiling spent. When every ad in the ad set breaches, brake the set 30% instead. Once per 72h per ad set.'],
+  },
+  L3: {
+    id: 'L3', title: 'Funnel break',
+    parts: ['Pause every lead ad when 30 landing views in 6h bring 0 successful lead posts, or /hello fails 2 probes in a row.'],
+    note: 'Waits on the hourly health samples. Until they exist this rule stays quiet.',
+  },
+  L4: {
+    id: 'L4', title: 'Click leak',
+    parts: ['Flag landing speed when 50 or more outbound clicks in 7d bring landing views under 60% of them. Once per 7d.'],
+  },
+  L5: {
+    id: 'L5', title: 'Lead scale',
+    parts: ['Scale up 20% when 7d CPL is at most 0.7x the CPL ceiling on 10 or more leads and the account turned at least 3% of its 14d leads into orders. Once per 72h, never past the daily cap.'],
+  },
+  L6: {
+    id: 'L6', title: 'Lead quality',
+    parts: ["Deprioritize and refresh the brief when a 20-lead cohort, 7 days old, clicks email 1 or reveals to cart at under half the account median. Once per 14d."],
+    note: 'Needs email-1 click or reveal-to-cart by utm_content, which the lead report does not read yet. Until then it stays quiet.',
+  },
+  L8: {
+    id: 'L8', title: 'Lead fatigue',
+    parts: ['Flag a refresh after 10 leads and 7 days when 7d CTR is down 30% from the first 3 days, or CPL is up 50% from the first 10 leads. Once per 7d.'],
+  },
 }
 
 /** Display order: each kill rule with its revive partner directly under it. */
@@ -407,6 +513,13 @@ export const RECIPE_ORDER: ReadonlyArray<{ rule: RuleId; underneath?: RuleId }> 
   { rule: 'R6' },
   { rule: 'R7' },
   { rule: 'R8' },
+  { rule: 'L1', underneath: 'L7' },
+  { rule: 'L2' },
+  { rule: 'L3' },
+  { rule: 'L4' },
+  { rule: 'L5' },
+  { rule: 'L6' },
+  { rule: 'L8' },
 ]
 
 export function recipeFields(rule: RuleId): RecipeField[] {

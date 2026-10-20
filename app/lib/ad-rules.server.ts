@@ -12,21 +12,43 @@
  *
  * With ads_spend_enabled off (simulation) every apply is recorded in the
  * database exactly as it would be live, and no platform call happens.
+ *
+ * Objective-aware sets (ticket #16428): each creative's campaign objective is
+ * read through the entity mirror (ad, ad set, campaign in ad_platform_entities).
+ * Lead campaigns get L1 to L8 plus R2 and R7, and their inputs are loaded here:
+ * leads per day from ad_creative_daily_metrics.leads, link clicks and landing
+ * views from ad_platform_insights_daily, and Klaviyo leads and lead-to-order by
+ * utm_content from the lead funnel read. L3's hourly health samples do not
+ * exist yet (phase 2d), so the window carries an empty list and L3 stays quiet.
  */
 import { and, asc, eq, gte, inArray, isNull, sql } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
-import { adCreativeDailyMetrics, adCreatives, adRuleEvents } from '../../db/schema'
-import { getAdsMediaDailyCapCents, getAdsRuleThresholds, getAdsSpendEnabled } from '~/lib/ad-settings.server'
+import { adCreativeDailyMetrics, adCreatives, adPlatformEntities, adPlatformInsightsDaily, adRuleEvents } from '../../db/schema'
+import { getAdsLeadCplCeilingCents, getAdsMediaDailyCapCents, getAdsRuleThresholds, getAdsSpendEnabled } from '~/lib/ad-settings.server'
 import { AdMetricsError, addDays, currentBreakEven, todayUtc } from '~/lib/ad-metrics.server'
-import { formatMoney, type LiveActionKind } from '~/lib/ad-metrics-core'
+import { buildCreativeIndex, formatMoney, type LiveActionKind } from '~/lib/ad-metrics-core'
 import { platformApply, type PlatformApplyResult } from '~/lib/ad-platform-apply.server'
 import {
   cappedScalePct, evaluateRules,
   type CreativeRuleInput, type RuleEventHistory, type RuleFired, type RulesSettings, type RulesWindow,
 } from '~/lib/ad-rules-core'
+import {
+  accountLeadToOrder, buildLeadCohorts, resolveObjectives,
+  type CampaignObjective, type CohortLead, type LeadAccountInputs, type LeadDay, type MirrorEntity, type ObjectiveResolution,
+} from '~/lib/ad-rules-lead-core'
 import type { DailyPoint } from '~/lib/ad-metrics-core'
 
 export * from '~/lib/ad-rules-core'
+export * from '~/lib/ad-rules-lead-core'
+
+/** How far back the Klaviyo read goes: L7 needs cohorts at least 30 days old. */
+const LEAD_READ_DAYS = 90
+
+/** Inputs the lead rules could not read this run, named so the run summary says why a rule stayed quiet. */
+export const LEAD_INPUTS_NOT_BUILT = [
+  'L3: hourly health samples (ad_health_samples, phase 2d) do not exist yet; L3 cannot fire',
+  'L6: email-1 click and reveal-to-cart by utm_content are not in the lead funnel report; L6 cannot fire',
+] as const
 
 const LOOKBACK_DAYS = 120
 const DAY_MS = 86_400_000
@@ -69,21 +91,64 @@ function foldDays(rows: Array<{ day: string; spendCents: number; impressions: nu
   return [...m.values()].sort((a, b) => a.day.localeCompare(b.day))
 }
 
+export interface ObjectiveReport {
+  counts: Record<CampaignObjective, number>
+  /** One line per evaluated creative: which set it got and why. */
+  byCreative: Array<{ creativeId: number; objective: CampaignObjective; rawObjective: string | null; ruleSet: 'leads' | 'sales'; note: string }>
+  /** What the lead rules could not read this run. Empty when no lead creative was evaluated. */
+  leadGaps: string[]
+}
+
 export interface LoadedWindow {
   window: RulesWindow
   events: EventRow[]
+  objectives: ObjectiveReport
+}
+
+type InsightRow = { externalId: string; day: string; linkClicks: number | null; actions: Record<string, number> | null }
+
+/**
+ * Lead days for one creative: platform leads from the metrics rows (null when
+ * no row carried the column), link clicks and landing views from insights.
+ * A present actions object without landing_page_view reads as 0 views, since
+ * Meta omits zero-count actions; no insights row reads as unread.
+ */
+export function buildLeadDays(
+  metricRows: ReadonlyArray<{ day: string; leads: number | null }>,
+  insightRows: readonly InsightRow[],
+): LeadDay[] {
+  const m = new Map<string, LeadDay>()
+  const get = (day: string) => m.get(day) ?? { day, leads: null, linkClicks: null, landingViews: null }
+  for (const r of metricRows) {
+    const d = get(r.day)
+    if (r.leads != null) d.leads = (d.leads ?? 0) + r.leads
+    m.set(r.day, d)
+  }
+  for (const r of insightRows) {
+    const d = get(r.day)
+    if (r.linkClicks != null) d.linkClicks = (d.linkClicks ?? 0) + r.linkClicks
+    if (r.actions && typeof r.actions === 'object') d.landingViews = (d.landingViews ?? 0) + (Number(r.actions['landing_page_view']) || 0)
+    m.set(r.day, d)
+  }
+  return [...m.values()].sort((a, b) => a.day.localeCompare(b.day))
 }
 
 export async function loadRulesWindow(now: Date): Promise<LoadedWindow> {
   const today = todayUtc(now)
   const from = addDays(today, -LOOKBACK_DAYS)
-  const [creatives, metrics, events] = await Promise.all([
+  const [creatives, metrics, events, mirror] = await Promise.all([
     db.select({
       id: adCreatives.id, pausedAt: adCreatives.pausedAt, launchedAt: adCreatives.launchedAt, budgetMultiplier: adCreatives.budgetMultiplier,
+      externalAdId: adCreatives.externalAdId, exportPayload: adCreatives.exportPayload,
     }).from(adCreatives),
     db.select().from(adCreativeDailyMetrics).where(gte(adCreativeDailyMetrics.day, from)),
     db.select().from(adRuleEvents).where(gte(adRuleEvents.firedAt, new Date(now.getTime() - LOOKBACK_DAYS * DAY_MS))).orderBy(asc(adRuleEvents.id)),
+    db.select({
+      platform: adPlatformEntities.platform, level: adPlatformEntities.level, externalId: adPlatformEntities.externalId,
+      parentExternalId: adPlatformEntities.parentExternalId, objective: adPlatformEntities.objective, creativeId: adPlatformEntities.creativeId,
+    }).from(adPlatformEntities) as Promise<MirrorEntity[]>,
   ])
+  const resolved = resolveObjectives(creatives.map(c => ({ creativeId: c.id, externalAdId: c.externalAdId ?? null })), mirror)
   const history = toHistory(events)
   const recent = addDays(today, -30)
   const byCreative = new Map<number, typeof metrics>()
@@ -94,10 +159,16 @@ export async function loadRulesWindow(now: Date): Promise<LoadedWindow> {
     byCreative.set(m.creativeId, list)
   }
   const inputs: CreativeRuleInput[] = []
+  const report: ObjectiveReport = { counts: { leads: 0, sales: 0, other: 0, unknown: 0 }, byCreative: [], leadGaps: [] }
   for (const c of creatives) {
     const rows = byCreative.get(c.id) ?? []
     const recentlyActive = rows.some(r => r.day >= recent)
     if (!recentlyActive && c.launchedAt == null && c.pausedAt == null) continue
+    const o: ObjectiveResolution = resolved.get(c.id) ?? {
+      objective: 'unknown', rawObjective: null, adExternalId: null, adsetExternalId: null, campaignExternalId: null, note: 'not resolved',
+    }
+    report.counts[o.objective] += 1
+    report.byCreative.push({ creativeId: c.id, objective: o.objective, rawObjective: o.rawObjective, ruleSet: o.objective === 'leads' ? 'leads' : 'sales', note: o.note })
     inputs.push({
       key: String(c.id), creativeId: c.id, label: `#${c.id}`,
       paused: c.pausedAt != null,
@@ -106,16 +177,59 @@ export async function loadRulesWindow(now: Date): Promise<LoadedWindow> {
       budgetMultiplier: Number(c.budgetMultiplier ?? 1) || 1,
       days: foldDays(rows),
       events: history.get(c.id) ?? [],
+      ...(o.objective === 'leads' ? { objective: 'leads' as const, adsetExternalId: o.adsetExternalId } : {}),
     })
   }
-  return { window: { creatives: inputs, accountDays: foldDays(metrics) }, events }
+
+  // Lead inputs, read only when a lead creative is in the window.
+  let lead: LeadAccountInputs | null = null
+  const leadInputs = inputs.filter(i => i.objective === 'leads')
+  if (leadInputs.length) {
+    report.leadGaps.push(...LEAD_INPUTS_NOT_BUILT)
+    const extIds = leadInputs.flatMap(i => {
+      const ext = creatives.find(c => c.id === i.creativeId)?.externalAdId
+      return ext ? [ext] : []
+    })
+    const insights: InsightRow[] = extIds.length
+      ? (await db.select({
+          externalId: adPlatformInsightsDaily.externalId, day: adPlatformInsightsDaily.day,
+          linkClicks: adPlatformInsightsDaily.linkClicks, actions: adPlatformInsightsDaily.actions,
+        }).from(adPlatformInsightsDaily).where(and(
+          eq(adPlatformInsightsDaily.level, 'ad'), inArray(adPlatformInsightsDaily.externalId, extIds), gte(adPlatformInsightsDaily.day, from),
+        ))) as InsightRow[]
+      : []
+    if (!insights.length) report.leadGaps.push('L4 and outbound CTR: no ad-level insights rows yet; R2 uses clicks over impressions and L4 stays quiet')
+
+    const { readLeadFunnelRaw } = await import('~/lib/lead-funnel-report.server')
+    const raw = await readLeadFunnelRaw({ windowDays: LEAD_READ_DAYS })
+    let cohorts: Map<number, CohortLead[]> | null = null
+    if (raw.complete) {
+      const index = buildCreativeIndex(creatives.map(c => ({ id: c.id, externalAdId: c.externalAdId ?? null, exportPayload: c.exportPayload })))
+      cohorts = buildLeadCohorts(raw.leads, raw.orders, index)
+      const acct = accountLeadToOrder(raw.leads, raw.orders, now, 14)
+      lead = { leadToOrder14d: acct.rate, leads14d: acct.leads, healthSamples: [] }
+    } else {
+      report.leadGaps.push(`Klaviyo leads unread (${raw.gaps.join('; ') || 'unknown'}); L5 and L7 stay quiet and L1 reads platform leads only`)
+      lead = { leadToOrder14d: null, leads14d: null, healthSamples: [] }
+    }
+
+    for (const i of leadInputs) {
+      const ext = creatives.find(c => c.id === i.creativeId)?.externalAdId ?? null
+      i.lead = {
+        days: buildLeadDays(byCreative.get(i.creativeId!) ?? [], ext ? insights.filter(r => r.externalId === ext) : []),
+        cohort: cohorts ? cohorts.get(i.creativeId!) ?? [] : null,
+        quality: null,
+      }
+    }
+  }
+  return { window: { creatives: inputs, accountDays: foldDays(metrics), lead }, events, objectives: report }
 }
 
 export async function loadRulesSettings(now: Date): Promise<RulesSettings & { spendEnabled: boolean }> {
-  const [thresholds, dailyCapCents, breakEven, spendEnabled] = await Promise.all([
-    getAdsRuleThresholds(), getAdsMediaDailyCapCents(), currentBreakEven(now), getAdsSpendEnabled(),
+  const [thresholds, dailyCapCents, breakEven, spendEnabled, leadCplCeilingCents] = await Promise.all([
+    getAdsRuleThresholds(), getAdsMediaDailyCapCents(), currentBreakEven(now), getAdsSpendEnabled(), getAdsLeadCplCeilingCents(),
   ])
-  return { thresholds, dailyCapCents, breakEven, spendEnabled }
+  return { thresholds, dailyCapCents, breakEven, spendEnabled, leadCplCeilingCents }
 }
 
 // ---------------------------------------------------------------------------
@@ -178,10 +292,18 @@ export interface RulesRunSummary {
   refreshed: number
   cleared: number
   r7: null | { eventId: number; trigger: string; pausedCreatives: number; alert: 'filed' | 'failed' | 'skipped' }
+  /** Which rule set each creative got, by mirrored campaign objective, and what the lead rules could not read. */
+  objectives: ObjectiveReport
 }
 
+/**
+ * The stored row detail. Lead-rule sentences carry a SIMULATION label while the
+ * spend valve is off; R1 to R8 keep their sentences exactly as before and say
+ * it through the `simulation` flag the Live tab already reads.
+ */
 function detailOf(f: RuleFired, simulated: boolean): Record<string, unknown> {
-  return { sentence: f.sentence, inputs: f.inputs, simulation: simulated, ...(f.held ? { held: true } : {}) }
+  const sentence = simulated && f.ruleId.startsWith('L') ? `SIMULATION. ${f.sentence}` : f.sentence
+  return { sentence, inputs: f.inputs, simulation: simulated, ...(f.held ? { held: true } : {}) }
 }
 
 /**
@@ -213,7 +335,7 @@ async function raiseR7Alert(day: string, sentence: string, pausedCreatives: numb
 
 export async function runRulesDaily(now: Date = new Date()): Promise<RulesRunSummary> {
   const day = todayUtc(now)
-  const [{ window, events }, settings] = await Promise.all([loadRulesWindow(now), loadRulesSettings(now)])
+  const [{ window, events, objectives }, settings] = await Promise.all([loadRulesWindow(now), loadRulesSettings(now)])
   const simulated = !settings.spendEnabled
   const result = evaluateRules(window, settings, now)
 
@@ -249,6 +371,7 @@ export async function runRulesDaily(now: Date = new Date()): Promise<RulesRunSum
     fired: result.firings.map(f => ({ ruleId: f.ruleId, creativeId: f.creativeId, action: f.action, sentence: f.sentence })),
     inserted: plan.inserts.length, refreshed: plan.refresh.length, cleared: plan.clear.length,
     r7: r7Summary,
+    objectives,
   }
 }
 
@@ -335,7 +458,7 @@ export async function applyRuleAction(
 
   const [thresholds, dailyCap, spendEnabled] = await Promise.all([getAdsRuleThresholds(), getAdsMediaDailyCapCents(), getAdsSpendEnabled()])
   const simulated = !spendEnabled
-  const ruleId = opts.ruleId && /^R[1-8]$/.test(opts.ruleId) ? opts.ruleId : 'MAN'
+  const ruleId = opts.ruleId && /^[RL][1-8]$/.test(opts.ruleId) ? opts.ruleId : 'MAN'
   const mult = Number(c.budgetMultiplier ?? 1) || 1
 
   if (kind === 'pause' && c.pausedAt != null) throw new AdMetricsError(`#${creativeId} is already paused.`)
