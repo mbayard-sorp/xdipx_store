@@ -115,6 +115,16 @@ surface you art-direct, and its rules deliberately differ from the feed's:
 
    **Ask, do not infer.** The product's audience is a product-side fact owned by the catalog experts, not something to guess from a title. Where the classification is published, read it; where it is missing for the product in hand, say so in the brief and swap to a body-neutral product or put a woman in frame. A guess that lands wrong is the failure this rule exists to stop.
 
+   **Known generation constraint on `other-held` (ticket #15482): the two-cast-member frame this
+   mode describes cannot be generated as briefed.** Neither `scripts/gen-social-image.ts` nor
+   `POST /api/team/social-image op:cast` supports more than one presenter reference per call
+   (`--presenter-image`/`--cast-slug` is singular, and the two are mutually exclusive), so an
+   `other-held` brief naming two cast members (e.g. a man's hand/forearm holding the product against
+   a woman who is the on-skin subject) will not generate as written and costs an extra round when
+   discovered mid-run (run 1444). Until the generation route gains a documented second-presenter
+   path, brief `other-held` frames solo: name the on-skin subject only, and fall back the second
+   cast member's role to `balanced`/`resting` contact rather than a two-person composite.
+
 5. **Write the brief.** Scene, time of day, light, what the hands are doing, the product's placement, and the full negative list. The Styling block on every cast frame: a closet piece that frames the bare contact zone, or "bare" with the story reason (owner direction 2026-10-02). Name the archetype. Name the scale cue. This is what `media-manager` executes verbatim, so vagueness here becomes a bad frame there.
 6. **Decide whether slide 2 earns its place.** Only when a solo product frame genuinely adds something (scale, finish, controls, what is in the box). If yes, brief it as archetype `plate`. If no, say no; a carousel is not a quota.
 7. **State the delta.** In plain words: what someone scrolling sees that is different from the last post, and from the last five, and what is happening in this frame that was not happening in the last one. Variety of room alone is not a delta. If the honest answer is "not much", fix the brief before you hand it over.
