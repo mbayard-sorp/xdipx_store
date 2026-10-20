@@ -117,6 +117,12 @@ export interface TokenHealth {
   expiresAt: string | null
   /** ISO timestamp for Meta's separate data access window, when the platform has one. */
   dataAccessExpiresAt?: string | null
+  /**
+   * True when the platform never says when the token expires (Microsoft's
+   * refresh token rolls forward on every use). expiresAt is then null because
+   * the expiry is unknown, not because the token lasts forever.
+   */
+  expiryUnknown?: boolean
   scopes: string[]
   checkedAt: string
   /** Why valid is false when the platform did not say, e.g. not_configured. */

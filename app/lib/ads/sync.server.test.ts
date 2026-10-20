@@ -267,12 +267,12 @@ describe('syncAllChannels', () => {
     expect(reports[0]?.reason).toBe('api_error')
   })
 
-  it('defaults to the registry: only Meta has a readable adapter today', async () => {
+  it('defaults to the registry: Meta and Microsoft have readable adapters today', async () => {
     const m = memoryStore()
     const f = fakeAdapter(() => [])
     const seen: string[] = []
     await syncAllChannels({ store: m.store, adapterFor: id => { seen.push(id); return f.adapter } })
-    expect(seen).toEqual(['meta'])
+    expect(seen).toEqual(['meta', 'microsoft'])
   })
 })
 

@@ -18,6 +18,7 @@ import {
   getGaClientId,
   getGaSessionId,
   getStoredGoogleClickId,
+  getStoredMicrosoftClickId,
   getStoredRefCode,
   getStoredUTM,
 } from './attribution.server'
@@ -29,7 +30,8 @@ export interface CartAttr { key: string; value: string }
 
 /**
  * Attribution cart attributes from the request's cookies: `_fbp`, `_fbc`,
- * `_ga_cid`, `_ga_sid`, the `_utm_` set, and `_ref_code`. Only cookies that
+ * `_ga_cid`, `_ga_sid`, the `_gclid` and `_msclkid` sets, the `_utm_` set,
+ * and `_ref_code`. Only cookies that
  * are actually present produce an attribute, so this can return an empty
  * array.
  */
@@ -38,6 +40,7 @@ export function attributionCartAttrs(request: Request): CartAttr[] {
   const gaCid = getGaClientId(request)
   const gaSid = getGaSessionId(request)
   const gclid = getStoredGoogleClickId(request)
+  const msclkid = getStoredMicrosoftClickId(request)
   const utm = getStoredUTM(request)
   const refCode = getStoredRefCode(request)
   const attrs: CartAttr[] = []
@@ -51,6 +54,14 @@ export function attributionCartAttrs(request: Request): CartAttr[] {
     attrs.push({ key: '_gclid', value: gclid.id })
     attrs.push({ key: '_gclid_type', value: gclid.type })
     attrs.push({ key: '_gclid_captured_at', value: gclid.capturedAt })
+  }
+  // Microsoft offline conversion import keys on msclkid. The webhook already
+  // reads `_msclkid` (server/webhooks.ts PAID_CLICK_ID_ATTRIBUTES).
+  if (msclkid) {
+    attrs.push({ key: '_msclkid', value: msclkid.id })
+    attrs.push({ key: '_msclkid_captured_at', value: msclkid.capturedAt })
+  }
+  if (gclid || msclkid) {
     // The order webhook has no Request/cookies (see the "We don't have the
     // original Request here" comment in server/webhooks.ts), so consent has
     // to ride along as its own attribute if the offline-conversion export is

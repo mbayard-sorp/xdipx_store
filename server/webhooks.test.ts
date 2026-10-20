@@ -205,6 +205,17 @@ describe('clickIdsFromNoteAttributes (ticket #16409)', () => {
     expect(clickIdsFromNoteAttributes([{ name, value: 'abc123' }])).toEqual([expected])
   })
 
+  it('reads the _msclkid attribute the cart stamps from a captured msclkid (ticket #16437)', async () => {
+    const { captureMicrosoftClickId } = await import('../app/lib/attribution.server')
+    const { attributionCartAttrs } = await import('../app/lib/attribution-cart.server')
+    const [cookie] = captureMicrosoftClickId(new Request('https://xdipx.com/?msclkid=4f2a9c1b8e7d'))
+    const cart = attributionCartAttrs(new Request('https://xdipx.com/api/cart', { headers: { Cookie: cookie!.split(';')[0]! } }))
+    // Shopify copies cart attributes onto the order as note_attributes, key becoming name.
+    const noteAttributes = cart.map(a => ({ name: a.key, value: a.value }))
+    expect(noteAttributes).toContainEqual({ name: '_msclkid', value: '4f2a9c1b8e7d' })
+    expect(clickIdsFromNoteAttributes(noteAttributes)).toEqual(['microsoft'])
+  })
+
   it('ignores _fbp, which is a browser id and not a click', () => {
     expect(clickIdsFromNoteAttributes([{ name: '_fbp', value: 'fb.1.2.3' }])).toEqual([])
   })

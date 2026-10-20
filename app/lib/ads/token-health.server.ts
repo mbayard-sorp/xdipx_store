@@ -85,6 +85,8 @@ export function tokenEnvVar(channel: ChannelId | string, env: NodeJS.ProcessEnv 
     if (set('META_ACCESS_TOKEN')) return 'META_ACCESS_TOKEN'
     return 'META_ADS_ACCESS_TOKEN (or META_ACCESS_TOKEN)'
   }
+  // Microsoft keeps its refresh token in microsoft_ads_tokens, not in an env var.
+  if (channel === 'microsoft') return 'the Microsoft Ads connection (/api/microsoft-ads-connect)'
   return `the ${channel} token env var`
 }
 
@@ -92,6 +94,9 @@ const WHERE_TO_GO: Partial<Record<string, string>> = {
   meta:
     'Meta Business Settings > Users > System users: generate a new token for the ads system user '
     + 'with ads_read and ads_management on ad account 920738511029316, then set it in Vercel and redeploy.',
+  microsoft:
+    'Open /api/microsoft-ads-connect while signed in as the owner and approve the Microsoft consent screen. '
+    + 'If the blocker says not set, add the MSADS_* variables for the active MSADS_ENV in Vercel first.',
 }
 
 export function tokenBlockerDedupeKey(channel: ChannelId | string): string {
