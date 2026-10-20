@@ -2493,6 +2493,24 @@ export const adChannelHealth = pgTable('ad_channel_health', {
 export type AdChannelHealthState = 'ok' | 'expiring' | 'invalid' | 'unknown'
 
 /**
+ * Channel enablement checklist (migration 135, plan §6, ticket #16438). One
+ * row per channel per item. checked_at is null while the item is open. Only
+ * an admin session action on /admin/ads/channels writes here; the item keys
+ * live in app/lib/ads/channels-core.ts.
+ */
+export const adChannelChecklist = pgTable('ad_channel_checklist', {
+  id:        bigserial('id', { mode: 'number' }).primaryKey(),
+  channel:   text('channel').notNull(),
+  item:      text('item').notNull(),
+  checkedAt: timestamp('checked_at', { withTimezone: true }),
+  checkedBy: text('checked_by'),
+  evidence:  text('evidence'),
+}, t => ({
+  // Postgres's default name for the inline UNIQUE in migration 135.
+  channelItemUq: unique('ad_channel_checklist_channel_item_key').on(t.channel, t.item),
+}))
+
+/**
  * Hourly ads health counters (migration 134, plan §9.2, ticket #16410). One
  * row per key per /cron/ads-insights run, plus one `lead_post_event` row per
  * successful /api/lead capture. Keys and their meaning live in

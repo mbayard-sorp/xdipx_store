@@ -24,6 +24,7 @@ const SECTIONS: Array<{ to: string; label: string; end: boolean }> = [
   { to: '/admin/ads/tree', label: 'Tree', end: false },
   { to: '/admin/ads/audiences', label: 'Audiences', end: false },
   { to: '/admin/ads/experiments', label: 'Experiments', end: false },
+  { to: '/admin/ads/channels', label: 'Channels', end: false },
 ]
 
 export async function loader({ request }: LoaderFunctionArgs) {
