@@ -32,6 +32,11 @@
  *   brake instead of a dry run. The row's reason says it was clamped.
  * - halt_all is one row and one action against ads_auto_actions_max_per_day,
  *   however many campaigns it pauses.
+ * - A spend-guard halt (halt_all from rule:R7 or rule:L3, ticket #16648) is
+ *   exempt from ads_auto_actions_max_per_day and the automatic pause cap,
+ *   owner decision 2026-10-20. Both valves still hold it, it still writes its
+ *   tier auto row (reason "spend guard: cap exempt") and still runs the
+ *   read-after-write. The R7 page stays with the caller in ad-rules.server.ts.
  * - The automatic pause cap (plan §9.4). Once AUTO_PAUSE_CAP_PER_DAY
  *   automatic pauses have applied in a UTC day, the next one is written as
  *   dry_run with reason "auto-pause cap: owner page", and one owner blocker
@@ -53,7 +58,8 @@ import type { AdActionRow, InsertActionResult, NewAdAction, TransitionExtra } fr
 import type { AdActionStatus, AdActionTier, AdActionVerb } from '../ledger-core'
 import type { BlockerInput } from '~/lib/owner-blockers-core'
 import {
-  budgetChangeOf, budgetWithinStep, classifyTier, gateDispatch, resolveBudgetOwner, withinDailyActionCap,
+  budgetChangeOf, budgetWithinStep, classifyTier, gateDispatch, isSpendGuardHalt, resolveBudgetOwner,
+  SPEND_GUARD_CAP_EXEMPT_REASON, withinDailyActionCap,
   type DispatchGate, type DispatchVerb, type MirrorBudgetRow,
 } from './apply-core'
 import { ChannelNotEnabledError, MutationRefusedError } from './errors'
@@ -376,6 +382,8 @@ export async function dispatch(req: DispatchRequest, deps: ApplyDeps = {}): Prom
   const tier = classifyTier(req.verb, params, before)
 
   // 4. Gates. halt_all is one row, so it counts once against the action cap.
+  // A spend-guard halt (R7, L3) is exempt from both caps; the valves still hold it.
+  const spendGuard = isSpendGuardHalt(req.verb, req.proposedBy)
   let budgetStepOk: boolean | undefined
   if (isBudget) {
     const change = budgetChangeOf(params, before)
@@ -387,10 +395,11 @@ export async function dispatch(req: DispatchRequest, deps: ApplyDeps = {}): Prom
     tier, spendEnabled, autoApplyEnabled: settings.autoApplyEnabled,
     autoActionsToday: autoToday, autoActionsMaxPerDay: settings.autoActionsMaxPerDay,
     budgetStepOk, budgetMaxStepPct: settings.budgetMaxStepPct,
+    verb: req.verb, proposedBy: req.proposedBy,
   })
   // The pause cap sits inside the action cap: past it, an automatic pause waits for the owner.
   let pauseCapHit = 0
-  if (gate.status === 'proposed' && ledgerVerb === 'pause' && tier === 'auto') {
+  if (gate.status === 'proposed' && ledgerVerb === 'pause' && tier === 'auto' && !spendGuard) {
     const pausesToday = await store.countAutoPausesSince(startOfUtcDay(now))
     if (pausesToday >= AUTO_PAUSE_CAP_PER_DAY) {
       pauseCapHit = pausesToday
@@ -416,7 +425,7 @@ export async function dispatch(req: DispatchRequest, deps: ApplyDeps = {}): Prom
     proposedBy: req.proposedBy,
     reason: gate.dryRunReason
       ? joinReason(`Dry run: ${gate.dryRunReason}`, clampNote, req.reason)
-      : joinReason(clampNote, req.reason),
+      : joinReason(spendGuard ? SPEND_GUARD_CAP_EXEMPT_REASON : null, clampNote, req.reason),
     ruleEventId: req.ruleEventId ?? null,
     tier,
     status: gate.status,
@@ -578,7 +587,8 @@ export async function applyApprovedRow(row: AdActionRow, deps: ApplyDeps = {}): 
  * A tier auto row left at proposed. dispatch inserts a row and approves it in
  * the next statement, so only a crash leaves one here. The row gets the gates
  * dispatch would have given it, checked again now: both valves, the daily
- * action cap and the automatic pause cap. Only a row from today's UTC day
+ * action cap and the automatic pause cap (a spend-guard halt skips both
+ * caps, as in dispatch). Only a row from today's UTC day
  * qualifies; older ones wait for the 48h expiry. A row that fails a gate
  * stays proposed.
  */
@@ -595,11 +605,12 @@ export async function adoptStrandedAutoRow(row: AdActionRow, deps: ApplyDeps = {
   const off = valveOff(settings)
   if (off) return leave(`Stranded row waits: ${off} is off.`)
   const dayStart = startOfUtcDay(now)
-  const autoToday = await store.countAutoActionsSince(dayStart)
-  if (!withinDailyActionCap(autoToday, settings.autoActionsMaxPerDay)) {
+  const spendGuard = isSpendGuardHalt(row.verb, row.proposedBy)
+  const autoToday = spendGuard ? 0 : await store.countAutoActionsSince(dayStart)
+  if (!spendGuard && !withinDailyActionCap(autoToday, settings.autoActionsMaxPerDay)) {
     return leave(`Stranded row waits: daily cap reached, ${autoToday} automatic actions today, cap ${settings.autoActionsMaxPerDay}.`)
   }
-  if (row.verb === 'pause' && (await store.countAutoPausesSince(dayStart)) >= AUTO_PAUSE_CAP_PER_DAY) {
+  if (!spendGuard && row.verb === 'pause' && (await store.countAutoPausesSince(dayStart)) >= AUTO_PAUSE_CAP_PER_DAY) {
     return leave(`Stranded row waits: ${AUTO_PAUSE_CAP_REASON}.`)
   }
   let approved: AdActionRow
