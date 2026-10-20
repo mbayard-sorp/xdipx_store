@@ -89,18 +89,22 @@ function byAge(a: AdActionRow, b: AdActionRow): number {
 // ---------------------------------------------------------------------------
 
 async function drizzleApplyRunStore(): Promise<ApplyRunStore> {
-  const [{ db }, { adActions }, { and, asc, eq, gte, inArray, sql }, { transitionAction }] = await Promise.all([
+  const [{ db }, { adActions }, { and, asc, eq, gte, inArray, ne, sql }, { transitionAction }] = await Promise.all([
     import('~/lib/db.server'), import('../../../db/schema'), import('drizzle-orm'), import('./ledger.server'),
   ])
+  // audience_sync rows (ticket #16687) belong to the weekly audience sync, which
+  // writes and closes its own row. The applier never sends them and they do not
+  // spend the daily action cap: refreshing an exclusion list cannot raise spend.
   return {
     listOldestFirst: (status, limit) => db.select().from(adActions)
-      .where(eq(adActions.status, status))
+      .where(and(eq(adActions.status, status), ne(adActions.verb, 'audience_sync')))
       .orderBy(asc(adActions.createdAt), asc(adActions.id))
       .limit(limit),
     async countAttemptedSince(since) {
       const [row] = await db.select({ n: sql<number>`count(*)::int` }).from(adActions).where(and(
         inArray(adActions.status, ['applied', 'failed']),
         gte(adActions.approvedAt, since),
+        ne(adActions.verb, 'audience_sync'),
       ))
       return Number(row?.n ?? 0)
     },

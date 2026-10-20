@@ -786,6 +786,21 @@ export const CRON_EXPECTATIONS: readonly CronExpectation[] = [
       + 'the last 7 days and runs the rules (ads control plane phase 2b, ticket #16408). A money '
       + 'event: if this pull fails, R7, the account spend guard, judges stale spend and runs blind.',
   },
+  {
+    route: '/cron/ads-audience-sync',
+    plane: 'vercel',
+    schedule: '20 9 * * 0',
+    periodMinutes: WEEKLY,
+    graceMinutes: 1440,
+    recorded: true,
+    moneyRelevant: false,
+    ownerTeam: 'ads',
+    notes:
+      'Weekly M8 exclusion audience refresh (ticket #16687): consent-filtered, hashed buyer and '
+      + 'subscriber emails into the two Meta exclusion audiences, or a dry_run ledger row while '
+      + 'ads_audience_sync_enabled is off. A missed week leaves last week\'s members in place, so new '
+      + 'buyers can still see ads for a few more days; that is wasted spend at the margin, not a money event.',
+  },
 ]
 
 /** Indexed by route, for the wrapper's per-request lookup. */

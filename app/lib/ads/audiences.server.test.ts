@@ -138,6 +138,24 @@ describe('auditExclusions', () => {
     expect(a).toMatchObject({ ok: true, excluded: [{ id: '700', name: null }, { id: '701', name: null }], customer: null, subscriber: null })
   })
 
+  it('recognizes the two audiences the weekly sync owns as the M8 pair (ticket #16687)', async () => {
+    const synced = adset('s4', 'Leads | synced', {
+      excluded_custom_audiences: [{ id: '120001', name: 'xdipx leads (exclude)' }, { id: '120000', name: 'xdipx buyers (exclude)' }],
+    })
+    const m = memoryAudienceStore([synced])
+    await syncChannelAudiences('meta', {
+      store: m.store,
+      adapterFor: () => fakeAdapter(() => [audience('120000', 'xdipx buyers (exclude)'), audience('120001', 'xdipx leads (exclude)')]),
+    })
+    const [a] = await auditExclusions({ store: m.store })
+    expect(a).toMatchObject({
+      ok: true,
+      customer: { id: '120000', name: 'xdipx buyers (exclude)' },
+      subscriber: { id: '120001', name: 'xdipx leads (exclude)' },
+    })
+    expect([...m.rows.values()].map(r => r.role)).toEqual(['exclusion', 'exclusion'])
+  })
+
   it('skips deleted, archived and missing ad sets but keeps paused ones', async () => {
     const m = memoryAudienceStore([
       adset('p', 'paused', null, { status: 'PAUSED', effectiveStatus: 'PAUSED' }),

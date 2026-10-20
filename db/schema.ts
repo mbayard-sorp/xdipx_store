@@ -2595,8 +2595,12 @@ export const adActions = pgTable('ad_actions', {
   platformTargetIdx: index('idx_ad_actions_platform_target').on(t.platform, t.targetExternalId),
 }))
 
-/** create_paused (phase 6a): an owner-tier paused draft, before null, after the created ids. */
-export type AdActionVerb = 'pause' | 'resume' | 'set_budget' | 'update_creative' | 'halt_all' | 'create_paused'
+/**
+ * create_paused (phase 6a): an owner-tier paused draft, before null, after the created ids.
+ * audience_sync (ticket #16687): the weekly M8 exclusion audience refresh, tier auto,
+ * target level 'audience'. Never reaches the applier.
+ */
+export type AdActionVerb = 'pause' | 'resume' | 'set_budget' | 'update_creative' | 'halt_all' | 'create_paused' | 'audience_sync'
 export type AdActionTier = 'auto' | 'approve' | 'owner'
 export type AdActionStatus =
   | 'proposed' | 'dry_run' | 'approved' | 'applied' | 'failed' | 'rejected' | 'expired'

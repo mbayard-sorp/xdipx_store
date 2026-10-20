@@ -5,8 +5,8 @@
  *
  * Cap control (owner-only edit), media versus compute bands, planned versus
  * actual per campaign and lane, the CSV drop zone, the lead SMS toggle and
- * lead funnel card, the Automation section (the four auto-apply valves), and
- * the rule recipes. Every write goes through setPipelineSettingAudited with
+ * lead funnel card, the Automation section (the four auto-apply valves), the
+ * M8 exclusion audience sync switch (ticket #16687), and the rule recipes. Every write goes through setPipelineSettingAudited with
  * actor 'owner'. The audit source stays 'admin.ad-studio.spend' (here and in
  * ad-spend.server.ts) so a valve's history reads as one series across the
  * move. Admins (non-owners) see everything read-only; the action refuses
@@ -25,6 +25,9 @@ import {
   SpendInputError, getSpendOverview, saveAutoApply, saveAutomationLimits, saveGrossMargin, saveMediaCaps, saveRuleValues,
 } from '~/lib/ad-spend.server'
 import { AutomationControls } from '~/components/admin/ads/AutomationControls'
+import { AudienceSyncSwitch } from '~/components/admin/ads/AudienceSyncSwitch'
+import { loadAudienceSyncStatus } from '~/lib/ads/audience-sync.server'
+import { ADS_SETTING_KEYS } from '~/lib/ad-settings-defaults'
 import { CapControl } from '~/components/admin/ads/CapControl'
 import { CsvDropZone } from '~/components/admin/ads/CsvDropZone'
 import { PlanVsActual } from '~/components/admin/ads/PlanVsActual'
@@ -44,13 +47,16 @@ const MAX_FILE_BYTES = 8 * 1024 * 1024
 
 export async function loader({ request }: LoaderFunctionArgs) {
   await requireAdmin(request)
-  const [admin, overview, smsOptin] = await Promise.all([getAdminUser(request), getSpendOverview(), isLeadSmsOptinEnabled()])
+  const [admin, overview, smsOptin, audienceSync] = await Promise.all([
+    getAdminUser(request), getSpendOverview(), isLeadSmsOptinEnabled(), loadAudienceSyncStatus(),
+  ])
   // Streamed (not awaited): Klaviyo + GA4 reads must not block the page.
   return {
     isOwner: admin?.role === 'owner',
     overview,
     leadFunnel: buildLeadFunnelReport(),
     leadSmsOptin: { enabled: smsOptin, envForced: leadSmsOptinEnvOverride() !== null },
+    audienceSync,
   }
 }
 
@@ -88,6 +94,19 @@ export async function action({ request }: ActionFunctionArgs) {
         message: next === 'true'
           ? 'Lead SMS opt-in is on. /hello asks for a phone number and SMS consent.'
           : 'Lead SMS opt-in is off. /hello asks for email only and /api/lead ignores phone and SMS consent.',
+      }
+    }
+
+    if (intent === 'toggle-audience-sync') {
+      if (!isOwner) return { ok: false as const, intent, error: 'Only the owner can change this.' }
+      const next = String(form.get('next') ?? '') === 'true' ? 'true' : 'false'
+      await setPipelineSettingAudited(ADS_SETTING_KEYS.audienceSyncEnabled, next, 'owner', 'admin.ad-studio.spend')
+      return {
+        ok: true as const,
+        intent,
+        message: next === 'true'
+          ? 'Exclusion audience sync is on. Sunday\'s run uploads hashed emails to the two M8 audiences.'
+          : 'Exclusion audience sync is off. Sunday\'s run only counts, and sends nothing.',
       }
     }
 
@@ -130,7 +149,7 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function AdsSettings() {
-  const { isOwner, overview: o, leadFunnel, leadSmsOptin } = useLoaderData<typeof loader>()
+  const { isOwner, overview: o, leadFunnel, leadSmsOptin, audienceSync } = useLoaderData<typeof loader>()
   const navigation = useNavigation()
   const loading = navigation.state === 'loading' && navigation.location?.pathname === ACTION_PATH
 
@@ -165,6 +184,9 @@ export default function AdsSettings() {
         </div>
         <div className="order-6 lg:col-span-2">
           <AutomationControls data={{ ...o.automation, spendEnabled: o.spendEnabled }} isOwner={isOwner} actionPath={ACTION_PATH} />
+          <div className="mt-3">
+            <AudienceSyncSwitch data={audienceSync} isOwner={isOwner} actionPath={ACTION_PATH} />
+          </div>
         </div>
         <div className="order-7 lg:col-span-2">
           <RuleRecipes thresholds={o.thresholds} grossMarginPct={o.grossMarginPct} isOwner={isOwner} actionPath={ACTION_PATH} />

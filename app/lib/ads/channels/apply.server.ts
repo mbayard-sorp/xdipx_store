@@ -483,7 +483,8 @@ async function applyRow(
   base: Pick<DispatchResult, 'tier' | 'target' | 'actionId' | 'inserted'>,
 ): Promise<DispatchResult> {
   // create_paused rows never reach here: dispatchCreatePaused has its own path.
-  const verb = row.verb as Exclude<AdActionVerb, 'create_paused'>
+  // audience_sync rows never reach here either: apply-run skips them (ticket #16687).
+  const verb = row.verb as Exclude<AdActionVerb, 'create_paused' | 'audience_sync'>
   const params = (row.params ?? null) as Record<string, unknown> | null
   const fail = async (msg: string, platformResponse?: unknown): Promise<DispatchResult> => {
     try {

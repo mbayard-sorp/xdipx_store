@@ -15,6 +15,8 @@ export const ADS_SETTING_KEYS = {
   autoActionsMaxPerDay: 'ads_auto_actions_max_per_day',
   budgetMaxStepPct: 'ads_budget_max_step_pct',
   leadCplCeilingCents: 'ads_lead_cpl_ceiling_cents',
+  /** Weekly M8 exclusion audience upload to Meta (ticket #16687). Owner-written only. */
+  audienceSyncEnabled: 'ads_audience_sync_enabled',
 } as const
 
 export const ADS_SIMULATION_EXIT_OK_DEFAULT = false
@@ -81,6 +83,14 @@ export const ADS_BUDGET_MAX_STEP_PCT_DEFAULT = 20
  * campaign rules compare CPL to this, never to break-even (plan section 9.1).
  */
 export const ADS_LEAD_CPL_CEILING_CENTS_DEFAULT = 800
+
+/**
+ * The weekly M8 exclusion audience sync sends hashed customer emails to Meta.
+ * Plan section 9.4 makes it tier A only after the owner approves it once as a
+ * standing rule, so it is OFF until he flips it. Off, each run writes a
+ * dry_run ledger row with the counts and sends nothing.
+ */
+export const ADS_AUDIENCE_SYNC_ENABLED_DEFAULT = false
 
 /** Accepted range for each automation number. A stored value outside it reads as the default. */
 export const ADS_AUTOMATION_BOUNDS = {

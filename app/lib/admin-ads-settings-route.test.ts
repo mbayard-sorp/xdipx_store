@@ -53,6 +53,10 @@ vi.mock('~/lib/lead-sms-optin.server', () => ({
   leadSmsOptinEnvOverride: () => sms.envOverride,
 }))
 
+vi.mock('~/lib/ads/audience-sync.server', () => ({
+  loadAudienceSyncStatus: vi.fn(async () => ({ enabled: false, last: null })),
+}))
+
 const setPipelineSettingAudited = vi.hoisted(() => vi.fn(async () => {}))
 vi.mock('~/lib/settings.server', () => ({ setPipelineSettingAudited }))
 
@@ -85,6 +89,7 @@ describe('admin.ads.settings loader', () => {
     expect(data.isOwner).toBe(true)
     expect(data.overview).toEqual({ overview: true })
     expect(data.leadSmsOptin).toEqual({ enabled: false, envForced: false })
+    expect(data.audienceSync).toEqual({ enabled: false, last: null })
   })
 
   it('marks a non-owner admin read-only', async () => {
@@ -101,6 +106,7 @@ describe('admin.ads.settings action', () => {
     ['toggle-auto-apply', { next: 'true' }],
     ['save-automation', { maxActionsPerDay: '10' }],
     ['toggle-lead-sms-optin', { next: 'true' }],
+    ['toggle-audience-sync', { next: 'true' }],
   ])('refuses %s from a non-owner and writes nothing', async (intent, fields) => {
     session.role = 'admin'
     const res = await post({ intent, ...fields })
@@ -141,6 +147,13 @@ describe('admin.ads.settings action', () => {
   it('writes the lead SMS valve with the unchanged audit source', async () => {
     expect(await post({ intent: 'toggle-lead-sms-optin', next: 'true' })).toMatchObject({ ok: true })
     expect(setPipelineSettingAudited).toHaveBeenCalledWith('lead_sms_optin_enabled', 'true', 'owner', 'admin.ad-studio.spend')
+  })
+
+  it('writes the exclusion audience sync valve as the owner (ticket #16687)', async () => {
+    expect(await post({ intent: 'toggle-audience-sync', next: 'true' })).toMatchObject({ ok: true })
+    expect(setPipelineSettingAudited).toHaveBeenCalledWith('ads_audience_sync_enabled', 'true', 'owner', 'admin.ad-studio.spend')
+    expect(await post({ intent: 'toggle-audience-sync', next: 'nonsense' })).toMatchObject({ ok: true })
+    expect(setPipelineSettingAudited).toHaveBeenLastCalledWith('ads_audience_sync_enabled', 'false', 'owner', 'admin.ad-studio.spend')
   })
 
   it('leaves the lead SMS valve alone when the environment forces it', async () => {
