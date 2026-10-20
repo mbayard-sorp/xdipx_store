@@ -39,22 +39,35 @@ import {
 const PR = { number: 494, title: 'docs: something', htmlUrl: 'https://github.com/o/r/pull/494', headRef: 'claude/foo' }
 
 /**
- * Stub the module's bus reads. Two query shapes come off `db.select`:
+ * Stub the module's bus reads. Three query shapes come off `db.select`:
  *   - link queries (guard (b) prAlreadyTracked, and guard (c)'s link pass):
- *     select → from → innerJoin → where → limit, returning `{ ref }` rows.
- *   - the body query (guard (c)): select → from → where → limit, returning
- *     `{ body }` rows.
- * `from()` exposes both `.innerJoin` and `.where` so either query resolves.
+ *     select({ ref }) → from → innerJoin → where → limit, returning `{ ref }`
+ *     rows.
+ *   - the body query (guard (c)): select({ body }) → from → where → limit,
+ *     returning `{ body }` rows.
+ *   - the applyRef query (prTrackedByApplyRef, ticket #16548): select
+ *     ({ applyRef }) → from → where → limit, returning `{ applyRef }` rows.
+ * `select()` inspects the key of the columns object it is called with so the
+ * three shapes (which otherwise look identical to the mock) resolve to the
+ * right stubbed rows, and `from()` exposes both `.innerJoin` and `.where` so
+ * either query chain resolves.
  */
-function stubDb({ links = [], bodies = [] }: { links?: string[]; bodies?: string[] } = {}) {
+function stubDb(
+  { links = [], bodies = [], applyRefs = [] }:
+  { links?: string[]; bodies?: string[]; applyRefs?: string[] } = {},
+) {
   const linkRows = links.map((ref) => ({ ref }))
   const bodyRows = bodies.map((body) => ({ body }))
-  ;(db as unknown as Record<string, unknown>).select = () => ({
-    from: () => ({
-      innerJoin: () => ({ where: () => ({ limit: async () => linkRows }) }),
-      where: () => ({ limit: async () => bodyRows }),
-    }),
-  })
+  const applyRefRows = applyRefs.map((applyRef) => ({ applyRef }))
+  ;(db as unknown as Record<string, unknown>).select = (cols: Record<string, unknown>) => {
+    const rows = 'applyRef' in cols ? applyRefRows : bodyRows
+    return {
+      from: () => ({
+        innerJoin: () => ({ where: () => ({ limit: async () => linkRows }) }),
+        where: () => ({ limit: async () => rows }),
+      }),
+    }
+  }
 }
 
 /** Back-compat shim for the guard-(b) tests: links only, no body references.
@@ -140,6 +153,25 @@ describe('autoFileTicketForPr', () => {
   // (/pull/4940) must not count as tracking PR 494.
   it('still files when the only link is a different PR sharing a number prefix', async () => {
     stubTrackingLinks(['https://github.com/o/r/pull/4940'])
+    vi.mocked(fileTicketForOpenPr).mockResolvedValue(1234)
+    expect(await autoFileTicketForPr(PR)).toEqual({ prNumber: 494, ticketId: 1234, created: true })
+  })
+
+  // Ticket #16548: markSuggestion() commits status='pr_open'+applyRef in one
+  // UPDATE, then writes the suggestionLinks 'pr' row afterward in a separate
+  // best-effort step. A PR landing in that gap has applyRef set but no link
+  // row yet, so the link-only query above sees nothing tracking it — this is
+  // exactly the case prTrackedByApplyRef exists to catch.
+  it('does not file when a tracked ticket has the PR in applyRef but no link row yet', async () => {
+    stubDb({ links: [], bodies: [], applyRefs: ['https://github.com/o/r/pull/494'] })
+    expect(await autoFileTicketForPr(PR)).toBeNull()
+    expect(fileTicketForOpenPr).not.toHaveBeenCalled()
+  })
+
+  // Same exact-match discipline applies to the applyRef check as to the link
+  // and body checks: a different PR sharing a number prefix must not match.
+  it('still files when the only applyRef is a different PR sharing a number prefix', async () => {
+    stubDb({ links: [], bodies: [], applyRefs: ['https://github.com/o/r/pull/4940'] })
     vi.mocked(fileTicketForOpenPr).mockResolvedValue(1234)
     expect(await autoFileTicketForPr(PR)).toEqual({ prNumber: 494, ticketId: 1234, created: true })
   })
