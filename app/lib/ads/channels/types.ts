@@ -108,7 +108,14 @@ export interface NormalizedAudience {
   externalId: string
   name: string | null
   kind: 'custom' | 'lookalike' | 'saved'
+  /** The platform's lower size bound, or its single estimate. Null when it reports none. */
   approxSize: number | null
+  /** The upper size bound, when the platform reports a range. */
+  approxSizeUpper?: number | null
+  /** The platform's delivery or operation status, as a short readable string. */
+  status?: string | null
+  /** The last platform payload, kept on ad_audiences.raw. */
+  raw?: Record<string, unknown>
 }
 
 export interface TokenHealth {
