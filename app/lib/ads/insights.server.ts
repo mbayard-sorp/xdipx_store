@@ -25,7 +25,8 @@
  * The cron body (runInsightsCron) then rolls the pulled days up into
  * daily_profit_summary.ad_spend, and on the 09:00 UTC restatement run it runs
  * the rules pass, the same two calls the ads routine makes through
- * POST /api/team/ad-metrics op daily.
+ * POST /api/team/ad-metrics op daily. Every run ends with the health step
+ * (health.server.ts, ticket #16410): the hourly counters and rule L3.
  *
  * Nothing here calls a platform write endpoint.
  */
@@ -237,6 +238,9 @@ export interface RollupOutcome {
 
 export type RulesOutcome = { ok: true; summary: unknown } | { ok: false; error: string }
 
+/** The health step's outcome. A failure is reported here and never fails the pull. */
+export type HealthOutcome = { ok: true; summary: unknown } | { ok: false; error: string }
+
 export interface InsightsCronResult {
   restatement: boolean
   range: DateRange
@@ -244,6 +248,8 @@ export interface InsightsCronResult {
   rollup: RollupOutcome[]
   /** Present only on the restatement run. */
   rules?: RulesOutcome
+  /** The hourly health counters and L3 (health.server.ts). Present on every run. */
+  health: HealthOutcome
 }
 
 export interface InsightsCronDeps extends InsightsDeps {
@@ -254,6 +260,8 @@ export interface InsightsCronDeps extends InsightsDeps {
   runRules?: (now: Date) => Promise<unknown>
   /** Force the 7-day restatement and the rules pass regardless of the hour. */
   restate?: boolean
+  /** Defaults to runAdHealth from health.server. */
+  health?: (now: Date) => Promise<unknown>
 }
 
 /** The range one cron run pulls: today and yesterday, or the last 7 days plus today on the restatement run. */
@@ -324,7 +332,7 @@ export async function runInsightsCron(deps: InsightsCronDeps = {}): Promise<Insi
     for (const day of pulledDays) rollup.push(await rollupDay(day))
   }
 
-  const out: InsightsCronResult = { restatement, range, channels, rollup }
+  const out: Omit<InsightsCronResult, 'health'> = { restatement, range, channels, rollup }
   if (restatement) {
     const runRules = deps.runRules ?? (async (at: Date) => (await import('~/lib/ad-rules.server')).runRulesDaily(at))
     // Same contract as POST /api/team/ad-metrics op daily: the rules read what
@@ -337,7 +345,29 @@ export async function runInsightsCron(deps: InsightsCronDeps = {}): Promise<Insi
       },
     )
   }
-  return out
+
+  // The health step runs whether or not any channel pulled: /hello and the
+  // lead counter matter even with the token down. It never fails the pull.
+  const runHealth = deps.health ?? (async (at: Date) => summarizeHealth(await (await import('./health.server')).runAdHealth({ now: () => at })))
+  const health = await runHealth(now).then(
+    (summary): HealthOutcome => ({ ok: true, summary }),
+    (err: unknown): HealthOutcome => {
+      console.error('[ads-insights] health step failed', err)
+      return { ok: false, error: err instanceof Error ? err.message : 'health step failed' }
+    },
+  )
+  return { ...out, health }
+}
+
+/** The cron response carries the verdicts and the values, not every detail blob. */
+function summarizeHealth(r: import('./health.server').AdHealthResult) {
+  return {
+    samples: Object.fromEntries(r.samples.map(s => [s.key, s.value])),
+    l3: { fires: r.l3.fires, reasons: r.l3.reasons, sentence: r.l3.sentence, landingViews6h: r.l3.landingViews6h, leadPosts6h: r.l3.leadPosts6h },
+    ruleEvent: r.ruleEvent,
+    funnelBlocker: r.funnelBlocker,
+    growthBlocker: r.growthBlocker,
+  }
 }
 
 // ---------------------------------------------------------------------------

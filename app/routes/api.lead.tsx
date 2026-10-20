@@ -20,12 +20,16 @@
  *      browser pixel's Lead dedupes against it;
  *   4. returns the code, its terms, and the shop link that puts the code on
  *      the cart.
+ * After a successful subscribe it also writes one lead_post_event row to
+ * ad_health_samples, the counter the hourly L3 funnel-break check reads
+ * (app/lib/ads/health.server.ts, ticket #16410). Awaited, never throws.
  * Klaviyo failure is the only hard failure: without the subscribe there is no
  * lead. SMS enrollment, consent log and CAPI failures are logged and never
  * cost the visitor their code.
  */
 
 import type { ActionFunctionArgs } from 'react-router'
+import { recordLeadPostEvent } from '~/lib/ads/health.server'
 import { getStoredUTM } from '~/lib/attribution.server'
 import { rejectIfBot } from '~/lib/botid.server'
 import { logConsent } from '~/lib/consent.server'
@@ -121,6 +125,8 @@ export async function action({ request }: ActionFunctionArgs) {
     console.error('[api.lead] Klaviyo subscribe failed:', err)
     return Response.json({ error: 'subscribe_failed' }, { status: 502 })
   }
+
+  await recordLeadPostEvent({ slug: lead.slug, ...(utm.content ? { utmContent: utm.content } : {}) })
 
   if (smsOptin && phone && lead.smsConsent) {
     try {

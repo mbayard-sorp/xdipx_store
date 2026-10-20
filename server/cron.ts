@@ -974,6 +974,10 @@ export function createCronRoutes() {
    * 09:00 UTC run re-pulls the last 7 days, because Meta restates inside its
    * attribution window, and then runs the rules pass the ads routine runs
    * through /api/team/ad-metrics. `?restate=1` forces that branch.
+   * Every run then takes the hourly health samples and evaluates rule L3
+   * (ticket #16410, app/lib/ads/health.server.ts). That step's outcome rides
+   * in `health`; a failure there is logged and reported, never a 500, so a
+   * health hiccup cannot mark a good pull as failed.
    *
    * Responds 500 when any channel's pull failed or the rules pass failed,
    * `skipped` when no channel could run, so cron_runs tells them apart.

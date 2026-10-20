@@ -156,6 +156,13 @@ export const PROBE_DESCRIPTIONS: Record<string, (arg: string) => string> = {
    * clears once the token is valid and neither its own expiry nor Meta's data
    * access window is inside TOKEN_EXPIRY_WARNING_DAYS. */
   ad_token_healthy: a => `the ${a} ads token is valid and at least 14 days from expiring`,
+  /* Arg is `funnel` or `growth` (ticket #16410). Reads the hourly
+   * ad_health_samples: `funnel` clears once rule L3 no longer fires on the
+   * last 6 hours, `growth` once the entity mirror reads the Shopify Growth
+   * campaign as anything but ACTIVE. Stale samples answer null. */
+  ad_health_clean: a => a === 'growth'
+    ? 'the Shopify Growth campaign is no longer ACTIVE in the Meta mirror'
+    : 'the hourly ads health check no longer fires rule L3 (lead funnel break)',
   /* Arg is `table|keyColumn|keyValue|column|expectedValue`.
    *
    * The scoped answer to the trap `rows_exist` walks into. `rows_exist` asks
