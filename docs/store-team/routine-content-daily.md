@@ -967,17 +967,21 @@ Two reviewers, both binding, sequenced so a cheap voice failure never spends the
    is exempt from re-gating. If the gate reported `[web: degraded]`, follow its strip/soften
    instructions and ship without a Sources section; zero citations is a valid outcome, never padded.
 
-   **When `sex-wellness-reviewer`'s own `WebFetch` is blocked by the sandbox egress policy, read the
-   source through this endpoint (ticket #4285), the sanctioned server-side read path.** The agent
-   sandbox blocks `WebFetch` to the citation hosts (runs 311 and 400 hit `EGRESS_BLOCKED` on every
-   allowlisted host, including a `healthline.com` control), while `/api/team/url-liveness` runs on the
-   server's open egress. POST the candidate URLs with `{"includeBody": true}` and each `live:true`
-   html result carries a readable-text `excerpt` of the page body (script/style/markup stripped,
-   capped at `MAX_BODY_TEXT_CHARS`). Confirm the source supports the claim from that `excerpt` instead
-   of opening the page, then keep the citation exactly as for a `live:true` result. This does not
-   relax the citation rule: the reviewer must still read the source and confirm it supports the claim
-   (routine Step 5 item 5), it just reads the server-fetched excerpt rather than the blocked page. An
-   `excerpt` is never returned for a `blocked`, `challenge`, `dead`, or non-html result, so it can
+   **When `sex-wellness-reviewer`'s own `WebFetch` is blocked by the sandbox egress policy, YOU (the
+   orchestrating content-writer session) read the source through this endpoint and hand the reviewer
+   the excerpt (ticket #4285, corrected by #16331).** `sex-wellness-reviewer`'s tool list is `Read`,
+   `Grep`, `Glob`, `WebSearch`, `WebFetch` — no `Bash` and no HTTP tool — so it has never actually
+   been able to call `/api/team/url-liveness` itself; telling it to was unreachable instructions
+   (occurrences: runs 311 and 400 hit `EGRESS_BLOCKED` on every allowlisted host including a
+   `healthline.com` control, and run 1531 had the reviewer report verbatim "this session had no shell
+   tool, so I could not call /api/team/url-liveness" and ship zero citations on cycle 1). You POST the
+   candidate URLs with `{"includeBody": true}` — the server's open egress isn't sandboxed — save each
+   `live:true` html result's readable-text `excerpt` (script/style/markup stripped, capped at
+   `MAX_BODY_TEXT_CHARS`) to a file, and hand the reviewer that file path in place of the blocked page.
+   This is what run 1531's workaround did and it worked: the reviewer returned `[web: ok]` and two
+   resolved citations. The reviewer still reads the excerpt and confirms it supports the claim itself
+   (routine Step 5 item 5); you are resolving the URL on its behalf, never judging the citation for it.
+   An `excerpt` is never returned for a `blocked`, `challenge`, `dead`, or non-html result, so it can
    never come from an unread interstitial; those stay drops exactly as below.
 
    **`live:false` is not always "drop it" — read the `reason`.** The endpoint distinguishes a host
