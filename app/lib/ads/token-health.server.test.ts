@@ -3,6 +3,7 @@ import type { BlockerInput } from '~/lib/owner-blockers-core'
 import type { ChannelAdapter, TokenHealth } from './channels/types'
 import {
   assessTokenHealth,
+  recordChannelReadiness,
   runAdsTokenHealth,
   tokenBlockerDedupeKey,
   tokenEnvVar,
@@ -146,6 +147,34 @@ describe('runAdsTokenHealth', () => {
     expect(r.failed).toBe(true)
     expect(r.channels[0]).toMatchObject({ state: 'invalid', blocker: null, saved: false })
     expect(r.channels[0]!.blockerError).toContain('db down')
+  })
+
+  it('keeps a not-ready reason in error, reads ok, and files no blocker', async () => {
+    const store = fakeBlockerStore()
+    const saved: ChannelHealthRow[] = []
+    const r = await runAdsTokenHealth({
+      channels: () => [fakeChannel({ ...VALID, ready: false, notReadyReason: 'account_inactive' })],
+      fileBlocker: store.file,
+      saveHealth: async row => { saved.push(row) },
+      now: () => NOW,
+    })
+    expect(store.file).not.toHaveBeenCalled()
+    expect(saved[0]).toMatchObject({ state: 'ok', valid: true, error: 'not_ready:account_inactive' })
+    expect(r.channels[0]!.blocker).toBeNull()
+  })
+})
+
+describe('recordChannelReadiness', () => {
+  it('stores the reason from the cron reading, and clears it with null', async () => {
+    const saved: ChannelHealthRow[] = []
+    const saveHealth = async (row: ChannelHealthRow) => { saved.push(row) }
+    const reading: TokenHealth = { valid: true, expiresAt: null, expiryUnknown: true, scopes: ['msads.manage'], checkedAt: NOW.toISOString() }
+    await recordChannelReadiness('microsoft', reading, 'account_inactive', { saveHealth, now: () => NOW, env: {} })
+    await recordChannelReadiness('microsoft', { ...reading, ready: false, notReadyReason: 'account_inactive' }, null, { saveHealth, now: () => NOW, env: {} })
+    expect(saved.map(s => [s.channel, s.state, s.error])).toEqual([
+      ['microsoft', 'ok', 'not_ready:account_inactive'],
+      ['microsoft', 'ok', null],
+    ])
   })
 })
 

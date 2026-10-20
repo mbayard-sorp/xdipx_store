@@ -140,6 +140,9 @@ export interface NormalizedAudience {
   raw?: Record<string, unknown>
 }
 
+/** Why a channel with a good token still cannot be read. See ChannelNotReadyError. */
+export type ChannelNotReadyReason = 'account_inactive'
+
 export interface TokenHealth {
   valid: boolean
   /** ISO timestamp, or null when the token does not expire or health could not be read. */
@@ -156,6 +159,13 @@ export interface TokenHealth {
   checkedAt: string
   /** Why valid is false when the platform did not say, e.g. not_configured. */
   error?: string
+  /**
+   * False when the token is good but the account behind it cannot be used
+   * yet, as the last sync or insights pull found. Absent means ready, or not
+   * known to be otherwise. Only Microsoft sets it today.
+   */
+  ready?: boolean
+  notReadyReason?: ChannelNotReadyReason
 }
 
 export interface ChannelCapabilities {

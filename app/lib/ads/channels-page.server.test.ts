@@ -59,6 +59,19 @@ describe('loadChannels', () => {
     expect(snap.lastInsightsPullAt).toBeNull()
   })
 
+  it('shows Microsoft as pending, not green, while the stored reason says its account is inactive', async () => {
+    const page = await loadChannels(source({
+      health: async () => [{
+        channel: 'microsoft', checkedAt: '2026-10-20T17:35:00.000Z', state: 'ok', valid: true, expiresAt: null,
+        dataAccessExpiresAt: null, scopes: ['msads.manage'], error: 'not_ready:account_inactive', envVar: 'x',
+      }],
+    }))
+    const ms = page.channels.find(c => c.id === 'microsoft')!
+    expect(ms.token).toMatchObject({ state: 'ok', pending: 'Pending: Adult Advertising Program' })
+    const meta = page.channels.find(c => c.id === 'meta')!
+    expect(meta.token).toBeNull()
+  })
+
   it('opens mutate for meta only when all nine items are checked', async () => {
     const rows = CHECKLIST_ITEMS.map(i => ({ channel: 'meta', item: i.key, checkedAt: NOW.toISOString(), checkedBy: 'admin:a', evidence: 'ok' }))
     const page = await loadChannels(source({ checklist: async () => rows }))

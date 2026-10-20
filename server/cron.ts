@@ -940,7 +940,9 @@ export function createCronRoutes() {
    * skipped here; the token health probe (phase 1d) files the blocker.
    *
    * Responds 500 when any channel's sync failed, `skipped` when no channel
-   * could run, so cron_runs tells the three apart. Awaited before
+   * could run, so cron_runs tells the three apart. A channel whose account
+   * is not usable yet (Microsoft Pending in the Adult Advertising Program)
+   * is `skipped` with a `notReady` reason, never `failed`. Awaited before
    * responding: Vercel discards work that continues after the response.
    */
   cronRoute('/ads-sync-entities', async (_req, res) => {
@@ -984,7 +986,8 @@ export function createCronRoutes() {
    * `pager` under the same never-a-500 rule.
    *
    * Responds 500 when any channel's pull failed or the rules pass failed,
-   * `skipped` when no channel could run, so cron_runs tells them apart.
+   * `skipped` when no channel could run, so cron_runs tells them apart. A
+   * not-ready account (see /ads-sync-entities) is a skip, not a failure.
    * Awaited before responding: Vercel discards work after the response.
    */
   cronRoute('/ads-insights', async (req, res) => {

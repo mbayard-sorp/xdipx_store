@@ -3,12 +3,15 @@ import { strToU8, zipSync } from 'fflate'
 
 const getMsAdsAccessToken = vi.fn(async () => 'access-token-1')
 vi.mock('~/lib/microsoft-ads-token.server', () => ({ getMsAdsAccessToken: () => getMsAdsAccessToken() }))
+// Never touch the real database from a test: .env DATABASE_URL is production.
+// health()'s default not-ready read then fails and is ignored.
+vi.mock('~/lib/db.server', () => ({ db: {} }))
 
-import { ChannelNotEnabledError } from '../errors'
+import { ChannelNotEnabledError, ChannelNotReadyError, isChannelNotReady } from '../errors'
 import type { PolicyMirrorRow } from '../types'
 import {
   buildReportRequest, createMicrosoftAdapter, csvFromReportZip, microsoftPolicyCheck, msBudgetCents, msHealthError,
-  normalizeMsEntity, parseMsReportCsv,
+  msNotReadyError, normalizeMsEntity, parseMsReportCsv,
 } from './adapter.server'
 
 // Shapes follow the Campaign Management and Reporting v13 REST responses for the fields the adapter reads.
@@ -190,16 +193,84 @@ describe('Microsoft adapter over the REST client, fetch mocked', () => {
     await expect(createMicrosoftAdapter().pullInsights({ since: '2026-10-18', until: '2026-10-18' }, 'creative')).rejects.toThrow(/creative level/)
     expect(fetchMock).not.toHaveBeenCalled()
   })
+
+  // The body Microsoft sent in production on 2026-10-20 for account 188472831,
+  // Pending in the Adult Advertising Program, with a token exchange that worked.
+  const INACTIVE = {
+    Errors: [{
+      Code: 105, ErrorCode: 'InvalidCredentials',
+      Message: 'Authentication failed. Either supplied credentials are invalid or the account is inactive',
+    }],
+  }
+
+  it('turns a 401 with code 105 on the entity sync into ChannelNotReadyError account_inactive', async () => {
+    fetchMock.mockImplementation(async () => jsonRes(INACTIVE, 401))
+    const err = await createMicrosoftAdapter().syncEntities({}).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(ChannelNotReadyError)
+    expect(err).toMatchObject({ channel: 'microsoft', reason: 'account_inactive', kind: 'not_ready' })
+    expect((err as Error).message).toContain(ACCOUNT)
+    expect((err as Error).message).toContain('Adult Advertising Program')
+    expect((err as Error).message).not.toMatch(/\u2014/)
+  })
+
+  it('turns a 401 with code 105 on the report submit into ChannelNotReadyError', async () => {
+    fetchMock.mockImplementation(async () => jsonRes(INACTIVE, 401))
+    const err = await createMicrosoftAdapter().pullInsights({ since: '2026-10-19', until: '2026-10-20' }, 'ad').catch((e: unknown) => e)
+    expect(isChannelNotReady(err)).toBe(true)
+    expect(err).toMatchObject({ reason: 'account_inactive' })
+  })
+
+  it('leaves every other API error alone', async () => {
+    fetchMock.mockImplementation(async () => jsonRes({ Errors: [{ Code: 109, ErrorCode: 'AuthenticationTokenExpired', Message: 'expired' }] }, 401))
+    const expired = await createMicrosoftAdapter().syncEntities({}).catch((e: unknown) => e)
+    expect(isChannelNotReady(expired)).toBe(false)
+    expect((expired as Error).name).toBe('MsAdsApiError')
+
+    fetchMock.mockImplementation(async () => jsonRes(INACTIVE, 500))
+    const server = await createMicrosoftAdapter().syncEntities({}).catch((e: unknown) => e)
+    expect(isChannelNotReady(server)).toBe(false)
+  })
+})
+
+describe('msNotReadyError', () => {
+  const apiError = (status: number, errors: unknown[], message = 'Microsoft Ads CampaignManagement/x failed') =>
+    Object.assign(new Error(message), { name: 'MsAdsApiError', status, errors })
+
+  it('maps 401 + 105 and nothing else', () => {
+    expect(msNotReadyError(apiError(401, [{ code: 105, errorCode: 'InvalidCredentials', message: 'm', index: null }]), '188472831'))
+      .toMatchObject({ reason: 'account_inactive' })
+    expect(msNotReadyError(apiError(401, [{ code: 106, errorCode: null, message: 'm', index: null }]), '1')).toBeNull()
+    expect(msNotReadyError(apiError(400, [{ code: 105, errorCode: null, message: 'm', index: null }]), '1')).toBeNull()
+    expect(msNotReadyError(new Error('105: Authentication failed'), '1')).toBeNull()
+    expect(msNotReadyError('nope', '1')).toBeNull()
+  })
+
+  it('falls back to the "105: " text when the structured list is empty', () => {
+    const e = apiError(401, [], 'Microsoft Ads Reporting/GenerateReport/Submit failed (401): 105: Authentication failed.')
+    expect(msNotReadyError(e, '188472831')?.message).toContain('188472831')
+  })
 })
 
 describe('Microsoft token health', () => {
   const now = () => new Date('2026-10-19T12:00:00Z')
 
   it('is valid when the token exchange succeeds, with the expiry reported as unknown', async () => {
-    const a = createMicrosoftAdapter({ missingConfig: () => [], accessToken: async () => 'tok', now })
+    const a = createMicrosoftAdapter({ missingConfig: () => [], accessToken: async () => 'tok', now, lastNotReady: async () => null })
     expect(await a.auth.health()).toEqual({
       valid: true, expiresAt: null, expiryUnknown: true, scopes: ['msads.manage'], checkedAt: '2026-10-19T12:00:00.000Z',
     })
+  })
+
+  it('reports ready false with the reason the last sync stored, and stays valid', async () => {
+    const a = createMicrosoftAdapter({ missingConfig: () => [], accessToken: async () => 'tok', now, lastNotReady: async () => 'account_inactive' })
+    expect(await a.auth.health()).toMatchObject({ valid: true, ready: false, notReadyReason: 'account_inactive', scopes: ['msads.manage'] })
+  })
+
+  it('treats a failed read of the stored reason as ready', async () => {
+    const a = createMicrosoftAdapter({ missingConfig: () => [], accessToken: async () => 'tok', now })
+    const h = await a.auth.health()
+    expect(h.valid).toBe(true)
+    expect(h.ready).toBeUndefined()
   })
 
   it('is not_configured when MSADS_* values are missing, without trying an exchange', async () => {

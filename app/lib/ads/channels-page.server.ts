@@ -20,7 +20,7 @@ import { adChannelChecklist, adPlatformEntities, adPlatformInsightsDaily } from 
 import { getChannel, listChannels, type ChannelListing } from './channels/registry.server'
 import { readChannelHealth, type ChannelHealthRow } from './token-health.server'
 import {
-  EVIDENCE_MAX, checklistFor, isChecklistItem, mutateStateFor,
+  EVIDENCE_MAX, checklistFor, isChecklistItem, mutateStateFor, pendingLabel,
   type ChannelPageRow, type ChannelsPage, type ChecklistRow,
 } from './channels-core'
 
@@ -107,6 +107,7 @@ export async function loadChannels(source: ChannelsSource = dbChannelsSource): P
   const channels: ChannelPageRow[] = listings.map(l => {
     const h = healthBy.get(l.id)
     const items = checklistFor(l.id, l.policyState, checklist ?? [])
+    const pending = h ? pendingLabel(l.id, h.error) : null
     return {
       id: l.id,
       label: l.label,
@@ -114,7 +115,9 @@ export async function loadChannels(source: ChannelsSource = dbChannelsSource): P
       policyNote: l.policyNote,
       hasAdapter: l.hasAdapter,
       capabilities: l.capabilities,
-      token: h ? { state: h.state, checkedAt: h.checkedAt, expiresAt: h.expiresAt, error: h.error } : null,
+      token: h
+        ? { state: h.state, checkedAt: h.checkedAt, expiresAt: h.expiresAt, error: h.error, ...(pending ? { pending } : {}) }
+        : null,
       lastEntitySyncAt: syncBy.get(l.id)?.toISOString() ?? null,
       lastInsightsPullAt: pullBy.get(l.id)?.toISOString() ?? null,
       checklist: items,
