@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { dispatch, type ApplyDeps, type ApplySettings, type ApplyStore } from './apply.server'
+import {
+  adoptStrandedAutoRow, applyApprovedRow, dispatch, STRANDED_MIN_AGE_MS,
+  type ApplyDeps, type ApplySettings, type ApplyStore,
+} from './apply.server'
 import type { MirrorBudgetRow } from './apply-core'
 import type { ChannelAdapter, MutationRequest, MutationResult } from './types'
 import type { AdActionRow, NewAdAction } from '../ledger.server'
@@ -226,5 +229,86 @@ describe('dispatch', () => {
     expect(viaLane.status).toBe('dry_run')
     expect(mem.rows).toHaveLength(1)
     expect(mem.rows[0]).toMatchObject({ platform: 'google', targetExternalId: 'ghost', before: null })
+  })
+
+  it('halt_all is one row that the automatic pause cap does not hold (ticket #16432)', async () => {
+    const { adapter, mutate } = fakeAdapter()
+    const d = deps({ store: { ...mem.store, countAutoPausesSince: async () => 3 }, adapter })
+    const r = await dispatch({ verb: 'halt_all', proposedBy: 'rule:R7', now: NOW }, d)
+    expect(r).toMatchObject({ status: 'applied', applied: true })
+    expect(mem.rows).toHaveLength(1)
+    expect(mem.rows[0]).toMatchObject({ verb: 'halt_all', targetExternalId: 'all', tier: 'auto', status: 'applied' })
+    expect(mutate).toHaveBeenCalledTimes(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The hourly applier's entry points (ticket #16432)
+// ---------------------------------------------------------------------------
+describe('applyApprovedRow and adoptStrandedAutoRow', () => {
+  let mem: ReturnType<typeof memoryStore>
+  beforeEach(() => { mem = memoryStore(mirror) })
+
+  function seed(over: Partial<AdActionRow>): AdActionRow {
+    const row = {
+      id: 100 + mem.rows.length, idempotencyKey: `k${mem.rows.length}`, platform: 'meta', targetLevel: 'ad', targetExternalId: 'ad1',
+      verb: 'resume', params: null, before: { status: 'PAUSED' }, after: { status: 'ACTIVE' }, proposedBy: 'rule:R4', reason: null,
+      ruleEventId: null, tier: 'approve', status: 'approved', approvedBy: 'mike@xdipx.com', approvedAt: NOW, appliedAt: null,
+      platformResponse: null, error: null, expiresAt: null, createdAt: new Date(NOW.getTime() - 3_600_000), ...over,
+    } as AdActionRow
+    mem.rows.push(row)
+    return row
+  }
+
+  it('sends an owner-approved row once and records applied', async () => {
+    const { adapter, mutate } = fakeAdapter(async () => ({ applied: true, after: { status: 'ACTIVE' } }))
+    const row = seed({})
+    const r = await applyApprovedRow(row, deps({ store: mem.store, adapter }))
+    expect(r).toMatchObject({ status: 'applied', applied: true, actionId: row.id })
+    expect(mutate).toHaveBeenCalledWith(expect.objectContaining({ verb: 'resume', ledger: expect.objectContaining({ approvedBy: 'mike@xdipx.com' }) }))
+    expect(row.status).toBe('applied')
+  })
+
+  it('waits, untouched, while either valve is off', async () => {
+    const { adapter, mutate } = fakeAdapter()
+    const row = seed({})
+    for (const off of [{ spendEnabled: false }, { autoApplyEnabled: false }]) {
+      const r = await applyApprovedRow(row, deps({ store: mem.store, adapter, settings: off }))
+      expect(r).toMatchObject({ status: 'approved', applied: false, error: false })
+    }
+    expect(mutate).not.toHaveBeenCalled()
+    expect(row.status).toBe('approved')
+  })
+
+  it('never sends a tier owner row, and takes it off the queue as failed', async () => {
+    const { adapter, mutate } = fakeAdapter()
+    const row = seed({ tier: 'owner', verb: 'update_creative' })
+    const r = await applyApprovedRow(row, deps({ store: mem.store, adapter }))
+    expect(r.status).toBe('failed')
+    expect(mutate).not.toHaveBeenCalled()
+    expect(row.error).toMatch(/^tier owner:/)
+  })
+
+  it('adopts a stranded auto pause from today, and leaves one that is too new, from yesterday, or over the pause cap', async () => {
+    const { adapter, mutate } = fakeAdapter()
+    const d = deps({ store: mem.store, adapter })
+    const ok = seed({ status: 'proposed', tier: 'auto', verb: 'pause', approvedBy: null, approvedAt: null, createdAt: new Date(NOW.getTime() - STRANDED_MIN_AGE_MS - 1) })
+    const fresh = seed({ status: 'proposed', tier: 'auto', verb: 'pause', approvedBy: null, approvedAt: null, createdAt: new Date(NOW.getTime() - 60_000) })
+    const old = seed({ status: 'proposed', tier: 'auto', verb: 'pause', approvedBy: null, approvedAt: null, createdAt: new Date('2026-10-18T23:00:00Z') })
+
+    expect((await adoptStrandedAutoRow(ok, d, NOW)).applied).toBe(true)
+    expect(ok.status).toBe('applied')
+    expect((await adoptStrandedAutoRow(fresh, d, NOW)).applied).toBe(false)
+    expect((await adoptStrandedAutoRow(old, d, NOW)).applied).toBe(false)
+    expect(fresh.status).toBe('proposed')
+    expect(old.status).toBe('proposed')
+
+    const capped = seed({ status: 'proposed', tier: 'auto', verb: 'pause', approvedBy: null, approvedAt: null, createdAt: new Date(NOW.getTime() - STRANDED_MIN_AGE_MS - 1) })
+    const atCap = deps({ store: { ...mem.store, countAutoPausesSince: async () => 3 }, adapter })
+    const r = await adoptStrandedAutoRow(capped, atCap, NOW)
+    expect(r.applied).toBe(false)
+    expect(r.note).toMatch(/auto-pause cap/)
+    expect(capped.status).toBe('proposed')
+    expect(mutate).toHaveBeenCalledTimes(1)
   })
 })

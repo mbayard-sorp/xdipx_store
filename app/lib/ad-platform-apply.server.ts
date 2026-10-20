@@ -9,6 +9,10 @@
  * platform mutation. With either ads_spend_enabled or ads_auto_apply_enabled
  * off, the row is dry_run and nothing reaches a platform.
  *
+ * `halt` (ticket #16432) is R7's account-wide stop. It becomes one halt_all
+ * ledger row per channel instead of one pause per ad, so it counts as one
+ * action and the automatic pause cap (3 a day) cannot swallow a spend guard.
+ *
  * setPlatformApplier registers a test override. An override keeps the old
  * contract exactly: with spendEnabled false, platformApply returns without
  * calling it, so a registered fake cannot be reached by accident.
@@ -16,10 +20,11 @@
 import type { ChannelId, EntityRef } from '~/lib/ads/channels/types'
 import type { DispatchVerb } from '~/lib/ads/channels/apply-core'
 
-export type PlatformAction = 'pause' | 'resume' | 'scale' | 'brake' | 'refresh'
+export type PlatformAction = 'pause' | 'resume' | 'scale' | 'brake' | 'refresh' | 'halt'
 
 export interface PlatformApplyRequest {
-  creativeId: number
+  /** The creative the action is about. Null for halt, which is about the whole account. */
+  creativeId: number | null
   externalAdId: string | null
   lane: string | null
   action: PlatformAction
@@ -50,7 +55,7 @@ export interface PlatformApplyResult {
 export type PlatformApplier = (req: PlatformApplyRequest) => Promise<PlatformApplyResult>
 
 const VERB: Record<PlatformAction, DispatchVerb> = {
-  pause: 'pause', resume: 'resume', scale: 'scale', brake: 'brake', refresh: 'update_creative',
+  pause: 'pause', resume: 'resume', scale: 'scale', brake: 'brake', refresh: 'update_creative', halt: 'halt_all',
 }
 
 /** Ad Studio lanes that are also channel ids. */

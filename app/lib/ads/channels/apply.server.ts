@@ -37,6 +37,10 @@
  *   dry_run with reason "auto-pause cap: owner page", and one owner blocker
  *   keyed ads-auto-pause-cap is filed.
  *
+ * Phase 5b (ticket #16432) added applyApprovedRow and adoptStrandedAutoRow
+ * at the bottom of this file, the entry points of the hourly applier in
+ * app/lib/ads/apply-run.server.ts.
+ *
  * Nothing changes on a platform while ads_spend_enabled or
  * ads_auto_apply_enabled is off, approved rows included. The Meta adapter
  * refuses any resume that does not undo the machine's own pause (M4).
@@ -46,7 +50,7 @@ import type { AdActionRow, InsertActionResult, NewAdAction, TransitionExtra } fr
 import type { AdActionStatus, AdActionTier, AdActionVerb } from '../ledger-core'
 import type { BlockerInput } from '~/lib/owner-blockers-core'
 import {
-  budgetChangeOf, budgetWithinStep, classifyTier, gateDispatch, resolveBudgetOwner,
+  budgetChangeOf, budgetWithinStep, classifyTier, gateDispatch, resolveBudgetOwner, withinDailyActionCap,
   type DispatchGate, type DispatchVerb, type MirrorBudgetRow,
 } from './apply-core'
 import { ChannelNotEnabledError, MutationRefusedError } from './errors'
@@ -512,4 +516,93 @@ async function applyRow(
     }
   }
   return { ...base, status: 'applied', applied: true, error: false, note: `Applied ${verb} to ${target.level} ${target.externalId}.` }
+}
+
+// ---------------------------------------------------------------------------
+// The hourly applier's entry points (ticket #16432, phase 5b)
+//
+// dispatch() handles a fresh request. Rows that already sit in the ledger
+// reach the platform through the two functions below, which
+// app/lib/ads/apply-run.server.ts calls once an hour. They keep the replay
+// path's rule: nothing is sent while either valve is off.
+// ---------------------------------------------------------------------------
+
+/**
+ * A proposed auto row younger than this may still belong to a dispatch that
+ * is between its insert and its approve, so the applier leaves it alone.
+ */
+export const STRANDED_MIN_AGE_MS = 10 * 60_000
+
+function targetOfRow(row: AdActionRow): EntityRef {
+  return { platform: row.platform as ChannelId, level: row.targetLevel, externalId: row.targetExternalId }
+}
+
+function valveOff(settings: ApplySettings): string | null {
+  if (!settings.spendEnabled) return 'ads_spend_enabled'
+  if (!settings.autoApplyEnabled) return 'ads_auto_apply_enabled'
+  return null
+}
+
+/**
+ * Sends one approved row: an owner tap from the console or the digest link,
+ * or a machine row a crash left at approved. Tier owner rows are never sent
+ * from here, whoever approved them, because plan §5 keeps those changes in
+ * Ads Manager. They land as failed with that sentence and leave the queue.
+ */
+export async function applyApprovedRow(row: AdActionRow, deps: ApplyDeps = {}): Promise<DispatchResult> {
+  const store = deps.store ?? defaultStore
+  const target = targetOfRow(row)
+  const base = { tier: row.tier as AdActionTier, target, actionId: row.id, inserted: false }
+  if (row.status !== 'approved') {
+    return { ...base, status: row.status, applied: false, error: false, note: `Row is ${row.status}, so there is nothing to apply.` }
+  }
+  if (row.tier === 'owner') {
+    const msg = 'tier owner: the owner makes this change in Ads Manager, so the applier does not send it.'
+    try {
+      await store.transition(row.id, 'failed', 'auto', { error: msg })
+    } catch (err) {
+      console.error('[ads/apply] could not mark the owner-tier row failed', row.id, err)
+    }
+    return { ...base, status: 'failed', applied: false, error: true, note: msg }
+  }
+  const off = valveOff(await (deps.settings ?? defaultSettings)())
+  if (off) return { ...base, status: 'approved', applied: false, error: false, note: `Approved row waits: ${off} is off, so no platform call.` }
+  return applyRow(row, target, store, deps, base)
+}
+
+/**
+ * A tier auto row left at proposed. dispatch inserts a row and approves it in
+ * the next statement, so only a crash leaves one here. The row gets the gates
+ * dispatch would have given it, checked again now: both valves, the daily
+ * action cap and the automatic pause cap. Only a row from today's UTC day
+ * qualifies; older ones wait for the 48h expiry. A row that fails a gate
+ * stays proposed.
+ */
+export async function adoptStrandedAutoRow(row: AdActionRow, deps: ApplyDeps = {}, now: Date = new Date()): Promise<DispatchResult> {
+  const store = deps.store ?? defaultStore
+  const target = targetOfRow(row)
+  const base = { tier: row.tier as AdActionTier, target, actionId: row.id, inserted: false }
+  const leave = (note: string): DispatchResult => ({ ...base, status: row.status, applied: false, error: false, note })
+  if (row.status !== 'proposed' || row.tier !== 'auto') return leave('Not a stranded automatic row.')
+  if (dayOf(row.createdAt) !== dayOf(now)) return leave('Stranded before today, so it waits for the 48h expiry.')
+  if (now.getTime() - row.createdAt.getTime() < STRANDED_MIN_AGE_MS) return leave('Too new: a dispatch may still be working on it.')
+
+  const settings = await (deps.settings ?? defaultSettings)()
+  const off = valveOff(settings)
+  if (off) return leave(`Stranded row waits: ${off} is off.`)
+  const dayStart = startOfUtcDay(now)
+  const autoToday = await store.countAutoActionsSince(dayStart)
+  if (!withinDailyActionCap(autoToday, settings.autoActionsMaxPerDay)) {
+    return leave(`Stranded row waits: daily cap reached, ${autoToday} automatic actions today, cap ${settings.autoActionsMaxPerDay}.`)
+  }
+  if (row.verb === 'pause' && (await store.countAutoPausesSince(dayStart)) >= AUTO_PAUSE_CAP_PER_DAY) {
+    return leave(`Stranded row waits: ${AUTO_PAUSE_CAP_REASON}.`)
+  }
+  let approved: AdActionRow
+  try {
+    approved = await store.transition(row.id, 'approved', 'auto')
+  } catch (err) {
+    return leave(`Another writer moved this row first: ${errorText(err)}`)
+  }
+  return applyRow(approved, target, store, deps, base)
 }
