@@ -8,6 +8,12 @@
  * figure comes from loadOverview(), which reads Neon only. No platform call
  * happens while this page loads.
  *
+ * Two cards from ticket #16686 sit under the tiles. Signal health compares
+ * the latest pixel snapshot's Lead count with the leads /api/lead stored and
+ * shows event match quality; it goes red past a 20% gap or under EMQ 6.
+ * Burn to date shows spend, leads, CPL, orders, CAC and contribution per
+ * channel since first spend and over 28 days, against break-even.
+ *
  * While ads_spend_enabled is off every tile carries a "Simulation" tag, the
  * same rule the Spend tab follows, so a simulated number is never read as
  * real money.
@@ -16,17 +22,26 @@ import type { LoaderFunctionArgs, MetaFunction } from 'react-router'
 import { isRouteErrorResponse, useLoaderData, useRevalidator, useRouteError } from 'react-router'
 import { requireAdmin } from '~/lib/session.server'
 import { loadOverview } from '~/lib/ads/console.server'
-import { ageWords, type Overview, type OverviewAlert, type WindowFigures } from '~/lib/ads/console-core'
+import { loadSignalCards } from '~/lib/ads/health-snapshots-console.server'
+import { ageWords, type Burn, type BurnFigures, type Overview, type OverviewAlert, type WindowFigures } from '~/lib/ads/console-core'
+import { EMQ_FLOOR, LEAD_GAP_MAX, type SignalHealth } from '~/lib/ads/health-snapshots-core'
 import { formatMoney, formatRoas } from '~/lib/ad-metrics-core'
 import { ErrorSlab } from '~/components/admin/ads/StateSlabs'
+import { ResponsiveTable } from '~/components/admin/ResponsiveTable'
 
 export const meta: MetaFunction = () => [{ title: 'Overview - Ads - xdipx Admin' }]
 
 export async function loader({ request }: LoaderFunctionArgs) {
   await requireAdmin(request)
   const now = new Date()
-  const overview = await loadOverview(undefined, now)
-  return { overview, now: now.toISOString() }
+  const [overview, cards] = await Promise.all([
+    loadOverview(undefined, now),
+    loadSignalCards(now).catch((err: unknown) => {
+      console.error('[admin.ads] signal cards failed', err)
+      return null
+    }),
+  ])
+  return { overview, cards, now: now.toISOString() }
 }
 
 type Tone = 'plain' | 'good' | 'warn' | 'over'
@@ -179,7 +194,7 @@ function HealthRow({ label, value, flag }: { label: string; value: string; flag?
 }
 
 export default function AdsOverview() {
-  const { overview: o, now } = useLoaderData<typeof loader>()
+  const { overview: o, cards, now } = useLoaderData<typeof loader>()
   const sim = o.simulation
   const s = o.settings
   const w = o.windows
@@ -271,6 +286,9 @@ export default function AdsOverview() {
         />
       </Section>
 
+      <SignalHealthCard health={cards?.signalHealth ?? null} failed={cards == null || cards.signalHealth == null} />
+      <BurnCard burn={cards?.burn ?? null} failed={cards == null || cards.burn == null} />
+
       <section aria-label="Alerts" className="space-y-2">
         <p className="kicker">Alerts</p>
         <div className="rounded-2xl border border-line bg-paper px-4">
@@ -307,6 +325,210 @@ export default function AdsOverview() {
         </dl>
       </section>
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Signal health and Burn to date (ticket #16686)
+// ---------------------------------------------------------------------------
+
+const STATE_PILL: Record<SignalHealth['state'], { label: string; cls: string }> = {
+  red: { label: 'Red', cls: 'border-red-300 bg-red-50 text-red-800' },
+  amber: { label: 'Watch', cls: 'border-amber-300 bg-amber-50 text-amber-800' },
+  ok: { label: 'OK', cls: 'border-line bg-paper-2 text-sage' },
+  empty: { label: 'No reading', cls: 'border-line bg-paper-2 text-ink-3' },
+}
+
+function pct(v: number | null): string {
+  return v == null ? 'n/a' : `${Math.round(v * 100)}%`
+}
+
+function SignalHealthCard({ health, failed }: { health: SignalHealth | null; failed: boolean }) {
+  const pill = STATE_PILL[health?.state ?? 'empty']
+  return (
+    <section aria-label="Signal health" className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="kicker">Signal health</p>
+        <span className={`rounded-full border px-2 font-mono text-[10px] uppercase tracking-wide ${pill.cls}`}>{pill.label}</span>
+        {health?.snapshot && (
+          <span className={`font-mono text-[11px] ${health.snapshot.stale ? 'text-amber-800' : 'text-ink-3'}`}>
+            pixel snapshot {health.snapshot.age}{health.source ? `, from ${health.source}` : ''}
+          </span>
+        )}
+      </div>
+      <div className="space-y-3 rounded-2xl border border-line bg-paper p-4">
+        {!health ? (
+          <p className="text-sm text-ink-3">
+            {failed
+              ? 'Signal health is unknown: the snapshot read failed. Migration 136 may not be applied yet.'
+              : 'No reading yet.'}
+          </p>
+        ) : health.state === 'empty' ? (
+          <p className="text-sm text-ink-3">
+            No pixel snapshot yet. The daily ads routine records one through /api/team/ad-health-snapshot after it reads dataset quality in the Meta Ads MCP. Until then nothing here says whether Meta sees the leads we store.
+          </p>
+        ) : (
+          <>
+            {health.reasons.length > 0 && (
+              <ul className="space-y-1">
+                {health.reasons.map(r => (
+                  <li key={r} className={`text-sm ${health.state === 'red' ? 'text-red-800' : 'text-amber-800'}`}>{r}</li>
+                ))}
+              </ul>
+            )}
+            {health.leads.length > 0 && (
+              <ResponsiveTable>
+                <table className="w-full min-w-[420px] text-sm">
+                  <thead>
+                    <tr className="text-left font-mono text-[11px] uppercase tracking-wide text-ink-3">
+                      <th className="py-1 pr-3 font-normal">Window</th>
+                      <th className="py-1 pr-3 font-normal">Meta Lead events</th>
+                      <th className="py-1 pr-3 font-normal">Leads we stored</th>
+                      <th className="py-1 font-normal">Gap</th>
+                    </tr>
+                  </thead>
+                  <tbody className="tabular-nums">
+                    {health.leads.map(l => (
+                      <tr key={l.window} className="border-t border-line">
+                        <td className="py-1.5 pr-3 font-mono text-xs">{l.window}</td>
+                        <td className="py-1.5 pr-3">{l.meta == null ? 'not reported' : l.meta}</td>
+                        <td className="py-1.5 pr-3">{l.ours}</td>
+                        <td className={`py-1.5 ${l.gap != null && l.gap > LEAD_GAP_MAX ? 'font-semibold text-red-800' : 'text-ink'}`}>{pct(l.gap)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </ResponsiveTable>
+            )}
+            {health.events.length > 0 && (
+              <div>
+                <p className="font-mono text-[11px] uppercase tracking-wide text-ink-3">Event match quality, red under {EMQ_FLOOR}</p>
+                <ul className="mt-1 flex flex-wrap gap-2">
+                  {health.events.map(e => (
+                    <li
+                      key={e.event}
+                      className={`rounded-full border px-2.5 py-0.5 font-mono text-xs ${e.emq != null && e.emq < EMQ_FLOOR ? 'border-red-300 bg-red-50 text-red-800' : 'border-line bg-paper-2 text-ink'}`}
+                    >
+                      {e.event} {e.emq == null ? 'n/a' : e.emq.toFixed(1)}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </>
+        )}
+        {health && health.attributedLeads7d != null && (
+          <p className="text-xs text-ink-3">
+            Meta attributed {health.attributedLeads7d} lead{health.attributedLeads7d === 1 ? '' : 's'} to ads in the last 7 days (insights mirror). Leads we stored count every /api/lead signup, paid or not.
+          </p>
+        )}
+      </div>
+    </section>
+  )
+}
+
+function signedMoney(cents: number): string {
+  return cents < 0 ? `-${formatMoney(-cents)}` : formatMoney(cents)
+}
+
+function BurnCells({ f, breakEvenCents }: { f: BurnFigures; breakEvenCents: number }) {
+  const cacTone = f.cacCents == null ? '' : f.cacCents > breakEvenCents ? 'text-red-800' : 'text-sage'
+  return (
+    <>
+      <td className="py-1.5 pr-3">{formatMoney(f.spendCents)}</td>
+      <td className="py-1.5 pr-3">{f.leads}</td>
+      <td className="py-1.5 pr-3">{money(f.cplCents)}</td>
+      <td className="py-1.5 pr-3">{f.orders}</td>
+      <td className={`py-1.5 pr-3 ${cacTone}`}>
+        {f.cacCents == null ? (f.spendCents > 0 ? 'no orders' : 'n/a') : formatMoney(f.cacCents)}
+      </td>
+      <td className={`py-1.5 ${f.contributionCents < 0 ? 'font-semibold text-red-800' : 'text-ink'}`}>{signedMoney(f.contributionCents)}</td>
+    </>
+  )
+}
+
+function BurnRowPair({ label, first, sinceFirst, d28, breakEvenCents, total }: {
+  label: string
+  first: string | null
+  sinceFirst: BurnFigures
+  d28: BurnFigures
+  breakEvenCents: number
+  total: boolean
+}) {
+  const cls = total ? 'font-semibold' : ''
+  return (
+    <>
+      <tr className={`border-t border-line ${cls}`}>
+        <td className="py-1.5 pr-3 align-top font-mono text-xs" rowSpan={2}>{label}</td>
+        <td className="py-1.5 pr-3 text-xs text-ink-3">{first ? `since ${first}` : 'never spent'}</td>
+        <BurnCells f={sinceFirst} breakEvenCents={breakEvenCents} />
+      </tr>
+      <tr className={cls}>
+        <td className="py-1.5 pr-3 text-xs text-ink-3">last 28d</td>
+        <BurnCells f={d28} breakEvenCents={breakEvenCents} />
+      </tr>
+    </>
+  )
+}
+
+function BurnCard({ burn, failed }: { burn: Burn | null; failed: boolean }) {
+  const lines = burn
+    ? [
+        ...burn.rows.map(r => ({ key: r.platform, label: r.platform, first: r.firstSpendDay, sinceFirst: r.sinceFirst, d28: r.d28 })),
+        ...(burn.rows.length > 1
+          ? [{ key: '__total', label: 'All channels', first: burn.total.firstSpendDay, sinceFirst: burn.total.sinceFirst, d28: burn.total.d28 }]
+          : []),
+      ]
+    : []
+  return (
+    <section aria-label="Burn to date" className="space-y-2">
+      <p className="kicker">Burn to date</p>
+      <div className="space-y-3 rounded-2xl border border-line bg-paper p-4">
+        {!burn ? (
+          <p className="text-sm text-ink-3">{failed ? 'Burn to date is unknown: the spend read failed.' : 'No reading yet.'}</p>
+        ) : burn.rows.length === 0 ? (
+          <p className="text-sm text-ink-3">
+            No spend or attributed orders recorded yet. The hourly insights pull fills this once a channel with a token spends.
+          </p>
+        ) : (
+          <>
+            <ResponsiveTable>
+              <table className="w-full min-w-[680px] text-sm">
+                <thead>
+                  <tr className="text-left font-mono text-[11px] uppercase tracking-wide text-ink-3">
+                    <th className="py-1 pr-3 font-normal">Channel</th>
+                    <th className="py-1 pr-3 font-normal">Window</th>
+                    <th className="py-1 pr-3 font-normal">Spend</th>
+                    <th className="py-1 pr-3 font-normal">Leads</th>
+                    <th className="py-1 pr-3 font-normal">CPL</th>
+                    <th className="py-1 pr-3 font-normal">Orders</th>
+                    <th className="py-1 pr-3 font-normal">CAC</th>
+                    <th className="py-1 font-normal">Contribution</th>
+                  </tr>
+                </thead>
+                <tbody className="tabular-nums">
+                  {lines.map(r => (
+                    <BurnRowPair
+                      key={r.key}
+                      label={r.label}
+                      first={r.first}
+                      sinceFirst={r.sinceFirst}
+                      d28={r.d28}
+                      breakEvenCents={burn.breakEven.cpaCents}
+                      total={r.key === '__total'}
+                    />
+                  ))}
+                </tbody>
+              </table>
+            </ResponsiveTable>
+            <p className="text-xs text-ink-3">
+              Spend and leads are what each platform reports at ad level. Orders and revenue are attributed orders. CAC turns red above the {formatMoney(burn.breakEven.cpaCents)} break-even
+              (AOV {formatMoney(burn.breakEven.aovCents)} at {burn.breakEven.marginPct}% margin). Contribution is net revenue at that margin minus spend.
+            </p>
+          </>
+        )}
+      </div>
+    </section>
   )
 }
 

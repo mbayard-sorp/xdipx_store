@@ -25,6 +25,8 @@ const SECTIONS: Array<{ to: string; label: string; end: boolean }> = [
   { to: '/admin/ads/actions', label: 'Actions', end: false },
   { to: '/admin/ads/audiences', label: 'Audiences', end: false },
   { to: '/admin/ads/experiments', label: 'Experiments', end: false },
+  { to: '/admin/ads/signals', label: 'Signals', end: false },
+  { to: '/admin/ads/breakdowns', label: 'Breakdowns', end: false },
   { to: '/admin/ads/channels', label: 'Channels', end: false },
   { to: '/admin/ads/settings', label: 'Settings', end: false },
 ]

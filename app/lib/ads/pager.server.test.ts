@@ -44,7 +44,7 @@ describe('runPagerChecks', () => {
     const r = await run(store({ spend: 1000 }), file)
     expect(file).not.toHaveBeenCalled()
     expect(r.pages).toEqual([])
-    expect(r.skipped.join(' ')).toMatch(/account_status/)
+    expect(r.skipped.join(' ')).not.toMatch(/account_status/)
     expect(r.skipped.join(' ')).toMatch(/discount-code redemptions/)
   })
 

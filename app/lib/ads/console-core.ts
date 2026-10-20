@@ -377,3 +377,101 @@ export function assembleOverview(input: OverviewInput, now: Date, failed: string
     alerts, failed,
   }
 }
+
+// ---------------------------------------------------------------------------
+// Burn to date (ticket #16686)
+// ---------------------------------------------------------------------------
+
+/** One platform on one day: ad-level insights spend and leads, attributed orders and net revenue. */
+export interface ChannelDay {
+  platform: string
+  day: string
+  spendCents: number
+  leads: number
+  orders: number
+  netRevenueCents: number
+}
+
+export interface BurnFigures {
+  spendCents: number
+  leads: number
+  /** spend / leads. Null with zero leads. */
+  cplCents: number | null
+  orders: number
+  /** spend / orders. Null with zero orders. */
+  cacCents: number | null
+  netRevenueCents: number
+  /** Net revenue at the gross margin, minus spend. Negative is money burned. */
+  contributionCents: number
+}
+
+export interface BurnRow {
+  platform: string
+  /** First day with spend, or null when the platform never spent. */
+  firstSpendDay: string | null
+  sinceFirst: BurnFigures
+  d28: BurnFigures
+}
+
+export interface Burn {
+  rows: BurnRow[]
+  total: { firstSpendDay: string | null; sinceFirst: BurnFigures; d28: BurnFigures }
+  breakEven: BreakEven
+}
+
+export const BURN_WINDOW_DAYS = 28
+
+export function burnFigures(days: Array<Pick<ChannelDay, 'spendCents' | 'leads' | 'orders' | 'netRevenueCents'>>, marginPct: number): BurnFigures {
+  let spendCents = 0, leads = 0, orders = 0, netRevenueCents = 0
+  for (const d of days) { spendCents += d.spendCents; leads += d.leads; orders += d.orders; netRevenueCents += d.netRevenueCents }
+  return {
+    spendCents, leads, cplCents: ratioCents(spendCents, leads),
+    orders, cacCents: ratioCents(spendCents, orders),
+    netRevenueCents,
+    contributionCents: Math.round(netRevenueCents * (marginPct / 100)) - spendCents,
+  }
+}
+
+/**
+ * Spend, leads, CPL, orders, CAC and contribution per platform, since that
+ * platform first spent and over the last 28 days, plus an all-channel total.
+ * Orders before a platform's first spend are not counted against it: nothing
+ * it paid for could have brought them. A platform that never spent shows
+ * its 28-day orders and a null first-spend day.
+ */
+export function assembleBurn(days: ChannelDay[], breakEven: BreakEven, now: Date): Burn {
+  const today = ymdUtc(now)
+  const d28From = shiftDay(today, -(BURN_WINDOW_DAYS - 1))
+  const margin = breakEven.marginPct
+  const byPlatform = new Map<string, ChannelDay[]>()
+  for (const d of days) {
+    if (d.day > today) continue
+    const list = byPlatform.get(d.platform) ?? []
+    list.push(d)
+    byPlatform.set(d.platform, list)
+  }
+  const firstSpend = (list: ChannelDay[]): string | null =>
+    list.filter(d => d.spendCents > 0).reduce<string | null>((m, d) => (m == null || d.day < m ? d.day : m), null)
+
+  const rows: BurnRow[] = [...byPlatform.entries()].map(([platform, list]) => {
+    const first = firstSpend(list)
+    return {
+      platform,
+      firstSpendDay: first,
+      sinceFirst: burnFigures(first ? list.filter(d => d.day >= first) : [], margin),
+      d28: burnFigures(list.filter(d => d.day >= d28From), margin),
+    }
+  }).sort((a, b) => b.sinceFirst.spendCents - a.sinceFirst.spendCents || a.platform.localeCompare(b.platform))
+
+  const all = [...byPlatform.values()].flat()
+  return {
+    rows,
+    total: {
+      firstSpendDay: firstSpend(all),
+      // Each platform counts from its own first spend, so the total is the sum of the rows.
+      sinceFirst: burnFigures(rows.map(r => r.sinceFirst), margin),
+      d28: burnFigures(all.filter(d => d.day >= d28From), margin),
+    },
+    breakEven,
+  }
+}
