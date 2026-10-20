@@ -13,7 +13,7 @@
  *   body we could not read). Files nothing, per the blocker probe rule in
  *   #4702.
  *
- * The latest reading per channel lands in ad_channel_health (migration 129)
+ * The latest reading per channel lands in ad_channel_health (migration 131)
  * so the phase 3 console can show token state without calling the platform.
  */
 import { sql } from 'drizzle-orm'

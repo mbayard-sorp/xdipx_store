@@ -1,4 +1,4 @@
--- 129: Ads Control Plane, phase 1d (ticket #16406). ADR-018 and
+-- 131: Ads Control Plane, phase 1d (ticket #16406). ADR-018 and
 -- docs/store-team/ads-control-plane-plan.md sections 3.4 and 8.
 -- ad_channel_health keeps the latest token health reading per ad channel, so
 -- the phase 3 console can show it without calling the platform. One row per
