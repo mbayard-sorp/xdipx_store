@@ -720,7 +720,41 @@ export function imageCapRefusesRun(team: TeamId, overImageCap: boolean): boolean
 
 // ── Run + event recorders (back the dashboard) ──────────────────────────────
 
+/**
+ * Ticket #16387: a caller that retries `op:'start'` after a transport hiccup
+ * (a dropped connection, a proxy TLS failure) mints a brand-new run row every
+ * time, and `homepage_team_runs` has no idempotency key to collapse those on.
+ * Each duplicate still counts against that team's `{team}_team_max_runs` cap
+ * for the day even though it did no work (runs 1478/1479 and 1325/1326, both
+ * self-reported as a duplicate-on-retry and immediately skipped).
+ *
+ * Fixed with a short server-side dedupe window rather than a caller-supplied
+ * key, since every existing caller (the scheduled routine prompts) already
+ * calls `op:'start'` with no way to pass one. If this exact team+runType
+ * already has a `status:'running'` row started in the last
+ * `START_RUN_DEDUPE_WINDOW_MS`, return that row's id instead of inserting a
+ * new one. A genuine second run of the same team+runType inside the window is
+ * not a pattern this loop produces today (each scheduled pass starts at most
+ * one run per team+runType), so the window only ever catches the retry case
+ * it was written for.
+ */
+export const START_RUN_DEDUPE_WINDOW_MS = 60_000
+
 export async function startRun(team: TeamId, runType: string): Promise<number> {
+  const cutoff = new Date(Date.now() - START_RUN_DEDUPE_WINDOW_MS)
+  const recent = await db
+    .select({ id: homepageTeamRuns.id })
+    .from(homepageTeamRuns)
+    .where(and(
+      eq(homepageTeamRuns.team, team),
+      eq(homepageTeamRuns.runType, runType),
+      eq(homepageTeamRuns.status, 'running'),
+      gte(homepageTeamRuns.startedAt, cutoff),
+    ))
+    .orderBy(desc(homepageTeamRuns.startedAt))
+    .limit(1)
+  if (recent[0]) return recent[0].id
+
   const [row] = await db
     .insert(homepageTeamRuns)
     .values({ team, runType, status: 'running' })
