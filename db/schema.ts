@@ -2583,6 +2583,30 @@ export type AdActionStatus =
   | 'proposed' | 'dry_run' | 'approved' | 'applied' | 'failed' | 'rejected' | 'expired'
 
 /**
+ * Ads Control Plane audience mirror (migration 132, ticket #16435). One row
+ * per platform audience, keyed by (platform, external_id). Filled after the
+ * entity sync; role comes from the mirrored ad sets' targeting. The console's
+ * exclusions check (docs/ads-policy.md M8) reads it. Read-only mirror.
+ */
+export const adAudiences = pgTable('ad_audiences', {
+  id:         bigserial('id', { mode: 'number' }).primaryKey(),
+  platform:   text('platform').notNull(),
+  externalId: text('external_id').notNull(),
+  name:       text('name'),
+  kind:       text('kind').$type<AdAudienceKind>(), // custom|lookalike|saved (CHECK in SQL)
+  role:       text('role').$type<AdAudienceRole>(), // targeting|exclusion|unknown (CHECK in SQL)
+  approxSize: integer('approx_size'),
+  status:     text('status'),
+  raw:        jsonb('raw').$type<Record<string, unknown> | null>(),
+  syncedAt:   timestamp('synced_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => ({
+  // Postgres's default name for the inline UNIQUE in migration 132.
+  platformExternalUq: unique('ad_audiences_platform_external_id_key').on(t.platform, t.externalId),
+  platformRoleIdx: index('idx_ad_audiences_platform_role').on(t.platform, t.role),
+}))
+
+export type AdAudienceKind = 'custom' | 'lookalike' | 'saved'
+export type AdAudienceRole = 'targeting' | 'exclusion' | 'unknown'
  * Ads Control Plane experiment log (migration 133, ticket #16436, plan
  * sections 3.3, 9.2 and 9.5). One row per hypothesis. arms holds the entity
  * refs being compared. Allowed values and status moves live in

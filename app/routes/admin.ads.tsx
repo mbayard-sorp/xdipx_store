@@ -21,6 +21,7 @@ export const meta: MetaFunction = () => [{ title: 'Ads - xdipx Admin' }]
 
 const SECTIONS: Array<{ to: string; label: string; end: boolean }> = [
   { to: '/admin/ads', label: 'Overview', end: true },
+  { to: '/admin/ads/audiences', label: 'Audiences', end: false },
   { to: '/admin/ads/experiments', label: 'Experiments', end: false },
 ]
 
