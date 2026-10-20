@@ -28,7 +28,7 @@ vi.mock('./db.server', () => ({ db: new Proxy({}, { get: (_t, k) => (db as never
 vi.mock('../../db/schema', () => ({
   metaCapiOutbox: { orderId: 'order_id', resolvedAt: 'resolved_at' },
 }))
-vi.mock('./meta-capi.server', () => ({ sendCapiEvent: (...a: unknown[]) => sendCapiEvent(...a) }))
+vi.mock('./meta-capi.server', () => ({ sendCapiEvent: (...a: unknown[]) => sendCapiEvent(...a), buildHashedUserData: () => ({}) }))
 vi.mock('./shopify.server', () => ({ adminGraphQL: (...a: unknown[]) => adminGraphQL(...a) }))
 vi.mock('./kv.server', () => ({
   kvIncrBy: (...a: unknown[]) => kvIncrBy(...a),

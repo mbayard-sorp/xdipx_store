@@ -52,6 +52,34 @@ export function isPrefetchRequest(request: Request): boolean {
 }
 
 /**
+ * Cookie the store's own synthetic traffic carries (the browser checkout probe
+ * in scripts/checkout-probe-browser.mjs sets it before its first navigation).
+ * The probe walked the whole purchase path once a day, and every walk landed in
+ * the Meta dataset as one AddToCart, one InitiateCheckout and one PageView.
+ */
+export const SYNTHETIC_COOKIE = 'xdipx_synthetic'
+/** Header form of the same marker, for server-side probes that use fetch. */
+export const SYNTHETIC_HEADER = 'x-xdipx-synthetic'
+
+/** True when the request says it is the store's own probe or healthcheck. */
+export function isSyntheticRequest(request: Request): boolean {
+  if (request.headers.get(SYNTHETIC_HEADER)) return true
+  const cookie = request.headers.get('cookie') ?? ''
+  return new RegExp(`(?:^|;\\s*)${SYNTHETIC_COOKIE}=1(?:;|$)`).test(cookie)
+}
+
+/**
+ * Bare runtime HTTP clients. Node's built-in fetch sends `node` (undici) and
+ * Bun sends `Bun/<version>`. The /cron/warm job fetches the live PDP with
+ * Node's fetch every 15 minutes, and none of these strings carry a generic
+ * crawler token, so isCrawlerRequest let them through.
+ */
+function isRuntimeClient(request: Request): boolean {
+  const ua = (request.headers.get('user-agent') ?? '').trim().toLowerCase()
+  return ua === 'node' || ua.startsWith('undici') || ua.startsWith('bun/') || ua.startsWith('deno/')
+}
+
+/**
  * True when a CAPI conversion event should be sent for this request.
  *
  * Suppressing an event here must also suppress its browser-pixel counterpart,
@@ -60,7 +88,9 @@ export function isPrefetchRequest(request: Request): boolean {
  * effects already treat as "do not fire".
  */
 export function isCapiEligible(request: Request): boolean {
+  if (isSyntheticRequest(request)) return false
   if (isPrefetchRequest(request)) return false
+  if (isRuntimeClient(request)) return false
   if (isCrawlerRequest(request)) return false
   if (isLikelyBot(request)) return false
   return true

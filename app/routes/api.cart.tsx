@@ -73,8 +73,9 @@ export async function action({ request }: ActionFunctionArgs) {
     // Write attribution cookies (_fbp/_fbc/_ga_cid/_utm_*/_ref_code) as cart
     // attributes so they flow to order.note_attributes for the order webhook.
     await applyAttributionAttrs(cartId, request)
-    // Generate dedup id and fire AddToCart CAPI fire-and-forget.
-    const addToCartEventId = fireCapiEvent(request, 'AddToCart', {
+    // AddToCart CAPI, awaited (Vercel drops post-response work). Null for a
+    // crawler or the checkout probe, which also suppresses the browser pixel.
+    const addToCartEventId = await fireCapiEvent(request, 'AddToCart', {
       contentIds: [productId],
       value:      price * quantity,
       numItems:   quantity,
@@ -135,13 +136,13 @@ export async function action({ request }: ActionFunctionArgs) {
     if (cartId) {
       await applyAttributionAttrs(cartId, request, cartTag ? [{ key: cartTag, value: 'live' }] : [])
     }
-    // Generate dedup id and fire AddToCart CAPI fire-and-forget.
+    // AddToCart CAPI, awaited; null for a crawler or the checkout probe.
     const totalValue = lines.reduce((sum, l) => {
       const p = parseFloat((form.get(`price_${lines.indexOf(l)}`) as string) ?? '0')
       return sum + p * l.quantity
     }, 0)
     const allProductIds = lines.map((_, i) => (form.get(`productId_${i}`) as string | null) ?? '').filter(Boolean)
-    const addToCartEventId = fireCapiEvent(request, 'AddToCart', {
+    const addToCartEventId = await fireCapiEvent(request, 'AddToCart', {
       contentIds: allProductIds.length > 0 ? allProductIds : lines.map((_, i) => String(i)),
       value:      totalValue,
       numItems:   lines.length,

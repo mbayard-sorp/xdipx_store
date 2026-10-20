@@ -13,7 +13,7 @@
  * host root path `/<slug>` and the client router matches the URL it hydrates.
  */
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { LoaderFunctionArgs, MetaFunction } from 'react-router'
 import { data, useLoaderData, useRouteError, useRouteLoaderData } from 'react-router'
 import { Analytics } from '~/components/store/Analytics'
@@ -29,7 +29,6 @@ import { LEAD_OFFER } from '~/lib/lead-interests'
 import { getStoredUTM } from '~/lib/attribution.server'
 import { trackCtaClick } from '~/lib/analytics.client'
 import { isBridgeHost, isBridgeHostRequest, requestHost, BRIDGE_HOST } from '~/lib/bridge-host.server'
-import { trackFbPageView } from '~/lib/meta-pixel.client'
 import { sanityImageUrl } from '~/lib/sanity-image'
 import { isPreviewRequest } from '~/lib/sanity.server'
 import { getProductByHandle } from '~/lib/shopify.server'
@@ -229,9 +228,8 @@ type BridgeData = Extract<LoaderData, { kind: 'bridge' }>
 export default function BridgeRoute() {
   const d = useLoaderData<typeof loader>()
 
-  useEffect(() => {
-    trackFbPageView()
-  }, [])
+  // The Meta PageView (browser pixel plus its CAPI copy) comes from
+  // MetaPageViews in root.tsx, which covers this host too.
 
   const rootData = useRouteLoaderData('root') as { ENV?: { GA4_ID?: string } } | undefined
   const ga4Id = rootData?.ENV?.GA4_ID ?? ''

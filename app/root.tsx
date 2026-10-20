@@ -22,6 +22,7 @@ import newsreaderLatinWoff2 from '@fontsource-variable/newsreader/files/newsread
 import dmSansLatinWoff2 from '@fontsource-variable/dm-sans/files/dm-sans-latin-wght-normal.woff2?url'
 import { BRAND_TITLE, BRAND_DESCRIPTION } from '~/lib/brand'
 import { SITE_ORIGIN } from '~/lib/social-meta'
+import { MetaPageViews } from '~/components/store/MetaPageViews'
 import { captureUTM, captureFbClickId, captureGoogleClickId, captureMicrosoftClickId } from '~/lib/attribution.server'
 import { resolveGa4 } from '~/lib/ga4-config.server'
 import { isQaAgeBypassRequest } from '~/lib/qa-preview.server'
@@ -243,6 +244,12 @@ export function Layout({ children }: { children: React.ReactNode }) {
     pixelId
       ? `!function(){try{var m=document.cookie.match(/(?:^|; )_fbp=([^;]*)/);if(m&&/^fb\\.1\\.\\d{13}\\.\\d+$/.test(decodeURIComponent(m[1])))return;var v='fb.1.'+Date.now()+'.'+Math.round(Math.random()*2147483647);var d=location.hostname.indexOf('xdipx.com')>-1?'; domain=.xdipx.com':'';var s=location.protocol==='https:'?'; secure':'';document.cookie='_fbp='+v+'; path=/; max-age=7776000; samesite=lax'+d+s}catch(e){}}();`
       : '',
+    // First-party visitor id (_xid), sent hashed as Meta's external_id on every
+    // CAPI event and carried onto the cart so the Purchase shares it (ticket
+    // #16688). Client-minted for the same edge-cache reason as _fbp above.
+    pixelId
+      ? `!function(){try{if(/(?:^|; )_xid=x1\\.[0-9a-z]+\\.[0-9a-z]+/.test(document.cookie))return;var v='x1.'+Date.now().toString(36)+'.'+Math.random().toString(36).slice(2,12);var d=location.hostname.indexOf('xdipx.com')>-1?'; domain=.xdipx.com':'';var s=location.protocol==='https:'?'; secure':'';document.cookie='_xid='+v+'; path=/; max-age=31536000; samesite=lax'+d+s}catch(e){}}();`
+      : '',
     pixelId
       ? `!function(f){if(f.fbq)return;var n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[]}(window);fbq('consent','revoke');fbq('init','${pixelId}');`
       : '',
@@ -330,6 +337,7 @@ export default function App() {
       />
       <SentryInit />
       <WebVitalsReport />
+      {ENV.META_PIXEL_ID ? <MetaPageViews /> : null}
     </>
   )
 }
