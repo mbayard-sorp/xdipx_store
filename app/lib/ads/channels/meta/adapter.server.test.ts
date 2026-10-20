@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { ChannelNotEnabledError } from '../errors'
 import type { PolicyMirrorRow } from '../types'
-import { budgetCents, createMetaAdapter, normalizeMetaEntity, normalizeMetaInsight } from './adapter.server'
+import { budgetCents, createMetaAdapter, metaAudienceKind, normalizeMetaAudience, normalizeMetaEntity, normalizeMetaInsight } from './adapter.server'
 import { GraphError, type GraphClient, type GraphJson } from './graph.server'
 
 // Fixtures shaped like Graph v23.0 responses for the fields the adapter asks for.
@@ -102,6 +102,50 @@ describe('metaAdapter', () => {
     expect(g.post).not.toHaveBeenCalled()
     const adFields = (g.getAll.mock.calls.find(c => c[0] === 'act_1/ads') as unknown[] | undefined)?.[1] as Record<string, string>
     expect(adFields.fields).toContain('ad_review_feedback')
+  })
+
+  it('asks for ad set targeting so the audiences mirror can read exclusions', async () => {
+    const g = fakeGraph({ 'act_1/campaigns': [], 'act_1/adsets': [], 'act_1/ads': [] })
+    await createMetaAdapter({ graph: g.graph, credentials: creds }).syncEntities({})
+    const adsetFields = (g.getAll.mock.calls.find(c => c[0] === 'act_1/adsets') as unknown[] | undefined)?.[1] as Record<string, string>
+    expect(String(adsetFields.fields).split(',')).toContain('targeting')
+  })
+
+  it('lists custom, lookalike and saved audiences read only', async () => {
+    const g = fakeGraph({
+      'act_1/customaudiences': [
+        { id: '238001', name: 'Shopify customers', subtype: 'CUSTOM', approximate_count_lower_bound: 1000, approximate_count_upper_bound: 1200,
+          delivery_status: { code: 200, description: 'This audience is ready for use.' }, operation_status: { code: 200, description: 'Normal' } },
+        { id: '238002', name: 'LAL 1% buyers', subtype: 'LOOKALIKE', approximate_count_lower_bound: -1 },
+      ],
+      'act_1/saved_audiences': [{ id: '238003', name: 'US 25-54 women', approximate_count_lower_bound: 5000000 }],
+    })
+    const a = createMetaAdapter({ graph: g.graph, credentials: creds })
+    expect(a.capabilities.audiences).toBe('read')
+    const rows = await a.audiences!.list()
+    expect(rows.map(r => [r.externalId, r.kind])).toEqual([['238001', 'custom'], ['238002', 'lookalike'], ['238003', 'saved']])
+    expect(rows[0]).toMatchObject({ approxSize: 1000, approxSizeUpper: 1200, status: 'This audience is ready for use.' })
+    expect(rows[1]!.approxSize).toBeNull()
+    expect(g.post).not.toHaveBeenCalled()
+    const caFields = (g.getAll.mock.calls.find(c => c[0] === 'act_1/customaudiences') as unknown[] | undefined)?.[1] as Record<string, string>
+    expect(caFields.fields).toContain('subtype')
+  })
+
+  it('still returns custom audiences when the saved audiences edge fails', async () => {
+    const getAll = vi.fn(async (path: string) => {
+      if (path === 'act_1/saved_audiences') throw new GraphError('api_error', 'no permission')
+      return [{ id: '1', name: 'Klaviyo subscribers', subtype: 'CUSTOM' }]
+    })
+    const graph = { get: vi.fn(), post: vi.fn(), getAll } as unknown as GraphClient
+    const rows = await createMetaAdapter({ graph, credentials: creds }).audiences!.list()
+    expect(rows.map(r => r.externalId)).toEqual(['1'])
+  })
+
+  it('maps audience subtypes to kinds', () => {
+    expect(metaAudienceKind('LOOKALIKE')).toBe('lookalike')
+    expect(metaAudienceKind('WEBSITE')).toBe('custom')
+    expect(metaAudienceKind(undefined)).toBe('custom')
+    expect(normalizeMetaAudience('saved', { id: 9 }).kind).toBe('saved')
   })
 
   it('drops rows not updated since the cutoff', async () => {
