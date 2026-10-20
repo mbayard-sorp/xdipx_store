@@ -2609,6 +2609,41 @@ export type AdAudienceKind = 'custom' | 'lookalike' | 'saved'
 export type AdAudienceRole = 'targeting' | 'exclusion' | 'unknown'
 
 /**
+ * Ads Control Plane experiment log (migration 133, ticket #16436, plan
+ * sections 3.3, 9.2 and 9.5). One row per hypothesis. arms holds the entity
+ * refs being compared. Allowed values and status moves live in
+ * app/lib/ads/experiments-core.ts; writes go through experiments.server.ts.
+ */
+export const adExperiments = pgTable('ad_experiments', {
+  id:            bigserial('id', { mode: 'number' }).primaryKey(),
+  hypothesis:    text('hypothesis').notNull(),
+  variable:      text('variable').$type<AdExperimentVariable>().notNull(), // hook|format|product|audience|placement (CHECK in SQL)
+  arms:          jsonb('arms').$type<AdExperimentArm[]>().notNull(),
+  primaryMetric: text('primary_metric').$type<AdExperimentMetric>().notNull(), // cpl|cpa|roas (CHECK in SQL)
+  minSpendCents: integer('min_spend_cents').notNull().default(4000),
+  startsAt:      timestamp('starts_at', { withTimezone: true }),
+  endsAt:        timestamp('ends_at', { withTimezone: true }),
+  status:        text('status').$type<AdExperimentStatus>().notNull().default('planned'),
+  verdict:       text('verdict'),
+  decidedBy:     text('decided_by'),
+  notes:         text('notes'),
+  createdAt:     timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt:     timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => ({
+  statusIdx: index('idx_ad_experiments_status').on(t.status),
+}))
+
+export type AdExperimentVariable = 'hook' | 'format' | 'product' | 'audience' | 'placement'
+export type AdExperimentMetric = 'cpl' | 'cpa' | 'roas'
+export type AdExperimentStatus = 'planned' | 'running' | 'decided' | 'abandoned'
+export interface AdExperimentArm {
+  label: string
+  platform: string
+  level: 'campaign' | 'adset' | 'ad'
+  externalId: string
+}
+
+/**
  * Outreach pipeline (077): vetted guest-post / brand-partnership targets.
  * One row per domain. Seeded from docs/store-team/outreach-prospects.md by
  * scripts/seed-outreach-prospects.ts; the offsite-scout adds more through
