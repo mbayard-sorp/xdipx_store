@@ -195,11 +195,15 @@ describe('metaAdapter', () => {
       .resolves.toMatchObject({ valid: false, error: 'network' })
   })
 
-  it('throws NotEnabled for createPaused and mutate', async () => {
+  it('throws NotEnabled for createPaused and hands mutate to the injected metaMutate', async () => {
     const g = fakeGraph({})
-    const a = createMetaAdapter({ graph: g.graph, credentials: creds })
+    const mutate = vi.fn(async () => ({ applied: true }))
+    const a = createMetaAdapter({ graph: g.graph, credentials: creds, mutate })
+    expect(a.capabilities.mutate).toEqual(['pause', 'resume', 'set_budget'])
     await expect(a.createPaused({})).rejects.toBeInstanceOf(ChannelNotEnabledError)
-    await expect(a.mutate({ verb: 'pause', target: { platform: 'meta', level: 'ad', externalId: '1' }, params: {} })).rejects.toBeInstanceOf(ChannelNotEnabledError)
+    const m = { verb: 'pause' as const, target: { platform: 'meta' as const, level: 'ad' as const, externalId: '1' }, params: {} }
+    await expect(a.mutate(m)).resolves.toEqual({ applied: true })
+    expect(mutate).toHaveBeenCalledWith(m)
     expect(g.post).not.toHaveBeenCalled()
   })
 
