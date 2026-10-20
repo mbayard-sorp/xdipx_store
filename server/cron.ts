@@ -1016,6 +1016,28 @@ export function createCronRoutes() {
   })
 
   /**
+   * GET|POST /cron/ads-audience-sync
+   * Schedule: Sundays 09:20 UTC, after the 09:05 insights restatement
+   * (ticket #16687, plan §9.4, docs/ads-policy.md M8). Builds the buyer and
+   * subscriber lists under the consent rule in app/lib/ads/audience-sync-core.ts
+   * and replaces the members of "xdipx buyers (exclude)" and "xdipx leads
+   * (exclude)" on Meta. With ads_audience_sync_enabled off, or no Meta token,
+   * it writes a dry_run ad_actions row with the counts and sends nothing.
+   * Responds 500 only when a live upload failed. Counts only in the response;
+   * no email or hash leaves this route. Awaited before responding.
+   */
+  cronRoute('/ads-audience-sync', async (_req, res) => {
+    try {
+      const { runAudienceSync } = await import('../app/lib/ads/audience-sync.server.js')
+      const result = await runAudienceSync()
+      res.status(result.status === 'failed' ? 500 : 200).json({ ok: result.status !== 'failed', result })
+    } catch (err) {
+      console.error('[cron/ads-audience-sync] failed:', err)
+      res.status(500).json({ ok: false, error: (err as Error).message })
+    }
+  })
+
+  /**
    * GET|POST /cron/social-asset-auto-archive
    * Schedule: daily. Archives unpicked social_media_assets rows past a
    * tunable age threshold (default 60 days, `social_library_auto_archive_days`

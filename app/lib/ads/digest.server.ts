@@ -89,6 +89,7 @@ export function actionPhrase(row: AdActionRow, target: string, tense: 'past' | '
     case 'pause': return `${past ? 'paused' : 'pause'} ${target}`
     case 'resume': return `${past ? 'resumed' : 'resume'} ${target}`
     case 'halt_all': return `${past ? 'halted everything on' : 'halt everything on'} ${target}`
+    case 'audience_sync': return past ? 'refreshed the M8 exclusion audiences' : 'refresh the M8 exclusion audiences'
     case 'update_creative': return `${past ? 'swapped the creative on' : 'swap the creative on'} ${target}`
     case 'set_budget': {
       const params = (row.params ?? {}) as Record<string, unknown>

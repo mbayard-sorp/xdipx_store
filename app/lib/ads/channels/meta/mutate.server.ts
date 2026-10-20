@@ -578,3 +578,146 @@ export function metaCreatePaused(input: MetaCreatePausedInput, deps?: MetaCreate
   if (deps) return createMetaCreatePaused(deps)(input)
   return (defaultCreatePaused ??= createMetaCreatePaused())(input)
 }
+
+// ---------------------------------------------------------------------------
+// M8 exclusion audiences (ticket #16687, plan §9.4)
+// ---------------------------------------------------------------------------
+
+/**
+ * The Graph writes for the weekly exclusion audience sync, and nothing else:
+ * find or create one customer-list custom audience by exact name, then load
+ * its members. Reached only from app/lib/ads/audience-sync.server.ts, after
+ * that run has checked ads_audience_sync_enabled and written its ledger row.
+ *
+ * - Create: POST act_<id>/customaudiences with subtype CUSTOM and
+ *   customer_file_source USER_PROVIDED_ONLY. Only when no audience on the
+ *   account carries the exact name. A same-named audience that is not a
+ *   CUSTOM customer list is refused rather than written to.
+ * - Members: a fresh audience is filled through /users; an existing one is
+ *   replaced through /usersreplace, so people who left a list leave the
+ *   audience. Both take batches of at most 10,000 under one session_id,
+ *   batch_seq from 1, last_batch_flag on the final batch.
+ * - Every row must be a 64-hex SHA-256 digest. Anything else refuses the
+ *   whole call before a byte leaves, so a raw email cannot reach Meta even
+ *   through a caller bug.
+ * - An empty list sends nothing: Meta has no empty replace, and an empty
+ *   upload would leave last week's members in place, which is the safer
+ *   direction for an exclusion.
+ *
+ * dryRun builds the requests and returns them with the digests stripped.
+ */
+export interface AudienceDefInput {
+  name: string
+  description: string
+}
+
+export interface EnsuredAudience {
+  id: string | null
+  created: boolean
+  /** subtype and operation status as Meta reported them, for the ledger. */
+  subtype: string | null
+  operationStatus: unknown
+  request: AudienceWriteSummary | null
+}
+
+/** A Graph write with its member data reduced to a count: safe to log and to store. */
+export interface AudienceWriteSummary {
+  path: string
+  rows?: number
+  session?: { session_id: number; batch_seq: number; last_batch_flag: boolean; estimated_num_total: number }
+  body?: Record<string, string>
+}
+
+export interface AudienceMembersResult {
+  audienceId: string
+  mode: 'users' | 'usersreplace' | 'skipped_empty'
+  sessionId: number | null
+  batches: number
+  rows: number
+  /** num_received and num_invalid_entries summed across batches, as Meta reported them. */
+  numReceived: number
+  numInvalid: number
+  requests: AudienceWriteSummary[]
+}
+
+export interface MetaAudienceSyncDeps {
+  graph?: GraphClient
+  accountId?: () => string | null
+  /** Session ids, injectable so tests are stable. */
+  sessionId?: () => number
+}
+
+const AUDIENCE_SCHEMA = 'EMAIL_SHA256'
+const AUDIENCE_FIELDS = 'id,name,subtype,customer_file_source,operation_status,approximate_count_lower_bound'
+
+export function createMetaAudienceSync(deps: MetaAudienceSyncDeps = {}) {
+  const graph = deps.graph ?? createGraphClient()
+  const accountId = deps.accountId ?? (() => metaCredentialsFromEnv().accountId)
+  const sessionId = deps.sessionId ?? (() => Date.now() * 1000 + Math.floor(Math.random() * 1000))
+
+  function account(): string {
+    const a = accountId()
+    if (!a) refuse('not_configured', 'META_AD_ACCOUNT_ID is not set, so there is no account to hold the audiences.')
+    return a as string
+  }
+
+  /** Finds the audience by exact name, or creates it (CUSTOM, USER_PROVIDED_ONLY). */
+  async function ensureCustomerListAudience(def: AudienceDefInput, opts: { dryRun?: boolean } = {}): Promise<EnsuredAudience> {
+    const acct = account()
+    const name = def.name.trim()
+    if (!name) refuse('bad_params', 'An audience needs a name.')
+    const rows = await graph.getAll(`${acct}/customaudiences`, { fields: AUDIENCE_FIELDS, limit: 200 })
+    const same = rows.filter(r => typeof r['name'] === 'string' && (r['name'] as string).trim() === name)
+    if (same.length > 1) refuse('bad_target', `${same.length} audiences on ${acct} are named "${name}". Rename or delete the extras in Ads Manager so the sync knows which one to fill.`)
+    const found = same[0]
+    if (found) {
+      if (found['subtype'] !== 'CUSTOM') {
+        refuse('bad_target', `Audience "${name}" (${String(found['id'])}) is subtype ${String(found['subtype'])}, not a CUSTOM customer list, so the sync will not write to it.`)
+      }
+      return { id: String(found['id']), created: false, subtype: 'CUSTOM', operationStatus: found['operation_status'] ?? null, request: null }
+    }
+    const body = { name, subtype: 'CUSTOM', customer_file_source: 'USER_PROVIDED_ONLY', description: def.description }
+    const request: AudienceWriteSummary = { path: `${acct}/customaudiences`, body }
+    if (opts.dryRun) return { id: null, created: false, subtype: 'CUSTOM', operationStatus: null, request }
+    const res = await graph.post(request.path, body)
+    const id = String(res['id'] ?? '')
+    if (!id) throw new GraphError('bad_response', `Creating audience "${name}" returned no id.`, { path: request.path })
+    return { id, created: true, subtype: 'CUSTOM', operationStatus: null, request }
+  }
+
+  /** Loads the members: /users for a fresh audience, /usersreplace for an existing one. */
+  async function loadCustomerListMembers(
+    audienceId: string,
+    hashes: readonly string[],
+    opts: { fresh: boolean; dryRun?: boolean; batchSize?: number },
+  ): Promise<AudienceMembersResult> {
+    if (!audienceId || !/^\d+$/.test(audienceId)) refuse('bad_target', `"${audienceId}" is not a Meta audience id.`)
+    const bad = hashes.findIndex(h => typeof h !== 'string' || !/^[0-9a-f]{64}$/.test(h))
+    if (bad !== -1) refuse('bad_params', `Row ${bad} is not a SHA-256 hex digest. The sync uploads hashed emails only; nothing was sent.`)
+    const unique = [...new Set(hashes)]
+    if (unique.length === 0) {
+      return { audienceId, mode: 'skipped_empty', sessionId: null, batches: 0, rows: 0, numReceived: 0, numInvalid: 0, requests: [] }
+    }
+    const size = Math.min(Math.max(1, Math.trunc(opts.batchSize ?? 10_000)), 10_000)
+    const batches: string[][] = []
+    for (let i = 0; i < unique.length; i += size) batches.push(unique.slice(i, i + size))
+    const mode = opts.fresh ? 'users' : 'usersreplace'
+    const sid = sessionId()
+    const path = `${audienceId}/${mode}`
+    const requests: AudienceWriteSummary[] = []
+    let numReceived = 0
+    let numInvalid = 0
+    for (let i = 0; i < batches.length; i++) {
+      const batch = batches[i] as string[]
+      const session = { session_id: sid, batch_seq: i + 1, last_batch_flag: i === batches.length - 1, estimated_num_total: unique.length }
+      requests.push({ path, rows: batch.length, session })
+      if (opts.dryRun) continue
+      const res = await graph.post(path, { session, payload: { schema: AUDIENCE_SCHEMA, data: batch.map(h => [h]) } })
+      numReceived += Number(res['num_received'] ?? 0) || 0
+      numInvalid += Number(res['num_invalid_entries'] ?? 0) || 0
+    }
+    return { audienceId, mode, sessionId: sid, batches: batches.length, rows: unique.length, numReceived, numInvalid, requests }
+  }
+
+  return { ensureCustomerListAudience, loadCustomerListMembers }
+}

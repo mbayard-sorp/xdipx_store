@@ -25,6 +25,7 @@ import { and, desc, eq, ne, or, isNull, sql } from 'drizzle-orm'
 
 import { db as defaultDb, type DB } from '~/lib/db.server'
 import { adAudiences, adPlatformEntities, type AdAudienceKind, type AdAudienceRole } from '../../../db/schema'
+import { audienceSyncKeyOfName } from './audience-sync-core'
 import { getChannel } from './channels/registry.server'
 import type { ChannelAdapter, ChannelId, NormalizedAudience } from './channels/types'
 
@@ -144,6 +145,18 @@ export function isLiveAdset(a: AdsetMirrorRow): boolean {
 const CUSTOMER_RE = /customer/i
 const SUBSCRIBER_RE = /subscriber|klaviyo|email list/i
 
+/**
+ * The M8 pair by name: the audiences the weekly sync owns (ticket #16687,
+ * "xdipx buyers (exclude)" and "xdipx leads (exclude)") count first, then any
+ * audience whose name says customer or subscriber.
+ */
+export function isCustomerExclusion(name: string | null): boolean {
+  return name !== null && (audienceSyncKeyOfName(name) === 'buyers' || CUSTOMER_RE.test(name))
+}
+export function isSubscriberExclusion(name: string | null): boolean {
+  return name !== null && (audienceSyncKeyOfName(name) === 'leads' || SUBSCRIBER_RE.test(name))
+}
+
 export interface ExclusionAudit {
   externalId: string
   name: string | null
@@ -166,8 +179,8 @@ export function auditExclusionsFrom(adsets: AdsetMirrorRow[], audiences: Pick<Au
     .filter(a => a.platform === 'meta' && isLiveAdset(a))
     .map(a => {
       const excluded = targetingAudiences(a.raw).excluded.map(x => ({ id: x.id, name: names.get(x.id) ?? x.name }))
-      const customer = excluded.find(x => x.name !== null && CUSTOMER_RE.test(x.name)) ?? null
-      const subscriber = excluded.find(x => x !== customer && x.name !== null && SUBSCRIBER_RE.test(x.name)) ?? null
+      const customer = excluded.find(x => isCustomerExclusion(x.name)) ?? null
+      const subscriber = excluded.find(x => x !== customer && isSubscriberExclusion(x.name)) ?? null
       return {
         externalId: a.externalId,
         name: a.name,

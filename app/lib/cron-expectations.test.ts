@@ -202,7 +202,11 @@ describe('the cron expectation manifest', () => {
     // pollers this cap exists to catch. It is a money event: R7, the account
     // spend guard, reads the spend this route writes, so a silent failure is
     // a spend guard running blind. The ads lane is its next actor.
-    expect(RECORDED_CRON_ROUTES.size).toBeLessThanOrEqual(24)
+    //
+    // Raised 24 -> 25 for /cron/ads-audience-sync (ticket #16687), WEEKLY:
+    // +1 row a week. A failed refresh leaves buyers in the ad pool, and its
+    // next actor is the ads lane, which reads cron_runs next to the ledger row.
+    expect(RECORDED_CRON_ROUTES.size).toBeLessThanOrEqual(25)
   })
 
   it('records the surfaces whose failure has a next actor', () => {

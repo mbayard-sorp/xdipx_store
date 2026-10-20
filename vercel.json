@@ -201,6 +201,10 @@
     {
       "path": "/cron/ads-insights",
       "schedule": "5 * * * *"
+    },
+    {
+      "path": "/cron/ads-audience-sync",
+      "schedule": "20 9 * * 0"
     }
   ]
 }
