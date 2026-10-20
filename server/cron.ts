@@ -912,6 +912,26 @@ export function createCronRoutes() {
   })
 
   /**
+   * GET|POST /cron/ads-token-health
+   * Schedule: daily, 08:35 UTC. Asks every ad channel with an adapter for its
+   * token health (Meta: Graph debug_token), stores the reading in
+   * ad_channel_health, and files one owner blocker per channel whose token is
+   * invalid or expires inside 14 days. The blocker carries the
+   * `ad_token_healthy` probe, so it clears itself once the token is rotated.
+   * Could-not-ask readings file nothing (ticket #16406, plan §3.4).
+   */
+  cronRoute('/ads-token-health', async (_req, res) => {
+    try {
+      const { runAdsTokenHealth } = await import('../app/lib/ads/token-health.server.js')
+      const result = await runAdsTokenHealth()
+      res.status(result.failed ? 500 : 200).json({ ok: !result.failed, result })
+    } catch (err) {
+      console.error('[cron/ads-token-health] failed:', err)
+      res.status(500).json({ ok: false, error: (err as Error).message })
+    }
+  })
+
+  /**
    * GET|POST /cron/ads-sync-entities
    * Schedule: every 6 hours at :35 (ticket #16405, ads control plane phase 1c).
    * Mirrors every campaign, ad set and ad from each channel that has a

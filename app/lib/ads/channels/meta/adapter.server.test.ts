@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { ChannelNotEnabledError } from '../errors'
 import type { PolicyMirrorRow } from '../types'
 import { budgetCents, createMetaAdapter, normalizeMetaEntity, normalizeMetaInsight } from './adapter.server'
-import type { GraphClient, GraphJson } from './graph.server'
+import { GraphError, type GraphClient, type GraphJson } from './graph.server'
 
 // Fixtures shaped like Graph v23.0 responses for the fields the adapter asks for.
 const CAMPAIGN: GraphJson = {
@@ -140,6 +140,15 @@ describe('metaAdapter', () => {
     const g = fakeGraph({}, { debug_token: { data: { is_valid: false, error: { message: 'Session has expired' }, scopes: [] } } })
     const a = createMetaAdapter({ graph: g.graph, credentials: creds })
     await expect(a.auth.health()).resolves.toMatchObject({ valid: false, error: 'Session has expired' })
+  })
+
+  it('marks a token Meta refuses with code 190 as token_rejected, and a network failure as network', async () => {
+    const refusing = { get: vi.fn(async () => { throw new GraphError('api_error', 'refused', { status: 400, code: 190 }) }) } as unknown as GraphClient
+    await expect(createMetaAdapter({ graph: refusing, credentials: creds }).auth.health())
+      .resolves.toMatchObject({ valid: false, error: 'token_rejected' })
+    const offline = { get: vi.fn(async () => { throw new GraphError('network', 'down') }) } as unknown as GraphClient
+    await expect(createMetaAdapter({ graph: offline, credentials: creds }).auth.health())
+      .resolves.toMatchObject({ valid: false, error: 'network' })
   })
 
   it('throws NotEnabled for createPaused and mutate', async () => {

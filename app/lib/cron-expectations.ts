@@ -757,6 +757,21 @@ export const CRON_EXPECTATIONS: readonly CronExpectation[] = [
       + 'moves no money, so it is not a money event.',
   },
   {
+    route: '/cron/ads-token-health',
+    plane: 'vercel',
+    schedule: '35 8 * * *',
+    periodMinutes: DAILY,
+    graceMinutes: 120,
+    recorded: true,
+    moneyRelevant: false,
+    ownerTeam: 'ads',
+    notes:
+      'Daily token health for every ad channel with an adapter (Meta debug_token, ticket #16406). '
+      + 'Files a self-clearing owner blocker when a token is invalid or inside 14 days of expiry, and '
+      + 'stores the reading in ad_channel_health. A missed day only delays that warning; live spend '
+      + 'is capped platform-side, so this is not a money event.',
+  },
+  {
     route: '/cron/ads-insights',
     plane: 'vercel',
     schedule: '5 * * * *',
