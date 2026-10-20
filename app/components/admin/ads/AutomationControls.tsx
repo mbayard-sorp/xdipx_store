@@ -1,5 +1,5 @@
 /**
- * Automation section on the Spend tab (ads control plane plan, sections 5 and
+ * Automation section on /admin/ads/settings (ads control plane plan, sections 5 and
  * 9.4). Four owner-only valves: the auto-apply switch and three limits. Same
  * shape as CapControl: admins see the values and "Owner only", the owner gets
  * Edit, and every save goes through the audited settings setter on the server.

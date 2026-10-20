@@ -10,7 +10,7 @@
  * replaces estimated product and shipping cost with what Nalpac billed. Days
  * are the store's local days.
  *
- * Cost edits are owner-only, same as the ad caps on /admin/ad-studio/spend.
+ * Cost edits are owner-only, same as the ad caps on /admin/ads/settings.
  */
 import { useMemo } from 'react'
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction, ShouldRevalidateFunction } from 'react-router'
