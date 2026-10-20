@@ -2493,6 +2493,23 @@ export const adChannelHealth = pgTable('ad_channel_health', {
 export type AdChannelHealthState = 'ok' | 'expiring' | 'invalid' | 'unknown'
 
 /**
+ * Hourly ads health counters (migration 134, plan §9.2, ticket #16410). One
+ * row per key per /cron/ads-insights run, plus one `lead_post_event` row per
+ * successful /api/lead capture. Keys and their meaning live in
+ * app/lib/ads/health.server.ts; the L3 funnel-break rule and the console read
+ * them.
+ */
+export const adHealthSamples = pgTable('ad_health_samples', {
+  id:        bigserial('id', { mode: 'number' }).primaryKey(),
+  sampledAt: timestamp('sampled_at', { withTimezone: true }).notNull().defaultNow(),
+  key:       text('key').notNull(),
+  value:     numeric('value').notNull(),
+  detail:    jsonb('detail').$type<Record<string, unknown> | null>(),
+}, t => ({
+  keySampledIdx: index('idx_ad_health_samples_key_sampled').on(t.key, t.sampledAt),
+}))
+
+/**
  * Ads Control Plane daily insights (migration 129, ADR-018). One row per
  * platform entity per day as the platform's insights API reports it, keyed
  * by (platform, level, external_id, day). The hourly pull re-upserts today's

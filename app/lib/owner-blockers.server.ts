@@ -310,6 +310,11 @@ async function adTokenHealthy(channel: string): Promise<ProbeVerdict> {
   return probeChannelToken(channel)
 }
 
+async function adHealthClean(arg: string): Promise<ProbeVerdict> {
+  const { probeAdHealth } = await import('~/lib/ads/health.server')
+  return probeAdHealth(arg)
+}
+
 /**
  * `table|keyColumn|keyValue|column|expectedValue` — does one identified row hold
  * one expected value?
@@ -450,6 +455,7 @@ const RUNNERS: Record<string, (arg: string) => Promise<ProbeVerdict>> = {
   credential_live: credentialLive,
   instagram_token_healthy: instagramTokenHealthy,
   ad_token_healthy: adTokenHealthy,
+  ad_health_clean: adHealthClean,
   row_matches:   rowMatches,
   migration_applied: migrationApplied,
   order_fulfilled: orderFulfilled,
@@ -724,6 +730,29 @@ export async function clearBlocker(
        SET status = 'cleared', cleared_at = now(), cleared_by = ${by},
            clear_note = ${clamp(note, 1000)}, updated_at = now()
      WHERE id = ${id} AND status <> 'cleared'
+     RETURNING id`)
+  return (res.rows ?? []).length > 0
+}
+
+/**
+ * Clear the open row with this dedupe key, if there is one. For a watcher
+ * that files by key and wants its own next clean reading to close the row
+ * straight away, rather than waiting for the daily verify sweep (ticket
+ * #16410, the hourly ads health check). Canonicalizes the key the same way
+ * fileBlocker does, so the two always address the same row.
+ */
+export async function clearBlockerByKey(
+  dedupeKey: string,
+  by: 'owner' | 'auto' | 'agent',
+  note?: string | null,
+): Promise<boolean> {
+  const key = canonicalDedupeKey(clamp(dedupeKey, 160) ?? '', { maxLength: 80 })
+  if (!key) return false
+  const res = await db.execute(sql`
+    UPDATE owner_blockers
+       SET status = 'cleared', cleared_at = now(), cleared_by = ${by},
+           clear_note = ${clamp(note, 1000)}, updated_at = now()
+     WHERE dedupe_key = ${key} AND status = 'open'
      RETURNING id`)
   return (res.rows ?? []).length > 0
 }

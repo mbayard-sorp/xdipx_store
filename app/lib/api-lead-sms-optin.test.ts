@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   enrollLeadSms: vi.fn(),
   normalizePhoneToE164: vi.fn(),
   isLeadSmsOptinEnabled: vi.fn(),
+  recordLeadPostEvent: vi.fn(),
 }))
 
 vi.mock('~/lib/rate-limit.server', () => ({ checkRateLimit: mocks.checkRateLimit, rateLimited: mocks.rateLimited }))
@@ -34,6 +35,7 @@ vi.mock('~/lib/meta-capi.server', () => ({ sendCapiLead: mocks.sendCapiLead }))
 vi.mock('~/lib/lead-sms.server', () => ({ enrollLeadSms: mocks.enrollLeadSms }))
 vi.mock('~/lib/sms-v2/web-sms-link.server', () => ({ normalizePhoneToE164: mocks.normalizePhoneToE164 }))
 vi.mock('~/lib/lead-sms-optin.server', () => ({ isLeadSmsOptinEnabled: mocks.isLeadSmsOptinEnabled }))
+vi.mock('~/lib/ads/health.server', () => ({ recordLeadPostEvent: mocks.recordLeadPostEvent }))
 
 import { action } from '~/routes/api.lead'
 
@@ -61,6 +63,7 @@ beforeEach(() => {
   mocks.logConsent.mockResolvedValue(undefined)
   mocks.sendCapiLead.mockResolvedValue('evt-1')
   mocks.normalizePhoneToE164.mockReturnValue(PHONE)
+  mocks.recordLeadPostEvent.mockResolvedValue(undefined)
 })
 
 afterEach(() => {
@@ -84,6 +87,9 @@ describe('/api/lead with lead SMS opt-in OFF (kill switch flipped)', () => {
     expect(mocks.enrollLeadSms).not.toHaveBeenCalled()
     expect(mocks.logConsent).not.toHaveBeenCalled()
     expect(mocks.sendCapiLead.mock.calls[0]![1]).toMatchObject({ phone: null })
+    // One lead_post_event row for the hourly L3 counter.
+    expect(mocks.recordLeadPostEvent).toHaveBeenCalledTimes(1)
+    expect(mocks.recordLeadPostEvent.mock.calls[0]![0]).toMatchObject({ slug: 'hello' })
   })
 
   it('does not 400 a stray smsConsent without a phone', async () => {
@@ -104,6 +110,8 @@ describe('/api/lead with lead SMS opt-in OFF (kill switch flipped)', () => {
     const res = await post(lead)
     expect(res.status).toBe(502)
     expect((await res.json()).error).toBe('subscribe_failed')
+    // No subscribe, no lead: the L3 counter must not count it.
+    expect(mocks.recordLeadPostEvent).not.toHaveBeenCalled()
   })
 })
 
