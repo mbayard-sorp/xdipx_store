@@ -11,12 +11,19 @@
 import type { ChannelAdapter, ChannelCapabilities, ChannelId, PolicyState } from './types'
 import { metaAdapter } from './meta/adapter.server'
 import { microsoftAdapter } from './microsoft/adapter.server'
+import { exoclickAdapter } from './exoclick/adapter.server'
 
 interface ChannelBase<Id extends ChannelId = ChannelId> {
   id: Id
   label: string
   /** One line from docs/ads-policy.md's matrix row. */
   policyNote: string
+  /**
+   * utm_source values that mean this channel, besides its id. Kept in step
+   * with the paid sources order attribution accepts (server/webhooks.ts
+   * classifyChannelGroup), which already counts 'adnetwork' as paid.
+   */
+  sourceAliases?: readonly string[]
 }
 
 export type ChannelEntry =
@@ -41,8 +48,10 @@ const CHANNELS: readonly ChannelEntry[] = [
     policyNote: 'Restricted: non-graphic creative, 18+ targeting.',
   },
   {
-    id: 'adult:exoclick', label: 'ExoClick', policyState: 'allowed', adapter: null,
-    policyNote: 'Adult network; allowed after traffic-quality vetting. UTMs mandatory.',
+    id: 'adult:exoclick', label: 'ExoClick', policyState: 'allowed', adapter: exoclickAdapter,
+    policyNote: 'Adult network, allowed (docs/ads-policy.md, Adult ad networks row): copy at register 10, the charter nudity definition is the imagery ceiling, and every banner URL must carry utm_source, utm_medium, utm_campaign and utm_content. The adapter reads and pulls insights; mutate stays empty until the checklist is green.',
+    // 'adnetwork' is the utm_source ad-export/common.ts stamps on every adult-lane banner.
+    sourceAliases: ['exoclick', 'adnetwork'],
   },
   {
     id: 'adult:juicyads', label: 'JuicyAds', policyState: 'allowed', adapter: null,

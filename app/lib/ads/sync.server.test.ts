@@ -323,12 +323,12 @@ describe('syncAllChannels', () => {
     expect(reports[0]?.outcome).toBe('skipped')
   })
 
-  it('defaults to the registry: Meta and Microsoft have readable adapters today', async () => {
+  it('defaults to the registry: Meta, Microsoft and ExoClick have readable adapters today', async () => {
     const m = memoryStore()
     const f = fakeAdapter(() => [])
     const seen: string[] = []
     await syncAllChannels({ store: m.store, adapterFor: id => { seen.push(id); return f.adapter } })
-    expect(seen).toEqual(['meta', 'microsoft'])
+    expect(seen).toEqual(['meta', 'microsoft', 'adult:exoclick'])
   })
 })
 

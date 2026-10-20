@@ -32,8 +32,29 @@ describe('channel registry', () => {
     for (const c of listChannels().filter(c => c.policyState === 'prohibited')) expect(c.hasAdapter).toBe(false)
   })
 
-  it('has adapters for Meta and Microsoft in this phase', () => {
-    expect(listChannels().filter(c => c.hasAdapter).map(c => c.id)).toEqual(['meta', 'microsoft'])
+  it('has adapters for Meta, Microsoft and ExoClick in this phase', () => {
+    expect(listChannels().filter(c => c.hasAdapter).map(c => c.id)).toEqual(['meta', 'microsoft', 'adult:exoclick'])
+  })
+
+  it('lists ExoClick as allowed with read and insights, no mutations, and the adult-lane source aliases', () => {
+    const exo = listChannels().find(c => c.id === 'adult:exoclick')
+    expect(exo).toMatchObject({ policyState: 'allowed', hasAdapter: true, label: 'ExoClick' })
+    expect(exo?.capabilities).toEqual({ read: true, insights: true, mutate: [], audiences: 'none', preview: false })
+    expect(exo?.policyNote).toMatch(/docs\/ads-policy\.md/)
+    expect(exo?.policyNote).toMatch(/register 10/)
+    expect(exo?.policyNote).toMatch(/nudity definition/)
+    expect(exo?.policyNote).toMatch(/utm_content/)
+    expect(exo?.policyNote).not.toMatch(/\u2014/)
+    const entry = getChannel('adult:exoclick')
+    expect(entry?.adapter?.id).toBe('adult:exoclick')
+    // 'adnetwork' is what ad-export/common.ts stamps as utm_source on adult-lane banners.
+    expect(entry?.sourceAliases).toEqual(['exoclick', 'adnetwork'])
+  })
+
+  it('keeps JuicyAds and TrafficJunky allowed but without an adapter', () => {
+    for (const id of ['adult:juicyads', 'adult:trafficjunky']) {
+      expect(listChannels().find(c => c.id === id)).toMatchObject({ policyState: 'allowed', hasAdapter: false })
+    }
   })
 
   it('lists Microsoft as restricted with read and insights, and no mutations while the program is pending', () => {

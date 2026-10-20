@@ -88,6 +88,7 @@ export function tokenEnvVar(channel: ChannelId | string, env: NodeJS.ProcessEnv 
   }
   // Microsoft keeps its refresh token in microsoft_ads_tokens, not in an env var.
   if (channel === 'microsoft') return 'the Microsoft Ads connection (/api/microsoft-ads-connect)'
+  if (channel === 'adult:exoclick') return 'EXOCLICK_API_KEY'
   return `the ${channel} token env var`
 }
 
@@ -98,6 +99,8 @@ const WHERE_TO_GO: Partial<Record<string, string>> = {
   microsoft:
     'Open /api/microsoft-ads-connect while signed in as the owner and approve the Microsoft consent screen. '
     + 'If the blocker says not set, add the MSADS_* variables for the active MSADS_ENV in Vercel first.',
+  'adult:exoclick':
+    'ExoClick admin > API tokens: create a new API token, set EXOCLICK_API_KEY in Vercel, redeploy.',
 }
 
 export function tokenBlockerDedupeKey(channel: ChannelId | string): string {
