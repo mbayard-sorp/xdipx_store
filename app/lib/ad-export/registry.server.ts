@@ -17,6 +17,8 @@
  *
  * This is the build layer. Reading from or changing a live platform belongs to
  * the operate layer in app/lib/ads/channels/ (ADR-018).
+ * Every change to a live entity goes through dispatch() in
+ * app/lib/ads/channels/apply.server.ts, which writes an ad_actions row first.
  */
 import { EXPORTER_BY_LANE, exporterForLane, type ExporterId } from './types'
 import { ExportRefusal, type ExportBuild, type ExportCreative, type ExportIdea } from './common'

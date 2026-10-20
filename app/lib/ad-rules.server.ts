@@ -27,7 +27,7 @@ import { adCreativeDailyMetrics, adCreatives, adPlatformEntities, adPlatformInsi
 import { getAdsLeadCplCeilingCents, getAdsMediaDailyCapCents, getAdsRuleThresholds, getAdsSpendEnabled } from '~/lib/ad-settings.server'
 import { AdMetricsError, addDays, currentBreakEven, todayUtc } from '~/lib/ad-metrics.server'
 import { buildCreativeIndex, formatMoney, type LiveActionKind } from '~/lib/ad-metrics-core'
-import { platformApply, type PlatformApplyResult } from '~/lib/ad-platform-apply.server'
+import { platformApply, type PlatformAction, type PlatformApplyResult } from '~/lib/ad-platform-apply.server'
 import {
   cappedScalePct, evaluateRules,
   type CreativeRuleInput, type RuleEventHistory, type RuleFired, type RulesSettings, type RulesWindow,
@@ -345,10 +345,12 @@ export async function runRulesDaily(now: Date = new Date()): Promise<RulesRunSum
   const evaluatedCreativeIds = new Set(window.creatives.flatMap(c => (c.creativeId != null ? [c.creativeId] : [])))
   const plan = planPersistence({ firings: result.firings, evaluatedCreativeIds, pending })
 
+  const firingEvents: Array<{ firing: RuleFired; eventId: number | null }> = plan.refresh.map(r => ({ firing: r.firing, eventId: r.id }))
   if (plan.inserts.length) {
-    await db.insert(adRuleEvents).values(plan.inserts.map(f => ({
+    const ids = await db.insert(adRuleEvents).values(plan.inserts.map(f => ({
       ruleId: f.ruleId, creativeId: f.creativeId, action: f.action, detail: detailOf(f, simulated), appliedBy: null, appliedAt: null,
-    })))
+    }))).returning({ id: adRuleEvents.id })
+    plan.inserts.forEach((f, i) => firingEvents.push({ firing: f, eventId: ids[i]?.id ?? null }))
   }
   for (const r of plan.refresh) {
     await db.update(adRuleEvents).set({ detail: detailOf(r.firing, simulated) }).where(and(eq(adRuleEvents.id, r.id), isNull(adRuleEvents.appliedAt)))
@@ -358,6 +360,8 @@ export async function runRulesDaily(now: Date = new Date()): Promise<RulesRunSum
       .set({ action: 'none', detail: sql`coalesce(${adRuleEvents.detail}, '{}'::jsonb) || '{"cleared": true}'::jsonb` })
       .where(and(inArray(adRuleEvents.id, plan.clear), isNull(adRuleEvents.appliedAt)))
   }
+
+  await recordFiringsInLedger(firingEvents, simulated)
 
   let r7Summary: RulesRunSummary['r7'] = null
   if (result.r7) {
@@ -372,6 +376,42 @@ export async function runRulesDaily(now: Date = new Date()): Promise<RulesRunSum
     inserted: plan.inserts.length, refreshed: plan.refresh.length, cleared: plan.clear.length,
     r7: r7Summary,
     objectives,
+  }
+}
+
+/** Rule actions that map to a platform change. flag and none never reach the ledger. */
+const LEDGER_ACTION: Partial<Record<string, PlatformAction>> = {
+  pause: 'pause', revive: 'resume', scale: 'scale', brake: 'brake', refresh: 'refresh',
+}
+
+/**
+ * Phase 4c hook (ticket #16429): every firing with a platform action also goes
+ * through the ledger dispatcher, so each one leaves an ad_actions row. With a
+ * valve off the row is dry_run; the dispatcher decides, not this code.
+ */
+async function recordFiringsInLedger(items: Array<{ firing: RuleFired; eventId: number | null }>, simulated: boolean): Promise<void> {
+  const todo = items.filter(i => i.firing.creativeId != null && !i.firing.held && LEDGER_ACTION[i.firing.action])
+  if (!todo.length) return
+  const ids = [...new Set(todo.map(i => i.firing.creativeId as number))]
+  const rows = await db.select({ id: adCreatives.id, externalAdId: adCreatives.externalAdId, lane: adCreatives.lane, budgetMultiplier: adCreatives.budgetMultiplier })
+    .from(adCreatives).where(inArray(adCreatives.id, ids))
+  const byId = new Map(rows.filter(r => ids.includes(r.id)).map(r => [r.id, r]))
+  for (const { firing, eventId } of todo) {
+    const c = byId.get(firing.creativeId as number)
+    if (!c) continue
+    const action = LEDGER_ACTION[firing.action]!
+    const mult = Number(c.budgetMultiplier ?? 1) || 1
+    const inputs = firing.inputs as { upPct?: unknown; downPct?: unknown }
+    const pct = action === 'scale' ? Number(inputs.upPct) : action === 'brake' ? Number(inputs.downPct) : NaN
+    const nextMult = Number.isFinite(pct) && (action === 'scale' || action === 'brake') ? nextMultiplier(mult, action, pct) : mult
+    await platformApply(
+      {
+        creativeId: c.id, externalAdId: c.externalAdId ?? null, lane: c.lane ?? null, action,
+        budgetMultiplier: nextMult, previousBudgetMultiplier: mult, reason: firing.sentence,
+        ruleEventId: eventId, proposedBy: `rule:${firing.ruleId}`,
+      },
+      { spendEnabled: !simulated },
+    )
   }
 }
 
@@ -401,7 +441,10 @@ async function applyR7(
       .where(and(inArray(adCreatives.id, ids), isNull(adCreatives.pausedAt)))
     for (const b of before) {
       await platformApply(
-        { creativeId: b.creativeId, externalAdId: b.externalAdId ?? null, lane: b.lane ?? null, action: 'pause', budgetMultiplier: 1, reason: r7.sentence },
+        {
+          creativeId: b.creativeId, externalAdId: b.externalAdId ?? null, lane: b.lane ?? null, action: 'pause', budgetMultiplier: 1, reason: r7.sentence,
+          ruleEventId: event?.id ?? null, proposedBy: 'rule:R7',
+        },
         { spendEnabled: !simulated },
       )
     }
@@ -521,6 +564,7 @@ export async function applyRuleAction(
     {
       creativeId, externalAdId: c.externalAdId ?? null, lane: c.lane ?? null,
       action: kind, budgetMultiplier: nextMult, reason: opts.reason ?? `${kind} by ${actor}`,
+      previousBudgetMultiplier: mult, ruleEventId: resolves[0] ?? null, proposedBy: actor,
     },
     { spendEnabled },
   )
