@@ -459,7 +459,7 @@ export function fitSlogan(input: FitInput): FitResult {
 // Layout choice
 // ---------------------------------------------------------------------------
 
-/** Wide-short formats take the strip. 300x100 is 3:1, 728x90 about 8:1, 900x250 3.6:1. */
+/** Wide-short formats take the strip. 300x100 is 3:1, 300x50 6:1, 728x90 about 8:1, 900x250 3.6:1. */
 export function isStripFormat(format: Pick<AdFormat, 'width' | 'height'>): boolean {
   return format.width / format.height >= 2.8
 }

@@ -16,7 +16,7 @@ describe('format matrix', () => {
   it('maps each lane to the sizes in the wires', () => {
     expect(LANE_FORMATS['meta']).toEqual(['1:1', '4:5', '1200x628'])
     expect(LANE_FORMATS['snap']).toEqual(['9:16'])
-    expect(LANE_FORMATS['adult']).toEqual(['300x250', '728x90', '300x100', '900x250'])
+    expect(LANE_FORMATS['adult']).toEqual(['300x250', '728x90', '160x600', '900x250', '300x100', '300x50'])
     expect(LANE_FORMATS['newsletter']).toEqual(['1200x628', '600x600'])
     expect(LANE_FORMATS['owned']).toEqual(['1200x628', '1:1'])
   })

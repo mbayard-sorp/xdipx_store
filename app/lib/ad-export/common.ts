@@ -85,6 +85,8 @@ export class ExportRefusal extends Error {
 // ---------------------------------------------------------------------------
 // UTM scheme (owner runbook): source by platform, medium paid, campaign per idea,
 // content per creative so Shopify order attribution can read it back (PR-G).
+// The adult lane is the exception: source is the network, medium the placement
+// (ticket #16685), so ExoClick and JuicyAds orders can be told apart.
 // ---------------------------------------------------------------------------
 
 const UTM_SOURCE: Readonly<Record<string, string>> = {
@@ -92,7 +94,6 @@ const UTM_SOURCE: Readonly<Record<string, string>> = {
   google: 'google',
   microsoft: 'bing',
   snap: 'snapchat',
-  adult: 'adnetwork',
   newsletter: 'newsletter',
   owned: 'owned',
 }
@@ -100,6 +101,34 @@ const UTM_SOURCE: Readonly<Record<string, string>> = {
 const UTM_MEDIUM: Readonly<Record<string, string>> = {
   newsletter: 'sponsor',
   owned: 'owned',
+}
+
+/** The adult networks an adult-lane export can be addressed to. ExoClick is the default. */
+export const ADULT_NETWORKS = ['exoclick', 'juicyads'] as const
+export type AdultNetwork = typeof ADULT_NETWORKS[number]
+export const DEFAULT_ADULT_NETWORK: AdultNetwork = 'exoclick'
+
+/**
+ * The single utm_source every adult banner carried before ticket #16685. Still
+ * read as ExoClick (registry sourceAliases, server/webhooks.ts PAID_SOURCES) so
+ * old links and old orders keep attributing. Never written any more.
+ */
+export const LEGACY_ADULT_UTM_SOURCE = 'adnetwork'
+
+/**
+ * Which network an adult idea is for. Read from idea.audience.network
+ * ('exoclick', 'juicyads', or the channel id 'adult:exoclick'); anything else,
+ * or nothing, is ExoClick, the network with a live adapter.
+ */
+export function adultNetworkFor(idea: { audience?: Record<string, unknown> | null }): AdultNetwork {
+  const raw = idea.audience?.['network']
+  const v = typeof raw === 'string' ? raw.trim().toLowerCase().replace(/^adult:/, '') : ''
+  return (ADULT_NETWORKS as readonly string[]).includes(v) ? (v as AdultNetwork) : DEFAULT_ADULT_NETWORK
+}
+
+/** Adult placement medium: 'native' for a native ad image, 'display' for every banner. */
+export function adultMediumFor(format: string | null | undefined): 'display' | 'native' {
+  return format && format.startsWith('native') ? 'native' : 'display'
 }
 
 function slugPart(s: string, max: number): string {
@@ -115,21 +144,62 @@ export function utmContentFor(args: { creativeId?: number | null; ideaId: number
   return args.creativeId ? String(args.creativeId) : `idea-${args.ideaId}`
 }
 
-export function utmParamsFor(idea: Pick<ExportIdea, 'id' | 'conceptSlug' | 'lane'>, creativeId: number | null): Record<string, string> {
+export type UtmIdea = Pick<ExportIdea, 'id' | 'conceptSlug' | 'lane'> & { audience?: Record<string, unknown> | null }
+
+export function utmParamsFor(idea: UtmIdea, creativeId: number | null, opts: { format?: string | null } = {}): Record<string, string> {
+  const adult = idea.lane === 'adult'
   return {
-    utm_source: UTM_SOURCE[idea.lane] ?? idea.lane,
-    utm_medium: UTM_MEDIUM[idea.lane] ?? 'paid',
+    utm_source: adult ? adultNetworkFor(idea) : UTM_SOURCE[idea.lane] ?? idea.lane,
+    utm_medium: adult ? adultMediumFor(opts.format) : UTM_MEDIUM[idea.lane] ?? 'paid',
     utm_campaign: utmCampaignFor(idea),
     utm_content: utmContentFor({ creativeId, ideaId: idea.id }),
   }
 }
 
 /** The idea's destination with the lane's four UTMs, replacing any utm_* it carried. */
-export function withUtms(destination: string, idea: Pick<ExportIdea, 'id' | 'conceptSlug' | 'lane'>, creativeId: number | null): string {
+export function withUtms(destination: string, idea: UtmIdea, creativeId: number | null, opts: { format?: string | null } = {}): string {
   const u = new URL(destination)
   for (const k of [...u.searchParams.keys()]) if (k.startsWith('utm_')) u.searchParams.delete(k)
-  for (const [k, v] of Object.entries(utmParamsFor(idea, creativeId))) u.searchParams.set(k, v)
+  for (const [k, v] of Object.entries(utmParamsFor(idea, creativeId, opts))) u.searchParams.set(k, v)
   return u.toString()
+}
+
+// ---------------------------------------------------------------------------
+// Adult-lane landing rule (owner decision 2026-10-20): every adult banner lands
+// directly on the canonical product page, https://xdipx.com/products/{slug},
+// with the four UTMs. No bridge page, no collection, no homepage.
+// ---------------------------------------------------------------------------
+
+export const CANONICAL_ORIGIN = 'https://xdipx.com'
+
+const PRODUCT_PATH = /^\/products\/([a-z0-9][a-z0-9-]*)\/?$/i
+
+/**
+ * The canonical PDP an adult banner lands on, without UTMs. Uses the idea's
+ * destination when it already is an xdipx.com /products/{slug} page (so an idea
+ * can point at its second product), otherwise the first product's handle. Any
+ * other query string is dropped. Null when neither gives a product.
+ */
+export function adultLandingFor(idea: Pick<ExportIdea, 'destinationUrl' | 'products'>): string | null {
+  if (idea.destinationUrl) {
+    try {
+      const u = new URL(idea.destinationUrl)
+      const m = PRODUCT_PATH.exec(u.pathname)
+      if (m && (u.hostname === 'xdipx.com' || u.hostname === 'www.xdipx.com')) return `${CANONICAL_ORIGIN}/products/${m[1]!.toLowerCase()}`
+    } catch { /* fall through to the product handle */ }
+  }
+  const handle = idea.products?.[0]?.handle?.trim()
+  return handle ? `${CANONICAL_ORIGIN}/products/${handle.toLowerCase()}` : null
+}
+
+/** True when a URL is the canonical xdipx.com PDP an adult banner must land on. */
+export function isAdultLanding(url: string): boolean {
+  try {
+    const u = new URL(url)
+    return u.protocol === 'https:' && u.hostname === 'xdipx.com' && PRODUCT_PATH.test(u.pathname)
+  } catch {
+    return false
+  }
 }
 
 /** Gate states that stop an export. A creative status of blocked stops it too. */

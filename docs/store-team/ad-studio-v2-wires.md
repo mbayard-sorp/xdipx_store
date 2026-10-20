@@ -439,7 +439,7 @@ One card per `ad_creatives` row, media at its real aspect, flush at the top.
 ││                                       ││
 │└───────────────────────────────────────┘│
 │ "The box is boring on purpose."         │  slogan, text-sm font-medium text-ink, clamp 2
-│ STATEMENT READS XDIPX · [ADULT 9]       │  .kicker concept · LaneBadge
+│ STATEMENT READS XDIPX · [ADULT 10]      │  .kicker concept · LaneBadge
 │ Le Wand Petite                          │  product, text-xs text-ink-3
 │ [✓Vision][✓Product][✓Voice][!Policy][✓Text]  gate chips, one 44px-tall button row
 │ Export  [Ready, not uploaded] [Download]│  ExportState
@@ -620,10 +620,10 @@ library's `?feedback=`), status. Format is added because a 728 x 90 problem is a
 
 `h-6 px-2 rounded-full border border-line bg-paper font-mono text-[11px] uppercase tracking-wide
 text-ink-2`, text is lane plus register: `META 3-4`, `GOOGLE 4-5`, `MSFT 4-5`, `SNAP 6-7`,
-`NEWSLETTER 7-9`, `OWNED 9`. All lanes share one neutral style: seven colours would read as a legend
-nobody learns. The one exception is the adult-network lane while register 10 is uncodified: it reads
-`ADULT 9` with a dashed amber border and a `title` and expanded-view note "10 pending codify" (plan
-§1 decision 1). When codified it becomes `ADULT 10` in the neutral style.
+`NEWSLETTER 7-9`, `OWNED 9`, `ADULT 10`. All lanes share one neutral style: seven colours would read
+as a legend nobody learns. The adult lane used to read `ADULT 9` with a dashed amber border while
+register 10 waited on the codify (plan §1 decision 1). It was codified 2026-10-03 and the badge went
+to `ADULT 10` in the neutral style on 2026-10-20.
 
 ### 6.2 Status pills
 
@@ -887,7 +887,7 @@ error: red slab, "Row 14: no date column found. Expected the Google Ads Editor e
 │ PLANNED VS ACTUAL, 7D                   │  .kicker
 │ META 3-4     ▕▓▓▓▓▓░░░░▏ $22 / $40      │  outline track = planned, ink fill = actual
 │ GOOGLE 4-5   ▕▓▓▓▓▓▓▓▓░▏ $31 / $35      │  data mono, one line per lane
-│ ADULT 9      ▕░░░░░░░░░▏ $0 / $0        │
+│ ADULT 10     ▕░░░░░░░░░▏ $0 / $0        │
 │ ┌ CSV import (§9.3) ──────────────────┐ │
 │ └─────────────────────────────────────┘ │
 │ Rules  (8)                          [v] │  collapsed disclosure, 44px
