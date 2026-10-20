@@ -78,12 +78,55 @@ The Meta Ads MCP connector is the interactive alternative. You authorize it in a
 
 ## 4. Banner zip for networks, sponsors and Snap
 
-The zip holds `<lane>-<idea>-<format>.png` for each creative, `copy.txt` (slogan, headlines, body and the tracked link for each banner), `README.txt` (the register tier and the imagery ceiling that applied) and `manifest.json`.
+The zip holds `<lane>-<idea>-<format>.png` for each creative (`.jpg` when only a JPEG gets under the network's file-size cap), `copy.txt` (slogan, headlines, body and the tracked link for each banner), `README.txt` (the register tier and the imagery ceiling that applied) and `manifest.json`.
 
-- Adult networks (ExoClick, JuicyAds): upload each PNG in the network dashboard and paste its link exactly as written in `copy.txt`. The ceiling is the nudity definition only. Copy is held at register 9 until you codify register 10.
+- Adult networks (ExoClick, JuicyAds): upload each image in the network dashboard and paste its link exactly as written in `copy.txt`. Copy runs at register 10 (codified 2026-10-03, live in code 2026-10-20). The ceiling is the nudity definition only. Every link lands on the product page itself, see section 4a. One pack is for one network: set `audience.network` to `juicyads` on the idea for a JuicyAds pack, otherwise it is built for ExoClick.
 - Newsletter sponsor: email the PNGs and `copy.txt` to the sponsor. Ask them to use each link as written, and make sure the sponsor disclosure runs at send.
 - Snap: there is no bulk importer in use. Make a Snap Ad per PNG in Ads Manager, paste the link, and leave it paused until you flip it.
 - Owned channels: use the PNGs on site, in email or in opted-in SMS.
+
+## 4a. ExoClick banner spec and the landing rule
+
+Owner direction 2026-10-20: the ads team generates register-10 banners for ExoClick. Owner decision the same day: they land directly on the product page, no bridge.
+
+### Sizes we render
+
+The adult lane renders ExoClick's six static banner sizes. The list comes from the owner's ExoClick account (2026-10-20) and matches ExoClick's Ad Formats page.
+
+| Size | ExoClick format | Slogan limit (chars) | Layout |
+|---|---|---|---|
+| 160x600 | Banner (wide skyscraper) | 48 | Plate on top, slogan column below, tick and wordmark |
+| 300x250 | Banner, Mobile Banner | 42 | Plate on top, text panel below |
+| 728x90 | Banner (leaderboard) | 44 | Strip: slogan left, plate right |
+| 900x250 | Banner | 60 | Strip |
+| 300x100 | Mobile Banner | 30 | Strip |
+| 300x50 | Mobile Banner | 22 | Strip, one line of type at the 11px floor |
+
+The 160x600 takes a tall plate (the `story` bucket), so an adult idea now generates one more plate than before. Every other size shares the wide plate.
+
+### File rules
+
+- File types: JPEG, PNG or GIF for banner and mobile banner images. MP4 for video banners (not built). Source: [Ad Formats](https://docs.exoclick.com/exoclick-docs/ad-formats.md), Banner and Mobile Banner sections.
+- File size: the Ad Formats page says 300 KB per image. The [Media Library](https://docs.exoclick.com/advertisers/campaigns/media-library.md) page sets 150 KB for any image under 1,000,000 pixels (banner, native, push) and 300 KB above that (full-page interstitials). The two pages disagree, so we hold the stricter 150 KB (`EXOCLICK_MAX_IMAGE_BYTES` in `app/lib/ad-formats.ts`).
+- How we enforce it: the compositor re-encodes any render over 150 KB as a palette PNG, stepping quality down. The banner zip checks each file again; if no palette PNG fits it falls back to JPEG with falling quality, and it refuses the creative if nothing fits. The pixel size never changes.
+- ExoClick converts PNG to JPEG on upload when that is smaller, and makes MP4 copies of animated GIFs for some zones (Media Library page). We ship static images, so neither matters.
+- Animated GIFs are allowed but get the "Animated Images" label, which publishers can block. Rapidly flashing banners are rejected. Sources: [campaign labels](https://docs.exoclick.com/advertisers/advertisers-faq/advertiser-compliance/my-campaign-has-labels-what-mean.md), [rejection reasons](https://docs.exoclick.com/advertisers/advertisers-faq/advertiser-compliance/my-campaign-got-rejected-why.md).
+- A plain image with no text, button or logo gets the "Simple Images" label, which publishers can also block. Our banners always carry the slogan and the wordmark. The "High CTR Elements" label covers fake close or play buttons, fake chat boxes and "Watch Now" buttons: none of that, ever.
+- One image per creative. ExoClick does not permit several images merged into one (Ad Formats page).
+
+### Landing rule
+
+- Every adult banner lands on the canonical product page, `https://xdipx.com/products/{slug}`, with `utm_source`, `utm_medium`, `utm_campaign` and `utm_content`. No bridge page, no collection, no homepage.
+- The export resolves the landing itself (`adultLandingFor` in `app/lib/ad-export/common.ts`). It keeps the idea's destination when that is already an xdipx.com product page, otherwise it uses the idea's first product handle, and it drops any other query string. An adult idea with no product refuses to export.
+- ExoClick's docs allow a product page as the landing page. The banner and the page must load for review, the product must not be on ExoClick's banned list, the URL must be https, and back-button redirects or entry and exit prompts on the page earn blocking labels. Our PDPs do none of that. Models who look young need a visible 18 U.S.C. 2257 disclaimer on the banner or the page; we cast adults only.
+
+### Next formats (not built)
+
+The owner's account also offers these. They need their own copy fields or layouts, so they are listed here rather than squeezed into the banner composer.
+
+- Native (Recommendation Widget): image 16:9, 4:3 or 1:1, between 300x300 and 900x900, PNG or JPEG, 150 KB. Title up to 90 characters, description up to 90, brand up to 30. The image should be text-free with the words in the fields, so it needs a native exporter and `utm_medium=native` (already supported by `adultMediumFor`).
+- Push notification: 720x480 (icon plus image) or 192x192 (icon), JPEG, PNG or GIF, title up to 50 characters, description up to 90. Same shape problem: the words go in fields, not pixels.
+- Left out on purpose: video, vertical video, full-page interstitials, popunder, direct link and email clicks.
 
 ## 5. The UTM scheme
 
@@ -91,10 +134,12 @@ Every exported link carries all four. The values come from the lane and the idea
 
 | Parameter | Value |
 |---|---|
-| utm_source | facebook (meta), google, bing (microsoft), snapchat, adnetwork, newsletter, owned |
-| utm_medium | paid, except sponsor for newsletter and owned for owned |
+| utm_source | facebook (meta), google, bing (microsoft), snapchat, newsletter, owned. Adult lane: the network, `exoclick` (default) or `juicyads` |
+| utm_medium | paid, except sponsor for newsletter, owned for owned, and on the adult lane `display` for banners (`native` once native images ship) |
 | utm_campaign | `ad<idea id>-<concept>` for example `ad103-sculpture-hall` |
 | utm_content | the creative id for example `503`. A Search idea with no creative row yet uses `idea-<id>` |
+
+Adult banners built before 2026-10-20 carried `utm_source=adnetwork&utm_medium=paid`. Those links still work and still attribute: order attribution counts `adnetwork` as a paid source and the ExoClick channel lists it as an alias. Nothing writes it any more.
 
 `utm_content` is what lets Shopify order attribution find the creative later. Medium stays `paid` on purpose, even though GA4's default grouping wants `cpc`. Map it with a GA4 custom channel group, as the Google launch plan says. Do not change the UTM.
 

@@ -13,6 +13,10 @@
  * Templates (minimal versions): plain-plate, type-card, banner-strip,
  * spec-diptych. A flat paper panel carries the text on every plate template,
  * so legibility never depends on what the plate looks like under it.
+ *
+ * A format with a byte cap (every ExoClick size, 150 KB) comes out re-encoded
+ * as a palette PNG when the lossless render is over it. The output is always a
+ * PNG at the exact pixel size; metrics.bytes and metrics.overBudget say how it went.
  */
 import satori from 'satori'
 import { Resvg } from '@resvg/resvg-js'
@@ -21,6 +25,8 @@ import newsreaderFont from '~/assets/og-fonts/newsreader-500.ttf?inline'
 import dmSansFont from '~/assets/og-fonts/dm-sans-400.ttf?inline'
 import jetbrainsFont from '~/assets/og-fonts/jetbrains-mono-500.ttf?inline'
 import { fitSlogan, isStripFormat, type LayoutTemplate, type PlateGround } from '~/lib/ad-render-rules'
+import { maxBytesForSize } from '~/lib/ad-formats'
+import { fitPngUnderBytes } from '~/lib/ad-export/fit-bytes.server'
 
 // v3 tokens mirrored from app/app.css (satori cannot read CSS custom properties).
 const INK = '#1A1418'
@@ -61,6 +67,11 @@ export interface ComposeInput {
   plate?: Buffer | null
   /** Mono spec rows for spec-diptych, at most three are set. */
   specLines?: readonly string[]
+  /**
+   * File-size cap in bytes. Defaults to the cap of the format at this pixel size
+   * (ExoClick's 150 KB on every adult banner size); null turns it off.
+   */
+  maxBytes?: number | null
 }
 
 export interface ComposeMetrics {
@@ -68,6 +79,14 @@ export interface ComposeMetrics {
   lines: number
   truncated: boolean
   minFont: number
+  /** Size of the PNG returned, in bytes. */
+  bytes: number
+  /** The cap that applied, or null. */
+  maxBytes: number | null
+  /** True when even the smallest palette PNG stayed over the cap. The banner zip re-encodes to JPEG. */
+  overBudget: boolean
+  /** 'original' or the palette step that got it under. */
+  encoding: string
 }
 
 export interface ComposeResult {
@@ -117,6 +136,8 @@ export async function composeAd(input: ComposeInput): Promise<ComposeResult> {
   const strip = isStripFormat({ width: w, height: h })
   const wide = !strip && w / h >= 1.5
   const story = h / w >= 1.6
+  // Narrow skyscrapers (160x600) get their own column layout on plate templates.
+  const tall = w <= 240 && h / w >= 2.5
   const min = minFontFor(w, h)
   const m = Math.round(Math.min(w, h) * (strip ? 0.08 : 0.055))
   const groundColor = GROUNDS[input.ground]
@@ -171,6 +192,26 @@ export async function composeAd(input: ComposeInput): Promise<ComposeResult> {
         ...(room ? [wordmark(Math.max(12, Math.round(h * 0.09)))] : []),
       ]),
       el('img', { width: plateW, height: h, objectFit: 'cover' }, undefined, { src: uri, width: plateW, height: h }),
+    ])
+  } else if (tall) {
+    // Skyscraper (160x600) for every plate template: plate on top, a paper column
+    // below with the slogan over several short lines, the tick and the wordmark.
+    // No kicker and no spec rows: a 160px column cannot set either legibly.
+    const ph = Math.round(h * 0.42)
+    const plateH = h - ph
+    const boxW = w - 2 * m
+    const mark = Math.max(14, Math.round(w * 0.12))
+    fit = fitSlogan({ text: input.slogan, boxWidth: boxW, boxHeight: ph - 2 * m - mark - 18, maxFont: w * 0.16, minFont: Math.max(min, 13), maxLines: 7, glyphRatio: GLYPH })
+    const uri = await plateDataUri(input.plate!, w, plateH, 'centre')
+    tree = el('div', { display: 'flex', flexDirection: 'column', width: w, height: h, backgroundColor: PAPER }, [
+      el('img', { width: w, height: plateH, objectFit: 'cover' }, undefined, { src: uri, width: w, height: plateH }),
+      el('div', { display: 'flex', flexDirection: 'column', justifyContent: 'space-between', width: w, height: ph, padding: m }, [
+        sloganEl(input.slogan, fit.fontSize),
+        el('div', { display: 'flex', flexDirection: 'column', gap: 8 }, [
+          tick(Math.round(w * 0.2), 3),
+          wordmark(mark),
+        ]),
+      ]),
     ])
   } else if (input.template === 'spec-diptych') {
     const specSize = Math.max(11, Math.round(Math.min(w, h) * 0.026))
@@ -284,9 +325,15 @@ export async function composeAd(input: ComposeInput): Promise<ComposeResult> {
   }
 
   const svg = await satori(tree as never, { width: w, height: h, fonts: loadFonts() })
-  const png = Buffer.from(new Resvg(svg, { fitTo: { mode: 'width', value: w } }).render().asPng())
+  const raw = Buffer.from(new Resvg(svg, { fitTo: { mode: 'width', value: w } }).render().asPng())
+  const cap = input.maxBytes === undefined ? maxBytesForSize(w, h) : input.maxBytes
+  const fitted = cap ? await fitPngUnderBytes(raw, cap) : null
+  const png = fitted?.bytes ?? raw
   return {
     png,
-    metrics: { fontSize: fit.fontSize, lines: fit.lines, truncated: fit.truncated, minFont: min },
+    metrics: {
+      fontSize: fit.fontSize, lines: fit.lines, truncated: fit.truncated, minFont: min,
+      bytes: png.length, maxBytes: cap ?? null, overBudget: fitted ? !fitted.withinLimit : false, encoding: fitted?.encoding ?? 'original',
+    },
   }
 }

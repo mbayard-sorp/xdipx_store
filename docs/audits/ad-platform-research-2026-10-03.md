@@ -291,6 +291,8 @@ The brief's "kill if spend > 2x AOV" (about $52 to $80) is **looser than break-e
 
 **Recommended first test at $20 to $50/day (est. allocation, owner decision):** $10 to $15/day Google Search (category plus long-tail product terms), $5 to $10/day Microsoft Adult Program once approved, $5 to $15/day Snap 18+ test with non-graphic toy creative, $5 to $10/day ExoClick or JuicyAds site-targeted banners at register 8-9. Meta only as a lube or health line with a clean landing page, after checking the dataset restriction tier. Add one newsletter sponsorship a month from the same budget. Kill rules R1 to R8 above, read from Shopify orders by creative id.
 
+> Addendum 2026-10-20 (ticket #16685): the 8-9 register for ExoClick, JuicyAds and TrafficJunky above is superseded. Register 10 on vetted adult networks was codified 2026-10-03 (`docs/emma-voice.md`, `docs/ads-policy.md`) and went live in code 2026-10-20. Adult banners land directly on `/products/{slug}`; ExoClick's banner spec is in `docs/store-team/ad-studio-exports.md` §4a. The table is left as written on 2026-10-03.
+
 ---
 
 ## Open items to verify (could not confirm from primary source)

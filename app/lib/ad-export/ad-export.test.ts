@@ -455,10 +455,10 @@ describe('meta push', () => {
 
 describe('banner-zip', () => {
   const now = new Date('2026-10-03T12:00:00Z')
-  const adultIdea = idea({ id: 52, lane: 'adult', registerTier: '9', title: 'Banner idea', headlines: ['Take a peek'], body: ['Body line'], destinationUrl: 'https://xdipx.com/products/x?utm_content=zz', audience: null })
+  const adultIdea = idea({ id: 52, lane: 'adult', registerTier: '10', title: 'Banner idea', headlines: ['Take a peek'], body: ['Body line'], destinationUrl: 'https://xdipx.com/products/x?utm_content=zz', audience: null })
   const crs = [
-    creative({ id: 11, ideaId: 52, lane: 'adult', registerTier: '9', format: '300x250', width: 300, height: 250, slogan: 'Slogan A', assetUrl: 'https://blob.example/a.png' }),
-    creative({ id: 12, ideaId: 52, lane: 'adult', registerTier: '9', format: '728x90', width: 728, height: 90, slogan: 'Slogan A', assetUrl: 'https://blob.example/b.png' }),
+    creative({ id: 11, ideaId: 52, lane: 'adult', registerTier: '10', format: '300x250', width: 300, height: 250, slogan: 'Slogan A', assetUrl: 'https://blob.example/a.png' }),
+    creative({ id: 12, ideaId: 52, lane: 'adult', registerTier: '10', format: '728x90', width: 728, height: 90, slogan: 'Slogan A', assetUrl: 'https://blob.example/b.png' }),
   ]
   const fetchBytes = async (url: string) => Buffer.from(`png:${url}`)
 
@@ -477,7 +477,9 @@ describe('banner-zip', () => {
     expect(copy).toContain('Slogan A')
     expect(copy).toContain('utm_content=12')
     const readme = strFromU8(files['README.txt']!)
-    expect(readme).toContain('Register tier: 9')
+    expect(readme).toContain('Register tier: 10')
+    expect(readme).toContain('Copy runs at register 10')
+    expect(readme).not.toMatch(/held at 9|pending/i)
     expect(readme).toContain('nudity definition')
     expect(strFromU8(files['adult-52-300x250.png']!)).toBe('png:https://blob.example/a.png')
     expect(b.filename).toBe('adult-banners-idea-52-2026-10-03.zip')

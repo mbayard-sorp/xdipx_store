@@ -1,13 +1,24 @@
 /**
  * Banner zip for the lanes with no bulk importer we use: adult networks
  * (ExoClick, JuicyAds), newsletter sponsors, owned channels and Snap. A zip with
- * each creative's PNG named <lane>-<idea>-<format>.png, copy.txt (slogan,
- * headlines, body and the UTM'd destination per creative), README.txt (the
- * register tier and the imagery ceiling that applied) and manifest.json.
- * Handing the zip to a network or a sponsor is a manual, owner-side step.
+ * each creative's image named <lane>-<idea>-<format>.png (or .jpg when only a
+ * JPEG gets under the network's byte cap), copy.txt (slogan, headlines, body
+ * and the UTM'd destination per creative), README.txt (the register tier and
+ * the imagery ceiling that applied) and manifest.json. Handing the zip to a
+ * network or a sponsor is a manual, owner-side step.
+ *
+ * Adult lane (ticket #16685): every destination is the canonical
+ * https://xdipx.com/products/{slug} with utm_source=<network> (exoclick unless
+ * the idea says juicyads) and utm_medium=display. Every image is held under the
+ * format's maxBytes (ExoClick: 150 KB); one that cannot get under refuses.
  */
 import { zipSync, strToU8 } from 'fflate'
-import { ExportRefusal, withUtms, type ExportBuild, type ExportCreative, type ExportIdea } from './common'
+import { getAdFormat } from '~/lib/ad-formats'
+import {
+  ExportRefusal, adultLandingFor, adultNetworkFor, withUtms,
+  type AdultNetwork, type ExportBuild, type ExportCreative, type ExportIdea,
+} from './common'
+import { fitImageUnderBytes } from './fit-bytes.server'
 import { assertCreativesExportable, assertSingleLane } from './policy'
 
 interface LaneRules { label: string; register: string; ceiling: string; handoff: string }
@@ -15,9 +26,9 @@ interface LaneRules { label: string; register: string; ceiling: string; handoff:
 export const LANE_RULES: Readonly<Record<string, LaneRules>> = {
   adult: {
     label: 'Adult ad network',
-    register: 'Copy runs at register 9. Register 10 is pending the owner codify, so these lines are held at 9.',
+    register: 'Copy runs at register 10, the vetted adult ad network register (codified 2026-10-03, docs/ads-policy.md). Explicit and act-anchored, never porn-copy.',
     ceiling: 'The nudity definition is the only imagery ceiling: no visible female nipples, labia, penis or anus. Every banner passed the vision gate against that stop list.',
-    handoff: 'Upload each PNG in the network dashboard (ExoClick, JuicyAds) and paste its destination URL exactly as given in copy.txt. The utm_content on each URL is the attribution key.',
+    handoff: 'Upload each image in the network dashboard and paste its destination URL exactly as given in copy.txt. Every URL lands on the product page itself (no bridge). The utm_content on each URL is the attribution key.',
   },
   newsletter: {
     label: 'Newsletter sponsor',
@@ -57,6 +68,11 @@ export interface ZipManifestEntry {
   slogan: string | null
   destination: string
   registerTier: string
+  /** Adult lane only: the network the UTMs were stamped for. */
+  network?: AdultNetwork
+  bytes: number
+  /** 'original', or the re-encode that got the file under the network cap. */
+  encoding: string
 }
 
 export interface BannerManifest {
@@ -67,8 +83,14 @@ export interface BannerManifest {
   entries: ZipManifestEntry[]
 }
 
-export function pngName(c: Pick<ExportCreative, 'lane' | 'ideaId' | 'format'>): string {
-  return `${c.lane}-${c.ideaId}-${c.format.replace(':', 'x')}.png`
+export function pngName(c: Pick<ExportCreative, 'lane' | 'ideaId' | 'format'>, ext: 'png' | 'jpg' = 'png'): string {
+  return `${c.lane}-${c.ideaId}-${c.format.replace(':', 'x')}.${ext}`
+}
+
+/** Network handoff line for the adult README. */
+const ADULT_HANDOFF: Readonly<Record<AdultNetwork, string>> = {
+  exoclick: 'ExoClick: create a Banner campaign (desktop sizes 160x600, 300x250, 728x90, 900x250) or a Mobile Banner campaign (300x250, 300x100, 300x50), upload each image as a variation, and paste its URL from copy.txt. ExoClick accepts JPEG, PNG or GIF; every file here is under 150 KB.',
+  juicyads: 'JuicyAds: upload each image at its size and paste its URL from copy.txt.',
 }
 
 export async function buildBannerZip(input: ZipBuildInput): Promise<ExportBuild> {
@@ -87,14 +109,31 @@ export async function buildBannerZip(input: ZipBuildInput): Promise<ExportBuild>
   for (const c of ordered) {
     const idea = input.ideas[c.ideaId]
     if (!idea) { issues.push(`Creative #${c.id}: its idea #${c.ideaId} was not found.`); continue }
-    if (!idea.destinationUrl || !/^https?:\/\//.test(idea.destinationUrl)) { issues.push(`Creative #${c.id}: idea #${idea.id} has no destination URL.`); continue }
-    const dest = withUtms(idea.destinationUrl, idea, c.id)
+    const adult = lane === 'adult'
+    const base = adult ? adultLandingFor(idea) : idea.destinationUrl
+    if (!base || !/^https?:\/\//.test(base)) {
+      issues.push(adult
+        ? `Creative #${c.id}: idea #${idea.id} has no product to land on (adult banners land on https://xdipx.com/products/{slug}).`
+        : `Creative #${c.id}: idea #${idea.id} has no destination URL.`)
+      continue
+    }
+    const dest = withUtms(base, idea, c.id, { format: c.format })
     if (!/utm_content=/.test(dest)) { issues.push(`Creative #${c.id}: destination has no utm_content.`); continue }
-    const name = pngName(c)
-    const bytes = await input.fetchBytes(c.assetUrl!)
+    const raw = await input.fetchBytes(c.assetUrl!)
+    const cap = getAdFormat(c.format)?.maxBytes ?? null
+    const fitted = cap ? await fitImageUnderBytes(raw, cap) : null
+    if (fitted && !fitted.withinLimit) {
+      issues.push(`Creative #${c.id} (${c.format}) is ${Math.ceil(fitted.bytes.length / 1024)} KB at its smallest encode, over the ${Math.round(cap! / 1024)} KB network cap. Re-render it with a simpler plate.`)
+      continue
+    }
+    const bytes = fitted?.bytes ?? raw
+    const name = pngName(c, fitted?.ext ?? 'png')
     files[name] = new Uint8Array(bytes)
     destinations[c.id] = dest
-    entries.push({ creativeId: c.id, ideaId: idea.id, lane, format: c.format, width: c.width, height: c.height, file: name, slogan: c.slogan, destination: dest, registerTier: c.registerTier })
+    entries.push({
+      creativeId: c.id, ideaId: idea.id, lane, format: c.format, width: c.width, height: c.height, file: name, slogan: c.slogan, destination: dest,
+      registerTier: c.registerTier, ...(adult ? { network: adultNetworkFor(idea) } : {}), bytes: bytes.length, encoding: fitted?.encoding ?? 'original',
+    })
     copy.push([
       `${name}`,
       `  Creative #${c.id}, idea #${idea.id}, ${c.width && c.height ? `${c.width}x${c.height}` : c.format}`,
@@ -108,6 +147,9 @@ export async function buildBannerZip(input: ZipBuildInput): Promise<ExportBuild>
   if (issues.length) throw new ExportRefusal('policy', issues)
 
   const tiers = [...new Set(ordered.map(c => c.registerTier))].join(', ')
+  const networks = [...new Set(entries.map(e => e.network).filter((n): n is AdultNetwork => !!n))]
+  if (networks.length > 1) throw new ExportRefusal('mixed_lanes', `Export one adult network at a time (got ${networks.join(', ')}). Set audience.network on the idea.`)
+  const handoff = networks.length === 1 ? `${rules.handoff} ${ADULT_HANDOFF[networks[0]!]}` : rules.handoff
   const readme = [
     `xdipx banner pack: ${rules.label}`,
     `Built ${now.toISOString()}. ${entries.length} banner${entries.length === 1 ? '' : 's'}.`,
@@ -116,9 +158,10 @@ export async function buildBannerZip(input: ZipBuildInput): Promise<ExportBuild>
     '',
     `Imagery ceiling that applied: ${rules.ceiling}`,
     '',
-    `How to hand it off: ${rules.handoff}`,
+    ...(networks.length === 1 ? [`Network: ${networks[0]}. Every URL carries utm_source=${networks[0]} and utm_medium=display.`, ''] : []),
+    `How to hand it off: ${handoff}`,
     '',
-    'Files: one PNG per banner, copy.txt with the words and the tracked links, manifest.json for the machine-readable list.',
+    'Files: one image per banner (PNG, or JPEG where only a JPEG fits the network cap), copy.txt with the words and the tracked links, manifest.json for the machine-readable list.',
     'Nothing in this pack was uploaded anywhere. Every destination URL carries utm_source, utm_medium, utm_campaign and utm_content.',
     'The billing descriptor reads XDIPX.',
     '',
@@ -144,7 +187,10 @@ export async function buildBannerZip(input: ZipBuildInput): Promise<ExportBuild>
     bytes,
     destinations,
     summary: {
-      lines: [`${rules.label} pack: ${entries.length} PNG${entries.length === 1 ? '' : 's'} plus copy.txt, README.txt and manifest.json`, `Register ${tiers}. UTMs on every link.`],
+      lines: [
+        `${rules.label} pack: ${entries.length} image${entries.length === 1 ? '' : 's'} plus copy.txt, README.txt and manifest.json`,
+        `Register ${tiers}. UTMs on every link${networks.length === 1 ? ` (utm_source=${networks[0]})` : ''}.`,
+      ],
       counts: { banners: entries.length, ideas: ideaIds.length },
       warnings: [],
     },

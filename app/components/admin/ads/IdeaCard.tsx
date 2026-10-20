@@ -145,7 +145,7 @@ export function IdeaCard({
               <p className="kicker mb-1">Policy check</p>
               <p className="text-ink-2">{idea.policyCheck}</p>
               {idea.lane === 'adult' && (
-                <p className="mt-1 text-xs text-amber-800">Register 10 is pending codify. Held at 9 until the owner says codify.</p>
+                <p className="mt-1 text-xs text-ink-3">Adult networks run at register 10. Banners land on the product page with full UTMs.</p>
               )}
             </div>
           </div>

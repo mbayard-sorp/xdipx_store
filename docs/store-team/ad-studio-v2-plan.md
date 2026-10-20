@@ -8,7 +8,7 @@ summarizes, and `docs/audits/meta-ads-category-teardown-2026-10-03.md` (Nancy an
 
 | # | Decision | Effect on the plan |
 |---|---|---|
-| 1 | Adult networks run at register 10 | Charter change. The charter says 10 never ships; adult networks become the one surface where it does. Needs the owner's "codify" on `docs/emma-voice.md` and `docs/ads-policy.md` before any agent writes at 10. Until then agents draft at 9 and label the 10 rung "pending codify" |
+| 1 | Adult networks run at register 10 | Charter change. The charter says 10 never ships; adult networks become the one surface where it does. Needs the owner's "codify" on `docs/emma-voice.md` and `docs/ads-policy.md` before any agent writes at 10. Codified 2026-10-03; the code hold at 9 came off 2026-10-20 (ticket #16685), so adult ideas are written and shown at 10 |
 | 2 | Meta, strategically | A Meta lane built on the Nancy pattern (§3). `docs/ads-policy.md` Meta row changes from Prohibited to a strategic lane with the 5a rules as hard gates. Owner codify |
 | 3, 4 | Testing starts | Google Search, Microsoft Adult Program, Snap, one adult network, one newsletter, Meta bridge lane. Spend stays off during the two-week simulation |
 | 5 | Kill rule default accepted | R1 to R8 ship as editable valves. Default pause at 2x break-even with zero orders after 48h live |
@@ -66,7 +66,7 @@ From the teardown's ranked rules (15 of them, 7 brands) and its do-not-copy list
 | Google Search | RSA text | 4-5 | Slogan bank R3-4 lines, 30-char headlines, keyword sets from the existing Google plan |
 | Microsoft Search | RSA text | 4-5 | Same as Google |
 | Snapchat | Snap Ads, 18+ | 6-7 | Non-graphic object and typographic creative |
-| Adult networks | ExoClick, JuicyAds banners 300x250, 728x90, 300x100, 900x250 | 10 (pending codify) | Full concept bank including Body Map |
+| Adult networks | ExoClick, JuicyAds banners 160x600, 300x250, 728x90, 900x250, 300x100, 300x50 (ExoClick spec in `ad-studio-exports.md` §4a), landing on the product page | 10 | Full concept bank including Body Map |
 | Newsletters, podcasts | Sponsored reads | 7-9 | Say It Plain, Hands Only, For Him Plainly |
 | Owned | Klaviyo flows, SMS, site | 9 | Bodyscape openers of the exact product left behind |
 
@@ -172,8 +172,7 @@ builders. Deliverable checked into `docs/store-team/ad-studio-v2-wires.md`.
 
 ## 7. Risks held open
 
-- Register 10 on adult networks is a charter change nobody has written yet. Agents hold at 9 until
-  codified.
+- Register 10 on adult networks: codified 2026-10-03, live in code 2026-10-20.
 - A Meta rejection pattern reaches the pixel and the Shop. The lane runs paused drafts, 25+, bridge
   only, and the owner flips each ad live himself.
 - Attribution: GA4 purchases arrive Unassigned. Shopify order attribution by `utm_content` is the
@@ -189,6 +188,6 @@ builders. Deliverable checked into `docs/store-team/ad-studio-v2-wires.md`.
 - [ ] `curious.xdipx.com` as the bridge host (or name another)
 - [ ] Overheard at the Counter replaces Group Chat
 - [ ] Simulation exit criteria in §2
-- [ ] Owner will say "codify" for register 10 on adult networks and the Meta strategic lane, or
-      will hold both at the current charter
+- [x] Owner will say "codify" for register 10 on adult networks and the Meta strategic lane, or
+      will hold both at the current charter (codified 2026-10-03)
 - [ ] Owner will authorize the Meta connector at Phase 3
