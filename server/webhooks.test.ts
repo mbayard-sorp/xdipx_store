@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { isRestockCrossing, parseWebhookBody, runWebhookWork, handleOrderFulfilled, referralCodeFromNoteAttributes, customerEmailFromNoteAttributes, classifyChannelGroup } from './webhooks'
+import { isRestockCrossing, parseWebhookBody, runWebhookWork, handleOrderFulfilled, referralCodeFromNoteAttributes, customerEmailFromNoteAttributes, classifyChannelGroup, clickIdsFromNoteAttributes, orderAttributionRow } from './webhooks'
 
 vi.mock('../app/lib/reviews.server.js', () => ({
   getReviewSettings: vi.fn(async () => ({ inviteDelayDays: 3 })),
@@ -118,6 +118,151 @@ describe('classifyChannelGroup', () => {
     it('email takes priority over a social referring site carried on the same order', () => {
       expect(classifyChannelGroup({ utmSource: 'klaviyo', utmMedium: 'email', referringSite: 'https://www.instagram.com/' })).toBe('email')
     })
+  })
+
+  // Ticket #16409 (ads control plane phase 2c): the paid bucket.
+  describe('paid (ticket #16409)', () => {
+    type Signals = Parameters<typeof classifyChannelGroup>[0]
+    const cases: Array<[string, Signals, ReturnType<typeof classifyChannelGroup>]> = [
+      // Paid mediums, case-insensitive.
+      ['utm_medium=cpc', { utmMedium: 'cpc' }, 'paid'],
+      ['utm_medium=ppc', { utmMedium: 'ppc' }, 'paid'],
+      ['utm_medium=paid', { utmMedium: 'paid' }, 'paid'],
+      ['utm_medium=paid_social', { utmMedium: 'paid_social' }, 'paid'],
+      ['utm_medium=paid_search', { utmMedium: 'paid_search' }, 'paid'],
+      ['utm_medium=display', { utmMedium: 'display' }, 'paid'],
+      ['utm_medium=CPC (uppercase)', { utmMedium: 'CPC' }, 'paid'],
+      ['utm_medium=Paid_Social (mixed case)', { utmMedium: 'Paid_Social' }, 'paid'],
+      // Registered channel ids and their aliases as utm_source.
+      ['utm_source=meta', { utmSource: 'meta' }, 'paid'],
+      ['utm_source=facebook', { utmSource: 'facebook' }, 'paid'],
+      ['utm_source=fb', { utmSource: 'fb' }, 'paid'],
+      ['utm_source=instagram', { utmSource: 'instagram' }, 'paid'],
+      ['utm_source=ig', { utmSource: 'ig' }, 'paid'],
+      ['utm_source=microsoft', { utmSource: 'microsoft' }, 'paid'],
+      ['utm_source=bing', { utmSource: 'bing' }, 'paid'],
+      ['utm_source=msads', { utmSource: 'msads' }, 'paid'],
+      ['utm_source=snapchat', { utmSource: 'snapchat' }, 'paid'],
+      ['utm_source=snap', { utmSource: 'snap' }, 'paid'],
+      ['utm_source=adnetwork (ad-export adult lane)', { utmSource: 'adnetwork' }, 'paid'],
+      ['utm_source=adult:trafficjunky', { utmSource: 'adult:trafficjunky' }, 'paid'],
+      ['utm_source=META (uppercase)', { utmSource: 'META' }, 'paid'],
+      ['utm_source=Adult:ExoClick (mixed case)', { utmSource: 'Adult:ExoClick' }, 'paid'],
+      // google only counts with a paid medium or a click id.
+      ['utm_source=google alone stays organic-search', { utmSource: 'google' }, 'organic-search'],
+      ['utm_source=google + utm_medium=cpc', { utmSource: 'google', utmMedium: 'cpc' }, 'paid'],
+      ['utm_source=google + gclid', { utmSource: 'google', clickIds: ['google'] }, 'paid'],
+      // Click ids alone.
+      ['fbclid alone', { clickIds: ['meta'] }, 'paid'],
+      ['gclid alone', { clickIds: ['google'] }, 'paid'],
+      ['msclkid alone', { clickIds: ['microsoft'] }, 'paid'],
+      // Precedence: paid wins over social and organic-search.
+      ['paid source beats a social referrer', { utmSource: 'meta', referringSite: 'https://www.instagram.com/' }, 'paid'],
+      ['fbclid beats a social referrer', { referringSite: 'https://l.facebook.com/', clickIds: ['meta'] }, 'paid'],
+      ['paid medium beats a search referrer', { utmMedium: 'cpc', referringSite: 'https://www.google.com/' }, 'paid'],
+      ['gclid beats a search referrer', { referringSite: 'https://www.google.com/', clickIds: ['google'] }, 'paid'],
+      ['msclkid beats a bing referrer', { referringSite: 'https://www.bing.com/', clickIds: ['microsoft'] }, 'paid'],
+      // Email and ai-assistant stay ahead of a paid source when there is no click id and no paid medium.
+      ['email beats a paid source with no click id', { utmSource: 'facebook', utmMedium: 'email' }, 'email'],
+      ['ai-assistant beats a paid-source alias on the referrer side', { utmSource: 'bing', referringSite: 'https://chatgpt.com/' }, 'ai-assistant'],
+      // ...and lose to a click id or a paid medium.
+      ['gclid beats email', { utmSource: 'klaviyo', utmMedium: 'email', clickIds: ['google'] }, 'paid'],
+      ['fbclid beats ai-assistant', { utmSource: 'chatgpt.com', clickIds: ['meta'] }, 'paid'],
+      ['paid medium beats klaviyo source', { utmSource: 'klaviyo', utmMedium: 'paid' }, 'paid'],
+      ['paid medium beats an AI referrer', { utmMedium: 'cpc', referringSite: 'https://www.perplexity.ai/' }, 'paid'],
+      // Organic social links we build stay social.
+      ['organic IG link (utm_source=instagram, utm_medium=social)', { utmSource: 'instagram', utmMedium: 'social' }, 'social'],
+      ['organic FB link (utm_source=facebook, utm_medium=organic)', { utmSource: 'facebook', utmMedium: 'organic' }, 'social'],
+      ['organic IG link with fbclid decoration stays social', { utmSource: 'instagram', utmMedium: 'social', clickIds: ['meta'] }, 'social'],
+      ['organic medium does not shield a gclid', { utmSource: 'instagram', utmMedium: 'social', clickIds: ['google'] }, 'paid'],
+      // Inputs that match no new rule keep their old bucket.
+      ['utm_source=x stays social', { utmSource: 'x', utmMedium: 'social' }, 'social'],
+      ['utm_source=tiktok stays social', { utmSource: 'tiktok' }, 'social'],
+      ['bing referrer with no utm stays organic-search', { referringSite: 'https://www.bing.com/search?q=x' }, 'organic-search'],
+      ['empty click id list stays direct', { clickIds: [] }, 'direct'],
+      ['utm_medium=referral stays other', { utmSource: 'some-blog', utmMedium: 'referral' }, 'other'],
+    ]
+    it.each(cases)('%s', (_label, signals, expected) => {
+      expect(classifyChannelGroup(signals)).toBe(expected)
+    })
+  })
+})
+
+describe('clickIdsFromNoteAttributes (ticket #16409)', () => {
+  it.each([
+    ['_fbc', 'meta'],
+    ['_fbclid', 'meta'],
+    ['fbclid', 'meta'],
+    ['_gclid', 'google'],
+    ['gclid', 'google'],
+    ['_wbraid', 'google'],
+    ['wbraid', 'google'],
+    ['_gbraid', 'google'],
+    ['gbraid', 'google'],
+    ['_msclkid', 'microsoft'],
+    ['msclkid', 'microsoft'],
+  ])('reads %s as a %s click', (name, expected) => {
+    expect(clickIdsFromNoteAttributes([{ name, value: 'abc123' }])).toEqual([expected])
+  })
+
+  it('ignores _fbp, which is a browser id and not a click', () => {
+    expect(clickIdsFromNoteAttributes([{ name: '_fbp', value: 'fb.1.2.3' }])).toEqual([])
+  })
+
+  it('ignores an empty value', () => {
+    expect(clickIdsFromNoteAttributes([{ name: '_gclid', value: '' }])).toEqual([])
+  })
+
+  it('handles missing attributes', () => {
+    expect(clickIdsFromNoteAttributes(undefined)).toEqual([])
+    expect(clickIdsFromNoteAttributes(null)).toEqual([])
+  })
+
+  it('dedupes and reports each platform once', () => {
+    const ids = clickIdsFromNoteAttributes([
+      { name: '_fbc', value: 'fb.1.1.x' },
+      { name: '_gclid', value: 'g1' },
+      { name: '_gclid_type', value: 'gclid' },
+      { name: 'fbclid', value: 'x' },
+    ])
+    expect(ids.sort()).toEqual(['google', 'meta'])
+  })
+})
+
+describe('orderAttributionRow (ticket #16409)', () => {
+  const base = { id: 9001, total_price: '30.65', referring_site: null, landing_site: null, source_name: 'web' }
+
+  it('writes channel_group paid for a test order with utm_source=meta', () => {
+    const row = orderAttributionRow({ ...base, note_attributes: [{ name: '_utm_source', value: 'meta' }] })
+    expect(row.channelGroup).toBe('paid')
+    expect(row.utmSource).toBe('meta')
+    expect(row.shopifyOrderId).toBe('9001')
+  })
+
+  it('writes paid from the _fbc note attribute with no utm', () => {
+    const row = orderAttributionRow({ ...base, note_attributes: [{ name: '_fbc', value: 'fb.1.1700000000000.abc' }] })
+    expect(row.channelGroup).toBe('paid')
+  })
+
+  it('writes paid from the _gclid note attribute over a google referrer', () => {
+    const row = orderAttributionRow({
+      ...base,
+      referring_site: 'https://www.google.com/',
+      note_attributes: [{ name: '_gclid', value: 'Cj0K' }, { name: '_gclid_type', value: 'gclid' }],
+    })
+    expect(row.channelGroup).toBe('paid')
+  })
+
+  it('keeps an email order as email', () => {
+    const row = orderAttributionRow({
+      ...base,
+      note_attributes: [{ name: '_utm_source', value: 'klaviyo' }, { name: '_utm_medium', value: 'email' }],
+    })
+    expect(row.channelGroup).toBe('email')
+  })
+
+  it('keeps an order with no signals as direct', () => {
+    expect(orderAttributionRow({ ...base, note_attributes: [] }).channelGroup).toBe('direct')
   })
 })
 
