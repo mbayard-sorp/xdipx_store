@@ -182,6 +182,19 @@ Priority per cluster: `2 × (questions/approved) + ln(approved) + 3 if it maps t
 authority collection + (avgVolume/100 when volume exists)`. Prefer question-shaped beginner
 clusters and comparisons.
 
+**Collision-check every brief before it is queued (ticket #16332).** `scripts/check-topic-collision.ts`
+(ticket #14988) is mandatory for the daily writer once a title and H2 outline exist, but this step
+never ran it when the curator writes the brief, so a duplicate topic entered the queue, sat there
+with a `plannedFor` date, and was only caught downstream by whichever run reached it (two queued
+briefs, `seoContentBrief-best-couples-vibrator-under-100` and
+`seoContentBrief-best-vibrator-for-beginners`, both duplicated a live published post this way, found
+2026-10-19 only because the writer happened to read all published slugs by hand). Before creating a
+brief, run `scripts/check-topic-collision.ts --draft` against the working title plus the intended
+H2 skeleton (its documented contract); do not queue a brief that collides with a live published post.
+Also reject a price in the working title or slug (`under-100` etc.) at this step — content-plan §7
+bans it in prose because it goes stale on an evergreen page, and catching it at write time is cheaper
+than catching it at drafting time.
+
 For each filled slot, create idempotently (`_id: seoContentBrief-${slug}`, `createIfNotExists`):
 `title` (answer-shaped working title), `slug` (pre-checked against blogPost AND seoContentBrief
 slugs), `category`, `cluster` ref, `targetQuery` (the cluster's best question or pillar term),
