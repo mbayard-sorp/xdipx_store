@@ -318,7 +318,34 @@ async function prAlreadyTracked(prNumber: number): Promise<boolean> {
     .limit(20)
   // The LIKE is end-anchored, but re-parse to be certain a ref for /pull/4940
   // is never counted as a match for PR 494.
-  return rows.some((r) => prNumberFromLinkRef(r.ref) === prNumber)
+  if (rows.some((r) => prNumberFromLinkRef(r.ref) === prNumber)) return true
+
+  return prTrackedByApplyRef(prNumber, TRACKED_SKIP_STATUSES)
+}
+
+/**
+ * True when a ticket in one of `statuses` carries `prNumber` in its `applyRef`
+ * column (ticket #16548). `markSuggestion()` (the agent-editor legacy path)
+ * writes `status` and `applyRef` together in one UPDATE, then records the
+ * matching `suggestionLinks` row afterward in a separate best-effort step. A
+ * ticket that has committed the status flip but not yet the link write is
+ * invisible to the link-only queries above; `applyRef` is never out of sync
+ * with `status`, so checking it closes that gap. Shared by both guards below.
+ */
+async function prTrackedByApplyRef(prNumber: number, statuses: string[]): Promise<boolean> {
+  const rows = await db
+    .select({ applyRef: homepageTeamSuggestions.applyRef })
+    .from(homepageTeamSuggestions)
+    .where(
+      and(
+        inArray(homepageTeamSuggestions.status, statuses),
+        like(homepageTeamSuggestions.applyRef, `%/pull/${prNumber}`),
+      ),
+    )
+    .limit(20)
+  // Same end-anchored-LIKE-then-reparse discipline as the link checks, so a
+  // PR 494 lookup is never satisfied by an applyRef pointing at /pull/4940.
+  return rows.some((r) => prNumberFromLinkRef(r.applyRef ?? '') === prNumber)
 }
 
 /**
@@ -375,7 +402,12 @@ async function prReferencedByLiveTicket(prNumber: number): Promise<boolean> {
       ),
     )
     .limit(20)
-  return linkRows.some((r) => prNumberFromLinkRef(r.ref) === prNumber)
+  if (linkRows.some((r) => prNumberFromLinkRef(r.ref) === prNumber)) return true
+
+  // A ticket on one of the pre-QA statuses whose status+applyRef flip has
+  // committed but whose suggestionLinks row has not (ticket #16548); see
+  // prTrackedByApplyRef.
+  return prTrackedByApplyRef(prNumber, REFERENCED_SKIP_STATUSES)
 }
 
 /**
