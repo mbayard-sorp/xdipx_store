@@ -15,3 +15,26 @@ export class ChannelNotEnabledError extends Error {
     this.name = 'ChannelNotEnabledError'
   }
 }
+
+export type MutationRefusalCode =
+  | 'm4_resume_refused'
+  | 'daily_cap_exceeded'
+  | 'budget_step_exceeded'
+  | 'approval_required'
+  | 'bad_target'
+  | 'bad_params'
+  | 'not_configured'
+
+/**
+ * Thrown by an adapter's mutate when it refuses a change before calling the
+ * platform: a resume M4 forbids, a budget past the daily cap, a step past
+ * ads_budget_max_step_pct. The dispatcher writes `code: message` into
+ * ad_actions.error and marks the row failed.
+ */
+export class MutationRefusedError extends Error {
+  readonly kind = 'refused' as const
+  constructor(readonly channel: ChannelId, readonly code: MutationRefusalCode, message: string) {
+    super(message)
+    this.name = 'MutationRefusedError'
+  }
+}

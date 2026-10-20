@@ -4,14 +4,16 @@
  * normalized rows. It writes nothing anywhere. Phase 1c upserts the entities
  * into ad_platform_entities; phase 2b stores the insights.
  *
- * createPaused and mutate throw ChannelNotEnabledError. Phase 6a moves the
- * paused-draft push here and phase 5a adds pause, resume and set_budget, both
- * in meta/mutate.server.ts, which is a protected path.
+ * createPaused throws ChannelNotEnabledError until phase 6a moves the
+ * paused-draft push here. mutate (phase 5a) hands pause, resume, set_budget
+ * and halt_all to meta/mutate.server.ts, a protected path; update_creative
+ * still throws ChannelNotEnabledError there. Only the ledger dispatcher in
+ * channels/apply.server.ts calls mutate.
  */
 import { metaCredentialsFromEnv, type MetaCredentials } from '~/lib/ad-export/meta-push.server'
 import { ChannelNotEnabledError } from '../errors'
 import type {
-  ChannelAdapter, EntityLevel, NormalizedAudience, NormalizedEntity, NormalizedInsightRow, PolicyContext, PolicyRefusal, PolicyVerdict, TokenHealth,
+  ChannelAdapter, EntityLevel, MutationRequest, MutationResult, NormalizedAudience, NormalizedEntity, NormalizedInsightRow, PolicyContext, PolicyRefusal, PolicyVerdict, TokenHealth,
 } from '../types'
 import { GraphError, createGraphClient, type GraphClient, type GraphJson } from './graph.server'
 
@@ -171,6 +173,13 @@ export interface MetaAdapterDeps {
   graph?: GraphClient
   credentials?: () => MetaCredentials
   now?: () => Date
+  /** Defaults to metaMutate in meta/mutate.server.ts, loaded on first use. */
+  mutate?: (m: MutationRequest) => Promise<MutationResult>
+}
+
+async function defaultMutate(m: MutationRequest): Promise<MutationResult> {
+  const { metaMutate } = await import('./mutate.server')
+  return metaMutate(m)
 }
 
 export function createMetaAdapter(deps: MetaAdapterDeps = {}): ChannelAdapter {
@@ -186,7 +195,7 @@ export function createMetaAdapter(deps: MetaAdapterDeps = {}): ChannelAdapter {
 
   return {
     id: 'meta',
-    capabilities: { read: true, insights: true, mutate: [], audiences: 'read', preview: false },
+    capabilities: { read: true, insights: true, mutate: ['pause', 'resume', 'set_budget'], audiences: 'read', preview: false },
 
     auth: {
       async health(): Promise<TokenHealth> {
@@ -280,7 +289,7 @@ export function createMetaAdapter(deps: MetaAdapterDeps = {}): ChannelAdapter {
     },
 
     async mutate(m) {
-      throw new ChannelNotEnabledError('meta', `mutate:${m.verb}`)
+      return (deps.mutate ?? defaultMutate)(m)
     },
 
     async policyCheck(ctx) {
