@@ -6,7 +6,7 @@
  * never talks to a platform. Applying an approved row is the job of
  * channels/apply.server.ts in a later phase.
  */
-import { and, desc, eq } from 'drizzle-orm'
+import { and, desc, eq, gte, inArray, sql } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
 import { adActions } from '../../../db/schema'
 import {
@@ -147,4 +147,21 @@ export async function listActions(opts: ListActionsOptions = {}): Promise<AdActi
     .where(where)
     .orderBy(desc(adActions.createdAt), desc(adActions.id))
     .limit(limit)
+}
+
+/**
+ * Automatic actions since `since` that got past the gate: tier auto rows that
+ * were approved, applied or failed. dry_run rows do not count, since nothing
+ * was attempted. Feeds the ads_auto_actions_max_per_day cap.
+ */
+export async function countAutoActionsSince(since: Date): Promise<number> {
+  const [row] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(adActions)
+    .where(and(
+      eq(adActions.tier, 'auto'),
+      inArray(adActions.status, ['approved', 'applied', 'failed']),
+      gte(adActions.createdAt, since),
+    ))
+  return Number(row?.n ?? 0)
 }

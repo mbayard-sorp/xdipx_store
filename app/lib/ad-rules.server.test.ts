@@ -54,6 +54,23 @@ vi.mock('~/lib/feed-processor.server', () => ({
 }))
 const fileBlocker = vi.hoisted(() => vi.fn(async () => ({ id: 1, created: true, reopened: false })))
 vi.mock('~/lib/owner-blockers.server', () => ({ fileBlocker }))
+// The ad_actions ledger (phase 4c): an in-memory stand-in that keeps the real
+// one's rule of one row per idempotency key.
+const ledger = vi.hoisted(() => ({ rows: [] as Array<Record<string, unknown>>, nextId: 1 }))
+vi.mock('~/lib/ads/ledger.server', () => ({
+  insertAction: vi.fn(async (input: Record<string, unknown>) => {
+    if (ledger.rows.some(r => r['idempotencyKey'] === input['idempotencyKey'])) return { inserted: false, row: null }
+    const row = { id: ledger.nextId++, status: 'proposed', ...input }
+    ledger.rows.push(row)
+    return { inserted: true, row }
+  }),
+  transitionAction: vi.fn(async (id: number, to: string) => {
+    const row = ledger.rows.find(r => r['id'] === id)!
+    row['status'] = to
+    return row
+  }),
+  countAutoActionsSince: vi.fn(async () => 0),
+}))
 const readLeadFunnelRaw = vi.hoisted(() => vi.fn(async () => ({
   leads: [] as Array<{ profileId: string; utmContent: string | null; interest: string | null; capturedAt: string }>,
   orders: [] as Array<{ profileId: string; at: string; value: number }>,
@@ -453,6 +470,7 @@ describe('planPersistence', () => {
 describe('runRulesDaily', () => {
   beforeEach(() => {
     mem.tables.clear(); mem.inserts.length = 0; mem.updates.length = 0; mem.settings.clear(); mem.nextId = 100
+    ledger.rows.length = 0; ledger.nextId = 1
     fileBlocker.mockClear()
     setPlatformApplier(null)
     mem.tables.set(adCreatives, [
@@ -529,6 +547,74 @@ describe('runRulesDaily', () => {
     expect(out.simulated).toBe(false)
     expect(applier).toHaveBeenCalledWith(expect.objectContaining({ creativeId: 1, action: 'pause' }))
   })
+
+  // Phase 4c: the default applier is the ledger dispatcher, so every firing leaves an ad_actions row.
+  const seedMirror = async () => {
+    const { adPlatformEntities } = await import('../../db/schema')
+    mem.tables.set(adCreatives, [
+      { id: 1, creativeId: 1, pausedAt: null, launchedAt: null, budgetMultiplier: '1', lane: 'meta', externalAdId: 'ad-1', pauseReason: null },
+      { id: 2, creativeId: 2, pausedAt: null, launchedAt: null, budgetMultiplier: '1', lane: 'meta', externalAdId: 'ad-2', pauseReason: null },
+    ])
+    mem.tables.set(adPlatformEntities, [
+      { platform: 'meta', level: 'ad', externalId: 'ad-1', parentExternalId: 'as-1', status: 'ACTIVE', effectiveStatus: 'ACTIVE', objective: null, creativeId: 1, dailyBudgetCents: null, lifetimeBudgetCents: null },
+      { platform: 'meta', level: 'ad', externalId: 'ad-2', parentExternalId: 'as-1', status: 'ACTIVE', effectiveStatus: 'ACTIVE', objective: null, creativeId: 2, dailyBudgetCents: null, lifetimeBudgetCents: null },
+      { platform: 'meta', level: 'adset', externalId: 'as-1', parentExternalId: 'c-1', status: 'ACTIVE', effectiveStatus: 'ACTIVE', objective: null, creativeId: null, dailyBudgetCents: 1000, lifetimeBudgetCents: null },
+      { platform: 'meta', level: 'campaign', externalId: 'c-1', parentExternalId: null, status: 'ACTIVE', effectiveStatus: 'ACTIVE', objective: 'OUTCOME_SALES', creativeId: null, dailyBudgetCents: null, lifetimeBudgetCents: null },
+    ])
+  }
+
+  it('runRulesDaily on fixtures writes a dry_run ledger row per firing, tied to its rule event', async () => {
+    await seedMirror()
+    const metrics = await seedMetricsTable()
+    mem.tables.set(metrics, Array.from({ length: 7 }, (_, i) => metricRow(1, ago(6 - i), { spendCents: 500 })))
+
+    const out = await runRulesDaily(NOW)
+
+    expect(out.fired.map(f => f.ruleId)).toEqual(['R1'])
+    const event = mem.inserts.find(i => i.table === adRuleEvents)!.values
+    expect(ledger.rows).toHaveLength(1)
+    expect(ledger.rows[0]).toMatchObject({
+      platform: 'meta', targetLevel: 'ad', targetExternalId: 'ad-1', verb: 'pause',
+      tier: 'auto', status: 'dry_run', proposedBy: 'rule:R1', ruleEventId: event['id'],
+    })
+    expect(ledger.rows[0]!['reason']).toBe('Dry run: ads_spend_enabled is off. Pause: $35.00 spent in 7d, 0 orders, R1')
+
+    // The same firing the next run, same day: the rule event is refreshed and the ledger keeps one row.
+    await runRulesDaily(NOW)
+    expect(ledger.rows).toHaveLength(1)
+  })
+
+  it('R7 goes through the dispatcher: one dry_run pause row per live creative while a valve is off', async () => {
+    await seedMirror()
+    const metrics = await seedMetricsTable()
+    mem.tables.set(metrics, [
+      metricRow(1, ago(0), { spendCents: 1500, impressions: 1500, clicks: 60 }),
+      metricRow(2, ago(0), { spendCents: 1000, impressions: 1000, clicks: 40 }),
+    ])
+    mem.settings.set('ads_spend_enabled', 'true')
+
+    const out = await runRulesDaily(NOW)
+
+    expect(out.r7).toMatchObject({ pausedCreatives: 2 })
+    const r7Rows = ledger.rows.filter(r => r['proposedBy'] === 'rule:R7')
+    expect(r7Rows.map(r => r['targetExternalId'])).toEqual(['ad-1', 'ad-2'])
+    expect(r7Rows.every(r => r['status'] === 'dry_run' && r['tier'] === 'auto' && r['ruleEventId'] === out.r7!.eventId)).toBe(true)
+    expect(String(r7Rows[0]!['reason'])).toMatch(/^Dry run: ads_auto_apply_enabled is off/)
+  })
+
+  it('with both valves on, R7 reaches the Meta adapter, whose NotEnabled lands as failed', async () => {
+    await seedMirror()
+    const metrics = await seedMetricsTable()
+    mem.tables.set(metrics, [metricRow(1, ago(0), { spendCents: 2500, impressions: 2500, clicks: 100 })])
+    mem.settings.set('ads_spend_enabled', 'true')
+    mem.settings.set('ads_auto_apply_enabled', 'true')
+
+    await runRulesDaily(NOW)
+
+    const r7Rows = ledger.rows.filter(r => r['proposedBy'] === 'rule:R7')
+    expect(r7Rows.length).toBeGreaterThan(0)
+    expect(r7Rows.every(r => r['status'] === 'failed')).toBe(true)
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -537,6 +623,7 @@ describe('runRulesDaily', () => {
 describe('applyRuleAction', () => {
   beforeEach(() => {
     mem.tables.clear(); mem.inserts.length = 0; mem.updates.length = 0; mem.settings.clear(); mem.nextId = 500
+    ledger.rows.length = 0; ledger.nextId = 1
     setPlatformApplier(null)
   })
   const seed = (over: Record<string, unknown> = {}) =>
@@ -571,6 +658,14 @@ describe('applyRuleAction', () => {
     await applyRuleAction(9, 'resume', 'owner', { ruleId: 'R4', now: NOW })
     expect(mem.updates[0]!.set).toMatchObject({ pausedAt: null, pauseReason: null })
     expect(mem.inserts.find(i => i.table === adRuleEvents)!.values['action']).toBe('revive')
+  })
+
+  it('a tap leaves a ledger row too: pause on the ad, dry_run with the valves off', async () => {
+    seed()
+    const r = await applyRuleAction(9, 'pause', 'owner@xdipx.com', { now: NOW })
+    expect(r.platform).toMatchObject({ applied: false, ledgerStatus: 'dry_run' })
+    expect(ledger.rows).toHaveLength(1)
+    expect(ledger.rows[0]).toMatchObject({ platform: 'google', targetExternalId: 'ext-9', verb: 'pause', status: 'dry_run', proposedBy: 'owner@xdipx.com' })
   })
 
   it('refuses a pause on a paused creative and a scale on a paused one', async () => {
