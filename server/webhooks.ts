@@ -117,12 +117,75 @@ const AI_ASSISTANT_HOSTS = [
   'chatgpt.com', 'openai.com', 'perplexity.ai', 'claude.ai', 'gemini.google.com', 'copilot.microsoft.com',
 ]
 
+/**
+ * Ticket #16409 (ads control plane phase 2c, plan §7): the paid bucket.
+ *
+ * Paid mediums: the ones the ad-export build layer and the ad bridge stamp
+ * (`utm_medium=paid`), plus the common platform conventions.
+ */
+const PAID_MEDIUMS = new Set(['cpc', 'ppc', 'paid', 'paid_social', 'paid_search', 'display'])
+
+/**
+ * Source aliases for the registered ad channels (ChannelId in
+ * app/lib/ads/channels/types.ts) that never show up on an organic link we
+ * build. `adnetwork` is what ad-export/common.ts stamps for the adult lane.
+ * Any source starting with `adult:` counts too.
+ */
+const PAID_SOURCES = new Set(['meta', 'microsoft', 'bing', 'msads', 'snapchat', 'snap', 'adnetwork'])
+
+/**
+ * Sources that name both an ad channel and an organic social account. Our
+ * organic posts link with `utm_source=instagram&utm_medium=social`
+ * (`_layout.social.tsx`), so these count as paid only when the medium does not
+ * say organic. Without that guard every organic Instagram order would land in
+ * paid.
+ */
+const SOCIAL_AD_SOURCES = new Set(['facebook', 'fb', 'instagram', 'ig'])
+const ORGANIC_MEDIUMS = new Set(['social', 'organic', 'organic_social'])
+
+/**
+ * Click ids Shopify copies from cart attributes onto the order's
+ * note_attributes. `_fbc` is the Meta click cookie built from `fbclid`
+ * (attribution.server.ts). `_gclid` holds the gclid, wbraid or gbraid value,
+ * with the type in `_gclid_type` (attribution-cart.server.ts). The bare and
+ * underscored names for fbclid, wbraid, gbraid and msclkid are accepted as
+ * well, so a capture path added later classifies without touching this file.
+ */
+export const PAID_CLICK_ID_ATTRIBUTES: readonly string[] = [
+  '_fbc', '_fbclid', 'fbclid',
+  '_gclid', 'gclid', '_wbraid', 'wbraid', '_gbraid', 'gbraid',
+  '_msclkid', 'msclkid',
+]
+
+/** Meta click ids. Meta also appends fbclid to organic links, so an explicit organic medium outranks it. */
+const META_CLICK_ID_ATTRIBUTES = new Set(['_fbc', '_fbclid', 'fbclid'])
+
+export type ClickIdSignal = 'meta' | 'google' | 'microsoft'
+
+/** Which ad-click ids an order carries, read from its note_attributes. */
+export function clickIdsFromNoteAttributes(
+  attrs: ReadonlyArray<{ name: string; value?: string | null }> | null | undefined,
+): ClickIdSignal[] {
+  const found = new Set<ClickIdSignal>()
+  for (const a of attrs ?? []) {
+    if (!a?.value || !PAID_CLICK_ID_ATTRIBUTES.includes(a.name)) continue
+    if (META_CLICK_ID_ATTRIBUTES.has(a.name)) found.add('meta')
+    else if (a.name.endsWith('msclkid')) found.add('microsoft')
+    else found.add('google')
+  }
+  return [...found]
+}
+
+export type ChannelGroup = 'email' | 'ai-assistant' | 'paid' | 'organic-search' | 'social' | 'direct' | 'other'
+
 export function classifyChannelGroup(signals: {
   utmSource?: string | null
   utmMedium?: string | null
   referringSite?: string | null
   sourceName?: string | null
-}): 'email' | 'ai-assistant' | 'organic-search' | 'social' | 'direct' | 'other' {
+  /** Ad-click ids on the order, from clickIdsFromNoteAttributes. */
+  clickIds?: ReadonlyArray<ClickIdSignal> | null
+}): ChannelGroup {
   const host = (value: string | null | undefined): string => {
     if (!value) return ''
     try {
@@ -134,6 +197,15 @@ export function classifyChannelGroup(signals: {
   const utmSourceHost = (signals.utmSource ?? '').toLowerCase()
   const utmMediumValue = (signals.utmMedium ?? '').toLowerCase()
   const referringHost = host(signals.referringSite)
+  const paidSourceValue = utmSourceHost.trim()
+  const paidMediumValue = utmMediumValue.trim()
+
+  // Ticket #16409: a paid medium or an ad-click id outranks every other
+  // bucket, email and ai-assistant included. A Meta click id loses to an
+  // explicit organic medium, because Meta decorates organic links with fbclid.
+  const organicMedium = ORGANIC_MEDIUMS.has(paidMediumValue)
+  const hasClickId = (signals.clickIds ?? []).some(id => id !== 'meta' || !organicMedium)
+  if (PAID_MEDIUMS.has(paidMediumValue) || hasClickId) return 'paid'
 
   // Ticket #15003 (daily promo email program, owner direction 2026-10-12):
   // Klaviyo's own UTM convention is the only email signal that reaches this
@@ -150,6 +222,18 @@ export function classifyChannelGroup(signals: {
     return 'ai-assistant'
   }
 
+  // Ticket #16409: a paid source on its own ranks behind email and
+  // ai-assistant and ahead of organic-search and social. `google` is left out
+  // on purpose. It counts as paid only with a paid medium or a click id, both
+  // handled above, so a bare `utm_source=google` stays organic-search.
+  if (
+    PAID_SOURCES.has(paidSourceValue) ||
+    paidSourceValue.startsWith('adult:') ||
+    (SOCIAL_AD_SOURCES.has(paidSourceValue) && !organicMedium)
+  ) {
+    return 'paid'
+  }
+
   const SEARCH_HOSTS = ['google.', 'bing.', 'duckduckgo.', 'yahoo.']
   if (SEARCH_HOSTS.some(h => referringHost.includes(h)) || utmSourceHost === 'google') {
     return 'organic-search'
@@ -163,6 +247,40 @@ export function classifyChannelGroup(signals: {
   if (!referringHost && !utmSourceHost) return 'direct'
 
   return 'other'
+}
+
+/**
+ * The order_attribution row for an orders/create payload. Pure, so the
+ * classification that lands in channel_group is unit-tested end to end from
+ * the note_attributes Shopify sends (ticket #16409).
+ */
+export function orderAttributionRow(order: Pick<ShopifyOrder,
+  'id' | 'total_price' | 'note_attributes' | 'referring_site' | 'landing_site' | 'source_name'
+>): typeof orderAttribution.$inferInsert {
+  const attrOf = (name: string): string | undefined =>
+    order.note_attributes?.find(a => a.name === name)?.value
+  const utmSource     = attrOf('_utm_source') ?? null
+  const utmMedium     = attrOf('_utm_medium') ?? null
+  const referringSite = order.referring_site ?? null
+  return {
+    shopifyOrderId: String(order.id),
+    utmSource,
+    utmMedium,
+    utmCampaign:    attrOf('_utm_campaign') ?? null,
+    utmContent:     attrOf('_utm_content') ?? null,
+    refCode:        referralCodeFromNoteAttributes(order.note_attributes) ?? null,
+    referringSite,
+    landingSite:    order.landing_site ?? null,
+    sourceName:     order.source_name ?? null,
+    channelGroup:   classifyChannelGroup({
+      utmSource,
+      utmMedium,
+      referringSite,
+      sourceName: order.source_name ?? null,
+      clickIds: clickIdsFromNoteAttributes(order.note_attributes),
+    }),
+    totalPrice:     order.total_price,
+  }
 }
 
 // ─── Handlers ─────────────────────────────────────────────────────────────
@@ -358,30 +476,8 @@ async function handleOrderCreated(order: ShopifyOrder): Promise<void> {
   // Persist acquisition attribution (ticket #12669). Best-effort: a write
   // failure here costs the owner digest's acquisition line, never the order.
   try {
-    const attrOf = (name: string): string | undefined =>
-      order.note_attributes?.find(a => a.name === name)?.value
-    const utmSource   = attrOf('_utm_source') ?? null
-    const utmMedium   = attrOf('_utm_medium') ?? null
-    const referringSite = order.referring_site ?? null
-    const channelGroup = classifyChannelGroup({
-      utmSource,
-      utmMedium,
-      referringSite,
-      sourceName: order.source_name ?? null,
-    })
-    await db.insert(orderAttribution).values({
-      shopifyOrderId: String(order.id),
-      utmSource,
-      utmMedium,
-      utmCampaign:    attrOf('_utm_campaign') ?? null,
-      utmContent:     attrOf('_utm_content') ?? null,
-      refCode:        referralCodeFromNoteAttributes(order.note_attributes) ?? null,
-      referringSite,
-      landingSite:    order.landing_site ?? null,
-      sourceName:     order.source_name ?? null,
-      channelGroup,
-      totalPrice:     order.total_price,
-    }).onConflictDoNothing({ target: orderAttribution.shopifyOrderId })
+    await db.insert(orderAttribution).values(orderAttributionRow(order))
+      .onConflictDoNothing({ target: orderAttribution.shopifyOrderId })
   } catch (err) {
     console.error('[webhook:order-created] order_attribution insert failed:', err)
   }

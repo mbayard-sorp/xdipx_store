@@ -742,6 +742,21 @@ export const CRON_EXPECTATIONS: readonly CronExpectation[] = [
       + 'read, not anything live.',
   },
   {
+    route: '/cron/ads-sync-entities',
+    plane: 'vercel',
+    schedule: '35 */6 * * *',
+    periodMinutes: EVERY_6_HOURS,
+    graceMinutes: 60,
+    recorded: true,
+    moneyRelevant: false,
+    ownerTeam: 'ads',
+    notes:
+      'Mirrors campaigns, ad sets and ads into ad_platform_entities (ads control plane phase 1c, '
+      + 'ticket #16405). Recorded because phase 1 is done only after 24h of green cron_runs, and '
+      + 'the console and the rules read this mirror. A missed run leaves the mirror stale; it '
+      + 'moves no money, so it is not a money event.',
+  },
+  {
     route: '/cron/ads-token-health',
     plane: 'vercel',
     schedule: '35 8 * * *',
