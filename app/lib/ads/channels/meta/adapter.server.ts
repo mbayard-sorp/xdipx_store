@@ -4,18 +4,20 @@
  * normalized rows. It writes nothing anywhere. Phase 1c upserts the entities
  * into ad_platform_entities; phase 2b stores the insights.
  *
- * createPaused throws ChannelNotEnabledError until phase 6a moves the
- * paused-draft push here. mutate (phase 5a) hands pause, resume, set_budget
+ * createPaused (phase 6a) hands a built paused-draft payload to
+ * metaCreatePaused in meta/mutate.server.ts, a protected path; only
+ * dispatchCreatePaused in channels/apply.server.ts calls it, so every draft
+ * is an ad_actions row. mutate (phase 5a) hands pause, resume, set_budget
  * and halt_all to meta/mutate.server.ts, a protected path; update_creative
  * still throws ChannelNotEnabledError there. Only the ledger dispatcher in
  * channels/apply.server.ts calls mutate.
  */
-import { metaCredentialsFromEnv, type MetaCredentials } from '~/lib/ad-export/meta-push.server'
-import { ChannelNotEnabledError } from '../errors'
+import { metaCredentialsFromEnv, type MetaCredentials } from './credentials'
 import type {
-  ChannelAdapter, EntityLevel, MutationRequest, MutationResult, NormalizedAudience, NormalizedEntity, NormalizedInsightRow, PolicyContext, PolicyRefusal, PolicyVerdict, TokenHealth,
+  ChannelAdapter, CreatedRefs, EntityLevel, MutationRequest, MutationResult, NormalizedAudience, NormalizedEntity, NormalizedInsightRow, PolicyContext, PolicyRefusal, PolicyVerdict, TokenHealth,
 } from '../types'
 import { GraphError, createGraphClient, type GraphClient, type GraphJson } from './graph.server'
+import type { MetaCreatePausedInput } from './mutate.server'
 
 const CAMPAIGN_FIELDS = 'id,name,status,effective_status,objective,daily_budget,lifetime_budget,bid_strategy,updated_time'
 // Ad sets carry no objective of their own; it lives on the campaign. targeting
@@ -175,11 +177,18 @@ export interface MetaAdapterDeps {
   now?: () => Date
   /** Defaults to metaMutate in meta/mutate.server.ts, loaded on first use. */
   mutate?: (m: MutationRequest) => Promise<MutationResult>
+  /** Defaults to metaCreatePaused in meta/mutate.server.ts, loaded on first use. */
+  createPaused?: (input: MetaCreatePausedInput) => Promise<CreatedRefs>
 }
 
 async function defaultMutate(m: MutationRequest): Promise<MutationResult> {
   const { metaMutate } = await import('./mutate.server')
   return metaMutate(m)
+}
+
+async function defaultCreatePaused(input: MetaCreatePausedInput): Promise<CreatedRefs> {
+  const { metaCreatePaused } = await import('./mutate.server')
+  return metaCreatePaused(input)
 }
 
 export function createMetaAdapter(deps: MetaAdapterDeps = {}): ChannelAdapter {
@@ -284,8 +293,9 @@ export function createMetaAdapter(deps: MetaAdapterDeps = {}): ChannelAdapter {
       },
     },
 
-    async createPaused() {
-      throw new ChannelNotEnabledError('meta', 'createPaused')
+    /** Takes a MetaCreatePausedInput: the built payload, our creative id, and any campaign or ad set to reuse. */
+    async createPaused(input: unknown) {
+      return (deps.createPaused ?? defaultCreatePaused)(input as MetaCreatePausedInput)
     },
 
     async mutate(m) {

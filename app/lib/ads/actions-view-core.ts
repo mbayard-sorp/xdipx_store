@@ -59,4 +59,5 @@ export const VERB_LABELS: Readonly<Record<AdActionVerb, string>> = {
   set_budget: 'Set budget',
   update_creative: 'Swap creative',
   halt_all: 'Halt everything',
+  create_paused: 'Create paused draft',
 }

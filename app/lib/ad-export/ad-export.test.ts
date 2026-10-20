@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import { unzipSync, strFromU8 } from 'fflate'
 
-vi.mock('~/lib/db.server', () => ({ db: {} }))
+const dbMock = vi.hoisted(() => ({ update: vi.fn(), insert: vi.fn() }))
+vi.mock('~/lib/db.server', () => ({ db: dbMock }))
 
 import { EXPORTER_BY_LANE, TEXT_EXPORT_LANES, exporterForLane } from './types'
 import { EXPORTERS, getExporter } from './registry.server'
@@ -12,6 +13,14 @@ import { buildSearchExport, decodeExport, validate } from './google-editor-csv.s
 import { buildMetaDraft, metaDailyBudget } from './meta-paused-draft.server'
 import { MetaPushError, type MetaDraftPayload } from './meta-payload'
 import { pushMetaDraft, type MetaPushDeps } from './meta-push.server'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import type { ApplyDeps, ApplyStore } from '~/lib/ads/channels/apply.server'
+import type { AdActionRow, NewAdAction } from '~/lib/ads/ledger.server'
+import { isLegalTransition, type AdActionStatus } from '~/lib/ads/ledger-core'
+import { createMetaAdapter } from '~/lib/ads/channels/meta/adapter.server'
+import { createMetaCreatePaused } from '~/lib/ads/channels/meta/mutate.server'
+import { GraphError, type GraphClient } from '~/lib/ads/channels/meta/graph.server'
 import { buildBannerZip, pngName, type BannerManifest } from './banner-zip.server'
 import type { GatesJson } from '~/lib/ad-render-rules'
 
@@ -61,10 +70,8 @@ describe('registry lane mapping', () => {
     expect(TEXT_EXPORT_LANES).toEqual(['google', 'microsoft'])
   })
 
-  it('only the Meta exporter can push', () => {
-    expect(EXPORTERS['meta-paused-draft'].push).toBeTypeOf('function')
-    expect(EXPORTERS['google-editor-csv'].push).toBeUndefined()
-    expect(EXPORTERS['banner-zip'].push).toBeUndefined()
+  it('no exporter can push: the Meta draft push lives on the adapter now', () => {
+    for (const e of Object.values(EXPORTERS)) expect('push' in e).toBe(false)
   })
 })
 
@@ -260,74 +267,189 @@ describe('meta-paused-draft', () => {
 describe('meta push', () => {
   const now = new Date('2026-10-03T12:00:00Z')
   const payload = buildMetaDraft({ idea: metaIdea(), creatives: [creative({ id: 900 })], dailyCapCents: 2000, now }).payloadJson
+  const creds = () => ({ token: 'tok', accountId: 'act_1', pageId: 'page1' })
 
-  function deps(over: Partial<MetaPushDeps> & { fetchImpl?: typeof fetch } = {}): MetaPushDeps {
-    return {
-      spendEnabled: async () => true,
-      credentials: () => ({ token: 'tok', accountId: 'act_1', pageId: 'page1' }),
-      fetchBytes: async () => Buffer.from('png'),
-      ...over,
+  /**
+   * The whole push path with every edge mocked: a fake Graph client, an
+   * in-memory ad_actions ledger, the real dispatcher, the real Meta adapter
+   * and the real metaCreatePaused. No network, no database.
+   */
+  function harness(opts: { failOn?: number; spendEnabled?: boolean } = {}) {
+    const posts: Array<{ path: string; body: Record<string, unknown> }> = []
+    const post = vi.fn(async (path: string, body: Record<string, unknown> = {}) => {
+      posts.push({ path, body })
+      if (opts.failOn === posts.length) throw new GraphError('api_error', `Graph POST ${path} refused: bad targeting`)
+      const edge = path.split('/').pop()
+      return edge === 'adimages' ? { images: { 'x.png': { hash: 'abc123' } } } : { id: `${edge}-id` }
+    })
+    const graph = { post, get: vi.fn(), getAll: vi.fn() } as unknown as GraphClient
+    const recordPushed = vi.fn(async () => {})
+    const recordPartial = vi.fn(async () => {})
+    const sync = vi.fn(async () => ({}))
+    const createPaused = createMetaCreatePaused({
+      graph, credentials: creds, fetchBytes: async () => Buffer.from('png'),
+      policyCheck: async () => ({ ok: true, refusals: [] }),
+      store: { recordPushed, recordPartial }, syncAfterWrite: sync, now: () => now,
+    })
+    const adapter = createMetaAdapter({ graph, credentials: creds, createPaused })
+    const rows: AdActionRow[] = []
+    const store: ApplyStore = {
+      mirrorRows: async () => [],
+      countAutoActionsSince: async () => 0,
+      countAutoPausesSince: async () => 0,
+      findByKey: async key => rows.find(r => r.idempotencyKey === key) ?? null,
+      insert: async (input: NewAdAction) => {
+        if (rows.some(r => r.idempotencyKey === input.idempotencyKey)) return { inserted: false, row: null }
+        const row = {
+          id: rows.length + 1, ...input, params: input.params ?? null, before: input.before ?? null, after: input.after ?? null,
+          status: input.status ?? 'proposed', approvedBy: null, approvedAt: null, appliedAt: null,
+          platformResponse: null, error: null, expiresAt: null, reason: input.reason ?? null, ruleEventId: null, createdAt: now,
+        } as AdActionRow
+        rows.push(row)
+        return { inserted: true, row }
+      },
+      transition: async (id, to: AdActionStatus, actor, extra = {}) => {
+        const row = rows.find(r => r.id === id)!
+        if (!isLegalTransition(row.status, to)) throw new Error(`illegal ${row.status} -> ${to}`)
+        row.status = to
+        if (to === 'approved') row.approvedBy = actor
+        if (extra.after !== undefined) row.after = extra.after
+        if (extra.error !== undefined) row.error = extra.error
+        if (extra.platformResponse !== undefined) row.platformResponse = extra.platformResponse
+        return row
+      },
     }
+    const apply: ApplyDeps = {
+      store,
+      settings: async () => ({ spendEnabled: opts.spendEnabled ?? true, autoApplyEnabled: false, autoActionsMaxPerDay: 10, budgetMaxStepPct: 20 }),
+      adapterFor: () => adapter,
+    }
+    const deps = (over: Partial<MetaPushDeps> = {}): MetaPushDeps => ({
+      spendEnabled: async () => opts.spendEnabled ?? true, credentials: creds, actor: 'mike@xdipx.com', apply, ...over,
+    })
+    return { posts, post, rows, deps, recordPushed, recordPartial, sync }
   }
 
-  it('refuses with spend_disabled when the valve is off and never reads credentials or calls the network', async () => {
-    const f = vi.fn()
-    const creds = vi.fn()
-    await expect(pushMetaDraft(payload, 900, {}, deps({ spendEnabled: async () => false, credentials: creds, fetchImpl: f as unknown as typeof fetch })))
+  it('refuses with spend_disabled when the valve is off and never reads credentials or calls Graph', async () => {
+    const h = harness()
+    const credentials = vi.fn()
+    await expect(pushMetaDraft(payload, 900, {}, h.deps({ spendEnabled: async () => false, credentials })))
       .rejects.toMatchObject({ code: 'spend_disabled' })
-    expect(f).not.toHaveBeenCalled()
-    expect(creds).not.toHaveBeenCalled()
+    expect(credentials).not.toHaveBeenCalled()
+    expect(h.post).not.toHaveBeenCalled()
+    expect(h.rows).toHaveLength(0)
   })
 
   it('refuses with not_configured when the valve is on but no token exists', async () => {
-    const f = vi.fn()
-    await expect(pushMetaDraft(payload, 900, {}, deps({ credentials: () => ({ token: null, accountId: null, pageId: null }), fetchImpl: f as unknown as typeof fetch })))
+    const h = harness()
+    await expect(pushMetaDraft(payload, 900, {}, h.deps({ credentials: () => ({ token: null, accountId: null, pageId: null }) })))
       .rejects.toMatchObject({ code: 'not_configured' })
-    expect(f).not.toHaveBeenCalled()
+    expect(h.post).not.toHaveBeenCalled()
+    expect(h.rows).toHaveLength(0)
   })
 
-  it('creates image, campaign, ad set, creative and ad in order, ad PAUSED, and reuses existing ids', async () => {
-    const calls: Array<{ url: string; body: Record<string, unknown> }> = []
-    const f = vi.fn(async (url: string, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body)) as Record<string, unknown>
-      calls.push({ url: String(url), body })
-      expect((init?.headers as Record<string, string>)['authorization']).toBe('Bearer tok')
-      expect(String(url)).not.toContain('tok')
-      const path = String(url).split('/').pop()
-      const json = path === 'adimages' ? { images: { 'x.png': { hash: 'abc123' } } } : { id: `${path}-id` }
-      return new Response(JSON.stringify(json), { status: 200 })
-    })
-    const res = await pushMetaDraft(payload, 900, {}, deps({ fetchImpl: f as unknown as typeof fetch }))
-    expect(calls.map(c => c.url.split('/').pop())).toEqual(['adimages', 'campaigns', 'adsets', 'adcreatives', 'ads'])
-    expect(calls[1]!.body['status']).toBe('PAUSED')
-    expect(calls[2]!.body['status']).toBe('PAUSED')
-    expect((calls[2]!.body['targeting'] as { age_min: number }).age_min).toBe(25)
-    expect(calls[2]!.body['campaign_id']).toBe('campaigns-id')
-    const spec = calls[3]!.body['object_story_spec'] as { page_id: string; link_data: { image_hash: string } }
+  it('the dispatcher holds the spend valve too: no row and no Graph call', async () => {
+    const h = harness({ spendEnabled: false })
+    await expect(pushMetaDraft(payload, 900, {}, h.deps({ spendEnabled: async () => true })))
+      .rejects.toMatchObject({ code: 'spend_disabled' })
+    expect(h.post).not.toHaveBeenCalled()
+    expect(h.rows).toHaveLength(0)
+  })
+
+  it('writes one ad_actions row and five Graph POSTs in order, every status PAUSED', async () => {
+    const h = harness()
+    const res = await pushMetaDraft(payload, 900, {}, h.deps())
+    expect(h.posts.map(c => c.path)).toEqual(['act_1/adimages', 'act_1/campaigns', 'act_1/adsets', 'act_1/adcreatives', 'act_1/ads'])
+    expect(h.posts[1]!.body['status']).toBe('PAUSED')
+    expect(h.posts[2]!.body['status']).toBe('PAUSED')
+    expect((h.posts[2]!.body['targeting'] as { age_min: number }).age_min).toBe(25)
+    expect(h.posts[2]!.body['campaign_id']).toBe('campaigns-id')
+    const spec = h.posts[3]!.body['object_story_spec'] as { page_id: string; link_data: { image_hash: string } }
     expect(spec.page_id).toBe('page1')
     expect(spec.link_data.image_hash).toBe('abc123')
-    expect(calls[4]!.body['status']).toBe('PAUSED')
-    expect(JSON.stringify(calls)).not.toContain('ACTIVE')
+    expect(h.posts[4]!.body['status']).toBe('PAUSED')
+    expect(JSON.stringify(h.posts)).not.toContain('ACTIVE')
     expect(res.externalAdId).toBe('ads-id')
 
-    calls.length = 0
-    const again = await pushMetaDraft(payload, 900, { campaignId: 'C1', adSetId: 'S1' }, deps({ fetchImpl: f as unknown as typeof fetch }))
-    expect(calls.map(c => c.url.split('/').pop())).toEqual(['adimages', 'adcreatives', 'ads'])
+    expect(h.rows).toHaveLength(1)
+    expect(h.rows[0]).toMatchObject({
+      verb: 'create_paused', tier: 'owner', status: 'applied', before: null, platform: 'meta',
+      targetLevel: 'creative', targetExternalId: 'ad_creatives:900',
+      proposedBy: 'mike@xdipx.com', approvedBy: 'mike@xdipx.com',
+      after: { campaignId: 'campaigns-id', adSetId: 'adsets-id', creativeId: 'adcreatives-id', adId: 'ads-id' },
+    })
+    expect(h.recordPushed).toHaveBeenCalledWith(900, expect.objectContaining({ externalAdId: 'ads-id' }), 'mike@xdipx.com')
+    expect(h.sync).toHaveBeenCalledWith('meta', ['campaigns-id', 'adsets-id', 'ads-id'])
+  })
+
+  it('reuses the campaign and ad set a sibling size already made', async () => {
+    const h = harness()
+    const again = await pushMetaDraft(payload, 900, { campaignId: 'C1', adSetId: 'S1' }, h.deps())
+    expect(h.posts.map(c => c.path.split('/').pop())).toEqual(['adimages', 'adcreatives', 'ads'])
+    expect(h.posts[2]!.body['adset_id']).toBe('S1')
     expect(again.reused).toEqual({ campaign: true, adSet: true })
   })
 
-  it('returns the ids created so far when a later step fails', async () => {
-    let n = 0
-    const f = vi.fn(async (url: string) => {
-      n += 1
-      if (n === 3) return new Response(JSON.stringify({ error: { message: 'bad targeting' } }), { status: 400 })
-      return new Response(JSON.stringify(String(url).endsWith('adimages') ? { images: { a: { hash: 'h' } } } : { id: `id${n}` }), { status: 200 })
-    })
-    const err = await pushMetaDraft(payload, 900, {}, deps({ fetchImpl: f as unknown as typeof fetch })).catch(e => e as MetaPushError)
+  it('refuses a replay of the same creative as already pushed, with no second Graph call', async () => {
+    const h = harness()
+    await pushMetaDraft(payload, 900, {}, h.deps())
+    h.posts.length = 0
+    await expect(pushMetaDraft(payload, 900, {}, h.deps())).rejects.toMatchObject({ code: 'already_pushed' })
+    expect(h.posts).toHaveLength(0)
+    expect(h.rows).toHaveLength(1)
+  })
+
+  it('returns the ids created so far when a later step fails, marks the row failed, and lets a retry run', async () => {
+    const h = harness({ failOn: 3 })
+    const err = await pushMetaDraft(payload, 900, {}, h.deps()).catch(e => e as MetaPushError)
     expect(err).toBeInstanceOf(MetaPushError)
     expect((err as MetaPushError).code).toBe('api_error')
-    expect((err as MetaPushError).partial.campaignId).toBe('id2')
+    expect((err as MetaPushError).partial.campaignId).toBe('campaigns-id')
     expect((err as MetaPushError).message).toContain('bad targeting')
+    expect(h.recordPartial).toHaveBeenCalledTimes(1)
+    expect(h.rows).toHaveLength(1)
+    expect(h.rows[0]).toMatchObject({ status: 'failed', platformResponse: { partial: { campaignId: 'campaigns-id' } } })
+    expect(h.rows[0]!.error).toContain('bad targeting')
+
+    // A retry is a second attempt row, reusing what exists.
+    const ok = await pushMetaDraft(payload, 900, { campaignId: 'campaigns-id' }, h.deps())
+    expect(ok.reused.campaign).toBe(true)
+    expect(h.rows.map(r => r.status)).toEqual(['failed', 'applied'])
+  })
+
+  it('refuses before any Graph call when the mirror shows a disapproval (M7)', async () => {
+    const post = vi.fn()
+    const cp = createMetaCreatePaused({
+      graph: { post, get: vi.fn(), getAll: vi.fn() } as unknown as GraphClient, credentials: creds, fetchBytes: async () => Buffer.from('png'),
+      policyCheck: async () => ({ ok: false, refusals: [{ code: 'meta_disapproved', message: 'Meta ad 9 is DISAPPROVED.' }] }),
+      store: { recordPushed: vi.fn(), recordPartial: vi.fn() }, syncAfterWrite: vi.fn(),
+    })
+    await expect(cp({ payload, adCreativeId: 900 })).rejects.toThrow(/DISAPPROVED/)
+    expect(post).not.toHaveBeenCalled()
+  })
+
+  it('refuses a destination off the bridge host before any Graph call (M1)', async () => {
+    const post = vi.fn()
+    const bad = JSON.parse(JSON.stringify(payload)) as MetaDraftPayload
+    bad.ads[0]!.adCreative.object_story_spec.link_data.link = 'https://xdipx.com/collections/vibrators'
+    const cp = createMetaCreatePaused({
+      graph: { post, get: vi.fn(), getAll: vi.fn() } as unknown as GraphClient, credentials: creds, fetchBytes: async () => Buffer.from('png'),
+      policyCheck: async () => ({ ok: true, refusals: [] }), store: { recordPushed: vi.fn(), recordPartial: vi.fn() }, syncAfterWrite: vi.fn(),
+    })
+    await expect(cp({ payload: bad, adCreativeId: 900 })).rejects.toThrow(/bridge host/)
+    expect(post).not.toHaveBeenCalled()
+  })
+
+  it('nothing on the push path touches the database, so nothing writes ad_campaigns', async () => {
+    const h = harness()
+    await pushMetaDraft(payload, 900, {}, h.deps())
+    expect(dbMock.update).not.toHaveBeenCalled()
+    expect(dbMock.insert).not.toHaveBeenCalled()
+  })
+
+  it('the export service no longer writes the legacy ad_campaigns table', () => {
+    const src = readFileSync(join(__dirname, 'service.server.ts'), 'utf8')
+    expect(src).not.toMatch(/adCampaigns/)
   })
 })
 

@@ -2572,7 +2572,7 @@ export const adActions = pgTable('ad_actions', {
   platform:         text('platform').notNull(),
   targetLevel:      text('target_level').$type<AdPlatformEntityLevel>().notNull(),
   targetExternalId: text('target_external_id').notNull(),
-  verb:             text('verb').$type<AdActionVerb>().notNull(), // pause|resume|set_budget|update_creative|halt_all
+  verb:             text('verb').$type<AdActionVerb>().notNull(), // pause|resume|set_budget|update_creative|halt_all|create_paused
   params:           jsonb('params').$type<Record<string, unknown> | null>(),
   before:           jsonb('before').$type<Record<string, unknown> | null>(),
   after:            jsonb('after').$type<Record<string, unknown> | null>(),
@@ -2595,7 +2595,8 @@ export const adActions = pgTable('ad_actions', {
   platformTargetIdx: index('idx_ad_actions_platform_target').on(t.platform, t.targetExternalId),
 }))
 
-export type AdActionVerb = 'pause' | 'resume' | 'set_budget' | 'update_creative' | 'halt_all'
+/** create_paused (phase 6a): an owner-tier paused draft, before null, after the created ids. */
+export type AdActionVerb = 'pause' | 'resume' | 'set_budget' | 'update_creative' | 'halt_all' | 'create_paused'
 export type AdActionTier = 'auto' | 'approve' | 'owner'
 export type AdActionStatus =
   | 'proposed' | 'dry_run' | 'approved' | 'applied' | 'failed' | 'rejected' | 'expired'

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  adoptStrandedAutoRow, applyApprovedRow, dispatch, STRANDED_MIN_AGE_MS,
+  adoptStrandedAutoRow, applyApprovedRow, dispatch, dispatchCreatePaused, STRANDED_MIN_AGE_MS,
   type ApplyDeps, type ApplySettings, type ApplyStore,
 } from './apply.server'
 import type { MirrorBudgetRow } from './apply-core'
@@ -310,5 +310,62 @@ describe('applyApprovedRow and adoptStrandedAutoRow', () => {
     expect(r.note).toMatch(/auto-pause cap/)
     expect(capped.status).toBe('proposed')
     expect(mutate).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('dispatchCreatePaused', () => {
+  const input = { payload: { any: 'thing' }, adCreativeId: 900 }
+  const req = { platform: 'meta' as const, adCreativeId: 900, input, proposedBy: 'mike@xdipx.com', now: NOW }
+  const createdAdapter = (impl?: () => Promise<unknown>) => {
+    const createPaused = vi.fn(impl ?? (async () => ({ campaignId: 'c9', adSetId: 's9', creativeId: 'k9', adId: 'a9' })))
+    const mutate = vi.fn()
+    return { adapter: { id: 'meta', createPaused, mutate } as unknown as ChannelAdapter, createPaused, mutate }
+  }
+
+  it('runs with ads_auto_apply_enabled off: one owner-tier row, applied, after the created ids', async () => {
+    const mem = memoryStore([])
+    const { adapter, createPaused, mutate } = createdAdapter()
+    const r = await dispatchCreatePaused(req, deps({ store: mem.store, adapter, settings: { autoApplyEnabled: false } }))
+    expect(r.created.adId).toBe('a9')
+    expect(createPaused).toHaveBeenCalledWith(input)
+    expect(mutate).not.toHaveBeenCalled()
+    expect(mem.rows).toHaveLength(1)
+    expect(mem.rows[0]).toMatchObject({
+      verb: 'create_paused', tier: 'owner', status: 'applied', before: null, approvedBy: 'mike@xdipx.com',
+      targetLevel: 'creative', targetExternalId: 'ad_creatives:900',
+      after: { campaignId: 'c9', adSetId: 's9', creativeId: 'k9', adId: 'a9' },
+    })
+  })
+
+  it('needs ads_spend_enabled: off writes no row and calls nothing', async () => {
+    const mem = memoryStore([])
+    const { adapter, createPaused } = createdAdapter()
+    await expect(dispatchCreatePaused(req, deps({ store: mem.store, adapter, settings: { spendEnabled: false } })))
+      .rejects.toMatchObject({ code: 'spend_disabled' })
+    expect(createPaused).not.toHaveBeenCalled()
+    expect(mem.rows).toHaveLength(0)
+  })
+
+  it('a failure marks the row failed and rethrows the adapter error; a retry is a new attempt; an applied creative is refused', async () => {
+    const mem = memoryStore([])
+    const boom = Object.assign(new Error('Meta ad set refused: bad targeting'), { partial: { campaignId: 'c9' } })
+    const failing = createdAdapter(async () => { throw boom })
+    await expect(dispatchCreatePaused(req, deps({ store: mem.store, adapter: failing.adapter }))).rejects.toBe(boom)
+    expect(mem.rows[0]).toMatchObject({ status: 'failed', platformResponse: { partial: { campaignId: 'c9' } } })
+
+    const ok = createdAdapter()
+    await dispatchCreatePaused(req, deps({ store: mem.store, adapter: ok.adapter }))
+    expect(mem.rows.map(r => r.status)).toEqual(['failed', 'applied'])
+    expect(mem.rows.map(r => (r.params as { attempt: number }).attempt)).toEqual([0, 1])
+
+    await expect(dispatchCreatePaused(req, deps({ store: mem.store, adapter: ok.adapter }))).rejects.toMatchObject({ code: 'already_applied' })
+    expect(ok.createPaused).toHaveBeenCalledTimes(1)
+    expect(mem.rows).toHaveLength(2)
+  })
+
+  it('no adapter for the channel lands as a failed row', async () => {
+    const mem = memoryStore([])
+    await expect(dispatchCreatePaused(req, deps({ store: mem.store }))).rejects.toBeInstanceOf(ChannelNotEnabledError)
+    expect(mem.rows[0]).toMatchObject({ status: 'failed', verb: 'create_paused' })
   })
 })

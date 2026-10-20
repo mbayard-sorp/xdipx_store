@@ -37,11 +37,14 @@
  *   dry_run with reason "auto-pause cap: owner page", and one owner blocker
  *   keyed ads-auto-pause-cap is filed.
  *
- * Phase 5b (ticket #16432) added applyApprovedRow and adoptStrandedAutoRow
- * at the bottom of this file, the entry points of the hourly applier in
- * app/lib/ads/apply-run.server.ts.
+ * Phase 5b (ticket #16432) added applyApprovedRow and adoptStrandedAutoRow,
+ * the entry points of the hourly applier in app/lib/ads/apply-run.server.ts.
  *
- * Nothing changes on a platform while ads_spend_enabled or
+ * Phase 6a (ticket #16434) added dispatchCreatePaused: the paused draft
+ * from the Creatives tab, one owner-tier row per attempt, gated on
+ * ads_spend_enabled only, because a paused draft creates nothing live.
+ *
+ * Apart from that draft, nothing changes on a platform while ads_spend_enabled or
  * ads_auto_apply_enabled is off, approved rows included. The Meta adapter
  * refuses any resume that does not undo the machine's own pause (M4).
  */
@@ -54,7 +57,7 @@ import {
   type DispatchGate, type DispatchVerb, type MirrorBudgetRow,
 } from './apply-core'
 import { ChannelNotEnabledError, MutationRefusedError } from './errors'
-import type { ChannelAdapter, ChannelId, EntityRef, MutationResult } from './types'
+import type { ChannelAdapter, ChannelId, CreatedRefs, EntityRef, MutationResult } from './types'
 
 /** Plan §9.4: at most 3 automatic pauses a day; the 4th waits and pages the owner. */
 export const AUTO_PAUSE_CAP_PER_DAY = 3
@@ -470,7 +473,8 @@ async function applyRow(
   deps: ApplyDeps,
   base: Pick<DispatchResult, 'tier' | 'target' | 'actionId' | 'inserted'>,
 ): Promise<DispatchResult> {
-  const verb = row.verb as AdActionVerb
+  // create_paused rows never reach here: dispatchCreatePaused has its own path.
+  const verb = row.verb as Exclude<AdActionVerb, 'create_paused'>
   const params = (row.params ?? null) as Record<string, unknown> | null
   const fail = async (msg: string, platformResponse?: unknown): Promise<DispatchResult> => {
     try {
@@ -605,4 +609,118 @@ export async function adoptStrandedAutoRow(row: AdActionRow, deps: ApplyDeps = {
     return leave(`Another writer moved this row first: ${errorText(err)}`)
   }
   return applyRow(approved, target, store, deps, base)
+}
+
+// ---------------------------------------------------------------------------
+// dispatchCreatePaused (phase 6a, ticket #16434)
+// ---------------------------------------------------------------------------
+
+/** How many failed attempts one creative may log in a day before the next push is refused. */
+export const CREATE_PAUSED_MAX_ATTEMPTS = 20
+
+export interface CreatePausedRequest {
+  platform: ChannelId
+  /** Our ad_creatives id. The ledger target is creative ad_creatives:<id>. */
+  adCreativeId: number
+  /** Handed to the adapter's createPaused unchanged. */
+  input: unknown
+  /** The admin's email. The Creatives tab action is the only caller. */
+  proposedBy: string
+  reason?: string | null | undefined
+  now?: Date | undefined
+}
+
+export interface CreatePausedDispatchResult {
+  actionId: number
+  created: CreatedRefs
+}
+
+/**
+ * The ledger path for a paused draft. Always tier owner: an admin session is
+ * the only caller, and that admin approves the row. Never auto, never dry_run.
+ *
+ * Gates: ads_spend_enabled must be on, exactly as the old push required.
+ * ads_auto_apply_enabled is not read: a paused draft creates nothing live,
+ * and only the owner takes an ad live (docs/ads-policy.md M4).
+ *
+ * One row per attempt: verb create_paused, before null, after the created
+ * ids, status applied or failed. The key carries the creative id and an
+ * attempt number, so a failed push can be retried and an applied one cannot.
+ * A replay of a pushed creative throws already_applied with no platform call.
+ * The adapter's own error is rethrown once the row is marked failed, so the
+ * caller sees the same error the push always threw.
+ */
+export async function dispatchCreatePaused(req: CreatePausedRequest, deps: ApplyDeps = {}): Promise<CreatePausedDispatchResult> {
+  const store = deps.store ?? defaultStore
+  const now = req.now ?? new Date()
+  const settings = await (deps.settings ?? defaultSettings)()
+  if (!settings.spendEnabled) {
+    throw new MutationRefusedError(req.platform, 'spend_disabled', 'Spend is off (ads_spend_enabled is false). Nothing was sent.')
+  }
+  const target: EntityRef = { platform: req.platform, level: 'creative', externalId: `ad_creatives:${req.adCreativeId}` }
+
+  let idempotencyKey: string | null = null
+  let params: Record<string, unknown> = {}
+  for (let attempt = 0; attempt < CREATE_PAUSED_MAX_ATTEMPTS; attempt++) {
+    params = { adCreativeId: req.adCreativeId, attempt }
+    const key = buildIdempotencyKey({ ...target, verb: 'create_paused', day: dayOf(now), params })
+    const existing = await store.findByKey(key)
+    if (!existing) { idempotencyKey = key; break }
+    if (existing.status === 'applied') {
+      throw new MutationRefusedError(req.platform, 'already_applied', `Creative #${req.adCreativeId} was already created on ${req.platform} (ad_actions #${existing.id}).`)
+    }
+    if (existing.status === 'proposed' || existing.status === 'approved') {
+      throw new MutationRefusedError(req.platform, 'already_applied', `Creative #${req.adCreativeId} has a push in flight (ad_actions #${existing.id}). Check Ads Manager before trying again.`)
+    }
+  }
+  if (!idempotencyKey) {
+    throw new MutationRefusedError(req.platform, 'already_applied', `Creative #${req.adCreativeId} has failed ${CREATE_PAUSED_MAX_ATTEMPTS} pushes today. Read the failed rows in ad_actions first.`)
+  }
+
+  const ins = await store.insert({
+    idempotencyKey, platform: req.platform, targetLevel: target.level, targetExternalId: target.externalId,
+    verb: 'create_paused', params, before: null, after: null,
+    proposedBy: req.proposedBy, reason: joinReason('Paused draft from the Creatives tab', req.reason),
+    tier: 'owner', status: 'proposed',
+  })
+  if (!ins.inserted || !ins.row) {
+    throw new MutationRefusedError(req.platform, 'already_applied', `Creative #${req.adCreativeId} has a push in flight. Check Ads Manager before trying again.`)
+  }
+  const row = await store.transition(ins.row.id, 'approved', req.proposedBy)
+
+  const markFailed = async (err: unknown): Promise<void> => {
+    const partial = err && typeof err === 'object' ? (err as { partial?: unknown }).partial : undefined
+    try {
+      await store.transition(row.id, 'failed', req.proposedBy, {
+        error: errorText(err).slice(0, 1000),
+        ...(partial !== undefined ? { platformResponse: { partial } } : {}),
+      })
+    } catch (e) {
+      console.error('[ads/apply] could not mark the create_paused row failed', row.id, e)
+    }
+  }
+
+  const adapter = await (deps.adapterFor ? Promise.resolve(deps.adapterFor(req.platform)) : defaultAdapterFor(req.platform))
+  if (!adapter) {
+    const err = new ChannelNotEnabledError(req.platform, 'createPaused')
+    await markFailed(err)
+    throw err
+  }
+  let created: CreatedRefs
+  try {
+    created = await adapter.createPaused(req.input)
+  } catch (err) {
+    await markFailed(err)
+    throw err
+  }
+  const after = {
+    campaignId: created.campaignId ?? null, adSetId: created.adSetId ?? null,
+    creativeId: created.creativeId ?? null, adId: created.adId ?? null,
+  }
+  try {
+    await store.transition(row.id, 'applied', req.proposedBy, { after, platformResponse: created })
+  } catch (err) {
+    console.error('[ads/apply] the create_paused applied transition failed', row.id, err)
+  }
+  return { actionId: row.id, created }
 }

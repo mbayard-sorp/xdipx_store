@@ -13,7 +13,7 @@
  *   destination_url (UTM'd), utm_content,
  *   export  { exporter, filename, contentType, url, bytes, summary, builtAt, builtBy, variant }
  *   meta    { payload, preview }           Meta lane only
- *   push    { adId, campaignId, adSetId, creativeId, imageHash, pushedAt }   after a real Meta push
+ *   push    { adId, campaignId, adSetId, creativeId, imageHash, pushedAt }   after a real Meta push (written by metaCreatePaused)
  *   push    { platform: 'microsoft', env, campaignName, campaignId, adGroupId, keywordIds, adId, pushedAt }
  *
  * Storage choice: Vercel Blob, same store and helper as the rendered PNGs
@@ -23,7 +23,7 @@
  */
 import { and, asc, eq, inArray } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
-import { adCampaigns, adCreativeFeedback, adCreatives, adIdeas, mediaAssets } from '../../../db/schema'
+import { adCreativeFeedback, adCreatives, adIdeas, mediaAssets } from '../../../db/schema'
 import { isGatesJson } from '~/lib/ad-render-rules'
 import { isPlaceholderUrl } from '~/lib/ad-render.server'
 import { getAdsMediaDailyCapCents, getAdsSpendEnabled } from '~/lib/ad-settings.server'
@@ -32,7 +32,7 @@ import { ExportRefusal, type ExportBuild, type ExportCreative, type ExportIdea }
 import { getExporter, type ExportContext, type LoadedSubjects } from './registry.server'
 import { exporterForLane, type StoredExportFile } from './types'
 import { MetaPushError, isMetaDraftPayload } from './meta-payload'
-import { metaCredentialsFromEnv, type MetaPushDeps, type MetaPushResult } from './meta-push.server'
+import { metaCredentialsFromEnv, pushMetaDraft, type MetaPushDeps, type MetaPushResult } from './meta-push.server'
 import { assembleAdGroup, campaignNameFor, searchDailyBudgetCents } from './google-editor-csv.server'
 import { assertCreativesExportable } from './policy'
 import { MsPushError, buildMicrosoftPayload, type MsPushPartial } from './microsoft-payload'
@@ -292,16 +292,18 @@ export async function getMetaPayload(creativeId: number): Promise<{ payload: unk
 // ---------------------------------------------------------------------------
 
 export async function defaultPushDeps(): Promise<MetaPushDeps> {
-  const { blobFetchToBuffer } = await import('~/lib/blob.server')
-  return { spendEnabled: getAdsSpendEnabled, credentials: () => metaCredentialsFromEnv(), fetchBytes: blobFetchToBuffer }
+  return { spendEnabled: getAdsSpendEnabled, credentials: () => metaCredentialsFromEnv() }
 }
 
 /**
  * Create the paused draft in Meta for one creative. The valve is checked before
- * the database is read. Never exposed to the team token.
+ * the database is read. Never exposed to the team token. The push runs through
+ * the ledger (dispatchCreatePaused) as one owner-tier ad_actions row, and
+ * metaCreatePaused records the ids on the ad_creatives row. Nothing here
+ * writes the legacy ad_campaigns table any more (plan §3.1).
  */
 export async function pushCreativeToMeta(creativeId: number, actor: string, depsIn?: Partial<MetaPushDeps>): Promise<MetaPushResult> {
-  const deps: MetaPushDeps = { ...(await defaultPushDeps()), ...depsIn }
+  const deps: MetaPushDeps = { ...(await defaultPushDeps()), ...depsIn, actor }
   if (!(await deps.spendEnabled())) throw new MetaPushError('spend_disabled', 'Spend is off (ads_spend_enabled is false). Nothing was sent to Meta.')
 
   const [row] = await db.select({ c: adCreatives }).from(adCreatives).where(eq(adCreatives.id, creativeId)).limit(1)
@@ -325,25 +327,7 @@ export async function pushCreativeToMeta(creativeId: number, actor: string, deps
     adSetId ??= (typeof push['adSetId'] === 'string' ? push['adSetId'] : typeof partial['adSetId'] === 'string' ? (partial['adSetId'] as string) : null)
   }
 
-  const push = getExporter('meta')!.push!
-  try {
-    const res = await push(payload, creativeId, { campaignId, adSetId }, deps)
-    await db.update(adCreatives).set({
-      externalAdId: res.externalAdId,
-      exportPayload: { ...p, push: { ...res, pushedBy: actor }, pushError: undefined },
-      updatedAt: new Date(),
-    }).where(eq(adCreatives.id, creativeId))
-    await db.update(adCampaigns).set({ externalCampaignId: res.campaignId.slice(0, 64), plannedDailyCents: payload.adSet.daily_budget, updatedAt: new Date() }).where(eq(adCampaigns.id, row.c.adCampaignId))
-    return res
-  } catch (err) {
-    if (err instanceof MetaPushError && err.code === 'api_error') {
-      await db.update(adCreatives).set({
-        exportPayload: { ...p, push: { partial: err.partial, error: err.message, at: new Date().toISOString() } },
-        updatedAt: new Date(),
-      }).where(eq(adCreatives.id, creativeId))
-    }
-    throw err
-  }
+  return pushMetaDraft(payload, creativeId, { campaignId, adSetId }, deps)
 }
 
 export async function defaultMicrosoftPushDeps(): Promise<MsPushDeps> {
@@ -443,11 +427,6 @@ export async function pushCreativeToMicrosoft(creativeId: number, actor: string,
       exportPayload: { ...p, push: { platform: 'microsoft', ...res, pushedBy: actor } },
       updatedAt: new Date(),
     }).where(eq(adCreatives.id, creativeId))
-    await db.update(adCampaigns).set({
-      externalCampaignId: res.campaignId.slice(0, 64),
-      plannedDailyCents: Math.round(payload.campaign.DailyBudget * 100),
-      updatedAt: new Date(),
-    }).where(eq(adCampaigns.id, row.c.adCampaignId))
     return res
   } catch (err) {
     if (err instanceof MsPushError && err.code === 'api_error') {

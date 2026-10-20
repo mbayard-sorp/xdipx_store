@@ -13,7 +13,7 @@
  *   call_count, total_cputime or total_time, the client sleeps before it
  *   returns a good response, and sleeps then retries once on a failed one.
  */
-import { metaCredentialsFromEnv } from '~/lib/ad-export/meta-push.server'
+import { metaCredentialsFromEnv } from './credentials'
 
 export const GRAPH_BASE = 'https://graph.facebook.com'
 export const GRAPH_VERSION = 'v23.0'

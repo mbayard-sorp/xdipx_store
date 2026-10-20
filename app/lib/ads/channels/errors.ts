@@ -5,8 +5,7 @@ import type { ChannelId } from './types'
 
 /**
  * Thrown by an adapter method that exists on the interface but is switched
- * off for that channel. Meta's createPaused and mutate throw this until
- * phases 5a and 6a ship them behind the ledger.
+ * off for that channel, such as Meta's update_creative.
  */
 export class ChannelNotEnabledError extends Error {
   readonly kind = 'not_enabled' as const
@@ -24,6 +23,8 @@ export type MutationRefusalCode =
   | 'bad_target'
   | 'bad_params'
   | 'not_configured'
+  | 'spend_disabled'
+  | 'already_applied'
 
 /**
  * Thrown by an adapter's mutate when it refuses a change before calling the
