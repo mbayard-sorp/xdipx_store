@@ -489,6 +489,16 @@ git fetch origin main >/dev/null && git grep -n "<file/flag/symbol from the tick
    ticket #8989) but does not help verify unmerged local changes on this branch, since the remote
    route runs whatever is currently deployed, not the branch under test.
 
+3h-2. **This cloud sandbox cannot open a direct TCP/Postgres connection to Neon (ticket #16353).**
+   `psql "$DATABASE_URL"` (or any raw Postgres client) hangs and times out after ~2 minutes trying
+   all three resolved IPs, even though `DATABASE_URL` is present and otherwise looks configured:
+   outbound here is HTTPS-only through an agent proxy, and a raw socket on port 5432 is simply not
+   reachable. Confirmed independently three times in one pass (tickets #16326, #16273, #16275), each
+   wanting a live DB read to confirm production state before verifying. Only the app's own HTTPS-based
+   Shopify Admin/Storefront API calls and the `/api/team/*` endpoints work from here. When a ticket's
+   verification needs a live DB read this sandbox cannot do, say so plainly in the PR's "what I could
+   not verify" section rather than spending a `psql` timeout rediscovering it.
+
 3i. **A shared pre-condition helper added to fix a bug must be confirmed called from every
    registry entry point, not just the one that triggered the fix.** (#13418) When a fix is a shared
    `assert*`/`require*` helper wired into a multi-lane dispatch or registry (a switch, a handler map,
