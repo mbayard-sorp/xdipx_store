@@ -13,17 +13,9 @@ import { useEffect, useState } from 'react'
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from 'react-router'
 import { Link, useFetcher, useLoaderData } from 'react-router'
 import { getAdminUser, requireAdmin } from '~/lib/session.server'
-import {
-  ACTIONS_TABS,
-  TAB_LABELS,
-  approveAction,
-  loadActions,
-  parseTab,
-  rejectAction,
-  type ActionView,
-  type ActionsTab,
-  type DecisionResult,
-} from '~/lib/ads/actions-view.server'
+import { ACTIONS_TABS, TAB_LABELS, parseTab, type ActionsTab } from '~/lib/ads/actions-view-core'
+import { approveAction, loadActions, rejectAction } from '~/lib/ads/actions-view.server'
+import type { ActionView, DecisionResult } from '~/lib/ads/actions-view.server'
 import { ResponsiveTable } from '~/components/admin/ResponsiveTable'
 
 export const meta: MetaFunction = () => [{ title: 'Actions - Ads - xdipx Admin' }]
