@@ -38,7 +38,7 @@ Everything below was read live or from the code on 2026-10-19, not from memory.
   DISAPPROVED (the Discriminatory Practices / financial-products classifier; ticket #16368 is the
   M7 record, owner has read it, appeal pending).
 - HOLD campaign 120249748010950056 holds 48 gate-failing images and never publishes.
-- Shopify Autopilot Advantage+ Sales 120249603770030056: PAUSED, $0.18 last 7 days, runs on the raw
+- Shopify Autopilot Advantage+ Sales, campaign 120249603764920056 (its one ad is 120249603770030056): PAUSED, $0.18 last 7 days, runs on the raw
   feed (M5 violation). Paused twice already; Shopify Growth can re-enable it.
 - The two active ads published today have no metrics yet.
 
@@ -165,6 +165,8 @@ builders; `metaCredentialsFromEnv` moves into the adapter's auth. Removed: the o
 | 131 | `ad_channel_health` | channel (PK), checked_at, state (ok, expiring, invalid, unknown), valid, expires_at, data_access_expires_at, scopes jsonb, error, env_var. One row per channel, overwritten by the daily token health cron (phase 1d, ticket #16406). Holds the reading, never the token |
 | 132 | `ad_audiences` | platform, external_id, name, kind (custom, lookalike, saved), role (targeting, exclusion), approx_size, status, synced_at. Read-only mirror first |
 | 133 | `ad_experiments` | hypothesis, variable, arms jsonb, primary_metric (cpl, cpa, roas), min_spend_cents, starts_at, ends_at, status, verdict, decided_by |
+| 134 | `ad_health_samples` | sampled_at, key (hello_ok, lead_posts_1h, landing_views_1h, lead_events_6h, growth_campaign_active, lead_post_event), value, detail jsonb. Hourly inputs for rule L3 and the pager (phase 2d, ticket #16410) |
+| 135 | `ad_channel_checklist` | channel, item, checked_at, checked_by, evidence; UNIQUE (channel, item). The nine enablement items from §6 (phase 7a, ticket #16438) |
 
 `ad_rule_events` stays the record of rule evaluations; `ad_actions` is the record of mutations.
 Every rule event that wants a platform change creates exactly one ledger row.
@@ -277,6 +279,41 @@ verifies. Sizes: S under half a day, M one to two days, L three or more.
 | **7. Enablement framework** | 7a channels page and checklist (S) | Reddit and X show as "policy: prohibited" with no adapter |
 
 Order matters: nothing in Phase 5 starts before Phase 4's 14 days of dry-run rows exist.
+
+**Build log, 2026-10-19 to 2026-10-20.** On owner direction ("complete all phases now, you run as
+orthestrator, merge as needed, Opus 5.5 only") every PR below was built by an Opus 5.5 agent in its
+own worktree and squash-merged by the orchestrating session once `check` and `migration-dry-run`
+were green. The 14-day dry-run gate therefore moved from "before Phase 5 is built" to "before the
+owner flips `ads_auto_apply_enabled`" (§13).
+
+| Phase | PR | Ticket |
+|---|---|---|
+| 0a protected paths | #1697 | 16401 |
+| 0b valves | #1699 | 16402 |
+| 0c plan and ADR-018 | #1696 | 16418 |
+| 1a migration 128 | #1698 | 16403 |
+| 1b adapter seam | #1700 | 16404 |
+| 1c entity sync cron | #1704 | 16405 |
+| 1d token health, migration 131 | #1705 | 16406 |
+| 2a migration 129 | #1702 | 16407 |
+| 2b hourly insights pull | #1707 | 16408 |
+| 2c paid attribution bucket | #1703 | 16409 |
+| 2d health samples and L3, migration 134 | #1711 | 16410 |
+| 3a console overview | #1708 | 16411 |
+| 3b tree | #1714 | 16412 |
+| 3c Ad Studio redirects and Settings | #1717 | 16413 |
+| 4a actions ledger, migration 130 | #1706 | 16427 |
+| 4b objective-aware rules L1 to L8 | #1709 | 16428 |
+| 4c dry-run dispatcher | #1716 | 16429 |
+| 4d actions view | #1719 | 16430 |
+| 5a Meta mutate | #1720 | 16431 |
+| 5b hourly applier, digest links, pager | #1722 | 16432 |
+| 5c buyer propose op | #1718 | 16433 |
+| 6a draft push on the adapter | #1721 | 16434 |
+| 6b audiences, migration 132 | #1712 | 16435 |
+| 6c experiments, migration 133 | #1713 | 16436 |
+| 6d Microsoft adapter | #1710 | 16437 |
+| 7a channels page, migration 135 | #1715 | 16438 |
 
 ## 8. Risks for the owner
 
@@ -495,26 +532,57 @@ a claim filter on the tag, which is a bus change and gets its own ticket.
   before the image call); 37 of 176 creatives have any feedback (cap autopicks at 2 when 10 or more
   creatives are unrated); products that drift repeatedly go on a skip-list.
 
-## 12. Where this landed
+## 12. Where this landed, and what is still open
 
-- This plan and ADR-018, opened as a PR by the convening session (owner merges, the ADR path is
-  outside agent-editor's allowlist).
-- `routine-dev-daily.md`: the `[opus-build]` rule (same PR).
-- Code tickets for Phases 0 to 3 under `team: 'ads'`, each tagged `[opus-build]`, with
-  `Depends-on` chains. Phases 4 to 7 are filed when Phase 2 lands and the first real insights
-  exist, so their DONE WHENs are written against data, not guesses.
-- Standing instructions for the ads routine (slate size, pre-render lint, autopick cap, skip-list)
-  filed as `instructions` rows under `team: 'strategy'` with `targetTeam: 'ads'`, the lane that
-  auto-approves, so agent-editor turns them into a playbook PR this week.
+Everything in §7 is on main as of 2026-10-20 (build log above). Production applies the additive
+migrations 128 to 135 on its next build. The tickets sit at `pr_open` until the release engine's
+merged-PR reconcile moves them to `applied`; nothing else may walk that edge.
+
+**Still open, by owner (these are the cost and brand decisions in CLAUDE.md's owner surface):**
+- Create a Meta system user token with `ads_read` and `ads_management` and set it in Vercel as
+  `META_ADS_ACCESS_TOKEN`; the daily token-health cron files a blocker until it is valid.
+- Decide the CPL ceiling (`ads_lead_cpl_ceiling_cents`, default $8) and the campaign structure
+  (Proven and Test ad sets with ad-set budgets, §9.5). Both are Tier C.
+- Read 14 days of `dry_run` rows on `/admin/ads/actions` before flipping `ads_auto_apply_enabled`.
+  `ads_spend_enabled` stays the master valve. Both are off today.
+- Decide whether an R7 halt should bypass `ads_auto_actions_max_per_day` (today a halt counts as one
+  action and is written as a dry run once the cap is used up).
+- Microsoft: the adapter reads and pulls insights; `mutate` stays empty until the Adult Advertising
+  Program accepts account 188472831.
+
+**Known gaps the builders reported (each is a follow-up ticket candidate, none blocks the owner's
+read-only use of the console):**
+- `lead_events_6h` is always 0 because `meta-capi.server.ts` keeps no Lead-event ledger; L3 and the
+  "no Lead event for 6h" page therefore rely on landing views and lead POSTs only.
+- L6 (lead quality) cannot fire: the lead funnel report exposes no email-1 click or reveal-to-cart
+  rate by `utm_content`.
+- The pager skips ad-account payment failure (the mirror never reads `account_status`) and
+  CURIOUS15 redemptions running ahead of leads (nothing in the store reads discount redemptions).
+- The digest "Undo" link opens the Applied tab; a signed link proposing the inverse action is not
+  built.
+- "Never pause the last live ad in a set without paging" and "at most one automatic brake per
+  campaign per 72h" (§9.4) are not enforced in code yet.
+- The Live tab's Pause, Scale and Refresh buttons went away with the tab; the actions view and the
+  ledger replace them, and bulk checkboxes on the tree stay disabled until a bulk ledger action
+  exists.
+- Microsoft shows `policyState: restricted` in the registry while `docs/ads-policy.md` says "allowed
+  through the Adult Advertising Program"; the registry wording is the stricter reading and stands
+  until the program accepts the account.
+
+**Standing instructions for the ads routine** (slate size, pre-render lint, autopick cap, drift
+skip-list) are rows 16414 to 16417. They sit at `proposed` because `ads_team_auto_approve_suggestions`
+is off and the valve keys off the acting team, so the owner's click is what sends them to
+agent-editor.
 
 ## 13. Approval checklist (owner)
 
-- [ ] Phase order and PR split as in §7
-- [ ] Console at `/admin/ads` rather than more Ad Studio tabs
-- [ ] Reddit and X stay adapter-less until a policy row is re-verified and a lane codified
-- [ ] Phase 0a protected-path additions (owner-merged PR)
-- [ ] Phase 0b valves `ads_auto_apply_enabled`, `ads_auto_actions_max_per_day`, `ads_budget_max_step_pct`, `ads_lead_cpl_ceiling_cents` (owner-merged PR)
+- [x] Phase order and PR split as in §7 (built 2026-10-19 to 2026-10-20, see the build log)
+- [x] Console at `/admin/ads` rather than more Ad Studio tabs
+- [x] Reddit and X stay adapter-less until a policy row is re-verified and a lane codified
+- [x] Phase 0a protected-path additions (#1697)
+- [x] Phase 0b valves `ads_auto_apply_enabled`, `ads_auto_actions_max_per_day`, `ads_budget_max_step_pct`, `ads_lead_cpl_ceiling_cents` (#1699)
 - [ ] CPL ceiling value: $8 to start (blocker 732), or another number
 - [ ] Campaign structure: Proven and Test ad sets with ad-set budgets, replacing the single CBO ad set (Tier C, Ads Manager)
 - [ ] Meta system user token created by the owner and set in Vercel as `META_ADS_ACCESS_TOKEN`
-- [ ] Build lane: Opus 5.5 interactive sessions per PR, R-DEV skips `[opus-build]` rows (§10)
+- [x] Build lane: Opus 5.5 agents per PR, R-DEV skips `[opus-build]` rows (§10)
+- [ ] Read 14 days of dry-run rows, then flip `ads_auto_apply_enabled` (and `ads_spend_enabled` when spend is wanted)
