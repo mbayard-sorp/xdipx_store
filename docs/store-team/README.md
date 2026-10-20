@@ -120,6 +120,7 @@ merges. Full lifecycle: `docs/store-team/improvement-loop.md`.
 ## Access checklist (per routine)
 
 Same as the homepage team: scheduled Claude cloud agent with repo access, the team callback secret,
-GA4 MCP where the agent def lists it, and (ads only) the Meta Ads MCP read/insights tools named in
-`.claude/agents/ads-manager.md`. Apply migrations with
+GA4 MCP where the agent def lists it, and (ads routine 28 and the weekly burn review only) the
+read-only Meta Ads MCP set pinned per `docs/store-team/routine-schedule.md` §Connector permissions.
+Routine 27 carries no Meta connector. Apply migrations with
 `npx tsx scripts/apply-migrations.ts --from 051`.

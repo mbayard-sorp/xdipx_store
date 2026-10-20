@@ -39,6 +39,9 @@ does not edit the buyer's verdicts.
    `ads_media_daily_cap_cents`, `ads_media_monthly_cap_cents`, month-to-date spend,
    `ads_gross_margin_pct`, the `ads_rule_*` thresholds.
 5. Open blockers and suggestions that mention a Meta rejection, restriction or data-sharing tier.
+6. The Meta account doctor's findings from Pass 2 Step 4a (`routine-ads-daily.md`), with their
+   evidence, and its ad-level `last_7d` read. A finding whose fix is a pause, resume or budget
+   change on a synced entity is the buyer's to turn into an action proposal.
 
 **Spawn** `paid-media-buyer` with those inputs and the line "Pass 2 Step 4b, <date>, simulation:
 <on|off>". It returns the block in its `<output_format>`.

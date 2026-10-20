@@ -2,6 +2,10 @@
 > (Ad Studio v2, `docs/store-team/ad-studio-v2-plan.md` §5). Do not follow this playbook. The weekly
 > trigger `trig_013PfuKac4rkjPTHuUwXWzRn` was deleted by the owner on 2026-10-06. The file stays for
 > history only.
+>
+> **Looking for the weekly ads routine?** Since 2026-10-20 it is
+> `docs/store-team/routine-ads-weekly-burn-review.md`: `paid-media-buyer` scores every channel's burn,
+> gives each campaign a kill, keep, scale or hold verdict, and asks whether to keep spending at all.
 
 # Routine — Ads Proposals (ads-manager)
 
