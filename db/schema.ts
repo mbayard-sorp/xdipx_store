@@ -2607,6 +2607,8 @@ export const adAudiences = pgTable('ad_audiences', {
 
 export type AdAudienceKind = 'custom' | 'lookalike' | 'saved'
 export type AdAudienceRole = 'targeting' | 'exclusion' | 'unknown'
+
+/**
  * Ads Control Plane experiment log (migration 133, ticket #16436, plan
  * sections 3.3, 9.2 and 9.5). One row per hypothesis. arms holds the entity
  * refs being compared. Allowed values and status moves live in
