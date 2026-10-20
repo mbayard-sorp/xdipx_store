@@ -2507,6 +2507,46 @@ export const adPlatformInsightsDaily = pgTable('ad_platform_insights_daily', {
 }))
 
 /**
+ * Ads Control Plane mutation ledger (migration 130, ticket #16427). One row
+ * per platform change the control plane wants to make, whoever proposed it.
+ * Allowed values and legal status moves live in app/lib/ads/ledger-core.ts;
+ * writes go through app/lib/ads/ledger.server.ts.
+ */
+export const adActions = pgTable('ad_actions', {
+  id:               bigserial('id', { mode: 'number' }).primaryKey(),
+  idempotencyKey:   text('idempotency_key').notNull(),
+  platform:         text('platform').notNull(),
+  targetLevel:      text('target_level').$type<AdPlatformEntityLevel>().notNull(),
+  targetExternalId: text('target_external_id').notNull(),
+  verb:             text('verb').$type<AdActionVerb>().notNull(), // pause|resume|set_budget|update_creative|halt_all
+  params:           jsonb('params').$type<Record<string, unknown> | null>(),
+  before:           jsonb('before').$type<Record<string, unknown> | null>(),
+  after:            jsonb('after').$type<Record<string, unknown> | null>(),
+  proposedBy:       text('proposed_by').notNull(), // rule:R5 | agent:paid-media-buyer | owner
+  reason:           text('reason'),
+  ruleEventId:      integer('rule_event_id').references(() => adRuleEvents.id, { onDelete: 'set null' }),
+  tier:             text('tier').$type<AdActionTier>().notNull(), // auto|approve|owner
+  status:           text('status').$type<AdActionStatus>().notNull().default('proposed'),
+  approvedBy:       text('approved_by'),
+  approvedAt:       timestamp('approved_at', { withTimezone: true }),
+  appliedAt:        timestamp('applied_at', { withTimezone: true }),
+  platformResponse: jsonb('platform_response').$type<unknown>(),
+  error:            text('error'),
+  expiresAt:        timestamp('expires_at', { withTimezone: true }),
+  createdAt:        timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => ({
+  // Postgres's default name for the inline UNIQUE in migration 130.
+  idempotencyKeyUq: unique('ad_actions_idempotency_key_key').on(t.idempotencyKey),
+  statusCreatedIdx: index('idx_ad_actions_status_created').on(t.status, t.createdAt),
+  platformTargetIdx: index('idx_ad_actions_platform_target').on(t.platform, t.targetExternalId),
+}))
+
+export type AdActionVerb = 'pause' | 'resume' | 'set_budget' | 'update_creative' | 'halt_all'
+export type AdActionTier = 'auto' | 'approve' | 'owner'
+export type AdActionStatus =
+  | 'proposed' | 'dry_run' | 'approved' | 'applied' | 'failed' | 'rejected' | 'expired'
+
+/**
  * Outreach pipeline (077): vetted guest-post / brand-partnership targets.
  * One row per domain. Seeded from docs/store-team/outreach-prospects.md by
  * scripts/seed-outreach-prospects.ts; the offsite-scout adds more through
