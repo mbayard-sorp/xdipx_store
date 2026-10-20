@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useFetcher } from 'react-router'
 import { useAdsToast } from './AdsToast'
 import {
-  RECIPE_ORDER, RULE_RECIPES, type RuleId, type RuleRecipe,
+  RECIPE_ORDER, RULE_RECIPES, recipeFields, type RuleId, type RuleRecipe,
 } from '~/lib/ad-rules-core'
 import type { AdsRuleKey } from '~/lib/ad-settings-defaults'
 
@@ -61,6 +61,8 @@ function RuleGroup({ ids, values, editable, actionPath }: { ids: RuleId[]; value
 
   const error = result && !result.ok && !pending ? result.error : null
   const recipes = ids.map(id => RULE_RECIPES[id])
+  // The lead rules carry no editable numbers of their own (the CPL ceiling is a valve), so no Save.
+  const hasFields = ids.some(id => recipeFields(id).length > 0)
 
   return (
     <fetcher.Form method="post" action={actionPath} className="space-y-2 py-3" aria-busy={pending}>
@@ -75,7 +77,7 @@ function RuleGroup({ ids, values, editable, actionPath }: { ids: RuleId[]; value
       ))}
       {ids.includes('R3') && <p className="ml-3 text-xs text-ink-3">R4 revives a pause from R3 too.</p>}
       {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
-      {editable && (
+      {editable && hasFields && (
         <div className="flex justify-end">
           <button
             type="submit"
@@ -152,13 +154,14 @@ export function RuleRecipes({ thresholds, grossMarginPct, isOwner, actionPath }:
         aria-controls="rule-recipes"
         className="flex min-h-11 w-full items-center justify-between gap-3 px-4 py-2 text-left touch-manipulation lg:px-5"
       >
-        <span className="text-sm font-semibold text-ink">Rules <span className="font-mono font-normal text-ink-3">(8)</span></span>
+        <span className="text-sm font-semibold text-ink">Rules <span className="font-mono font-normal text-ink-3">({Object.keys(RULE_RECIPES).length})</span></span>
         <span aria-hidden="true" className={`font-mono text-ink-3 transition-transform duration-[var(--duration-fast)] ${open ? 'rotate-180' : ''}`}>v</span>
       </button>
       {open && (
         <div id="rule-recipes" className="divide-y divide-line border-t border-line px-4 lg:px-5">
           <p className="py-3 text-xs text-ink-3">
             Rules recommend. You tap. The one exception is R7, which pauses everything on its own.
+            Sales campaigns run R1 to R8. Lead campaigns run L1 to L8 plus R2 and R7.
             {!isOwner && ' Only the owner can change these numbers.'}
           </p>
           {RECIPE_ORDER.map(({ rule, underneath }) => (

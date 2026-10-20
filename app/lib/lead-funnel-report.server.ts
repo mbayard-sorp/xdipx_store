@@ -220,3 +220,39 @@ export async function buildLeadFunnelReport(opts: {
 
   return base
 }
+
+/**
+ * The raw Klaviyo read behind the report, for the lead rules (ticket #16428):
+ * leads with utm_content and capture time, and Placed Order events on the same
+ * profiles. No GA4 and no SQL, and it never throws: anything unread lands in
+ * `gaps` and `complete` is false, so the rules treat the inputs as unread.
+ */
+export async function readLeadFunnelRaw(opts: { windowDays?: number; listId?: string | null } = {}): Promise<{
+  leads: FunnelLead[]
+  orders: FunnelOrder[]
+  since: string
+  complete: boolean
+  gaps: string[]
+}> {
+  const windowDays = Math.min(Math.max(Math.floor(opts.windowDays ?? DEFAULT_WINDOW_DAYS), 1), 90)
+  const since = new Date(Date.now() - windowDays * 86_400_000)
+  const listId = opts.listId || process.env['KLAVIYO_LIST_ID_PAID_LEADS'] || null
+  const gaps: string[] = []
+  const empty = { leads: [] as FunnelLead[], orders: [] as FunnelOrder[], since: since.toISOString(), complete: false, gaps }
+  if (!process.env['KLAVIYO_API_KEY']) { gaps.push('KLAVIYO_API_KEY not set'); return empty }
+  if (!listId) { gaps.push('no list id: set KLAVIYO_LIST_ID_PAID_LEADS'); return empty }
+  try {
+    const { leads } = await readLeads(listId, since.getTime(), gaps)
+    const metricId = (await getMetricIdsByName()).get('Placed Order')
+    if (!metricId) { gaps.push('Klaviyo metric "Placed Order" not found'); return empty }
+    let orders: FunnelOrder[] = []
+    if (leads.length > 0) {
+      const earliest = leads.reduce((m, l) => (l.capturedAt < m ? l.capturedAt : m), leads[0]!.capturedAt)
+      orders = (await readOrders(metricId, new Date(Date.parse(earliest)).toISOString().replace(/\.\d+Z$/, ''), gaps)).orders
+    }
+    return { leads, orders, since: since.toISOString(), complete: true, gaps }
+  } catch (err) {
+    gaps.push(`klaviyo: ${err instanceof Error ? err.message.slice(0, 300) : String(err)}`)
+    return empty
+  }
+}

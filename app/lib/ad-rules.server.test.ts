@@ -54,6 +54,12 @@ vi.mock('~/lib/feed-processor.server', () => ({
 }))
 const fileBlocker = vi.hoisted(() => vi.fn(async () => ({ id: 1, created: true, reopened: false })))
 vi.mock('~/lib/owner-blockers.server', () => ({ fileBlocker }))
+const readLeadFunnelRaw = vi.hoisted(() => vi.fn(async () => ({
+  leads: [] as Array<{ profileId: string; utmContent: string | null; interest: string | null; capturedAt: string }>,
+  orders: [] as Array<{ profileId: string; at: string; value: number }>,
+  since: '', complete: false, gaps: ['KLAVIYO_API_KEY not set'],
+})))
+vi.mock('~/lib/lead-funnel-report.server', () => ({ readLeadFunnelRaw }))
 
 import { adCreatives, adRuleEvents } from '../../db/schema'
 import { ADS_RULE_DEFAULTS } from '~/lib/ad-settings-defaults'
@@ -321,13 +327,32 @@ describe('R7 spend guard', () => {
   const guard = (today: Partial<DailyPoint>, prior = history) =>
     evaluateRules({ creatives: live, accountDays: [...prior, dp(0, today)] }, settings, NOW)
 
-  it('fires when today passes the daily cap and names the live creatives to pause', () => {
-    const r = guard({ spendCents: 2500, impressions: 2500 })
+  it('fires when the 7-day average passes the daily cap and names the live creatives to pause', () => {
+    const hot = run(7, 1, { spendCents: 2200, impressions: 2200, clicks: 40 })
+    const r = guard({ spendCents: 2200, impressions: 2200 }, hot)
     expect(r.r7).not.toBeNull()
     expect(r.r7!.trigger).toBe('spend')
     expect(r.r7!.pauseKeys).toEqual(['1', '2'])
-    expect(r.r7!.sentence).toBe("R7 paused all: today's spend $25.00 passed the $20.00 daily cap")
+    expect(r.r7!.sentence).toBe('R7 paused all: average daily spend $22.00 over the last 7d passed the $20.00 daily cap')
+    expect(r.r7!.inputs).toMatchObject({ avgDailySpendCents: 2200, spendDays: 7, todaySpendCents: 2200, dailyCapCents: 2000 })
     expect(r.firings.find(f => f.ruleId === 'R7')).toMatchObject({ action: 'pause', creativeId: null })
+  })
+
+  it('does not fire on one day of normal Meta overdelivery inside a quiet week', () => {
+    // $25 today on a $20 cap, $10 a day before: the 7-day average is $12.14.
+    expect(guard({ spendCents: 2500, impressions: 2500 }).r7).toBeNull()
+  })
+
+  it('still trips on one day past 1.75x the cap', () => {
+    const r = guard({ spendCents: 3600, impressions: 3600 })
+    expect(r.r7!.trigger).toBe('spend')
+    expect(r.r7!.sentence).toBe("R7 paused all: today's spend $36.00 passed 1.75x the $20.00 daily cap")
+  })
+
+  it('averages over the days since the first spend when the account is younger than a week', () => {
+    const young = run(2, 1, { spendCents: 2400, impressions: 2400 })
+    const r = guard({ spendCents: 2400, impressions: 2400 }, young)
+    expect(r.r7!.inputs).toMatchObject({ spendDays: 3, avgDailySpendCents: 2400 })
   })
 
   it('fires on CPM over 2x its 7-day median even under the cap', () => {
@@ -337,7 +362,7 @@ describe('R7 spend guard', () => {
   })
 
   it('reports both legs when both trip', () => {
-    expect(guard({ spendCents: 2500, impressions: 1000 }).r7!.trigger).toBe('both')
+    expect(guard({ spendCents: 4000, impressions: 1000 }).r7!.trigger).toBe('both')
   })
 
   it('stays quiet under the cap at a normal CPM', () => {
@@ -480,7 +505,7 @@ describe('runRulesDaily', () => {
     expect(r7['appliedAt']).toBeInstanceOf(Date)
     const pause = mem.updates.find(u => u.table === adCreatives)!
     expect(pause.set['pausedAt']).toEqual(NOW)
-    expect(pause.set['pauseReason']).toBe("R7 paused all: today's spend $25.00 passed the $20.00 daily cap")
+    expect(pause.set['pauseReason']).toBe('R7 paused all: average daily spend $25.00 over the last 1d passed the $20.00 daily cap')
     expect(fileBlocker).toHaveBeenCalledTimes(1)
     const blocker = (fileBlocker.mock.calls[0] as unknown as [{ dedupeKey: string; category: string }])[0]
     expect(blocker.dedupeKey).toBe('ads-r7-spend-guard-2026-10-03')
@@ -576,10 +601,12 @@ describe('applyRuleAction', () => {
 // Recipes
 // ---------------------------------------------------------------------------
 describe('rule recipes', () => {
-  it('shows every rule once with the revive partner directly under R1', () => {
+  it('shows every rule once with the revive partner directly under its kill rule', () => {
     const ids = RECIPE_ORDER.flatMap(r => (r.underneath ? [r.rule, r.underneath] : [r.rule])).sort()
-    expect(ids).toEqual(['R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R7', 'R8'])
+    expect(ids).toEqual(['L1', 'L2', 'L3', 'L4', 'L5', 'L6', 'L7', 'L8', 'R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R7', 'R8'])
     expect(RECIPE_ORDER[0]).toEqual({ rule: 'R1', underneath: 'R4' })
+    expect(RECIPE_ORDER).toContainEqual({ rule: 'L1', underneath: 'L7' })
+    expect(RULE_RECIPES.L1.revive).toBe('L7')
     expect(RULE_RECIPES.R1.revive).toBe('R4')
     expect(RULE_RECIPES.R3.revive).toBe('R4')
   })
@@ -601,5 +628,96 @@ describe('rule recipes', () => {
     expect(validateRuleValue('ads_rule_r1_be_multiple', '0')).toBeNull()
     expect(validateRuleValue('ads_rule_r1_be_multiple', 'abc')).toBeNull()
     expect(validateRuleValue('ads_rule_r6_budget_down_pct', 95)).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// runRulesDaily on a lead campaign: objective from the mirror, L rules, no R1
+// ---------------------------------------------------------------------------
+describe('runRulesDaily objective-aware', () => {
+  beforeEach(() => {
+    mem.tables.clear(); mem.inserts.length = 0; mem.updates.length = 0; mem.settings.clear(); mem.nextId = 700
+    fileBlocker.mockClear(); readLeadFunnelRaw.mockClear()
+    setPlatformApplier(null)
+  })
+
+  const seedLeadCampaign = async (leadsPerDay: number | null) => {
+    const { adCreativeDailyMetrics, adPlatformEntities } = await import('../../db/schema')
+    mem.tables.set(adCreatives, [
+      { id: 1, pausedAt: null, launchedAt: null, budgetMultiplier: '1', lane: 'meta', externalAdId: 'ad-1', exportPayload: null, pauseReason: null },
+      { id: 2, pausedAt: null, launchedAt: null, budgetMultiplier: '1', lane: 'meta', externalAdId: 'ad-2', exportPayload: null, pauseReason: null },
+    ])
+    mem.tables.set(adPlatformEntities, [
+      { platform: 'meta', level: 'campaign', externalId: 'c-leads', parentExternalId: null, objective: 'OUTCOME_LEADS', creativeId: null },
+      { platform: 'meta', level: 'adset', externalId: 'as-1', parentExternalId: 'c-leads', objective: null, creativeId: null },
+      { platform: 'meta', level: 'ad', externalId: 'ad-1', parentExternalId: 'as-1', objective: null, creativeId: 1 },
+    ])
+    // Creative 1: $5 a day for 7 days, no orders. Creative 2 has no mirror row: unknown.
+    mem.tables.set(adCreativeDailyMetrics, [
+      ...Array.from({ length: 7 }, (_, i) => ({ creativeId: 1, day: ago(6 - i), platform: 'meta', spendCents: 500, impressions: 400, clicks: 12, orders: 0, netRevenueCents: 0, leads: leadsPerDay })),
+      ...Array.from({ length: 7 }, (_, i) => ({ creativeId: 2, day: ago(6 - i), platform: 'meta', spendCents: 500, impressions: 400, clicks: 12, orders: 0, netRevenueCents: 0, leads: null })),
+    ])
+    // An R1 recommendation already on file for creative 1, from before objectives existed.
+    mem.tables.set(adRuleEvents, [{ id: 50, ruleId: 'R1', creativeId: 1, action: 'pause', detail: {}, firedAt: new Date(NOW.getTime() - 86_400_000), appliedAt: null, appliedBy: null }])
+  }
+
+  it('a lead ad with 0 orders and a healthy CPL gets no R1, and its old R1 row is cleared', async () => {
+    await seedLeadCampaign(2) // $2.50 CPL on 14 leads against the $8 ceiling
+    const out = await runRulesDaily(NOW)
+    expect(out.fired.filter(f => f.creativeId === 1)).toEqual([])
+    expect(out.fired.filter(f => f.creativeId === 2).map(f => f.ruleId)).toEqual(['R1'])
+    expect(out.cleared).toBe(1)
+    expect(out.objectives.counts).toEqual({ leads: 1, sales: 0, other: 0, unknown: 1 })
+    expect(out.objectives.byCreative.find(b => b.creativeId === 1)).toMatchObject({ ruleSet: 'leads', rawObjective: 'OUTCOME_LEADS' })
+    expect(out.objectives.byCreative.find(b => b.creativeId === 2)).toMatchObject({ ruleSet: 'sales', objective: 'unknown', note: 'ad not in the mirror' })
+    expect(out.objectives.leadGaps.join(' ')).toContain('phase 2d')
+    expect(out.objectives.leadGaps.join(' ')).toContain('Klaviyo leads unread')
+    expect(readLeadFunnelRaw).toHaveBeenCalledTimes(1)
+  })
+
+  it('writes an L recommendation the R way, labeled SIMULATION while spend is off', async () => {
+    await seedLeadCampaign(0) // $35 spent, 0 leads: L1
+    const out = await runRulesDaily(NOW)
+    expect(out.fired.filter(f => f.creativeId === 1).map(f => f.ruleId)).toEqual(['L1'])
+    const row = mem.inserts.filter(i => i.table === adRuleEvents).map(i => i.values).find(v => v['ruleId'] === 'L1')!
+    expect(row).toMatchObject({ creativeId: 1, action: 'pause', appliedBy: null, appliedAt: null })
+    const detail = row['detail'] as { sentence: string; simulation: boolean; inputs: Record<string, unknown> }
+    expect(detail.simulation).toBe(true)
+    expect(detail.sentence).toBe('SIMULATION. Pause: $35.00 spent in 7d with 0 leads, past 3x the $8.00 CPL ceiling, L1')
+    expect(detail.inputs).toMatchObject({ spendCents: 3500, leads: 0, ceilingCents: 800 })
+    // R1 to R8 sentences keep their exact wording.
+    const r1 = mem.inserts.filter(i => i.table === adRuleEvents).map(i => i.values).find(v => v['ruleId'] === 'R1')!
+    expect((r1['detail'] as { sentence: string }).sentence).toBe('Pause: $35.00 spent in 7d, 0 orders, R1')
+  })
+
+  it('drops the SIMULATION label once spend is on', async () => {
+    await seedLeadCampaign(0)
+    mem.settings.set('ads_spend_enabled', 'true')
+    await runRulesDaily(NOW)
+    const row = mem.inserts.filter(i => i.table === adRuleEvents).map(i => i.values).find(v => v['ruleId'] === 'L1')!
+    expect((row['detail'] as { sentence: string }).sentence.startsWith('Pause:')).toBe(true)
+  })
+
+  it('reads the CPL ceiling valve', async () => {
+    await seedLeadCampaign(0)
+    mem.settings.set('ads_lead_cpl_ceiling_cents', '2000') // L1 now needs $60
+    const out = await runRulesDaily(NOW)
+    expect(out.fired.filter(f => f.creativeId === 1)).toEqual([])
+  })
+
+  it('never calls Klaviyo when no creative is on a lead campaign', async () => {
+    const { adCreativeDailyMetrics } = await import('../../db/schema')
+    mem.tables.set(adCreatives, [{ id: 1, pausedAt: null, launchedAt: null, budgetMultiplier: '1', lane: 'google', externalAdId: null, pauseReason: null }])
+    mem.tables.set(adCreativeDailyMetrics, [{ creativeId: 1, day: ago(0), platform: 'google', spendCents: 100, impressions: 100, clicks: 2, orders: 0, netRevenueCents: 0, leads: null }])
+    const out = await runRulesDaily(NOW)
+    expect(readLeadFunnelRaw).not.toHaveBeenCalled()
+    expect(out.objectives.leadGaps).toEqual([])
+  })
+
+  it('a tap on an L rule records that rule, not MAN', async () => {
+    mem.tables.set(adCreatives, [{ id: 9, pausedAt: null, pauseReason: null, budgetMultiplier: '1', externalAdId: 'ext-9', lane: 'meta' }])
+    await applyRuleAction(9, 'pause', 'owner', { ruleId: 'L2', now: NOW })
+    const row = mem.inserts.filter(i => i.table === adRuleEvents).map(i => i.values).at(-1)!
+    expect(row['ruleId']).toBe('L2')
   })
 })
