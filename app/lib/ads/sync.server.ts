@@ -27,8 +27,10 @@ import { and, asc, eq, inArray, isNull, ne, notInArray, or, sql } from 'drizzle-
 import { db as defaultDb, type DB } from '~/lib/db.server'
 import { adCreatives, adPlatformEntities } from '../../../db/schema'
 import { syncChannelAudiences, type AudienceStore, type AudienceSyncResult } from './audiences.server'
+import { isChannelNotReady } from './channels/errors'
 import { getChannel, listChannels } from './channels/registry.server'
-import type { ChannelAdapter, ChannelId, EntityLevel, NormalizedEntity, TokenHealth } from './channels/types'
+import type { ChannelAdapter, ChannelId, ChannelNotReadyReason, EntityLevel, NormalizedEntity, TokenHealth } from './channels/types'
+import { noteChannelReadiness, summarizeTokenHealth, type RecordReadinessFn } from './token-health.server'
 
 export const MISSING_STATUS = 'MISSING'
 
@@ -83,6 +85,8 @@ export interface SyncDeps {
   now?: () => Date
   /** The audience mirror's store, for the audiences pass syncAllChannels runs after entities. */
   audienceStore?: AudienceStore
+  /** Stores or clears a channel's not-ready reason. Defaults to ad_channel_health. */
+  recordReadiness?: RecordReadinessFn
 }
 
 export class SyncError extends Error {
@@ -188,7 +192,9 @@ export interface ChannelSyncReport {
   result?: SyncResult
   /** Why a channel was skipped or failed. */
   reason?: string
-  health?: Pick<TokenHealth, 'valid' | 'expiresAt' | 'error'>
+  /** Set when the channel was skipped because its account cannot be used yet. */
+  notReady?: ChannelNotReadyReason
+  health?: Pick<TokenHealth, 'valid' | 'expiresAt' | 'error' | 'ready' | 'notReadyReason'>
   /** The audiences pass (phase 6b). Absent when the channel cannot list audiences. */
   audiences?: { outcome: 'synced' | 'failed'; result?: AudienceSyncResult; reason?: string }
 }
@@ -197,7 +203,10 @@ export interface ChannelSyncReport {
  * The cron's body: sync every channel that has a readable adapter and a
  * valid token. One channel failing does not stop the others. Token problems
  * skip the channel here; the daily token health probe (phase 1d) is what
- * files a blocker for them.
+ * files a blocker for them. A ChannelNotReadyError from the pull (an account
+ * the platform will not serve yet) is a skip with the reason, not a failure,
+ * and the reason is stored so health() and the Channels page report it. The
+ * channel is still tried on every pass, so the first clean one clears it.
  */
 export async function syncAllChannels(
   deps: SyncDeps & { channels?: () => ChannelId[] } = {},
@@ -220,11 +229,7 @@ export async function syncAllChannels(
       reports.push({ channel, outcome: 'skipped', reason: `health check threw: ${(e as Error).message}` })
       continue
     }
-    const healthSummary: ChannelSyncReport['health'] = {
-      valid: health.valid,
-      expiresAt: health.expiresAt,
-      ...(health.error !== undefined ? { error: health.error } : {}),
-    }
+    const healthSummary = summarizeTokenHealth(health)
     if (!health.valid) {
       reports.push({ channel, outcome: 'skipped', reason: `token not valid: ${health.error ?? 'invalid'}`, health: healthSummary })
       continue
@@ -247,7 +252,16 @@ export async function syncAllChannels(
         }
       }
       reports.push(report)
+      await noteChannelReadiness(deps.recordReadiness, channel, health, null)
     } catch (e) {
+      if (isChannelNotReady(e)) {
+        // The token is fine and nothing broke: the account is not usable yet
+        // (a Microsoft account Pending in the Adult Advertising Program). A
+        // skip with the reason, so the cron stays green for the channels that ran.
+        reports.push({ channel, outcome: 'skipped', reason: `${e.reason}: ${e.message}`, notReady: e.reason, health: healthSummary })
+        await noteChannelReadiness(deps.recordReadiness, channel, health, e.reason)
+        continue
+      }
       reports.push({ channel, outcome: 'failed', reason: (e as Error).message, health: healthSummary })
     }
   }

@@ -8,6 +8,7 @@ import { drizzle } from 'drizzle-orm/neon-http'
 
 import { strToU8, zipSync } from 'fflate'
 
+import { ChannelNotReadyError } from './channels/errors'
 import { createMicrosoftAdapter } from './channels/microsoft/adapter.server'
 import type { ChannelAdapter, DateRange, NormalizedInsightRow, TokenHealth } from './channels/types'
 import {
@@ -332,6 +333,46 @@ describe('runInsightsCron', () => {
     expect(r.channels[0]).toMatchObject({ outcome: 'skipped', reason: 'token not valid: expired' })
     expect(f.pullInsights).not.toHaveBeenCalled()
     expect(rollup).not.toHaveBeenCalled()
+  })
+
+  it('skips Microsoft while its account is Pending, with ok pulls for Meta and nothing failed', async () => {
+    const meta = fakeAdapter(() => [row('a1', '2026-10-19')])
+    // The real adapter, with the REST client answering the way production did on 2026-10-20.
+    const microsoft = createMicrosoftAdapter({
+      missingConfig: () => [], accessToken: async () => 'tok', accountId: () => '188472831', lastNotReady: async () => null,
+      call: async () => {
+        throw Object.assign(
+          new Error('Microsoft Ads Reporting/GenerateReport/Submit failed (401): 105: Authentication failed. Either supplied credentials are invalid or the account is inactive'),
+          { name: 'MsAdsApiError', status: 401, errors: [{ code: 105, errorCode: 'InvalidCredentials', message: 'Authentication failed.', index: null }] },
+        )
+      },
+    })
+    const { deps, rollup } = cronDeps(T_HOURLY, meta.adapter)
+    const recordReadiness = vi.fn(async () => {})
+    const adapters: Record<string, ChannelAdapter> = { meta: meta.adapter, microsoft }
+    const r = await runInsightsCron({
+      ...deps, recordReadiness,
+      channels: () => ['meta' as const, 'microsoft' as const],
+      adapterFor: id => adapters[id] ?? null,
+    })
+    expect(r.channels.map(c => [c.channel, c.outcome])).toEqual([['meta', 'pulled'], ['microsoft', 'skipped']])
+    expect(r.channels[1]).toMatchObject({ notReady: 'account_inactive', reason: expect.stringContaining('Adult Advertising Program') })
+    expect(r.channels.filter(c => c.outcome === 'failed')).toEqual([])
+    expect(r.channels[0]?.result?.insightRows).toBe(1)
+    expect(rollup).toHaveBeenCalledTimes(2)
+    expect(recordReadiness).toHaveBeenCalledWith('microsoft', expect.objectContaining({ valid: true }), 'account_inactive')
+  })
+
+  it('a not-ready error is a skip, a generic one from the same fake is still failed', async () => {
+    const pending = fakeAdapter(() => { throw new ChannelNotReadyError('microsoft', 'account_inactive', 'pending') })
+    const a = cronDeps(T_HOURLY, pending.adapter)
+    const skipped = await runInsightsCron({ ...a.deps, recordReadiness: async () => {} })
+    expect(skipped.channels[0]).toMatchObject({ outcome: 'skipped', notReady: 'account_inactive' })
+
+    const broken = fakeAdapter(() => { throw new Error('Microsoft report r9 failed.') })
+    const b = cronDeps(T_HOURLY, broken.adapter)
+    const failed = await runInsightsCron({ ...b.deps, recordReadiness: async () => {} })
+    expect(failed.channels[0]).toMatchObject({ outcome: 'failed', reason: 'Microsoft report r9 failed.' })
   })
 
   it('records a failed pull as failed', async () => {

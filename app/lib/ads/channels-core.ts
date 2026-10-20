@@ -9,6 +9,7 @@
  * none is built until the policy row is re-verified and the owner codifies a
  * lane (plan section 6).
  */
+import { notReadyFromHealthError } from './channels/errors'
 import type { ChannelCapabilities, ChannelId, PolicyState } from './channels/types'
 
 export interface ChecklistItemDef {
@@ -164,6 +165,22 @@ export interface ChannelTokenLite {
   checkedAt: string
   expiresAt: string | null
   error: string | null
+  /**
+   * Set when the token is good but the account is not usable yet, e.g.
+   * "Pending: Adult Advertising Program". The page shows it in place of the
+   * state, so a pending channel never reads green.
+   */
+  pending?: string
+}
+
+/** The Channels page words for a stored not-ready reason, or null when there is none. */
+export function pendingLabel(channel: ChannelId | string, error: string | null | undefined): string | null {
+  const reason = notReadyFromHealthError(error)
+  if (!reason) return null
+  if (reason === 'account_inactive') {
+    return channel === 'microsoft' ? 'Pending: Adult Advertising Program' : 'Pending: account not active yet'
+  }
+  return `Pending: ${reason}`
 }
 
 export interface ChannelPageRow {

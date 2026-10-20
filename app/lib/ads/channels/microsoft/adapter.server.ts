@@ -26,9 +26,9 @@ import { parse as parseCsv } from 'csv-parse/sync'
 import { MsPushError, microsoftPolicyIssues, type MsPushPartial, type MsSearchPayload } from '~/lib/ad-export/microsoft-payload'
 import type { MsPushDeps } from '~/lib/ad-export/microsoft-push.server'
 import { missingConfig, msAdsConfig, type MsAdsErrorItem, type MsAdsService } from '~/lib/microsoft-ads-core'
-import { ChannelNotEnabledError } from '../errors'
+import { ChannelNotEnabledError, ChannelNotReadyError, notReadyFromHealthError } from '../errors'
 import type {
-  ChannelAdapter, CreatedRefs, DateRange, EntityLevel, NormalizedEntity, NormalizedInsightRow, PolicyContext,
+  ChannelAdapter, ChannelNotReadyReason, CreatedRefs, DateRange, EntityLevel, NormalizedEntity, NormalizedInsightRow, PolicyContext,
   PolicyRefusal, PolicyVerdict, TokenHealth,
 } from '../types'
 
@@ -248,6 +248,31 @@ export interface MicrosoftAdapterDeps {
   sleep?: (ms: number) => Promise<void>
   pollIntervalMs?: number
   maxPolls?: number
+  /**
+   * The not-ready reason the last sync or insights pull stored for Microsoft
+   * in ad_channel_health.error, or null. health() reports it as ready: false.
+   */
+  lastNotReady?: () => Promise<ChannelNotReadyReason | null>
+}
+
+const defaultLastNotReady = async (): Promise<ChannelNotReadyReason | null> => {
+  try {
+    const [{ db }, { adChannelHealth }, { eq }] = await Promise.all([
+      import('~/lib/db.server'),
+      import('../../../../../db/schema'),
+      import('drizzle-orm'),
+    ])
+    const rows = await db
+      .select({ error: adChannelHealth.error })
+      .from(adChannelHealth)
+      .where(eq(adChannelHealth.channel, 'microsoft'))
+      .limit(1)
+    return notReadyFromHealthError(rows[0]?.error ?? null)
+  } catch (err) {
+    // A health reading must never fail on this read; without it the token reads as ready.
+    console.warn('[ads/microsoft] could not read the stored not-ready reason (ignored):', String(err).slice(0, 200))
+    return null
+  }
 }
 
 const defaultCall: NonNullable<MicrosoftAdapterDeps['call']> = async (service, path, body) => {
@@ -301,6 +326,37 @@ export function msHealthError(e: unknown): string {
   return 'unknown'
 }
 
+/**
+ * Microsoft's code for "Authentication failed. Either supplied credentials are
+ * invalid or the account is inactive." With a token exchange that just
+ * succeeded, the inactive account is what it means: account 188472831 answers
+ * every Campaign Management and Reporting call this way while it is Pending in
+ * the Adult Advertising Program (first seen in production 2026-10-20).
+ */
+export const MS_INACTIVE_ACCOUNT_CODE = 105
+
+/**
+ * The ChannelNotReadyError for an error from the REST client, or null when the
+ * error is anything else. Matches a 401 whose fault list carries code 105, and
+ * falls back to the "105:" text describeErrors writes into the message for a
+ * client that lost the structured list.
+ */
+export function msNotReadyError(e: unknown, accountId: string): ChannelNotReadyError | null {
+  if (!(e instanceof Error) || e.name !== 'MsAdsApiError') return null
+  const err = e as Error & { status?: unknown; errors?: unknown }
+  if (err.status !== 401) return null
+  const items = Array.isArray(err.errors) ? (err.errors as MsAdsErrorItem[]) : []
+  const coded = items.some(i => i?.code === MS_INACTIVE_ACCOUNT_CODE)
+  const inText = items.length === 0 && new RegExp(`\\b${MS_INACTIVE_ACCOUNT_CODE}: `).test(err.message)
+  if (!coded && !inText) return null
+  return new ChannelNotReadyError(
+    'microsoft',
+    'account_inactive',
+    `Microsoft Ads account ${accountId || '(unset)'} is not active yet, so Microsoft refuses every Campaign Management `
+    + 'and Reporting call with 105. It is Pending in the Adult Advertising Program; this clears on its own once Microsoft accepts it.',
+  )
+}
+
 function partialFail(what: string, partial: MsAdsErrorItem[]): void {
   if (partial.length) {
     throw new MsAdsReportError('bad_response', `Microsoft ${what} had errors: ${partial.map(p => p.message || p.code).join('; ')}`)
@@ -316,6 +372,7 @@ export function createMicrosoftAdapter(deps: MicrosoftAdapterDeps = {}): Channel
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>(r => setTimeout(r, ms)))
   const pollIntervalMs = deps.pollIntervalMs ?? 5_000
   const maxPolls = deps.maxPolls ?? 24
+  const lastNotReady = deps.lastNotReady ?? defaultLastNotReady
 
   const accountId = (): string => {
     const id = (deps.accountId ?? (() => msAdsConfig().accountId))()
@@ -362,45 +419,36 @@ export function createMicrosoftAdapter(deps: MicrosoftAdapterDeps = {}): Channel
         if (unset.length) return { valid: false, expiresAt: null, expiryUnknown: true, scopes: [], checkedAt, error: 'not_configured' }
         try {
           await accessToken()
-          return { valid: true, expiresAt: null, expiryUnknown: true, scopes: ['msads.manage'], checkedAt }
         } catch (e) {
           return { valid: false, expiresAt: null, expiryUnknown: true, scopes: [], checkedAt, error: msHealthError(e) }
         }
+        const valid: TokenHealth = { valid: true, expiresAt: null, expiryUnknown: true, scopes: ['msads.manage'], checkedAt }
+        // The token is good. Whether the account behind it answers is only
+        // known from the last sync or pull, which stores the reason; a later
+        // clean pass clears it, so this flips back without anyone touching it.
+        const reason = await lastNotReady()
+        return reason ? { ...valid, ready: false, notReadyReason: reason } : valid
       },
     },
 
     // Microsoft objects carry no modified time on these reads, so `since` is
     // ignored and every pass is a full pass. The account is a handful of rows.
     async syncEntities() {
-      const account = accountId()
-      const camp = await call<{ Campaigns?: Json[] | null }>('CampaignManagement', 'Campaigns/QueryByAccountId', {
-        AccountId: account, CampaignType: 'Search',
-      })
-      partialFail('campaign list', camp.partial)
-      const campaigns = camp.data?.Campaigns ?? []
-      const out: NormalizedEntity[] = campaigns.map(c => normalizeMsEntity('campaign', account, c, null))
-
-      for (const c of campaigns) {
-        const campaignId = String(c['Id'])
-        const groups = await call<{ AdGroups?: Json[] | null }>('CampaignManagement', 'AdGroups/QueryByCampaignId', { CampaignId: campaignId })
-        partialFail('ad group list', groups.partial)
-        for (const g of groups.data?.AdGroups ?? []) {
-          out.push(normalizeMsEntity('adset', account, g, campaignId))
-          const adGroupId = String(g['Id'])
-          const ads = await call<{ Ads?: Json[] | null }>('CampaignManagement', 'Ads/QueryByAdGroupId', {
-            AdGroupId: adGroupId, AdTypes: ['ResponsiveSearch', 'ExpandedText', 'DynamicSearch'],
-          })
-          partialFail('ad list', ads.partial)
-          for (const a of ads.data?.Ads ?? []) out.push(normalizeMsEntity('ad', account, a, adGroupId))
-        }
+      try {
+        return await listEntities()
+      } catch (e) {
+        throw msNotReadyError(e, safeAccountId()) ?? e
       }
-      return out
     },
 
     async pullInsights(range: DateRange, level: EntityLevel) {
       if (level === 'creative') throw new MsAdsReportError('bad_response', 'Microsoft insights are not reported at creative level.')
-      const csv = await runReport(level, range)
-      return csv ? parseMsReportCsv(level, csv) : []
+      try {
+        const csv = await runReport(level, range)
+        return csv ? parseMsReportCsv(level, csv) : []
+      } catch (e) {
+        throw msNotReadyError(e, safeAccountId()) ?? e
+      }
     },
 
     /**
@@ -425,6 +473,40 @@ export function createMicrosoftAdapter(deps: MicrosoftAdapterDeps = {}): Channel
     async policyCheck(ctx) {
       return microsoftPolicyCheck(ctx)
     },
+  }
+
+  function safeAccountId(): string {
+    try {
+      return accountId()
+    } catch {
+      return ''
+    }
+  }
+
+  async function listEntities(): Promise<NormalizedEntity[]> {
+    const account = accountId()
+    const camp = await call<{ Campaigns?: Json[] | null }>('CampaignManagement', 'Campaigns/QueryByAccountId', {
+      AccountId: account, CampaignType: 'Search',
+    })
+    partialFail('campaign list', camp.partial)
+    const campaigns = camp.data?.Campaigns ?? []
+    const out: NormalizedEntity[] = campaigns.map(c => normalizeMsEntity('campaign', account, c, null))
+
+    for (const c of campaigns) {
+      const campaignId = String(c['Id'])
+      const groups = await call<{ AdGroups?: Json[] | null }>('CampaignManagement', 'AdGroups/QueryByCampaignId', { CampaignId: campaignId })
+      partialFail('ad group list', groups.partial)
+      for (const g of groups.data?.AdGroups ?? []) {
+        out.push(normalizeMsEntity('adset', account, g, campaignId))
+        const adGroupId = String(g['Id'])
+        const ads = await call<{ Ads?: Json[] | null }>('CampaignManagement', 'Ads/QueryByAdGroupId', {
+          AdGroupId: adGroupId, AdTypes: ['ResponsiveSearch', 'ExpandedText', 'DynamicSearch'],
+        })
+        partialFail('ad list', ads.partial)
+        for (const a of ads.data?.Ads ?? []) out.push(normalizeMsEntity('ad', account, a, adGroupId))
+      }
+    }
+    return out
   }
 }
 

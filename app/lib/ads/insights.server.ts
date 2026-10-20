@@ -39,8 +39,10 @@ import { and, eq, gte, inArray, isNull, lte, sql } from 'drizzle-orm'
 
 import { db as defaultDb, type DB } from '~/lib/db.server'
 import { adCreativeDailyMetrics, adPlatformEntities, adPlatformInsightsDaily } from '../../../db/schema'
+import { isChannelNotReady } from './channels/errors'
 import { getChannel, listChannels } from './channels/registry.server'
-import type { ChannelAdapter, ChannelId, DateRange, NormalizedInsightRow, TokenHealth } from './channels/types'
+import type { ChannelAdapter, ChannelId, ChannelNotReadyReason, DateRange, NormalizedInsightRow, TokenHealth } from './channels/types'
+import { noteChannelReadiness, summarizeTokenHealth, type RecordReadinessFn } from './token-health.server'
 
 export const API_SOURCE = 'api'
 /** The UTC hour whose run also re-pulls the last RESTATE_DAYS days and runs the rules. */
@@ -94,6 +96,8 @@ export interface InsightsDeps {
   store?: InsightsStore
   adapterFor?: (channel: ChannelId) => ChannelAdapter | null
   now?: () => Date
+  /** Stores or clears a channel's not-ready reason. Defaults to ad_channel_health. */
+  recordReadiness?: RecordReadinessFn
 }
 
 export class InsightsError extends Error {
@@ -231,7 +235,9 @@ export interface ChannelInsightsReport {
   outcome: 'pulled' | 'skipped' | 'failed'
   result?: PullResult
   reason?: string
-  health?: Pick<TokenHealth, 'valid' | 'expiresAt' | 'error'>
+  /** Set when the channel was skipped because its account cannot be used yet. */
+  notReady?: ChannelNotReadyReason
+  health?: Pick<TokenHealth, 'valid' | 'expiresAt' | 'error' | 'ready' | 'notReadyReason'>
 }
 
 export interface RollupOutcome {
@@ -295,7 +301,8 @@ export function isRestatementRun(now: Date): boolean {
  * pulled days up into daily_profit_summary.ad_spend, and on the 09:00 UTC run
  * (or with restate) also run the rules pass. One channel failing does not stop
  * the others. A token problem skips the channel; the token health cron files
- * the blocker.
+ * the blocker. A ChannelNotReadyError (an account the platform will not serve
+ * yet) skips the channel with its reason and is stored for the Channels page.
  *
  * The rollup runs on every hourly pass because it is two small queries per
  * day and keeps ad_spend current through the day. The rules run once a day,
@@ -324,11 +331,7 @@ export async function runInsightsCron(deps: InsightsCronDeps = {}): Promise<Insi
       channels.push({ channel, outcome: 'skipped', reason: `health check threw: ${(e as Error).message}` })
       continue
     }
-    const healthSummary: ChannelInsightsReport['health'] = {
-      valid: health.valid,
-      expiresAt: health.expiresAt,
-      ...(health.error !== undefined ? { error: health.error } : {}),
-    }
+    const healthSummary = summarizeTokenHealth(health)
     if (!health.valid) {
       channels.push({ channel, outcome: 'skipped', reason: `token not valid: ${health.error ?? 'invalid'}`, health: healthSummary })
       continue
@@ -336,7 +339,16 @@ export async function runInsightsCron(deps: InsightsCronDeps = {}): Promise<Insi
     try {
       const result = await pullChannelInsights(channel, range, { ...deps, adapterFor: () => adapter, now: () => now })
       channels.push({ channel, outcome: 'pulled', result, health: healthSummary })
+      await noteChannelReadiness(deps.recordReadiness, channel, health, null)
     } catch (e) {
+      if (isChannelNotReady(e)) {
+        // A good token on an account the platform will not serve yet (Microsoft
+        // Pending in the Adult Advertising Program): skipped with the reason,
+        // so this money cron stays green for the channels that did pull.
+        channels.push({ channel, outcome: 'skipped', reason: `${e.reason}: ${e.message}`, notReady: e.reason, health: healthSummary })
+        await noteChannelReadiness(deps.recordReadiness, channel, health, e.reason)
+        continue
+      }
       channels.push({ channel, outcome: 'failed', reason: (e as Error).message, health: healthSummary })
     }
   }

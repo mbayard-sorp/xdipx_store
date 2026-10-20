@@ -90,9 +90,19 @@ function tokenCell(row: ChannelPageRow, now: string, failed: boolean) {
   if (!row.hasAdapter) return <span className="text-ink-4">n/a</span>
   if (!row.token) return <span className="text-ink-3">not checked yet</span>
   const t = row.token
+  // A good token on an account the platform will not serve yet reads as
+  // pending, never green. A bad token still wins: that one is the owner's.
+  const pending = t.pending && t.state === 'ok' ? t.pending : null
   return (
     <span>
-      <span className={`font-medium ${TOKEN_TONE[t.state] ?? 'text-ink'}`}>{t.state}</span>
+      {pending ? (
+        <>
+          <span className="font-medium text-amber-800">{pending}</span>
+          <span className="block text-[11px] text-ink-3">token ok</span>
+        </>
+      ) : (
+        <span className={`font-medium ${TOKEN_TONE[t.state] ?? 'text-ink'}`}>{t.state}</span>
+      )}
       <span className="block text-[11px] text-ink-3">checked {since(t.checkedAt, now)}</span>
       {t.expiresAt && <span className="block text-[11px] text-ink-3">expires {t.expiresAt.slice(0, 10)}</span>}
     </span>

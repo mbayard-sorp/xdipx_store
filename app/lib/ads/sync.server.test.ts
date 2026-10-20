@@ -6,6 +6,7 @@ vi.mock('~/lib/db.server', () => ({ db: {} }))
 import { neon } from '@neondatabase/serverless'
 import { drizzle } from 'drizzle-orm/neon-http'
 
+import { ChannelNotReadyError } from './channels/errors'
 import type { ChannelAdapter, ChannelId, EntityLevel, NormalizedEntity, TokenHealth } from './channels/types'
 import {
   MISSING_STATUS, buildUpsertQuery, syncAfterWrite, syncAllChannels, syncChannelEntities,
@@ -265,6 +266,61 @@ describe('syncAllChannels', () => {
     })
     expect(reports.map(r => r.outcome)).toEqual(['failed', 'synced'])
     expect(reports[0]?.reason).toBe('api_error')
+  })
+
+  it('skips a channel whose account is not ready, stores the reason, and leaves the others alone', async () => {
+    const m = memoryStore()
+    const meta = fakeAdapter(() => ACCOUNT)
+    const notReady = new ChannelNotReadyError('microsoft', 'account_inactive', 'Microsoft Ads account 188472831 is not active yet.')
+    const microsoft = fakeAdapter(() => { throw notReady }, { ...VALID, scopes: ['msads.manage'] })
+    const recordReadiness = vi.fn(async () => {})
+    const adapters: Record<string, ChannelAdapter> = { meta: meta.adapter, microsoft: microsoft.adapter }
+    const reports = await syncAllChannels({
+      store: m.store, now: () => T1, recordReadiness,
+      channels: () => ['meta', 'microsoft'] as ChannelId[],
+      adapterFor: id => adapters[id] ?? null,
+    })
+    expect(reports.map(r => [r.channel, r.outcome])).toEqual([['meta', 'synced'], ['microsoft', 'skipped']])
+    expect(reports[1]).toMatchObject({ notReady: 'account_inactive', reason: expect.stringContaining('account_inactive: Microsoft Ads account 188472831') })
+    expect(reports.some(r => r.outcome === 'failed')).toBe(false)
+    expect(reports[0]?.result?.counts.ad.inserted).toBe(2)
+    // Meta never changes readiness, so the only write is Microsoft's reason.
+    expect(recordReadiness).toHaveBeenCalledTimes(1)
+    expect(recordReadiness).toHaveBeenCalledWith('microsoft', expect.objectContaining({ valid: true }), 'account_inactive')
+  })
+
+  it('does not rewrite a reason already stored, and clears it after a clean pass', async () => {
+    const m = memoryStore()
+    const stored: TokenHealth = { ...VALID, ready: false, notReadyReason: 'account_inactive' }
+    const recordReadiness = vi.fn(async () => {})
+    const still = fakeAdapter(() => { throw new ChannelNotReadyError('microsoft', 'account_inactive', 'pending') }, stored)
+    await syncAllChannels({ store: m.store, recordReadiness, channels: () => ['microsoft'] as ChannelId[], adapterFor: () => still.adapter })
+    expect(recordReadiness).not.toHaveBeenCalled()
+
+    const accepted = fakeAdapter(() => ACCOUNT, stored)
+    const reports = await syncAllChannels({ store: m.store, recordReadiness, channels: () => ['microsoft'] as ChannelId[], adapterFor: () => accepted.adapter })
+    expect(reports[0]?.outcome).toBe('synced')
+    expect(recordReadiness).toHaveBeenCalledWith('microsoft', stored, null)
+  })
+
+  it('a generic error from the same channel is still failed', async () => {
+    const m = memoryStore()
+    const recordReadiness = vi.fn(async () => {})
+    const broken = fakeAdapter(() => { throw new Error('Microsoft Ads CampaignManagement failed (500)') })
+    const reports = await syncAllChannels({ store: m.store, recordReadiness, channels: () => ['microsoft'] as ChannelId[], adapterFor: () => broken.adapter })
+    expect(reports[0]).toMatchObject({ outcome: 'failed', reason: 'Microsoft Ads CampaignManagement failed (500)' })
+    expect(reports[0]?.notReady).toBeUndefined()
+    expect(recordReadiness).not.toHaveBeenCalled()
+  })
+
+  it('a failed readiness write never turns the skip into a failure', async () => {
+    const m = memoryStore()
+    const f = fakeAdapter(() => { throw new ChannelNotReadyError('microsoft', 'account_inactive', 'pending') })
+    const reports = await syncAllChannels({
+      store: m.store, recordReadiness: async () => { throw new Error('db down') },
+      channels: () => ['microsoft'] as ChannelId[], adapterFor: () => f.adapter,
+    })
+    expect(reports[0]?.outcome).toBe('skipped')
   })
 
   it('defaults to the registry: Meta and Microsoft have readable adapters today', async () => {

@@ -19,8 +19,9 @@
 import { sql } from 'drizzle-orm'
 import { adChannelHealth, type AdChannelHealthState } from '../../../db/schema'
 import type { BlockerInput, ProbeVerdict } from '~/lib/owner-blockers-core'
+import { notReadyHealthError } from './channels/errors'
 import { getChannel, listChannels } from './channels/registry.server'
-import type { ChannelAdapter, ChannelId, TokenHealth } from './channels/types'
+import type { ChannelAdapter, ChannelId, ChannelNotReadyReason, TokenHealth } from './channels/types'
 
 export const TOKEN_EXPIRY_WARNING_DAYS = 14
 
@@ -244,6 +245,85 @@ async function safeHealth(adapter: ChannelAdapter, now: Date): Promise<TokenHeal
   }
 }
 
+/**
+ * The stored row for one reading. A not-ready reason rides in `error` as
+ * `not_ready:<reason>` (no schema change) and never changes `state`: a
+ * pending account has a good token, so it files no token blocker.
+ */
+function healthRow(
+  channel: ChannelId,
+  health: TokenHealth,
+  a: TokenAssessment,
+  envVar: string,
+  notReady: ChannelNotReadyReason | null,
+): ChannelHealthRow {
+  return {
+    channel,
+    checkedAt: health.checkedAt,
+    state: a.state,
+    valid: health.valid,
+    expiresAt: health.expiresAt,
+    dataAccessExpiresAt: health.dataAccessExpiresAt ?? null,
+    scopes: health.scopes,
+    error: health.error ?? (notReady ? notReadyHealthError(notReady) : null),
+    envVar,
+  }
+}
+
+/**
+ * Called by the entity sync and the insights pull when a channel's readiness
+ * changed: `reason` set when the platform said the account cannot be used yet
+ * (ChannelNotReadyError), null when a clean pass followed a stored reason. It
+ * upserts the channel's ad_channel_health row from the reading the cron just
+ * took, so the Channels page and the next health() call see it.
+ */
+export async function recordChannelReadiness(
+  channel: ChannelId,
+  health: TokenHealth,
+  reason: ChannelNotReadyReason | null,
+  deps: { saveHealth?: (row: ChannelHealthRow) => Promise<void>; now?: () => Date; env?: NodeJS.ProcessEnv } = {},
+): Promise<void> {
+  const now = (deps.now ?? (() => new Date()))()
+  const row = healthRow(channel, health, assessTokenHealth(health, now), tokenEnvVar(channel, deps.env ?? process.env), reason)
+  await (deps.saveHealth ?? defaultSaveHealth)(row)
+}
+
+/** The slice of a health reading the sync and insights cron reports carry. */
+export function summarizeTokenHealth(
+  health: TokenHealth,
+): Pick<TokenHealth, 'valid' | 'expiresAt' | 'error' | 'ready' | 'notReadyReason'> {
+  return {
+    valid: health.valid,
+    expiresAt: health.expiresAt,
+    ...(health.error !== undefined ? { error: health.error } : {}),
+    ...(health.ready !== undefined ? { ready: health.ready } : {}),
+    ...(health.notReadyReason !== undefined ? { notReadyReason: health.notReadyReason } : {}),
+  }
+}
+
+export type RecordReadinessFn =(channel: ChannelId, health: TokenHealth, reason: ChannelNotReadyReason | null) => Promise<void>
+
+/**
+ * The cron side of readiness: store a new not-ready reason, or clear a stored
+ * one after a clean pass. Writes only on a change, so Meta, which never sets
+ * `ready`, never writes here. A failed write is logged and ignored; it must
+ * not turn a skip or a good pull into a failure.
+ */
+export async function noteChannelReadiness(
+  record: RecordReadinessFn | undefined,
+  channel: ChannelId,
+  health: TokenHealth,
+  reason: ChannelNotReadyReason | null,
+): Promise<void> {
+  const stored = health.ready === false ? health.notReadyReason ?? null : null
+  if (reason === stored) return
+  try {
+    await (record ?? recordChannelReadiness)(channel, health, reason)
+  } catch (err) {
+    console.warn(`[ads] could not store ${channel} readiness (ignored):`, String(err).slice(0, 200))
+  }
+}
+
 /** The daily pass. Never throws for one channel's sake. */
 export async function runAdsTokenHealth(deps: AdsTokenHealthDeps = {}): Promise<AdsTokenHealthResult> {
   const channels = (deps.channels ?? channelsWithAdapters)()
@@ -258,17 +338,7 @@ export async function runAdsTokenHealth(deps: AdsTokenHealthDeps = {}): Promise<
     const health = await safeHealth(ch.adapter, now())
     const a = assessTokenHealth(health, now())
     const envVar = tokenEnvVar(ch.id, env)
-    const row: ChannelHealthRow = {
-      channel: ch.id,
-      checkedAt: health.checkedAt,
-      state: a.state,
-      valid: health.valid,
-      expiresAt: health.expiresAt,
-      dataAccessExpiresAt: health.dataAccessExpiresAt ?? null,
-      scopes: health.scopes,
-      error: health.error ?? null,
-      envVar,
-    }
+    const row = healthRow(ch.id, health, a, envVar, health.ready === false ? health.notReadyReason ?? null : null)
 
     let saved = false
     try {
