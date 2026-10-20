@@ -6,6 +6,9 @@ vi.mock('~/lib/db.server', () => ({ db: {} }))
 import { neon } from '@neondatabase/serverless'
 import { drizzle } from 'drizzle-orm/neon-http'
 
+import { strToU8, zipSync } from 'fflate'
+
+import { createMicrosoftAdapter } from './channels/microsoft/adapter.server'
 import type { ChannelAdapter, DateRange, NormalizedInsightRow, TokenHealth } from './channels/types'
 import {
   API_SOURCE, buildCreativeMetricsUpsertQuery, buildInsightsUpsertQuery, cronRange, daysInRange, planCreativeMetrics,
@@ -81,6 +84,32 @@ const T_HOURLY = new Date('2026-10-19T14:05:00Z')
 const T_RESTATE = new Date('2026-10-19T09:05:00Z')
 
 describe('pullChannelInsights', () => {
+  it('stores a Microsoft Reporting API pull under platform microsoft (ticket #16437)', async () => {
+    const csv = [
+      'TimePeriod,AccountId,CampaignId,AdGroupId,AdId,Impressions,Clicks,Spend,Conversions,Revenue',
+      '2026-10-18,188472831,801,1301,84001,900,30,"1,012.40",2.00,59.98',
+      '2026-10-18,188472831,801,1301,84002,100,2,1.60,0.00,0.00',
+    ].join('\n')
+    const call = vi.fn(async (_service: string, path: string) => ({
+      data: path.endsWith('Submit')
+        ? { ReportRequestId: 'r1' }
+        : { ReportRequestStatus: { Status: 'Success', ReportDownloadUrl: 'https://reports.example/r1.zip' } },
+      partial: [],
+    })) as never
+    const download = vi.fn(async () => zipSync({ 'r1.csv': strToU8(csv) }))
+    const adapter = createMicrosoftAdapter({ call, download, accountId: () => '188472831' })
+    const m = memoryStore({ '84001': 12 })
+
+    const r = await pullChannelInsights('microsoft', { since: '2026-10-18', until: '2026-10-18' }, {
+      store: m.store, adapterFor: () => adapter, now: () => T_HOURLY,
+    })
+    expect(r.insightRows).toBe(2)
+    expect(m.insights.get('microsoft|ad|84001|2026-10-18')).toMatchObject({ spendCents: 101240, clicks: 30, platformPurchases: 2, platformPurchaseValueCents: 5998 })
+    expect(m.metrics.get('12|2026-10-18|microsoft')).toMatchObject({ spendCents: 101240, impressions: 900, clicks: 30, source: 'api' })
+    // The ad with no Ad Studio creative lands on the account-level row, so the P&L still sees its spend.
+    expect(m.accountRows).toEqual([expect.objectContaining({ creativeId: null, platform: 'microsoft', spendCents: 160 })])
+  })
+
   it('asks the adapter for ad level over the range and upserts idempotently', async () => {
     const m = memoryStore({ a1: 7 })
     const f = fakeAdapter(() => [row('a1', '2026-10-18'), row('a1', '2026-10-19', { spendCents: 250 })])
@@ -304,8 +333,8 @@ describe('runInsightsCron', () => {
     const { deps } = cronDeps(T_HOURLY, f.adapter)
     const { channels: _drop, ...rest } = deps
     const r = await runInsightsCron(rest)
-    // Meta is the only channel in the registry with an adapter today.
-    expect(r.channels.map(c => c.channel)).toEqual(['meta'])
+    // Meta and Microsoft are the channels in the registry with insights today.
+    expect(r.channels.map(c => c.channel)).toEqual(['meta', 'microsoft'])
   })
 })
 
