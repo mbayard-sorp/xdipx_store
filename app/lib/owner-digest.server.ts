@@ -1942,6 +1942,16 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
       gatherAdStudio(),
       gatherPrQueueSummary(),
     ])
+  // The ads control plane's lines 6 and 7 (plan §9.8, ticket #16432). Never
+  // fatal: gatherAdsDigest returns null on any failure, and so does a failed import.
+  const adsDigestMod = await import('~/lib/ads/digest.server').catch((): null => null)
+  const adsDigest = adsDigestMod ? await adsDigestMod.gatherAdsDigest() : null
+  const adsDigestHtml = adsDigest && adsDigestMod
+    ? adsDigestMod.renderAdsDigestSection(adsDigest)
+    : `<p style="margin:0;color:${MUTED};">The ads ledger could not be read this run.</p>`
+  const adsDigestTitle = adsDigest && adsDigest.tapCount > 0
+    ? `Ads: ${adsDigest.tapCount} ${adsDigest.tapCount === 1 ? 'action awaits' : 'actions await'} your tap`
+    : 'Ads'
   const needsOwner = escalations.protectedPrs.length + escalations.exhausted.length
   // One note-aware source for blocked rows, shared by the Needs Mike list and
   // the Tickets section. The janitor's sla.blocked resolves the reason from
@@ -2099,6 +2109,7 @@ export async function runOwnerDigest(opts: { force?: boolean } = {}): Promise<Ow
       ${section('Homepage now', renderHomepageNowSection(homepageNow))}
       ${section(`Needs a decision from you${ownerQueue.totalCount > 0 ? ` (${ownerQueue.totalCount})` : ''}`, renderOwnerQueueSection(ownerQueue))}
       ${section(`Ad campaigns awaiting launch${adCampaignQueue.length > 0 ? ` (${adCampaignQueue.length})` : ''}`, renderAdCampaignQueueSection(adCampaignQueue))}
+      ${section(adsDigestTitle, adsDigestHtml)}
       ${section('Ad Studio', adStudio ? renderAdStudioSection(adStudio) : `<p style="margin:0;color:${MUTED};">Ad Studio numbers could not be read this run.</p>`)}
       ${section('PR queue', renderPrQueueSection(prQueue))}
       ${section('Orders and profit (last 8 days)', `<table style="border-collapse:collapse;">${profitRows || '<tr><td>no rows</td></tr>'}</table>${reconLine}`)}

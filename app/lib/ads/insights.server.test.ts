@@ -244,8 +244,40 @@ describe('runInsightsCron', () => {
     const rollup = vi.fn(async (day: string): Promise<RollupOutcome> => ({ day, spendCents: 0, written: true }))
     const runRules = vi.fn(async () => ({ evaluated: 1 }))
     const health = vi.fn(async (_at: Date): Promise<unknown> => ({ stub: true }))
-    return { deps: { store: m.store, adapterFor: () => adapter, channels: () => ['meta' as const], now: () => now, rollup, runRules, health }, rollup, runRules, health, m }
+    const apply = vi.fn(async (_at: Date): Promise<unknown> => ({ applied: 0 }))
+    const pager = vi.fn(async (_at: Date): Promise<unknown> => ({ pages: [] }))
+    return {
+      deps: { store: m.store, adapterFor: () => adapter, channels: () => ['meta' as const], now: () => now, rollup, runRules, health, apply, pager },
+      rollup, runRules, health, apply, pager, m,
+    }
   }
+
+  it('runs the applier and then the pager after the health step, on every run', async () => {
+    const f = fakeAdapter(() => [row('a1', '2026-10-19')])
+    const { deps, health, apply, pager } = cronDeps(T_HOURLY, f.adapter)
+    const order: string[] = []
+    health.mockImplementation(async () => { order.push('health'); return {} })
+    apply.mockImplementation(async () => { order.push('apply'); return { applied: 1 } })
+    pager.mockImplementation(async () => { order.push('pager'); return { pages: [] } })
+    const r = await runInsightsCron(deps)
+    expect(order).toEqual(['health', 'apply', 'pager'])
+    expect(apply).toHaveBeenCalledWith(T_HOURLY)
+    expect(r.apply).toEqual({ ok: true, summary: { applied: 1 } })
+    expect(r.pager).toEqual({ ok: true, summary: { pages: [] } })
+  })
+
+  it('an applier or pager failure is reported and never fails the pull', async () => {
+    const f = fakeAdapter(() => [row('a1', '2026-10-19')])
+    const { deps, apply, pager } = cronDeps(T_HOURLY, f.adapter)
+    apply.mockRejectedValue(new Error('ledger down'))
+    pager.mockRejectedValue(new Error('blockers down'))
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const r = await runInsightsCron(deps)
+    err.mockRestore()
+    expect(r.apply).toEqual({ ok: false, error: 'ledger down' })
+    expect(r.pager).toEqual({ ok: false, error: 'blockers down' })
+    expect(r.channels[0]!.outcome).toBe('pulled')
+  })
 
   it('hourly: pulls today and yesterday, rolls both up, and leaves the rules alone', async () => {
     const f = fakeAdapter(() => [row('a1', '2026-10-19')])

@@ -25,10 +25,15 @@
  * The cron body (runInsightsCron) then rolls the pulled days up into
  * daily_profit_summary.ad_spend, and on the 09:00 UTC restatement run it runs
  * the rules pass, the same two calls the ads routine makes through
- * POST /api/team/ad-metrics op daily. Every run ends with the health step
- * (health.server.ts, ticket #16410): the hourly counters and rule L3.
+ * POST /api/team/ad-metrics op daily. Every run then takes the health step
+ * (health.server.ts, ticket #16410): the hourly counters and rule L3. Then
+ * the applier (apply-run.server.ts, ticket #16432) expires stale proposals
+ * and sends approved ledger rows under the daily cap, and the pager
+ * (pager.server.ts) files owner blockers for the plan §9.8 pages. A failure
+ * in any of those three is reported in its own field and never fails the pull.
  *
- * Nothing here calls a platform write endpoint.
+ * The pull itself never calls a platform write endpoint. The applier reaches
+ * one only through channels/apply.server.ts, with both valves on.
  */
 import { and, eq, gte, inArray, isNull, lte, sql } from 'drizzle-orm'
 
@@ -250,7 +255,14 @@ export interface InsightsCronResult {
   rules?: RulesOutcome
   /** The hourly health counters and L3 (health.server.ts). Present on every run. */
   health: HealthOutcome
+  /** The applier (apply-run.server.ts): expiry, then approved rows under the cap. Never fails the pull. */
+  apply: StepOutcome
+  /** The pager checks (pager.server.ts). Never fails the pull. */
+  pager: StepOutcome
 }
+
+/** A step that reports its own failure and never fails the pull. */
+export type StepOutcome = { ok: true; summary: unknown } | { ok: false; error: string }
 
 export interface InsightsCronDeps extends InsightsDeps {
   channels?: () => ChannelId[]
@@ -262,6 +274,10 @@ export interface InsightsCronDeps extends InsightsDeps {
   restate?: boolean
   /** Defaults to runAdHealth from health.server. */
   health?: (now: Date) => Promise<unknown>
+  /** Defaults to applyApprovedActions from apply-run.server. */
+  apply?: (now: Date) => Promise<unknown>
+  /** Defaults to runPagerChecks from pager.server. */
+  pager?: (now: Date) => Promise<unknown>
 }
 
 /** The range one cron run pulls: today and yesterday, or the last 7 days plus today on the restatement run. */
@@ -332,7 +348,7 @@ export async function runInsightsCron(deps: InsightsCronDeps = {}): Promise<Insi
     for (const day of pulledDays) rollup.push(await rollupDay(day))
   }
 
-  const out: Omit<InsightsCronResult, 'health'> = { restatement, range, channels, rollup }
+  const out: Omit<InsightsCronResult, 'health' | 'apply' | 'pager'> = { restatement, range, channels, rollup }
   if (restatement) {
     const runRules = deps.runRules ?? (async (at: Date) => (await import('~/lib/ad-rules.server')).runRulesDaily(at))
     // Same contract as POST /api/team/ad-metrics op daily: the rules read what
@@ -356,7 +372,21 @@ export async function runInsightsCron(deps: InsightsCronDeps = {}): Promise<Insi
       return { ok: false, error: err instanceof Error ? err.message : 'health step failed' }
     },
   )
-  return { ...out, health }
+
+  // Phase 5b (ticket #16432): apply approved ledger rows, then the pager. Both
+  // run after health, one after the other, and neither can fail the pull.
+  const step = (name: string, fn: (at: Date) => Promise<unknown>): Promise<StepOutcome> => fn(now).then(
+    (summary): StepOutcome => ({ ok: true, summary }),
+    (err: unknown): StepOutcome => {
+      console.error(`[ads-insights] ${name} step failed`, err)
+      return { ok: false, error: err instanceof Error ? err.message : `${name} step failed` }
+    },
+  )
+  const apply = await step('apply', deps.apply
+    ?? (async (at: Date) => (await import('./apply-run.server')).applyApprovedActions({ now: () => at })))
+  const pager = await step('pager', deps.pager
+    ?? (async (at: Date) => (await import('./pager.server')).runPagerChecks({ now: () => at })))
+  return { ...out, health, apply, pager }
 }
 
 /** The cron response carries the verdicts and the values, not every detail blob. */

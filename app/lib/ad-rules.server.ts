@@ -310,27 +310,24 @@ function detailOf(f: RuleFired, simulated: boolean): Record<string, unknown> {
  * Raise the owner alert for R7. The owner blocker list is where the store puts
  * anything only the owner can move ("it goes on the blocker list or it did not
  * happen"); the daily digest renders it in the queue and the blocker email. One
- * row per UTC day, so a bad afternoon does not file it twice.
+ * row per UTC day, so a bad afternoon does not file it twice. It goes through
+ * the ads pager (pager.server.ts), which owns every plan §9.8 page.
  */
 async function raiseR7Alert(day: string, sentence: string, pausedCreatives: number): Promise<'filed' | 'failed'> {
-  try {
-    const { fileBlocker } = await import('~/lib/owner-blockers.server')
-    await fileBlocker({
-      dedupeKey: `ads-r7-spend-guard-${day}`,
-      title: `R7 paused every Ad Studio ad: ${sentence.replace(/^R7 paused all: /, '')}`,
-      detail: `The account spend guard fired on ${day}. It paused ${pausedCreatives} live creative${pausedCreatives === 1 ? '' : 's'} on its own. Nothing resumes until you resume it from the Live tab, where the R7 row has an Undo.`,
-      unblocks: 'Resume the paused ads once you have checked the spend',
-      whereToGo: 'https://xdipx.com/admin/ad-studio/live',
-      category: 'approval',
-      priority: 1,
-      source: 'agent',
-      sourceRef: 'ad-rules:R7',
-    })
-    return 'filed'
-  } catch (err) {
-    console.error('[ad-rules] R7 owner alert failed', err)
-    return 'failed'
-  }
+  const { pageOwner } = await import('~/lib/ads/pager.server')
+  const r = await pageOwner('r7', {
+    dedupeKey: `ads-r7-spend-guard-${day}`,
+    title: `R7 paused every Ad Studio ad: ${sentence.replace(/^R7 paused all: /, '')}`,
+    detail: `The account spend guard fired on ${day}. It paused ${pausedCreatives} live creative${pausedCreatives === 1 ? '' : 's'} on its own. Nothing resumes until you resume it from the Live tab, where the R7 row has an Undo.`,
+    unblocks: 'Resume the paused ads once you have checked the spend',
+    whereToGo: 'https://xdipx.com/admin/ad-studio/live',
+    category: 'approval',
+    priority: 1,
+    source: 'agent',
+    sourceRef: 'ad-rules:R7',
+  })
+  if (!r.filed) console.error('[ad-rules] R7 owner alert failed', r.error)
+  return r.filed ? 'filed' : 'failed'
 }
 
 export async function runRulesDaily(now: Date = new Date()): Promise<RulesRunSummary> {
@@ -415,6 +412,14 @@ async function recordFiringsInLedger(items: Array<{ firing: RuleFired; eventId: 
   }
 }
 
+const R7_HALT_CHANNELS = new Set(['meta', 'microsoft', 'google', 'snap'])
+
+/** The channels R7 halts: each distinct channel lane among the live creatives, Meta when none names one. */
+export function r7HaltLanes(lanes: ReadonlyArray<string | null | undefined>): string[] {
+  const out = [...new Set(lanes.filter((l): l is string => !!l && R7_HALT_CHANNELS.has(l)))].sort()
+  return out.length ? out : ['meta']
+}
+
 async function applyR7(
   r7: NonNullable<ReturnType<typeof evaluateRules>['r7']>,
   window: RulesWindow,
@@ -439,10 +444,13 @@ async function applyR7(
   if (ids.length) {
     await db.update(adCreatives).set({ pausedAt: now, pauseReason: r7.sentence, updatedAt: now })
       .where(and(inArray(adCreatives.id, ids), isNull(adCreatives.pausedAt)))
-    for (const b of before) {
+    // Ticket #16432: one halt_all per channel, not one pause per ad. A halt is
+    // one action against the daily cap and sits outside the 3-a-day automatic
+    // pause cap, so the spend guard cannot be swallowed by the pauses before it.
+    for (const lane of r7HaltLanes(before.map(b => b.lane))) {
       await platformApply(
         {
-          creativeId: b.creativeId, externalAdId: b.externalAdId ?? null, lane: b.lane ?? null, action: 'pause', budgetMultiplier: 1, reason: r7.sentence,
+          creativeId: null, externalAdId: null, lane, action: 'halt', budgetMultiplier: 1, reason: r7.sentence,
           ruleEventId: event?.id ?? null, proposedBy: 'rule:R7',
         },
         { spendEnabled: !simulated },

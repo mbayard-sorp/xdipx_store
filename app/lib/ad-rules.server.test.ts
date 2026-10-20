@@ -545,7 +545,19 @@ describe('runRulesDaily', () => {
     setPlatformApplier(applier)
     const out = await runRulesDaily(NOW)
     expect(out.simulated).toBe(false)
-    expect(applier).toHaveBeenCalledWith(expect.objectContaining({ creativeId: 1, action: 'pause' }))
+    // Ticket #16432: R7 is one account-wide halt on the creative's channel, not a pause per ad.
+    // The fixture's creatives sit on two lanes (google and meta), so that is two halts, never a pause per ad.
+    const r7Calls = (applier.mock.calls as unknown as Array<[{ proposedBy?: string; action: string; creativeId: number | null; lane: string | null }]>)
+      .map(c => c[0]).filter(c => c.proposedBy === 'rule:R7')
+    expect(r7Calls.map(c => c.lane)).toEqual(['google', 'meta'])
+    expect(r7Calls.every(c => c.action === 'halt' && c.creativeId === null)).toBe(true)
+  })
+
+  it('R7 halts once per channel however many ads are live, and names Meta when no lane does', async () => {
+    const { r7HaltLanes } = await import('~/lib/ad-rules.server')
+    expect(r7HaltLanes(['meta', 'meta', 'meta', 'meta'])).toEqual(['meta'])
+    expect(r7HaltLanes(['meta', 'microsoft', null])).toEqual(['meta', 'microsoft'])
+    expect(r7HaltLanes([null, 'organic'])).toEqual(['meta'])
   })
 
   // Phase 4c: the default applier is the ledger dispatcher, so every firing leaves an ad_actions row.
@@ -584,7 +596,7 @@ describe('runRulesDaily', () => {
     expect(ledger.rows).toHaveLength(1)
   })
 
-  it('R7 goes through the dispatcher: one dry_run pause row per live creative while a valve is off', async () => {
+  it('R7 goes through the dispatcher: one dry_run halt_all row for the account while a valve is off', async () => {
     await seedMirror()
     const metrics = await seedMetricsTable()
     mem.tables.set(metrics, [
@@ -595,14 +607,18 @@ describe('runRulesDaily', () => {
 
     const out = await runRulesDaily(NOW)
 
+    // Both creatives are still paused in Ad Studio; the ledger gets one row for the account.
     expect(out.r7).toMatchObject({ pausedCreatives: 2 })
     const r7Rows = ledger.rows.filter(r => r['proposedBy'] === 'rule:R7')
-    expect(r7Rows.map(r => r['targetExternalId'])).toEqual(['ad-1', 'ad-2'])
-    expect(r7Rows.every(r => r['status'] === 'dry_run' && r['tier'] === 'auto' && r['ruleEventId'] === out.r7!.eventId)).toBe(true)
+    expect(r7Rows).toHaveLength(1)
+    expect(r7Rows[0]).toMatchObject({
+      platform: 'meta', targetLevel: 'campaign', targetExternalId: 'all', verb: 'halt_all',
+      tier: 'auto', status: 'dry_run', ruleEventId: out.r7!.eventId, after: { status: 'PAUSED' },
+    })
     expect(String(r7Rows[0]!['reason'])).toMatch(/^Dry run: ads_auto_apply_enabled is off/)
   })
 
-  it('with both valves on, R7 reaches the Meta adapter, whose NotEnabled lands as failed', async () => {
+  it('with both valves on, R7 reaches the Meta adapter as one halt_all, recorded as failed when the adapter cannot apply', async () => {
     await seedMirror()
     const metrics = await seedMetricsTable()
     mem.tables.set(metrics, [metricRow(1, ago(0), { spendCents: 2500, impressions: 2500, clicks: 100 })])
@@ -612,8 +628,8 @@ describe('runRulesDaily', () => {
     await runRulesDaily(NOW)
 
     const r7Rows = ledger.rows.filter(r => r['proposedBy'] === 'rule:R7')
-    expect(r7Rows.length).toBeGreaterThan(0)
-    expect(r7Rows.every(r => r['status'] === 'failed')).toBe(true)
+    expect(r7Rows).toHaveLength(1)
+    expect(r7Rows[0]).toMatchObject({ verb: 'halt_all', targetExternalId: 'all', tier: 'auto', status: 'failed' })
   })
 })
 
