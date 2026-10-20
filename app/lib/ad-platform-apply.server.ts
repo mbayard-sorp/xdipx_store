@@ -1,19 +1,20 @@
 /**
  * The seam between the rules engine and the ad platforms (Ad Studio v2).
+ * PROTECTED PATH: the owner merges every change to this file.
  *
  * PR-H records every pause, resume, scale and brake in ad_rule_events and in
- * ad_creatives. PR-E (the export registry and the Meta connector) fills this
- * seam so the same verbs also reach the platform, only ever behind the
- * ads_spend_enabled valve. Until then the default applier is a no-op that logs,
- * so nothing here can move money.
+ * ad_creatives. Since phase 4c (ticket #16429) the default applier hands each
+ * one to the ledger dispatcher in app/lib/ads/channels/apply.server.ts, which
+ * writes an ad_actions row for it and is the only code that may call a
+ * platform mutation. With either ads_spend_enabled or ads_auto_apply_enabled
+ * off, the row is dry_run and nothing reaches a platform.
  *
- * Phase 4 retargets this seam onto the channel adapters in app/lib/ads/channels/
- * (ADR-018); until then it stays the no-op below.
- *
- * Callers pass `spendEnabled`. With the valve off, platformApply returns
- * without calling anything, simulation or not, so a registered applier cannot
- * be reached by accident.
+ * setPlatformApplier registers a test override. An override keeps the old
+ * contract exactly: with spendEnabled false, platformApply returns without
+ * calling it, so a registered fake cannot be reached by accident.
  */
+import type { ChannelId, EntityRef } from '~/lib/ads/channels/types'
+import type { DispatchVerb } from '~/lib/ads/channels/apply-core'
 
 export type PlatformAction = 'pause' | 'resume' | 'scale' | 'brake' | 'refresh'
 
@@ -24,7 +25,15 @@ export interface PlatformApplyRequest {
   action: PlatformAction
   /** The creative's budget multiplier after this action (scale and brake). */
   budgetMultiplier: number
+  /** The multiplier before this action. scale and brake move the platform budget by after over before. */
+  previousBudgetMultiplier?: number
   reason: string
+  /** An explicit platform entity. Without it the dispatcher resolves one from externalAdId and the mirror. */
+  target?: EntityRef
+  /** The ad_rule_events row behind this action, stored on the ledger row. */
+  ruleEventId?: number | null
+  /** rule:R1, owner, or the admin's email. Defaults to owner. */
+  proposedBy?: string
 }
 
 export interface PlatformApplyResult {
@@ -32,31 +41,63 @@ export interface PlatformApplyResult {
   applied: boolean
   note: string
   error?: boolean
+  /** The ad_actions row the dispatcher wrote or found, when there is one. */
+  actionId?: number | null
+  /** That row's status: dry_run, applied, failed, or skipped when no row could be written. */
+  ledgerStatus?: string
 }
 
 export type PlatformApplier = (req: PlatformApplyRequest) => Promise<PlatformApplyResult>
 
-const stub: PlatformApplier = async req => {
-  console.log('[ad-platform-apply] no platform applier registered (PR-E fills this)', {
-    creativeId: req.creativeId, action: req.action, lane: req.lane,
-  })
-  return { applied: false, note: 'Platform call not wired yet.' }
+const VERB: Record<PlatformAction, DispatchVerb> = {
+  pause: 'pause', resume: 'resume', scale: 'scale', brake: 'brake', refresh: 'update_creative',
 }
 
-let applier: PlatformApplier = stub
+/** Ad Studio lanes that are also channel ids. */
+const LANE_CHANNELS = new Set<string>(['meta', 'microsoft', 'google', 'snap'])
 
-/** PR-E registers the real applier here. Tests register fakes. */
+function budgetFactor(req: PlatformApplyRequest): number | undefined {
+  if (req.action !== 'scale' && req.action !== 'brake') return undefined
+  const prev = req.previousBudgetMultiplier
+  if (prev == null || !(prev > 0) || !Number.isFinite(req.budgetMultiplier)) return undefined
+  return req.budgetMultiplier / prev
+}
+
+async function dispatchApplier(req: PlatformApplyRequest, spendEnabled: boolean): Promise<PlatformApplyResult> {
+  const { dispatch } = await import('~/lib/ads/channels/apply.server')
+  const r = await dispatch({
+    verb: VERB[req.action],
+    adExternalId: req.externalAdId,
+    target: req.target,
+    platform: req.lane && LANE_CHANNELS.has(req.lane) ? (req.lane as ChannelId) : null,
+    budgetFactor: budgetFactor(req),
+    proposedBy: req.proposedBy ?? 'owner',
+    reason: req.reason,
+    ruleEventId: req.ruleEventId ?? null,
+    spendEnabledHint: spendEnabled,
+  })
+  return { applied: r.applied, note: r.note, ...(r.error ? { error: true } : {}), actionId: r.actionId, ledgerStatus: r.status }
+}
+
+let override: PlatformApplier | null = null
+
+/** Tests register fakes here. null restores the ledger dispatcher. */
 export function setPlatformApplier(fn: PlatformApplier | null): void {
-  applier = fn ?? stub
+  override = fn
 }
 
 export async function platformApply(
   req: PlatformApplyRequest,
   opts: { spendEnabled: boolean },
 ): Promise<PlatformApplyResult> {
-  if (!opts.spendEnabled) return { applied: false, note: 'Simulation: no platform call.' }
   try {
-    return await applier(req)
+    if (override) {
+      if (!opts.spendEnabled) return { applied: false, note: 'Simulation: no platform call.' }
+      return await override(req)
+    }
+    // The dispatcher always runs, valve or not: with a valve off it writes the
+    // dry_run row and stops there.
+    return await dispatchApplier(req, opts.spendEnabled)
   } catch (err) {
     console.error('[ad-platform-apply] applier threw', req.creativeId, req.action, err)
     return { applied: false, error: true, note: err instanceof Error ? err.message : 'Platform call failed.' }
