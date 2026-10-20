@@ -4171,6 +4171,16 @@ const XDIPX_EXCLUDED_PUBLICATION_NAMES = [
 ]
 
 /**
+ * Ticket #16390, owner direction 2026-10-19: Shop.app orders arrive as very
+ * small baskets and the ~$12 acquisition cost makes each one a loss, so a
+ * product whose every variant is under this price never reaches the Shop
+ * sales channel. The owner removed 2,110 such products from Shop by hand on
+ * 2026-10-19; this constant keeps the import/re-enrich pipeline from putting
+ * them back.
+ */
+export const SHOP_CHANNEL_MIN_PRICE_USD = 20
+
+/**
  * Activate every variant's inventory item at both xdipx fulfillment locations
  * so the daily feeds can set quantities. No quantity is set here (left blank).
  * Idempotent: activating an already-active location is a no-op.
@@ -4218,12 +4228,29 @@ export async function publishProductToXdipxChannels(numericId: string): Promise<
   const id = numericId.replace('gid://shopify/Product/', '')
   const gid = `gid://shopify/Product/${id}`
 
-  const { publications } = await adminGraphQL<{
+  const { publications, product } = await adminGraphQL<{
     publications: { edges: { node: { id: string; name: string } }[] }
-  }>(`query GetPublications { publications(first: 30) { edges { node { id name } } } }`)
+    product: { priceRangeV2: { maxVariantPrice: { amount: string } } } | null
+  }>(`
+    query GetPublicationsAndProductPrice($id: ID!) {
+      publications(first: 30) { edges { node { id name } } }
+      product(id: $id) { priceRangeV2 { maxVariantPrice { amount } } }
+    }
+  `, { id: gid })
+
+  // null when the product lookup itself comes back empty -- left on the
+  // normal channel set rather than guessed off Shop (ticket #16390).
+  const maxVariantPrice = product ? Number(product.priceRangeV2.maxVariantPrice.amount) : null
+  const belowShopFloor = maxVariantPrice !== null && maxVariantPrice < SHOP_CHANNEL_MIN_PRICE_USD
 
   const wanted   = new Set(XDIPX_PUBLICATION_NAMES)
   const excluded = new Set(XDIPX_EXCLUDED_PUBLICATION_NAMES)
+  if (belowShopFloor) {
+    // Drop Shop from the publish set (new imports) and add it to the
+    // unpublish set too (a re-enrich of an existing cheap product clears it).
+    wanted.delete('Shop')
+    excluded.add('Shop')
+  }
   const toPublish   = publications.edges.filter(e => wanted.has(e.node.name)).map(e => e.node.id)
   const toUnpublish = publications.edges.filter(e => excluded.has(e.node.name)).map(e => e.node.id)
 
