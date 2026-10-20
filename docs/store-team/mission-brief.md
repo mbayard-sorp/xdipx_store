@@ -40,8 +40,8 @@ and every touchpoint must be comfortable to receive, open, and share.
   2026-09-30), AOV $50.69, so the AOV half is met and the order count is not (6 of 10). At the ~$33
   basket the catalog previously produced, break-even on paid needed a ~12% conversion rate, which is
   why spend stays dark until the owner's go. Owned and earned channels stay first in the channel
-  priority in `docs/ads-policy.md`. The "HELD" wording in the §3 ads row predates this decision;
-  read that row through this entry.
+  priority in `docs/ads-policy.md`. The §3 ads row said "HELD" until 2026-10-20, when it was
+  corrected to match this entry.
 - **Do not quote a site-wide CVR as if it were measured.** Of 311 sessions in 90 days, ~91 are a
   single crawler on `search.google.com`, ~14 are `vercel.com` deploy previews, and much of Direct is
   the owner. Genuinely cold humans number **30 to 40**. At user level, PDP to add-to-cart is 25% and
@@ -122,7 +122,7 @@ What that binds every run to:
 | Team | Valve state | What the team MAY do | What requires the owner |
 |---|---|---|---|
 | social | valve-gated autopublish (IG + X) | draft `social_posts` rows; rows the independent `social-publish-gate` approves ship via the hourly `/cron/social-publish` tick while `instagram_autopublish_enabled` / `x_autopublish_enabled` are on | flipping either posting valve; publishing anything the gate did not approve |
-| ads | **HELD** (was propose-only) | research and retro only; record the hold. **No new proposals while held**, see §2 | approving, launching, any platform write, any spend, and lifting the hold |
+| ads | **simulation, propose-only** (the HELD state ended with the owner decision recorded in §2; row corrected 2026-10-20) | file ideas and request renders (routines 27 and 28), build the ExoClick zip for the owner to upload, read Meta through the pinned read-only MCP set (routine 28 and the weekly burn review), and propose at most 3 `ad_actions` rows a day through `POST /api/team/ad-action`. Everything runs as a dry run while `ads_spend_enabled` and `ads_auto_apply_enabled` are off | approving any ledger row, flipping either valve, raising a cap, first activation of anything, any upload, any spend |
 | email | plan-only | file campaign briefs as suggestions | executing in Klaviyo |
 | content | valve-gated publish | draft Sanity `blogPost` docs (`status:'draft'`); publish live only on a voice-gate PASS while `content_team_autopublish` is on | flipping `content_team_enabled` or `content_team_autopublish`; publishing anything that did not PASS the voice gate |
 | strategy | advisory | publish the brief, file/route suggestions | acting on any of it |

@@ -28,6 +28,16 @@ The standup, gathered live and not from memory:
   before
 - The last `gsc_index_daily` row and the indexed-count trend
 - Anything failing: healthchecks, the checkout probe, recent run errors
+- Ads, one line: spend month to date against `ads_media_monthly_cap_cents`, our leads and CPL
+  against `ads_lead_cpl_ceiling_cents`, ledger rows waiting on him, the latest pixel health, and the
+  last burn verdict. Read-only sources: the `meta doctor` line in the newest `ads-render` run summary
+  and the newest `ads-burn-review` summary (`POST /api/team/run {"op":"list","team":"ads","limit":10}`);
+  `GET /api/team/lead-funnel-report?days=30` for leads; `POST /api/team/ad-action {"op":"list"}` for
+  proposed rows (the Actions tab on `/admin/ads` shows the rule-engine rows too);
+  `POST /api/team/ad-health-snapshot {"op":"latest"}` for pixel, errors and activity. Never call
+  `ad-metrics {op:'daily'}` from a standup: it rolls up spend and runs the rules. When the Meta Ads
+  MCP is attached to this session, `ads_get_ad_entities` (account `920738511029316`,
+  `date_preset:"this_month"`, `amount_spent`) is the live spend figure; read tools only
 
 Then report, in this order: **what needs him** (short, answerable), **what is stuck and why**,
 **what shipped since yesterday**, and **what runs next and when**. Lead with the thing he would
@@ -97,6 +107,74 @@ Verified against the code 2026-08-12; auto-approve line re-verified against live
   `dismissed` are the offramps. In practice `blocked` is a parking lot nothing surfaces. Do not
   park things there and call them handled.
 
+### Ads
+
+Added 2026-10-20 (ticket #16684). The ads control plane is
+`docs/store-team/ads-control-plane-plan.md`; read §9 before judging spend. **Standing rule: nothing
+raises spend without the owner.** No valve flip, no cap raise, no first activation, no new campaign,
+audience, age, geo or offer, by any agent, on any channel.
+
+- **The console, `/admin/ads`** (owner-only, admin session):
+  - Overview: spend today, yesterday and month to date against the caps; leads and CPL against the
+    ceiling; orders and CPA against break-even; alerts.
+  - Tree: the mirrored campaigns, ad sets and ads per channel.
+  - Actions: the `ad_actions` ledger (Pending, Dry run, Applied, Failed) with Approve and Reject.
+    An hourly applier sends approved rows.
+  - Approve: the signed one-tap link for a single row.
+  - Audiences: a read-only mirror plus the M8 exclusion check.
+  - Experiments: the internal hypothesis log.
+  - Channels: the registry, token health and the per-channel checklist.
+  - Settings: caps, margin, rule thresholds, auto-apply, the Google and Shop CSV imports, lead SMS.
+- **Ledger tiers** (`app/lib/ads/channels/apply-core.ts`, plan §9.4):
+  - A, machine alone: pause an ad, halt everything, a 30% brake, undo within 24h. Applies only
+    while `ads_spend_enabled` and `ads_auto_apply_enabled` are both on; otherwise it is a dry run.
+  - B, one tap: scale +20%, resume or revive, activate a staged paused ad, a placement exclusion,
+    a cross-channel shift inside the monthly cap.
+  - C, owner only: everything else.
+  - Agents write only proposals. `paid-media-buyer` writes them through
+    `POST /api/team/ad-action {op:'propose'}`, at most 3 a UTC day, always as one-tap cards. The
+    route refuses any attempt to set `approved` or `applied`.
+- **Valves and caps** (`app/lib/ad-settings-defaults.ts`, Settings tab; owner-only, never a ticket):
+  - `ads_spend_enabled` false, `ads_auto_apply_enabled` false. Both off means simulation.
+  - `ads_media_daily_cap_cents` 2000, `ads_media_monthly_cap_cents` 60000,
+    `ads_lead_cpl_ceiling_cents` 800.
+  - `ads_budget_max_step_pct` 20, `ads_auto_actions_max_per_day` 10, `ads_gross_margin_pct` 45,
+    the `ads_rule_*` thresholds.
+  - Team: `ads_team_enabled`, `ads_team_max_runs` 2 (the weekly burn review needs 3),
+    `ads_team_auto_approve_suggestions` false.
+- **Channels** (`app/lib/ads/channels/registry.server.ts`):
+  - `meta`: Graph API read, plus pause, resume, budget, halt and paused drafts through the ledger.
+  - `microsoft`: read; the account is Pending in the Adult Advertising Program, so the crons skip it.
+  - `adult:exoclick`: read-only (entities and stats, no upload). Banners go up by hand from the
+    zip the render pass builds.
+  - `google` and Shop: no adapter; owner-imported CSVs.
+  - `adult:juicyads`, `adult:trafficjunky`, `snap`: registered, no adapter.
+  - TikTok, X, Reddit, Pinterest: prohibited.
+- **Server loop:** `/cron/ads-insights` hourly (mirror, the rules at 09:00 UTC, health, the
+  applier, the pager), `/cron/ads-sync-entities` every 6h, `/cron/ads-token-health` daily.
+  Rules R1 to R8 (sales) and L1 to L8 (leads) live in `app/lib/ad-rules-core.ts` and
+  `app/lib/ad-rules-lead-core.ts`.
+- **Routines and owners.** `ads-manager` plans and makes ideas, `paid-media-buyer` judges spend:
+  - 27, Ads Ideas, 14:30 UTC, `ads-manager`. 10 to 20 ideas, 6 of them register-10 ExoClick banners.
+  - 28, Ads Render, 20:30 UTC, `ads-manager`. Renders, ExoClick zip, metrics and rules, the Meta
+    account doctor, then `paid-media-buyer` judges and proposes.
+  - Weekly burn review, Monday 16:00 UTC, `paid-media-buyer`.
+  - Playbooks: `docs/store-team/routine-ads-daily.md`, `routine-ads-daily-buyer-addendum.md`,
+    `routine-ads-weekly-burn-review.md`.
+  - The Meta Ads MCP is pinned read-only on 28 and the weekly review only. No agent calls a Meta
+    write tool.
+- **Protected paths for ads** (owner merges; the engine escalates): `ad-platform-apply.server.ts`,
+  `ad-settings.server.ts`, `ad-settings-defaults.ts`, `ad-spend-core.ts`,
+  `ads/channels/apply.server.ts`, `ads/channels/*/mutate.server.ts`, plus `db/migrations/**`.
+- **Where ads direction lands:**
+  - A standing rule for the routines or agents: an `instructions` row under `team:'ads'`. Auto-approve
+    is off, so it waits at `proposed` for his triage click; say so in "Needs you".
+  - Control-plane code: a `code` row whose text opens `[opus-build]` and carries
+    `program: ads-control-plane`. R-DEV never claims those; an owner-started Opus session builds them
+    (plan §10).
+  - A spend, cap, channel or valve call: a question in "Needs you" with the key, current value,
+    proposed value and the dollars at stake.
+
 ## Step 1 — Split it up
 
 Owner direction arrives as a paragraph containing four unrelated things, an aside, and a
@@ -147,6 +225,8 @@ item touches:
 - Blog, notebook, editorial → `content-writer`, `sex-wellness-reviewer`
 - Architecture, cross-cutting, or "should this exist at all" → `tech-architect`
 - Cost and efficiency of the loop itself → `process-optimizer`
+- Paid media → `paid-media-buyer` for performance, burn, budgets and "is this spend working";
+  `ads-manager` for ad ideas, creative and platform policy (`docs/ads-policy.md`)
 
 Tell each specialist the owner's actual words. Ask what it means for their surface, what it breaks,
 and what they would need. **A specialist that disagrees is doing its job**; surface the disagreement

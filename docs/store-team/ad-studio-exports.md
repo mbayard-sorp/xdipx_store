@@ -74,7 +74,7 @@ What you can do with a built draft:
 
 Daily budget on the ad set is the idea's break-even CPA (about $15 when the idea gives none), never below $1 and never above the daily media cap.
 
-The Meta Ads MCP connector is the interactive alternative. You authorize it in a chat session, it is not a server credential, and the daily routine never carries it. In that session an agent can run the same payload steps through `ads_creative_upload_media`, `ads_create_campaign`, `ads_create_ad_set`, `ads_create_creative` and `ads_create_ad`, each with status PAUSED, and only while the valve is on.
+The Meta Ads MCP connector is the interactive alternative. You authorize it in a chat session, it is not a server credential, and no routine carries its write tools (routine 28 and the weekly burn review carry only a pinned read-only set, for diagnosis). In that session an agent can run the same payload steps through `ads_creative_upload_media`, `ads_create_campaign`, `ads_create_ad_set`, `ads_create_creative` and `ads_create_ad`, each with status PAUSED, and only while the valve is on.
 
 ## 4. Banner zip for networks, sponsors and Snap
 
