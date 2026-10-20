@@ -56,6 +56,8 @@ on purpose, so the gap is visible in the run table rather than silent.
 - The Live tab runs on `?source=sample` and on Shop Campaigns history you import on the Spend tab.
   Rules R1 to R8 fire as recommendations; Pause, Scale and Refresh write rule events and nothing
   else.
+- Since ticket #16413 both tabs are in the ads console and the old URLs redirect: Live is
+  `/admin/ads/tree` and Spend is `/admin/ads/settings`.
 - The simulation badge in the burn bar shows the exit criteria: 10 straight routine days, 30 hearted
   creatives across 3 lanes, bridge page live, and your "go".
 

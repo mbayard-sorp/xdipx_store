@@ -81,7 +81,7 @@ export function AdPlatformsTable({ rows, netRevenue, newCustomers }: { rows: AdP
         <p>No ad spend is recorded for this window.</p>
         <p>
           Type each platform&apos;s monthly total on the Costs tab under Ad spend by month. Google Ads and Shop Campaigns can also be imported
-          from CSV on <a href="/admin/ad-studio/spend" className="link-coral">Ad Studio → Spend</a>.
+          from CSV on <a href="/admin/ads/settings" className="link-coral">Ads → Settings</a>.
         </p>
       </div>
     )

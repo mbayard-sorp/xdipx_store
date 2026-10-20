@@ -63,8 +63,23 @@ that item.
 
 ## Pass 2, Step 5b. Weekly profit memo (Sundays)
 
-Runs after Step 5 on the Sunday Pass 2 only, so Monday's 12:00 UTC strategy run reads it.
+Runs after Step 5 on the Sunday Pass 2 only, so Monday's 12:00 UTC strategy run reads it. The
+action proposals in item 0 are the exception and run every Pass 2.
 
+0. **Action proposals, every Pass 2.** Send each action proposal the buyer returned in Step 4b, or
+   in the memo on Sunday, to the ledger, highest `expectedContributionCents` first, verbatim:
+   ```bash
+   bash scripts/team-api.sh POST team/ad-action '{"op":"propose","platform":"meta","target":{"level":"ad","externalId":"<id>"},"verb":"pause","params":{},"reason":"<one line>","expectedContributionCents":<n>,"source":"paid-media-buyer"}'
+   ```
+   The route writes an `ad_actions` row with status `proposed` for the owner's one-tap card and
+   answers `{ok, inserted, id, tier, status}`. It takes at most 3 buyer proposals a UTC day: stop at
+   the first 429 and post a `decision` event naming the proposals that did not fit. A 404 means the
+   target is not in the mirror; post that as a `decision` event and move on. `inserted:false` means
+   today's ledger already holds that change, which is fine. The route never approves or applies
+   anything; a 403 means the call asked it to. Before sending, read
+   `bash scripts/team-api.sh POST team/ad-action '{"op":"list"}'` and hand the result to the buyer
+   with Step 4b's inputs, so it sees what the owner approved, rejected or let expire. The `decision`
+   event for each judgment is still posted as Step 4b describes; it remains the audit trail.
 1. Fetch the same inputs as Step 4b with `lookback:7` and the prior week's summaries, plus the real
    order count and AOV from `daily_profit_summary` and the state of tickets #3441 and #3422.
 2. Spawn `paid-media-buyer` with "Step 5b, weekly memo, week of <date>". It returns a suggestion

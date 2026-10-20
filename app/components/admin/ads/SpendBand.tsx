@@ -1,5 +1,5 @@
 /**
- * Instrument band for the Spend tab (wires 9.1, 9.4, 9.5): media against its
+ * Instrument band for the ads Settings page (wires 9.1, 9.4, 9.5): media against its
  * cap and compute against its own cap, side by side but never summed. One
  * surface, hairlines between the readings. Phones show two rows (media, compute);
  * md and up add the month reading as a third column.
