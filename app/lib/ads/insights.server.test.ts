@@ -214,7 +214,8 @@ describe('runInsightsCron', () => {
   function cronDeps(now: Date, adapter: ChannelAdapter, m = memoryStore({ a1: 7 })) {
     const rollup = vi.fn(async (day: string): Promise<RollupOutcome> => ({ day, spendCents: 0, written: true }))
     const runRules = vi.fn(async () => ({ evaluated: 1 }))
-    return { deps: { store: m.store, adapterFor: () => adapter, channels: () => ['meta' as const], now: () => now, rollup, runRules }, rollup, runRules, m }
+    const health = vi.fn(async (_at: Date): Promise<unknown> => ({ stub: true }))
+    return { deps: { store: m.store, adapterFor: () => adapter, channels: () => ['meta' as const], now: () => now, rollup, runRules, health }, rollup, runRules, health, m }
   }
 
   it('hourly: pulls today and yesterday, rolls both up, and leaves the rules alone', async () => {
@@ -277,6 +278,25 @@ describe('runInsightsCron', () => {
     const { deps } = cronDeps(T_HOURLY, f.adapter)
     const r = await runInsightsCron(deps)
     expect(r.channels[0]).toMatchObject({ outcome: 'failed', reason: 'rate limited' })
+  })
+
+  it('runs the health step on every run, even with no channel pulled', async () => {
+    const f = fakeAdapter(() => [row('a1', '2026-10-19')], { ...VALID, valid: false, error: 'expired' })
+    const { deps, health } = cronDeps(T_HOURLY, f.adapter)
+    const r = await runInsightsCron(deps)
+    expect(health).toHaveBeenCalledWith(T_HOURLY)
+    expect(r.health).toEqual({ ok: true, summary: { stub: true } })
+  })
+
+  it('reports a health step failure without failing the pull', async () => {
+    const f = fakeAdapter(() => [row('a1', '2026-10-19')])
+    const { deps, health } = cronDeps(T_HOURLY, f.adapter)
+    health.mockRejectedValue(new Error('samples table missing'))
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const r = await runInsightsCron(deps)
+    err.mockRestore()
+    expect(r.health).toEqual({ ok: false, error: 'samples table missing' })
+    expect(r.channels[0]!.outcome).toBe('pulled')
   })
 
   it('by default runs only channels whose adapter reports insights', async () => {
