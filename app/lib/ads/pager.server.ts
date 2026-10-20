@@ -23,10 +23,11 @@
  * - R7: ad-rules.server files its spend-guard blocker through pageOwner.
  * - L3: health.server files ads-funnel-break with a self-clearing probe.
  * - The Shopify Growth campaign: health.server files ads-growth-campaign-active.
+ * - Ad-account payment failure or restriction: health-snapshots.server reads
+ *   account_status every hour and files ads-meta-account-status through
+ *   pageOwner (ticket #16686).
  *
  * Not built, reported in `skipped` on every run:
- * - Ad-account payment failure. The mirror holds campaigns, ad sets and ads;
- *   nothing reads the ad account's account_status.
  * - CURIOUS15 redemptions ahead of leads, and any use of HKK1P6EV0AEJ.
  *   Nothing in the store reads discount-code redemptions: order_attribution
  *   has no code column, and no Shopify read pulls an order's discount codes.
@@ -40,7 +41,6 @@ export const NO_LEAD_SPEND_FLOOR_CENTS = 500
 export const LEAD_EVENTS_KEY = 'lead_events_6h'
 
 export const PAGER_NOT_BUILT = [
-  'ad-account payment failure: the mirror does not read the ad account\'s account_status',
   'CURIOUS15 ahead of leads and HKK1P6EV0AEJ use: nothing reads discount-code redemptions',
 ] as const
 

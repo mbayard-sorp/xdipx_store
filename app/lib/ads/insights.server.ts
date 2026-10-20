@@ -29,8 +29,11 @@
  * (health.server.ts, ticket #16410): the hourly counters and rule L3. Then
  * the applier (apply-run.server.ts, ticket #16432) expires stale proposals
  * and sends approved ledger rows under the daily cap, and the pager
- * (pager.server.ts) files owner blockers for the plan §9.8 pages. A failure
- * in any of those three is reported in its own field and never fails the pull.
+ * (pager.server.ts) files owner blockers for the plan §9.8 pages. Last, the
+ * signals step (health-snapshots.server.ts, ticket #16686) reads Meta's
+ * account_status and activity log every run and the ad-set breakdowns on
+ * Sunday's restatement run. A failure in any of those four is reported in its
+ * own field and never fails the pull.
  *
  * The pull itself never calls a platform write endpoint. The applier reaches
  * one only through channels/apply.server.ts, with both valves on.
@@ -265,6 +268,8 @@ export interface InsightsCronResult {
   apply: StepOutcome
   /** The pager checks (pager.server.ts). Never fails the pull. */
   pager: StepOutcome
+  /** Meta account_status, activity log and Sunday breakdowns (health-snapshots.server.ts). Never fails the pull. */
+  signals: StepOutcome
 }
 
 /** A step that reports its own failure and never fails the pull. */
@@ -284,6 +289,8 @@ export interface InsightsCronDeps extends InsightsDeps {
   apply?: (now: Date) => Promise<unknown>
   /** Defaults to runPagerChecks from pager.server. */
   pager?: (now: Date) => Promise<unknown>
+  /** Defaults to runSignalPulls from health-snapshots.server (ticket #16686). */
+  signals?: (now: Date, restatement: boolean) => Promise<unknown>
 }
 
 /** The range one cron run pulls: today and yesterday, or the last 7 days plus today on the restatement run. */
@@ -360,7 +367,7 @@ export async function runInsightsCron(deps: InsightsCronDeps = {}): Promise<Insi
     for (const day of pulledDays) rollup.push(await rollupDay(day))
   }
 
-  const out: Omit<InsightsCronResult, 'health' | 'apply' | 'pager'> = { restatement, range, channels, rollup }
+  const out: Omit<InsightsCronResult, 'health' | 'apply' | 'pager' | 'signals'> = { restatement, range, channels, rollup }
   if (restatement) {
     const runRules = deps.runRules ?? (async (at: Date) => (await import('~/lib/ad-rules.server')).runRulesDaily(at))
     // Same contract as POST /api/team/ad-metrics op daily: the rules read what
@@ -398,7 +405,13 @@ export async function runInsightsCron(deps: InsightsCronDeps = {}): Promise<Insi
     ?? (async (at: Date) => (await import('./apply-run.server')).applyApprovedActions({ now: () => at })))
   const pager = await step('pager', deps.pager
     ?? (async (at: Date) => (await import('./pager.server')).runPagerChecks({ now: () => at })))
-  return { ...out, health, apply, pager }
+  // Ticket #16686: account_status (pages on anything but ACTIVE), the activity
+  // log, and on Sunday's restatement run the weekly breakdowns. Meta only.
+  const signals: StepOutcome = ids.includes('meta')
+    ? await step('signals', at => (deps.signals
+      ?? (async (when: Date, restate: boolean) => (await import('./health-snapshots.server')).runSignalPulls({ now: () => when, restatement: restate })))(at, restatement))
+    : { ok: true, summary: { skipped: 'meta not in this run' } }
+  return { ...out, health, apply, pager, signals }
 }
 
 /** The cron response carries the verdicts and the values, not every detail blob. */

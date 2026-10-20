@@ -561,8 +561,12 @@ read-only use of the console):**
   "no Lead event for 6h" page therefore rely on landing views and lead POSTs only.
 - L6 (lead quality) cannot fire: the lead funnel report exposes no email-1 click or reveal-to-cart
   rate by `utm_content`.
-- The pager skips ad-account payment failure (the mirror never reads `account_status`) and
-  CURIOUS15 redemptions running ahead of leads (nothing in the store reads discount redemptions).
+- The pager skips CURIOUS15 redemptions running ahead of leads (nothing in the store reads
+  discount redemptions). Ad-account payment failure is covered since ticket #16686: the hourly
+  ads-insights run reads `account_status` and pages `ads-meta-account-status` on anything but
+  ACTIVE. The same ticket stores the activity log hourly and the §9.2 Sunday breakdowns
+  (placement, age, gender) in `ad_health_snapshots`, shown on /admin/ads/signals and
+  /admin/ads/breakdowns.
 - The digest "Undo" link opens the Applied tab; a signed link proposing the inverse action is not
   built.
 - "Never pause the last live ad in a set without paging" and "at most one automatic brake per

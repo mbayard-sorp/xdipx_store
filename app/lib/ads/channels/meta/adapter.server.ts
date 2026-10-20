@@ -309,3 +309,131 @@ export function createMetaAdapter(deps: MetaAdapterDeps = {}): ChannelAdapter {
 }
 
 export const metaAdapter: ChannelAdapter = createMetaAdapter()
+
+// ---------------------------------------------------------------------------
+// Signal reads (ticket #16686, plan §9.2 and §12). Read only, GET only.
+// health-snapshots.server.ts calls these from the hourly ads-insights run and
+// stores what comes back as ad_health_snapshots rows. Field names checked
+// against the Graph v23 reference for AdAccount, AdActivity and insights
+// breakdowns on 2026-10-20.
+// ---------------------------------------------------------------------------
+
+const ACCOUNT_FIELDS = 'id,name,account_status,disable_reason,currency,amount_spent,spend_cap,balance'
+const ACTIVITY_FIELDS = 'actor_id,actor_name,application_id,application_name,date_time_in_timezone,event_time,event_type,extra_data,object_id,object_name,object_type,translated_event_type'
+const BREAKDOWN_INSIGHT_FIELDS = 'adset_id,adset_name,spend,impressions,inline_link_clicks,actions'
+
+export interface MetaAccountSnapshot {
+  accountId: string
+  name: string | null
+  accountStatus: number | null
+  disableReason: number | null
+  currency: string | null
+  /** amount_spent, spend_cap and balance arrive as strings in the currency's minor unit. */
+  amountSpentCents: number | null
+  spendCapCents: number | null
+  balanceCents: number | null
+}
+
+export interface MetaBreakdownRow {
+  adsetId: string | null
+  adsetName: string | null
+  /** The breakdown values joined with " / ", e.g. "instagram / feed" or "25-34". */
+  slice: string
+  spendCents: number
+  impressions: number
+  linkClicks: number
+  leads: number
+}
+
+export interface MetaSignalReads {
+  /** False when the token or the account id is missing: the caller skips quietly. */
+  configured(): boolean
+  account(): Promise<MetaAccountSnapshot>
+  /** The token's own user (our system user). Null when Meta will not say. */
+  whoAmI(): Promise<{ id: string; name: string | null } | null>
+  activities(since: Date, until: Date): Promise<GraphJson[]>
+  breakdown(range: { since: string; until: string }, breakdowns: readonly string[]): Promise<MetaBreakdownRow[]>
+}
+
+const intOrNull = (v: unknown): number | null => {
+  const n = typeof v === 'number' ? v : typeof v === 'string' && v !== '' ? Number(v) : NaN
+  return Number.isFinite(n) ? Math.round(n) : null
+}
+
+export function normalizeMetaAccount(accountId: string, row: GraphJson): MetaAccountSnapshot {
+  return {
+    accountId,
+    name: str(row['name']),
+    accountStatus: intOrNull(row['account_status']),
+    disableReason: intOrNull(row['disable_reason']),
+    currency: str(row['currency']),
+    amountSpentCents: intOrNull(row['amount_spent']),
+    spendCapCents: intOrNull(row['spend_cap']),
+    balanceCents: intOrNull(row['balance']),
+  }
+}
+
+export function normalizeMetaBreakdownRow(row: GraphJson, breakdowns: readonly string[]): MetaBreakdownRow {
+  const actions = actionMap(row['actions'])
+  return {
+    adsetId: str(row['adset_id']),
+    adsetName: str(row['adset_name']),
+    slice: breakdowns.map(b => str(row[b]) ?? 'unknown').join(' / '),
+    spendCents: toCents(row['spend']),
+    impressions: Math.round(num(row['impressions'])),
+    linkClicks: Math.round(num(row['inline_link_clicks'])),
+    leads: Math.round(firstOf(actions, LEAD_TYPES)),
+  }
+}
+
+export function createMetaSignalReads(deps: Pick<MetaAdapterDeps, 'graph' | 'credentials'> = {}): MetaSignalReads {
+  const credentials = deps.credentials ?? (() => metaCredentialsFromEnv())
+  const graph = deps.graph ?? createGraphClient({ token: () => credentials().token })
+  const accountId = (): string => {
+    const id = credentials().accountId
+    if (!id) throw new GraphError('not_configured', 'META_AD_ACCOUNT_ID is not set.')
+    return id
+  }
+  return {
+    configured() {
+      const c = credentials()
+      return Boolean(c.token && c.accountId)
+    },
+    async account() {
+      const id = accountId()
+      return normalizeMetaAccount(id, await graph.get(id, { fields: ACCOUNT_FIELDS }))
+    },
+    async whoAmI() {
+      try {
+        const me = await graph.get('me', { fields: 'id,name' })
+        const id = str(me['id'])
+        return id ? { id, name: str(me['name']) } : null
+      } catch {
+        return null
+      }
+    },
+    async activities(since, until) {
+      const rows = await graph.getAll(`${accountId()}/activities`, {
+        fields: ACTIVITY_FIELDS,
+        since: Math.floor(since.getTime() / 1000),
+        until: Math.floor(until.getTime() / 1000),
+        limit: 200,
+      }, { maxPages: 10 })
+      // The edge documents no filter params, so the window is enforced here as well.
+      return rows.filter(r => {
+        const t = Date.parse(String(r['event_time'] ?? ''))
+        return !Number.isFinite(t) || (t >= since.getTime() && t <= until.getTime())
+      })
+    },
+    async breakdown(range, breakdowns) {
+      const rows = await graph.getAll(`${accountId()}/insights`, {
+        level: 'adset',
+        fields: BREAKDOWN_INSIGHT_FIELDS,
+        breakdowns: breakdowns.join(','),
+        time_range: { since: range.since, until: range.until },
+        limit: 500,
+      })
+      return rows.map(r => normalizeMetaBreakdownRow(r, breakdowns))
+    },
+  }
+}

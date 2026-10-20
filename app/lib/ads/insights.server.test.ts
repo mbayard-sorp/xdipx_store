@@ -247,9 +247,10 @@ describe('runInsightsCron', () => {
     const health = vi.fn(async (_at: Date): Promise<unknown> => ({ stub: true }))
     const apply = vi.fn(async (_at: Date): Promise<unknown> => ({ applied: 0 }))
     const pager = vi.fn(async (_at: Date): Promise<unknown> => ({ pages: [] }))
+    const signals = vi.fn(async (_at: Date, _restate: boolean): Promise<unknown> => ({ signals: true }))
     return {
-      deps: { store: m.store, adapterFor: () => adapter, channels: () => ['meta' as const], now: () => now, rollup, runRules, health, apply, pager },
-      rollup, runRules, health, apply, pager, m,
+      deps: { store: m.store, adapterFor: () => adapter, channels: () => ['meta' as const], now: () => now, rollup, runRules, health, apply, pager, signals },
+      rollup, runRules, health, apply, pager, signals, m,
     }
   }
 
@@ -277,6 +278,22 @@ describe('runInsightsCron', () => {
     err.mockRestore()
     expect(r.apply).toEqual({ ok: false, error: 'ledger down' })
     expect(r.pager).toEqual({ ok: false, error: 'blockers down' })
+    expect(r.channels[0]!.outcome).toBe('pulled')
+  })
+
+  it('runs the signals step after the pager, with the restatement flag, and a failure never fails the pull', async () => {
+    const f = fakeAdapter(() => [row('a1', '2026-10-19')])
+    const { deps, signals } = cronDeps(T_HOURLY, f.adapter)
+    const ok = await runInsightsCron(deps)
+    expect(signals).toHaveBeenCalledWith(T_HOURLY, false)
+    expect(ok.signals).toEqual({ ok: true, summary: { signals: true } })
+
+    signals.mockRejectedValue(new Error('graph down'))
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const r = await runInsightsCron({ ...deps, restate: true })
+    err.mockRestore()
+    expect(signals).toHaveBeenLastCalledWith(T_HOURLY, true)
+    expect(r.signals).toEqual({ ok: false, error: 'graph down' })
     expect(r.channels[0]!.outcome).toBe('pulled')
   })
 

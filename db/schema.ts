@@ -2934,3 +2934,23 @@ export const leadSmsSubscriptions = pgTable('lead_sms_subscriptions', {
   phoneCreatedIdx: index('idx_lead_sms_subscriptions_phone_created').on(t.phone, t.createdAt),
   statusIdx:       index('idx_lead_sms_subscriptions_status').on(t.status),
 }))
+
+/**
+ * Ads signal snapshots (migration 136, ticket #16686, plan §9.2). One row per
+ * reading of one kind on one channel: pixel, errors, activity, opportunity,
+ * anomaly, breakdown or account. The daily ads routine records through
+ * POST /api/team/ad-health-snapshot; the hourly ads-insights run records
+ * account, activity and (Sundays) breakdown rows from the Graph API. Kinds and
+ * payload shapes live in app/lib/ads/health-snapshots-core.ts.
+ */
+export const adHealthSnapshots = pgTable('ad_health_snapshots', {
+  id:         bigserial('id', { mode: 'number' }).primaryKey(),
+  channel:    text('channel').notNull(),
+  kind:       text('kind').notNull(),
+  observedAt: timestamp('observed_at', { withTimezone: true }).notNull(),
+  payload:    jsonb('payload').$type<Record<string, unknown>>().notNull(),
+  source:     text('source').notNull().default('routine'),
+  createdAt:  timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => ({
+  channelKindObservedIdx: index('idx_ad_health_snapshots_channel_kind_observed').on(t.channel, t.kind, t.observedAt),
+}))
