@@ -35,8 +35,13 @@ the issue is."*
 ## Step 0 — Gate + start
 
 1. `POST /api/team/run {"op":"start","team":"strategy","runType":"blocker-scout"}` → `$RUN_ID`.
-2. `GET /api/team/gate?team=strategy&excludeRun=$RUN_ID`. On `ok:false` → post a skipped event,
-   finish the run honestly, exit.
+2. `GET /api/team/gate?team=strategy&excludeRun=$RUN_ID`. On `ok:false`, check the reason first:
+   **if it is `run_in_progress` and the blocking run's `runType` is `strategy` (Weekly Strategy
+   holds the lock at 12:00 UTC Mondays, colliding with this routine's 12:00 fire — ticket #16285,
+   lost runs 1119/1255/1392 on 09-28/10-05/10-12)**, do not finish skipped immediately: re-check the
+   gate every ~10 minutes for up to 90 minutes and run the scout as soon as it opens. Finish
+   `skipped` with the blocking run id only if the lock never clears inside that window. Every other
+   gate-refusal reason is still an immediate honest skip.
 
 ## Step 1 — Read the list first
 
@@ -46,6 +51,14 @@ curl -s "$BASE_URL/api/team/blocker" -H "x-team-secret: $TEAM_TOKEN"
 
 Everything is deduped by `dedupeKey`, so re-filing an open row is harmless and is how a row
 ages. But know what is there before deciding what is new.
+
+**Re-verify every open row whose title makes a factual claim about a named database row (ticket
+#16283).** Four blockers (#445, #465, #466, #618), each asserting "post N you approved did not
+publish," sat on the owner's queue for up to fourteen days asserting a `social_posts` state nobody
+re-read; a live check found the posts were correctly `rejected` by the gate, and one named row was
+confirmed vitest fixture data. Re-read the asserted state of each such open row this pass and
+dismiss or rewrite the ones the live data contradicts. Report a count re-read and a count
+dismissed/rewritten in the Step 5 summary.
 
 ## Step 2 — Sweep the store's state
 
@@ -136,6 +149,17 @@ a P1.
 `POST /api/team/blocker {op:'file', ...}`. Field-by-field guidance is in the agent definition.
 The one field worth repeating here: if you cannot name what the row **unblocks**, reconsider
 whether it belongs on the list.
+
+**The probe must test the state the title asserts (ticket #16283).** A row about a specific object
+(a `social_posts` row, an inventory condition, a named ticket) probes that object's own live state,
+never the existence of the table it lives in. `rows_exist(<table>)` is the worked example of an
+invalid probe: blocker #555 ("the Nalpac app stopped syncing inventory onto newly published SKUs")
+carried `rows_exist(import_candidates)`, which is satisfied by the table being non-empty, which it
+always is — the row self-cleared with `cleared_by='auto'` while the condition was still live, and
+was re-raised the next day as #588. A probe whose predicate is satisfiable while the described
+condition persists is not a valid probe; a false "cleared" is worse than no probe, because it hides
+an open blocker instead of surfacing one. If no existing probe expresses the real condition, pass
+`overrideNoProbeReason` and say what the actual check is in the `DONE WHEN`, the way #588 did.
 
 Anything an agent could do with the access it already has goes to
 `POST /api/team/suggestion` as a ticket instead. That line is the whole health of this list.
