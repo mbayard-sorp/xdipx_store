@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  budgetChangeOf, budgetWithinStep, classifyTier, gateDispatch, resolveBudgetOwner, withinDailyActionCap,
+  budgetChangeOf, budgetWithinStep, classifyTier, gateDispatch, isSpendGuardHalt, resolveBudgetOwner, withinDailyActionCap,
   type MirrorBudgetRow,
 } from './apply-core'
 
@@ -124,6 +124,23 @@ describe('gateDispatch', () => {
   it('holds at the daily cap and on an oversized step', () => {
     expect(gateDispatch({ ...on, tier: 'auto', autoActionsToday: 10 }).dryRunReason).toMatch(/daily cap/)
     expect(gateDispatch({ ...on, tier: 'auto', budgetStepOk: false, budgetMaxStepPct: 20 }).dryRunReason).toMatch(/20%/)
+  })
+  it('lets a spend-guard halt past the daily cap, but never past a valve (ticket #16648)', () => {
+    const full = { ...on, tier: 'auto' as const, autoActionsToday: 10, verb: 'halt_all' }
+    expect(gateDispatch({ ...full, proposedBy: 'rule:R7' })).toEqual({ status: 'proposed', dryRunReason: null })
+    expect(gateDispatch({ ...full, proposedBy: 'rule:L3' })).toEqual({ status: 'proposed', dryRunReason: null })
+    expect(gateDispatch({ ...full, proposedBy: 'agent:paid-media-buyer' }).dryRunReason).toMatch(/daily cap/)
+    expect(gateDispatch({ ...full, proposedBy: 'owner' }).dryRunReason).toMatch(/daily cap/)
+    expect(gateDispatch({ ...full, verb: 'pause', proposedBy: 'rule:R7' }).dryRunReason).toMatch(/daily cap/)
+    expect(gateDispatch({ ...full, proposedBy: 'rule:R7', spendEnabled: false }).dryRunReason).toMatch(/ads_spend_enabled/)
+    expect(gateDispatch({ ...full, proposedBy: 'rule:R7', autoApplyEnabled: false }).dryRunReason).toMatch(/ads_auto_apply_enabled/)
+  })
+  it('isSpendGuardHalt is halt_all from rule:R7 or rule:L3 only', () => {
+    expect(isSpendGuardHalt('halt_all', 'rule:R7')).toBe(true)
+    expect(isSpendGuardHalt('halt_all', 'rule:L3')).toBe(true)
+    expect(isSpendGuardHalt('halt_all', 'rule:R1')).toBe(false)
+    expect(isSpendGuardHalt('halt_all', null)).toBe(false)
+    expect(isSpendGuardHalt('pause', 'rule:R7')).toBe(false)
   })
   it('lets an auto action through only when everything allows it', () => {
     expect(gateDispatch({ ...on, tier: 'auto' })).toEqual({ status: 'proposed', dryRunReason: null })

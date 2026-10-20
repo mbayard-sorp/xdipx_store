@@ -240,6 +240,69 @@ describe('dispatch', () => {
     expect(mem.rows[0]).toMatchObject({ verb: 'halt_all', targetExternalId: 'all', tier: 'auto', status: 'applied' })
     expect(mutate).toHaveBeenCalledTimes(1)
   })
+
+  describe('spend-guard halt at the daily cap (ticket #16648)', () => {
+    // The cap is already spent: two automatic actions today, cap 2.
+    const atCap = (store: ApplyStore): ApplyStore => ({ ...store, countAutoActionsSince: async () => 2, countAutoPausesSince: async () => 3 })
+    const capped = { autoActionsMaxPerDay: 2 }
+
+    it('a halt_all from rule:R7 still applies, once, with the exemption in its reason', async () => {
+      const { adapter, mutate } = fakeAdapter()
+      const sync = vi.fn(async () => ({}))
+      const d = deps({ store: atCap(mem.store), adapter, settings: capped, sync })
+      const r = await dispatch({ verb: 'halt_all', proposedBy: 'rule:R7', reason: 'R7 paused all: spend over cap', now: NOW }, d)
+      expect(r).toMatchObject({ status: 'applied', applied: true, tier: 'auto' })
+      expect(mem.rows).toHaveLength(1)
+      expect(mem.rows[0]).toMatchObject({ verb: 'halt_all', tier: 'auto', status: 'applied', proposedBy: 'rule:R7' })
+      expect(mem.rows[0]!.reason).toBe('spend guard: cap exempt. R7 paused all: spend over cap')
+      expect(mutate).toHaveBeenCalledTimes(1)
+      expect(mutate.mock.calls[0]![0]).toMatchObject({ verb: 'halt_all' })
+    })
+
+    it('a halt_all from rule:L3 is exempt too, and still runs the read-after-write', async () => {
+      const { adapter, mutate } = fakeAdapter(async () => ({ applied: true, after: { status: 'PAUSED' }, touchedIds: ['c1'] }))
+      const sync = vi.fn(async () => ({}))
+      const d = deps({ store: atCap(mem.store), adapter, settings: capped, sync })
+      const r = await dispatch({ verb: 'halt_all', target: { platform: 'meta', level: 'campaign', externalId: 'c1' }, proposedBy: 'rule:L3', now: NOW }, d)
+      expect(r.status).toBe('applied')
+      expect(mutate).toHaveBeenCalledTimes(1)
+      expect(sync).toHaveBeenCalledWith('meta', ['c1'])
+    })
+
+    it('a plain pause at the limit stays dry_run', async () => {
+      const { adapter, mutate } = fakeAdapter()
+      const d = deps({ store: atCap(mem.store), adapter, settings: capped })
+      const r = await dispatch({ verb: 'pause', adExternalId: 'ad1', proposedBy: 'rule:R7', now: NOW }, d)
+      expect(r.status).toBe('dry_run')
+      expect(mem.rows[0]!.reason).toMatch(/daily cap reached/)
+      expect(mutate).not.toHaveBeenCalled()
+    })
+
+    it('a halt_all from agent:paid-media-buyer or the owner at the limit stays dry_run', async () => {
+      const { adapter, mutate } = fakeAdapter()
+      const d = deps({ store: atCap(mem.store), adapter, settings: capped })
+      const buyer = await dispatch({ verb: 'halt_all', proposedBy: 'agent:paid-media-buyer', now: NOW }, d)
+      const owner = await dispatch({ verb: 'halt_all', platform: 'google', proposedBy: 'owner', now: NOW }, d)
+      for (const r of [buyer, owner]) expect(r.status).toBe('dry_run')
+      expect(mem.rows.every(r => /daily cap reached/.test(r.reason ?? ''))).toBe(true)
+      expect(mem.rows.some(r => /cap exempt/.test(r.reason ?? ''))).toBe(false)
+      expect(mutate).not.toHaveBeenCalled()
+    })
+
+    it('a halt_all from rule:R7 with either valve off stays dry_run', async () => {
+      const { adapter, mutate } = fakeAdapter()
+      for (const off of [{ spendEnabled: false }, { autoApplyEnabled: false }] as Array<Partial<ApplySettings>>) {
+        const m = memoryStore(mirror)
+        const r = await dispatch({ verb: 'halt_all', proposedBy: 'rule:R7', now: NOW }, deps({ store: atCap(m.store), adapter, settings: { ...capped, ...off } }))
+        expect(r.status).toBe('dry_run')
+        expect(m.rows[0]!.reason).toMatch(/is off/)
+      }
+      const m = memoryStore(mirror)
+      const hinted = await dispatch({ verb: 'halt_all', proposedBy: 'rule:R7', spendEnabledHint: false, now: NOW }, deps({ store: atCap(m.store), adapter, settings: capped }))
+      expect(hinted.status).toBe('dry_run')
+      expect(mutate).not.toHaveBeenCalled()
+    })
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -309,6 +372,18 @@ describe('applyApprovedRow and adoptStrandedAutoRow', () => {
     expect(r.applied).toBe(false)
     expect(r.note).toMatch(/auto-pause cap/)
     expect(capped.status).toBe('proposed')
+    expect(mutate).toHaveBeenCalledTimes(1)
+  })
+  it('adopts a stranded R7 halt_all at the daily cap, and leaves a buyer halt_all waiting (ticket #16648)', async () => {
+    const { adapter, mutate } = fakeAdapter()
+    const d = deps({ store: { ...mem.store, countAutoActionsSince: async () => 2 }, adapter, settings: { autoActionsMaxPerDay: 2 } })
+    const halt = { status: 'proposed', tier: 'auto', verb: 'halt_all', targetLevel: 'campaign', targetExternalId: 'all', approvedBy: null, approvedAt: null, createdAt: new Date(NOW.getTime() - STRANDED_MIN_AGE_MS - 1) } as const
+    const r7 = seed({ ...halt, proposedBy: 'rule:R7' })
+    const buyer = seed({ ...halt, proposedBy: 'agent:paid-media-buyer' })
+    expect((await adoptStrandedAutoRow(r7, d, NOW)).applied).toBe(true)
+    const held = await adoptStrandedAutoRow(buyer, d, NOW)
+    expect(held.applied).toBe(false)
+    expect(held.note).toMatch(/daily cap reached/)
     expect(mutate).toHaveBeenCalledTimes(1)
   })
 })

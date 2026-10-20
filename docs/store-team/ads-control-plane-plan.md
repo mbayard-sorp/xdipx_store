@@ -420,6 +420,11 @@ per campaign per 72h; the machine never unpauses anything; it never pauses the l
 without paging; at most 3 one-tap cards a day ranked by expected 7-day contribution; at most 1
 budget change per campaign per 72h from any source. Advantage+ anything stays never, in every tier.
 
+A spend-guard halt (halt_all proposed by rule:R7 or rule:L3) always applies once ads_spend_enabled
+and ads_auto_apply_enabled are both on: it is exempt from ads_auto_actions_max_per_day and the
+3-a-day pause cap, its ledger row says "spend guard: cap exempt", and R7 still pages the owner
+(owner decision 2026-10-20, ticket #16648).
+
 ### 9.5 Creative testing: the slot model
 
 At $25/day there is about $175 a week and a test costs about $40 per ad (about 2,000 impressions

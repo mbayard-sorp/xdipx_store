@@ -112,6 +112,26 @@ export function withinDailyActionCap(countToday: number, max: number): boolean {
   return countToday < max
 }
 
+/**
+ * The proposers whose halt_all is a spend guard (plan §9.4, ticket #16648):
+ * R7 is the account spend guard, L3 its lead-campaign twin.
+ */
+export const SPEND_GUARD_PROPOSERS: ReadonlySet<string> = new Set(['rule:R7', 'rule:L3'])
+
+/** Written into the reason of a spend-guard halt that the caps let through. */
+export const SPEND_GUARD_CAP_EXEMPT_REASON = 'spend guard: cap exempt'
+
+/**
+ * True for a halt_all proposed by R7 or L3. Owner decision 2026-10-20: a
+ * spend-guard halt always applies, so it is exempt from
+ * ads_auto_actions_max_per_day and from the 3-a-day automatic pause cap.
+ * The valves still hold it. A halt from anyone else (the owner, the buyer)
+ * is an ordinary automatic action.
+ */
+export function isSpendGuardHalt(verb: string, proposedBy: string | null | undefined): boolean {
+  return verb === 'halt_all' && !!proposedBy && SPEND_GUARD_PROPOSERS.has(proposedBy)
+}
+
 /** The slice of an ad_platform_entities row the dispatcher reads. */
 export interface MirrorBudgetRow {
   platform: string
@@ -154,6 +174,9 @@ export interface DispatchGateInput {
   /** Only set for a budget change. True when the step is inside ads_budget_max_step_pct. */
   budgetStepOk?: boolean | undefined
   budgetMaxStepPct?: number | undefined
+  /** The request's verb and proposer. A spend-guard halt (isSpendGuardHalt) skips the daily cap. */
+  verb?: string | undefined
+  proposedBy?: string | null | undefined
 }
 
 export interface DispatchGate {
@@ -167,6 +190,10 @@ export interface DispatchGate {
  * Whether a classified action may reach the platform now. The first reason
  * that applies wins, valves before tier before caps, so the reason on a row
  * names the outermost thing holding it.
+ *
+ * A spend-guard halt (halt_all from rule:R7 or rule:L3) skips the daily
+ * action cap: the owner decided on 2026-10-20 that a spend guard always
+ * applies once both valves are on, however many automatic actions ran first.
  */
 export function gateDispatch(g: DispatchGateInput): DispatchGate {
   const hold = (dryRunReason: string): DispatchGate => ({ status: 'dry_run', dryRunReason })
@@ -174,7 +201,8 @@ export function gateDispatch(g: DispatchGateInput): DispatchGate {
   if (!g.autoApplyEnabled) return hold('ads_auto_apply_enabled is off')
   if (g.tier === 'approve') return hold('tier approve: this can raise spend, so it waits for a tap')
   if (g.tier === 'owner') return hold('tier owner: only the owner makes this change')
-  if (!withinDailyActionCap(g.autoActionsToday, g.autoActionsMaxPerDay)) {
+  const capExempt = g.verb != null && isSpendGuardHalt(g.verb, g.proposedBy)
+  if (!capExempt && !withinDailyActionCap(g.autoActionsToday, g.autoActionsMaxPerDay)) {
     return hold(`daily cap reached: ${g.autoActionsToday} automatic actions today, cap ${g.autoActionsMaxPerDay}`)
   }
   if (g.budgetStepOk === false) {
