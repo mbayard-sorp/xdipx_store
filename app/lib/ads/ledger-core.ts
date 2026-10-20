@@ -13,7 +13,7 @@ import type { AdActionStatus, AdActionTier, AdActionVerb } from '../../../db/sch
 export type { AdActionStatus, AdActionTier, AdActionVerb }
 
 export const AD_ACTION_VERBS: readonly AdActionVerb[] = [
-  'pause', 'resume', 'set_budget', 'update_creative', 'halt_all',
+  'pause', 'resume', 'set_budget', 'update_creative', 'halt_all', 'create_paused',
 ]
 export const AD_ACTION_TIERS: readonly AdActionTier[] = ['auto', 'approve', 'owner']
 export const AD_ACTION_STATUSES: readonly AdActionStatus[] = [

@@ -7,11 +7,12 @@
  *   snap, adult, newsletter, owned          -> banner-zip
  *
  * An exporter BUILDS (a file or a payload) and a build never reaches a platform.
- * `push` exists only on the Meta exporter, is reachable only from the admin route
- * action (never the team token), and throws `spend_disabled` unless
- * ads_spend_enabled is true. TikTok has no entry: paid TikTok is prohibited for
- * this catalog (docs/ads-policy.md), and a stub that could one day be keyed on
- * was the failure mode this registry removes. The microsoft lane's push is not
+ * The Meta paused draft push is not on the exporter any more (phase 6a): it is
+ * the adapter's createPaused in app/lib/ads/channels/meta/mutate.server.ts,
+ * reached from the admin route action through the ledger dispatcher. TikTok
+ * has no entry: paid TikTok is prohibited for this catalog (docs/ads-policy.md),
+ * and a stub that could one day be keyed on was the failure mode this registry
+ * removes. The microsoft lane's push is not
  * on the exporter: it rebuilds its API payload from the idea and lives in
  * microsoft-push.server.ts, called from service.server.ts.
  *
@@ -25,7 +26,6 @@ import { ExportRefusal, type ExportBuild, type ExportCreative, type ExportIdea }
 import { assertCreativesExportable, assertSingleLane } from './policy'
 import { buildSearchExport, type SearchVariant } from './google-editor-csv.server'
 import { buildMetaDraft } from './meta-paused-draft.server'
-import { pushMetaDraft, type MetaPushDeps, type MetaPushExisting, type MetaPushResult } from './meta-push.server'
 import { buildBannerZip } from './banner-zip.server'
 
 /** Everything a builder needs, already loaded. The service loads it from the database. */
@@ -47,8 +47,6 @@ export interface ExportContext {
 export interface Exporter {
   id: ExporterId
   build(subjects: LoadedSubjects, ctx: ExportContext): Promise<ExportBuild>
-  /** Meta only. Throws MetaPushError('spend_disabled') unless ads_spend_enabled is true. */
-  push?(payload: unknown, creativeId: number, existing: MetaPushExisting, deps: MetaPushDeps): Promise<MetaPushResult>
 }
 
 const googleEditorCsv: Exporter = {
@@ -82,7 +80,6 @@ const metaPausedDraft: Exporter = {
       ...(ctx.now ? { now: ctx.now } : {}),
     })
   },
-  push: pushMetaDraft,
 }
 
 const bannerZip: Exporter = {
