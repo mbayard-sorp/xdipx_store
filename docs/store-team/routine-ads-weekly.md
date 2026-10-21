@@ -1,6 +1,7 @@
 > **RETIRED 2026-10-03.** Replaced by the two daily passes in `docs/store-team/routine-ads-daily.md`
 > (Ad Studio v2, `docs/store-team/ad-studio-v2-plan.md` §5). Do not follow this playbook. The weekly
-> trigger `trig_013PfuKac4rkjPTHuUwXWzRn` was deleted by the owner on 2026-10-06. The file stays for
+> trigger `trig_013PfuKac4rkjPTHuUwXWzRn` was disabled on 2026-10-20 (it had been recorded as deleted on
+> 2026-10-06 but kept firing on Tuesdays). The file stays for
 > history only.
 >
 > **Looking for the weekly ads routine?** Since 2026-10-20 it is
