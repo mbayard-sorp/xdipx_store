@@ -296,8 +296,8 @@ playbook never calls comes off the trigger entirely, because a pin only pre-appr
 lists and nobody has documented whether an unlisted tool on a pinned connector is refused or just
 prompts. Removal is the guard; the pin is for the tools a routine genuinely uses.
 
-**Live pins, read back from every trigger on 2026-10-20** (owner-approved sweep; before it, 18
-triggers carried at least one connector with an empty list, and Gmail sat unpinned on eight of them,
+**Live pins, read back from every trigger on 2026-10-20** (owner-approved sweep; before it, 19
+triggers carried at least one connector with an empty list, and Gmail sat unpinned on seven of them,
 none of which sends email). No trigger now carries a connector with an empty `permitted_tools`.
 
 | # | Routine | Trigger | Connectors and `permitted_tools` |
