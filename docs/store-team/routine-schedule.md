@@ -100,7 +100,7 @@ Trigger IDs, for reference when editing or deleting a routine:
 | 25 | xdipx — Video Render (2x weekly) | `trig_01T1rn2K5jysEHxrvzzYL5Vd` (created 2026-08-27, `0 13 * * 1,4`, enabled, git source attached, model `claude-opus-4-8`, no connectors — repo + xdipx.com egress only, as this lane specifies. Created once `video_team_max_runs` (10) and `video_program_enabled` (on) were both verified live through the team API. **Agent-created, so agents can edit it**, unlike the `http_api` triggers in this table. Two setup notes for whoever creates the next one: `create_trigger` exposes no git-source parameter, so the source must be attached in the Routines UI afterward and then VERIFIED (`session_context.sources` non-null) — an enabled trigger with a null source fires into `/home/user`, loses the allowlist, and dies at `POST /api/team/run` leaving no run row, per §Every trigger MUST carry a git source; and it took two attempts here, the first not persisting. First fire 2026-08-31 13:04 UTC lands a day before the writers room's first slate, so it correctly skips on `empty_episode_queue` and files the `video:empty-episode-queue` owner blocker; that is the playbook working, not a fault. **Target per the 2026-09-23 video plan:** `0 13 * * 4`, Sonnet, Atlas Cloud, up to 3 approved clips per fire; not yet applied to the trigger, see §Re-pointing the video triggers. **Cron cell UNVERIFIED as of ticket #16287**: no Monday video-render run row exists after 2026-09-21 while every Thursday has one, which is evidence the live trigger may already fire Thursday-only, but this pass could not read the live trigger to confirm — the next pass with trigger access should verify and either confirm `0 13 * * 1,4` still stands or correct this cell to the live cron) |
 | 26 | xdipx — Daily Blocker Scout (R-BLOCK) | `trig_019VmGusB3DtmUMA72vCu7uj` — cron `0 12 * * *` (daily), team `strategy`, `runType:'blocker-scout'`, playbook `docs/store-team/routine-blocker-scout.md`. Created 2026-09-02 by an agent session, gated by `blocker_scout_enabled` (ON). Alive and firing daily (5 runs 2026-09-08 through 2026-09-12, one honest skip 2026-09-12) but had never been added to this table, which left it flagged as an unwatched lane by program-manager's routine-coverage check (suggestion #9337) despite being genuinely alive — added here to close that gap. |
 | 27 | xdipx Ads Ideas (daily pass 1) | `trig_01Y1sZNUGXwBGcEV4s1fTM4H` (`30 14 * * *` UTC, created 2026-10-04) |
-| 28 | xdipx Ads Render (daily pass 2) | `trig_01V5uuqg4V96CgK3UFUMfyTX` (`30 20 * * *` UTC, created 2026-10-04). Should carry the read-only Meta Ads MCP pin from §Connector permissions. Ticket #16684 has merged, but on 2026-10-20 the trigger still carried only the Sanity floor, so the pin has not been applied |
+| 28 | xdipx Ads Render (daily pass 2) | `trig_01V5uuqg4V96CgK3UFUMfyTX` (`30 20 * * *` UTC, created 2026-10-04). Carries the read-only Meta Ads MCP pin from §Connector permissions, applied 2026-10-21 after ticket #16684 merged (it had been missing until then) |
 | 29 | xdipx Ads Weekly Burn Review | TBD (`0 16 * * 1` UTC, to be created after ticket #16684 merges, and only once `ads_team_max_runs` reads 3; see the run-cap table) |
 
 Routine 11 (Weekly Off-site Scout) was created 2026-07-23 as `trig_0131NQ3PLTRpcgdMU4wdoxh8` (Tue
@@ -331,7 +331,7 @@ none of which sends email). No trigger now carries a connector with an empty `pe
 | 25 | Video Render | `trig_01T1rn2K5jysEHxrvzzYL5Vd` | Sanity floor. Its stock check goes through `POST /api/team/video-job`. Was Shopify, Sanity, Vercel, all empty |
 | 26 | R-BLOCK | `trig_019VmGusB3DtmUMA72vCu7uj` | none |
 | 27 | Ads Ideas | `trig_01Y1sZNUGXwBGcEV4s1fTM4H` | Sanity floor |
-| 28 | Ads Render | `trig_01V5uuqg4V96CgK3UFUMfyTX` | Sanity floor. The Meta Ads pin in the next table is the target and is not attached yet |
+| 28 | Ads Render | `trig_01V5uuqg4V96CgK3UFUMfyTX` | Sanity floor plus Meta Ads with the 10 read tools in the next table, attached 2026-10-21 |
 
 The **Sanity floor** is Sanity with `query_documents`, `get_document`, `get_schema` and nothing else.
 It is what a routine that needs no connector carries, because an `update` cannot take a trigger to
@@ -348,7 +348,7 @@ No routine is ever granted a write tool (`ads_update_entity`, `ads_activate_enti
 | # | Routine | Connectors | Meta `permitted_tools` |
 |---|---|---|---|
 | 27 | Ads Ideas | none | none |
-| 28 | Ads Render | Meta Ads, target (not attached as of 2026-10-20; the trigger carries the Sanity floor) | 10: `ads_get_ad_accounts`, `ads_get_ad_entities`, `ads_get_field_context`, `ads_get_dataset_stats`, `ads_get_dataset_quality`, `ads_get_errors`, `ads_insights_anomaly_signal`, `ads_insights_performance_trend`, `ads_get_opportunity_score`, `ads_account_get_activity_logs` |
+| 28 | Ads Render | Meta Ads (attached 2026-10-21) plus the Sanity floor | 10: `ads_get_ad_accounts`, `ads_get_ad_entities`, `ads_get_field_context`, `ads_get_dataset_stats`, `ads_get_dataset_quality`, `ads_get_errors`, `ads_insights_anomaly_signal`, `ads_insights_performance_trend`, `ads_get_opportunity_score`, `ads_account_get_activity_logs` |
 | 29 | Ads Weekly Burn Review | Meta Ads only | 11: the routine 28 set plus `ads_library_search` |
 
 "Reads" above is `query_documents`, `get_document`, `get_schema`, `list_workspace_schemas`,
