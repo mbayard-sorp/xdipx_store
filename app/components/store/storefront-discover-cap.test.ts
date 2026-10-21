@@ -36,18 +36,37 @@ describe('StorefrontHome.tsx — the /discover link cap (mission brief §1)', ()
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/^\s*\/\/.*$/gm, '')
 
+  // Every failure here points at the rule rather than at the assertion, so a
+  // reader hitting it on an unrelated refactor reaches for the brief instead of
+  // reaching for the delete key. A guard that gets deleted the first time it is
+  // inconvenient is worth less than no guard, because it also carries a claim.
+  const WHY = 'mission brief §1 caps /discover at two links on the homepage: the Nº 05 mosaic promo and the Nº 09 closer. If you are deliberately changing that cap, change the brief first.'
+
   it('hardcodes exactly one route literal, the Nº 09 closer', () => {
     const hardcoded = code.match(/to="\/discover"/g) ?? []
-    expect(hardcoded).toHaveLength(1)
+    expect(hardcoded, WHY).toHaveLength(1)
   })
 
   it('keeps the mosaic promo as the only other door, via its content fallback', () => {
     // The promo renders `to={promoCtaLink}`, so its /discover is a fallback
     // string rather than a literal href. Pinned here because it is the one
     // deliberate remaining instance: the cap is two, and this is the second.
-    expect(code).toContain("const promoCtaLink = promo?.ctaLink || '/discover'")
+    expect(code, WHY).toContain("const promoCtaLink = promo?.ctaLink || '/discover'")
     const literals = code.match(/'\/discover'|"\/discover"/g) ?? []
-    expect(literals).toHaveLength(2)
+    expect(literals, WHY).toHaveLength(2)
+  })
+
+  it('keeps the promo default equal to the label the hero guard excludes', () => {
+    // The rename that removed the duplicated 'Find your fit →' literal left one
+    // hazard: the hero's secondary CTA excludes FINDER_CTA_LABEL so it can never
+    // echo the promo's label, and that only holds while the promo actually
+    // DEFAULTS to that constant. Give the promo its own literal again and the
+    // duplicate protection lapses silently, because nothing else reads both.
+    // (Content-set promo ctaLabels are outside this guard, same gap as above.)
+    expect(code, 'the promo default and the hero duplicate-label guard must read the same constant').toContain(
+      'const promoCtaLabel = promo?.ctaLabel || FINDER_CTA_LABEL',
+    )
+    expect(code).toContain('secondaryLabelRaw !== FINDER_CTA_LABEL')
   })
 
   it('does not reintroduce a CTA in the Nº 04 Meet Emma band', () => {
