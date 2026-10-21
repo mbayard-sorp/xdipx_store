@@ -273,8 +273,19 @@ React Router v7 framework mode IS the same framework as Shopify Oxygen/Hydrogen.
 4. Move env vars to Oxygen CLI secrets
 5. Replace Vercel Cron with Inngest or Upstash Qstash
 
-**Keep all Shopify calls in `app/lib/shopify.server.ts`** — single file to swap.
-**Keep all Vercel-specific code in `server/index.ts`** — never import `@vercel/kv` inside `app/`.
+**Keep product-data Shopify calls in `app/lib/shopify.server.ts`** — single file to swap. A handful of files
+deliberately call Shopify directly instead, because they're not product data and routing them through the
+shared client would defeat their own purpose: `app/lib/customer-oauth.server.ts` (Shopify's Customer Account
+OAuth API, a different surface from Admin/Storefront entirely), and `app/lib/credential-health.server.ts` plus
+the `webhookRegistered` probe in `app/lib/owner-blockers.server.ts` (each needs to ask with one exact,
+named credential to verify that credential, or to avoid whatever caching/business logic the shared client
+carries — see `docs/store-team/routine-dev-daily.md`'s "check the instrument first" section for why the
+webhook probe in particular must not go through a shared client). These are the only sanctioned exceptions;
+a new direct Shopify call anywhere else should go through `shopify.server.ts` instead.
+**Keep Vercel-specific code behind a server boundary** — either `server/index.ts` directly, or a single
+`.server.ts` facade like `app/lib/kv.server.ts` that `app/` may import, as long as the actual `@vercel/kv` (or
+other Vercel SDK) call stays behind a lazy `await import()` inside the facade rather than a static top-level
+import, so the facade — not every call site — is the one file an Oxygen migration swaps.
 
 ## Worktree setup
 
