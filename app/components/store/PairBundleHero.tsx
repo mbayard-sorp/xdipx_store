@@ -408,7 +408,6 @@ function DesktopPairItem({
             className="flex items-baseline gap-1.5 mb-3.5"
             style={{ fontFamily: 'var(--font-script)', fontSize: '19px', color: 'var(--color-ink-2)', lineHeight: 1.25 }}
           >
-            <span className="text-coral font-bold" style={{ fontFamily: 'var(--font-body)', fontSize: '14px' }}>—</span>
             <span>{say}</span>
           </div>
         )}
@@ -794,7 +793,7 @@ export function PairBundleHero({ primary, partner, copy, discountPct }: PairBund
                     color:      'var(--color-coral-deep)',
                   }}
                 >
-                  — {copy.knotCaption} —
+                  {copy.knotCaption}
                 </span>
               )}
               <div
@@ -1019,7 +1018,6 @@ export function PairBundleHero({ primary, partner, copy, discountPct }: PairBund
               className="flex items-center justify-center gap-3 px-10 py-[18px] bg-paper text-muted italic"
               style={{ fontFamily: 'var(--font-display)', fontSize: '14px' }}
             >
-              <span className="text-coral font-bold not-italic" style={{ fontFamily: 'var(--font-body)' }}>—</span>
               <span>{copy.bannerLine}</span>
             </footer>
           )}
