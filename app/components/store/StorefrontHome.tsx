@@ -206,11 +206,13 @@ export function ctaText(label: string): string {
  *  first-time visitor, and it sat one click from the hero. */
 const SECONDARY_CTA_FALLBACK_HREF = '/collections/best-sellers'
 
-/** The label the Meet Emma band (Nº 04) renders. Shared with the hero's
+/** The label the Nº 05 mosaic promo renders by default. Shared with the hero's
  *  secondary-CTA guard so the two can never drift into showing the same words
- *  for the same destination, which is the defect that made the Meet Emma button
- *  and the Nº 09 closer read as one duplicated CTA. */
-const MEET_EMMA_CTA_LABEL = 'Find your fit →'
+ *  for the same destination, which is the defect that made two finder buttons
+ *  read as one duplicated CTA. The Nº 04 Meet Emma band used to render this
+ *  label too; it no longer carries a CTA at all (see that band for why), so the
+ *  guard now protects the hero against the promo alone. */
+const FINDER_CTA_LABEL = 'Find your fit →'
 
 /** How many dial dimensions the hero readout shows. The hero is a glance, not
  *  the PDP: the ticket brief (#3530) asks for 2 to 4 dimensions, and three
@@ -323,7 +325,7 @@ function Hero({
     secondaryLabelRaw
     && HERO_CTA_WHITELIST.includes(secondaryLabelRaw)
     && secondaryLabelRaw !== primaryLabel
-    && secondaryLabelRaw !== MEET_EMMA_CTA_LABEL
+    && secondaryLabelRaw !== FINDER_CTA_LABEL
       ? secondaryLabelRaw
       // Unset (or a rejected value): keep the original "never show the same
       // label twice" behavior.
@@ -787,20 +789,18 @@ function MeetEmma({ photoUrl, photoAlt }: { photoUrl?: string | null; photoAlt?:
               Tell me a little about what you want, and I'll match it against the specs and the
               reviews. No wrong answers, just a little help finding your fit.
             </p>
-            {/* Goes straight to /discover. It used to anchor-scroll to the Nº 09
-                band, whose own button carried the SAME "Find your fit →" label
-                and only then went to /discover: two clicks and two identical
-                labels for one destination. The two buttons now carry different
-                whitelist labels (this one "Find your fit →", the closer "Show
-                me") so the page never shows the same CTA twice. */}
-            <Link
-              to="/discover"
-              onClick={() => trackCtaClick('find-your-fit', 'meet-emma')}
-              className="mt-7 inline-flex items-center gap-2 rounded-full border border-line-2 px-5 py-3 text-[15px] font-medium text-ink transition-colors hover:border-ink-3"
-              style={BODY}
-            >
-              {ctaText(MEET_EMMA_CTA_LABEL)} <span aria-hidden="true">→</span>
-            </Link>
+            {/* No CTA here, deliberately. This band is Emma's introduction,
+                which mission brief §8 makes a trust beat and not a sell beat,
+                and it used to carry a third bare /discover link on a page the
+                brief caps at two (§1: the Nº 05 mosaic promo and the Nº 09
+                closer, exactly as the MOOD_PILLS comment above already states).
+                The cap was measured breached at three on the live page from
+                2026-10-14 through 2026-10-21. §1's "repoint it at the product
+                it is really about" escape does not apply to a self-introduction,
+                which has no product, so the link goes rather than moves. The
+                copy above already asks the reader to tell Emma what they want;
+                the promo and the closer are both within a scroll of it and both
+                answer it. Ruled by homepage-ia, Routine B run 1571. */}
           </Reveal>
         </div>
     </section>
@@ -840,10 +840,14 @@ function FindYourWayIn({ block }: { block?: WayfinderMosaicBlock | undefined } =
   const promoEmphasis = promo?.emphasis || 'Discover'
   const promoBody = promo?.body
     || "Answer a few quiet questions and Emma narrows it down to a few that fit."
-  const promoCtaLabel = promo?.ctaLabel || 'Find your fit →'
+  const promoCtaLabel = promo?.ctaLabel || FINDER_CTA_LABEL
   // The mosaic promo slot is the one tile the mission brief allows to keep
-  // /discover. This fallback only renders when no wayfinderMosaic block is
-  // published; once the team publishes, ctaLink is content-controlled.
+  // /discover (§1). The fallback fires both when no wayfinderMosaic block is
+  // published AND when a published block leaves ctaLink blank, so it is the
+  // guaranteed floor for this slot rather than a pre-publish placeholder.
+  // Degrading to /discover is the correct direction here: the doctrine
+  // requirement this slot carries is that it IS the permitted finder door, so
+  // an empty field keeps the door rather than deleting it.
   const promoCtaLink = promo?.ctaLink || '/discover'
   const hasPromoImage = !!promo?.image?.url
 
@@ -1247,9 +1251,11 @@ function StillDecidingBand() {
             <em className="em em-on-dark">curious</em>{' '}
             about. Same thing.
           </h2>
-          {/* "Show me", not "Find your fit →": the Meet Emma band above now
-              links straight to /discover with that label, and the page must not
-              render the same CTA label twice. Both are whitelist phrases. */}
+          {/* "Show me", not "Find your fit →": the Nº 05 mosaic promo above
+              renders that label by default (FINDER_CTA_LABEL) and the page must
+              not render the same CTA label twice. Both are whitelist phrases.
+              This band is the sanctioned closer of the two /discover links the
+              mission brief allows; the promo is the other. */}
           <Link
             to="/discover"
             onClick={() => trackCtaClick('show-me', 'still-deciding')}
