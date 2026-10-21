@@ -99,6 +99,17 @@ backlog was 56 deep against 6 claims/day, so the queue only ever grew), once per
 `{"empty":true}` or a 409 means there is nothing claimable; that is a clean, successful, short run,
 not a failure. Claims come back in priority order (1 is P0), oldest first within a priority.
 
+**`conv-p1-*` tickets: re-triage against the actual per-surface architecture before claiming.**
+(#1958) Several `conv-p1-*` auto-filed tickets (batch 2026-08-01) assume an LLM/tool-loop
+architecture the target IVR/SMS surface does not have, which cost two tickets in run 219: #618
+(v1 IVR `createDraftOrder` is email-only, the ticket asked to reword prompts to promise texting)
+and #621 (RESEARCH is `tool_choice:none` and POST_PURCHASE has no tools array, so `kbLookup`
+cannot be registered without an architectural conversion). Before claiming a `conv-p1-*` row,
+confirm which shape the named surface actually is — deterministic template stage, single-hop LLM,
+or auto tool-loop — rather than assuming a tool loop exists. One that assumes a nonexistent tool
+loop is a premise-vs-code mismatch: block it on that premise (or rescope/split it) instead of
+implementing against the wrong architecture.
+
 **Check file overlap across the tickets you claim in one pass.** Two independently-authored `code`
 tickets that touch the same function in the same file can merge with **zero conflict markers and
 still silently drop one ticket's change** — verified on #1272/#1273 (both rewrote the same tool-hop
