@@ -163,7 +163,7 @@ export function ProductSummaryGrid({
 
   const faqSummary = faqCount > 0
     ? `${faqCount} answers to the questions buyers actually ask${productType ? ` about ${productType}s` : ''}.`
-    : `Quick answers to the most common questions${productType ? ` about ${productType}s` : ''} — coming soon.`
+    : `Quick answers to the most common questions${productType ? ` about ${productType}s` : ''}, coming soon.`
 
   return (
     <section

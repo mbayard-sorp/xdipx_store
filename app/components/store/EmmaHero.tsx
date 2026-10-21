@@ -132,7 +132,7 @@ function HeroLoving({ deal, mapRestricted, copy }: { deal: Deal; mapRestricted: 
           <Reveal disabled variant="fade" delay={0.42} as="p"
             className="text-muted text-xs mt-3 font-mono"
           >
-            {copy?.aside ?? "— Emma · changes when I find something new worth telling you about"}
+            {copy?.aside ?? "Emma · changes when I find something new worth telling you about"}
           </Reveal>
         </div>
       </div>
@@ -242,7 +242,7 @@ function HeroBundle({ deal, pair, bundlePrice, bundleCompareAt, copy }: {
         </div>
 
         <p className="text-muted text-xs font-mono">
-          {copy?.aside ?? '— Emma · picked this pairing recently · will change it when I\'m into something new'}
+          {copy?.aside ?? 'Emma · picked this pairing recently · will change it when I\'m into something new'}
         </p>
       </div>
     </section>
@@ -256,7 +256,7 @@ function HeroQuote({ deal, mapRestricted, copy }: { deal: Deal; mapRestricted: b
     ? Math.round(((deal.msrp - deal.dealPrice) / deal.msrp) * 100)
     : 0
   const image = deal.images[0]
-  const defaultQuote = `I've been a little obsessed with this one — it's got a kind of slow-burn energy I wasn't expecting. Come see.`
+  const defaultQuote = `This one's got a slow-burn energy that sneaks up on you. Come see.`
   return (
     <section className="bg-cream">
       <div className="max-w-6xl mx-auto px-4 py-8 md:py-14 grid gap-6 md:grid-cols-[1.1fr_0.9fr]">

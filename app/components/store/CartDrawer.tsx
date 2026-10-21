@@ -252,15 +252,15 @@ function EmmaBlock({
 function upsellsIntroCopy(emma: EmmaCartContext): string {
   const { variant, freeShip } = emma
   if (freeShip.remaining > 0 && freeShip.remaining <= 25) {
-    return `You're $${freeShip.remaining.toFixed(2)} from free ship — any of these tip you over ✿`
+    return `You're $${freeShip.remaining.toFixed(2)} from free ship. Any of these tip you over ✿`
   }
   switch (variant) {
     case 'gift':               return "A few quiet add-ons that travel well in a bundle."
     case 'repeat':             return "Little things I'd slide in alongside what you've got."
-    case 'first-timer':        return "A few picks I'd casually add — low commitment."
+    case 'first-timer':        return "A few picks I'd casually add, low commitment."
     case 'back-after-abandon': return "These pair nicely with what you've been eyeing."
     case 'free-ship-adjacent': return "Any of these round the order out nicely."
-    default:                   return "A few of my quiet favorites — low-key add-ons."
+    default:                   return "A few of my quiet favorites, low-key add-ons."
   }
 }
 
@@ -530,7 +530,7 @@ function EmptyCart({ onClose, upsells = [] }: { onClose: () => void; upsells?: C
       </div>
       <div>
         <p className="text-base font-semibold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
-          Empty bag — I see you ♥
+          Empty bag, I see you ♥
         </p>
         <p className="text-sm text-muted mt-1">
           Emma's picks are one tap away.
