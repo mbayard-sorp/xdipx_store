@@ -642,9 +642,8 @@ export default function ProfilePage() {
           )}
 
           <p className="text-xs text-ink/40 leading-relaxed">
-            We never share this information with any other companies for marketing purposes other than our own.
-            This helps us give you a better experience of the xdipx.com website, and also lets us provide you
-            with information about products and topics that are most relevant to you.
+            We never sell this information, and we only use it for our own marketing. It helps us shape
+            xdipx.com around you and send you the products and topics that fit what you're into.
           </p>
 
           <div className="flex justify-end">

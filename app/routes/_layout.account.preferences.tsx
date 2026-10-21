@@ -376,7 +376,7 @@ export default function PreferencesPage() {
       {/* Unsubscribe from all — soft CTA block */}
       <section className="bg-cream-2/50 rounded-2xl p-5 space-y-3 text-center">
         <p className="text-sm text-ink/60">
-          We never share your email. Unsubscribe from everything with one tap{' '}
+          We never sell your email, and we only use it for our own messages and ads. Unsubscribe from everything with one tap{' '}
           <span className="text-sage">♥</span>
         </p>
         <div>
