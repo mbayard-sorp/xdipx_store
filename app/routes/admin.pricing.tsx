@@ -13,6 +13,7 @@ import {
   getLast7DaysSummary,
   getApprovalModeV2,
   getGlobalRule,
+  getPendingQueueStaleness,
 } from '~/lib/pricing-admin.server'
 import { getModeThresholds, getClearanceLadder } from '~/lib/pricing-apply-v2.server'
 import type {
@@ -42,6 +43,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     globalRule,
     modeThresholds,
     clearanceLadder,
+    queueStaleness,
   ] = await Promise.all([
     loadGroupTree(),
     countVariantsByGroup(),
@@ -56,6 +58,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     getGlobalRule(),
     getModeThresholds(),
     getClearanceLadder(),
+    getPendingQueueStaleness(),
   ])
 
   // Merge coverage counts and last rationale into the tree
@@ -92,6 +95,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       pending: pendingRows.length,
       autoApplied: autoAppliedRows.length,
     },
+    queueStaleness,
   }
 }
 
@@ -105,6 +109,13 @@ function fmt(v: string | number | null | undefined): string {
   if (v == null) return '—'
   const n = parseFloat(String(v))
   return isNaN(n) ? '—' : `$${n.toFixed(2)}`
+}
+
+/** Hours since the oldest pending row's true start of its pending/rejected chain. */
+function fmtAgeHours(hours: number | null): string {
+  if (hours == null) return '—'
+  if (hours < 24) return `${hours}h`
+  return `${Math.round(hours / 24)}d`
 }
 
 function fmtPct(v: number | null | undefined): string {
@@ -1642,6 +1653,11 @@ export default function AdminPricingPage() {
           <span className="text-muted text-xs uppercase tracking-wide block mb-0.5">Pending approval</span>
           <span className={`font-medium ${data.counts.pending > 0 ? 'text-yellow-600' : 'text-ink'}`}>
             {data.counts.pending}
+            {data.queueStaleness.oldestPendingHours != null && (
+              <span className={`ml-1.5 font-normal text-xs ${data.queueStaleness.oldestPendingHours > 48 ? 'text-red-600' : 'text-muted'}`}>
+                (oldest {fmtAgeHours(data.queueStaleness.oldestPendingHours)})
+              </span>
+            )}
           </span>
         </div>
         <div>
