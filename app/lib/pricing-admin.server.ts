@@ -313,6 +313,66 @@ export async function getPendingAuditRows(): Promise<AuditPendingRow[]> {
 }
 
 // ---------------------------------------------------------------------------
+// Pending queue staleness (true oldest-pending age, not the latest row's own)
+// ---------------------------------------------------------------------------
+
+export interface PendingQueueStaleness {
+  pendingCount: number
+  oldestPendingAt: Date | null
+  oldestPendingHours: number | null
+}
+
+/**
+ * `pricing-apply-v2.server.ts` keeps one open decision per variant: every
+ * batch pass that touches a variant already sitting at `pending` supersedes
+ * the old row to `rejected` and inserts a fresh `pending` row, so the live
+ * row's own `occurred_at` resets on every touch even though the variant has
+ * been stuck in the queue for days. `min(occurred_at) where status='pending'`
+ * is blind to that and reports an age close to zero for a variant that has
+ * been bouncing between pending/rejected for a week.
+ *
+ * This walks each currently-pending variant's `pending`/`rejected` chain
+ * back to its true start: the earliest row after the most recent row with
+ * any other status (`applied`, `auto_applied`, `skipped_no_change`, `error`,
+ * or no prior row at all), so a variant that was actually resolved at some
+ * point does not drag in stale history from before that resolution.
+ */
+export async function getPendingQueueStaleness(): Promise<PendingQueueStaleness> {
+  const res = await db.execute(sql`
+    SELECT
+      COUNT(*)::int AS pending_count,
+      MIN(chain_start) AS oldest_pending_at
+    FROM (
+      SELECT
+        cp.variant_id,
+        (
+          SELECT MIN(p.occurred_at)
+          FROM pricing_audit_log p
+          WHERE p.variant_id = cp.variant_id
+            AND p.status IN ('pending', 'rejected')
+            AND p.occurred_at > COALESCE(
+              (SELECT MAX(r.occurred_at)
+                 FROM pricing_audit_log r
+                WHERE r.variant_id = cp.variant_id
+                  AND r.status NOT IN ('pending', 'rejected')),
+              '-infinity'::timestamptz
+            )
+        ) AS chain_start
+      FROM (SELECT DISTINCT variant_id FROM pricing_audit_log WHERE status = 'pending') cp
+    ) chains
+  `)
+
+  const row = (res.rows ?? [])[0] as { pending_count?: number; oldest_pending_at?: string } | undefined
+  const pendingCount = Number(row?.pending_count ?? 0)
+  const oldestPendingAt = row?.oldest_pending_at ? new Date(row.oldest_pending_at) : null
+  const oldestPendingHours = oldestPendingAt
+    ? Math.round((Date.now() - oldestPendingAt.getTime()) / 3600_000)
+    : null
+
+  return { pendingCount, oldestPendingAt, oldestPendingHours }
+}
+
+// ---------------------------------------------------------------------------
 // Auto-applied today
 // ---------------------------------------------------------------------------
 
