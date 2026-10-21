@@ -107,7 +107,7 @@ export function BundleHero({ bundle, buyButtonText = 'Dip In ♥', compact = fal
             className="w-full py-4 rounded-full font-bold text-lg bg-coral text-white hover:opacity-90 hover:scale-[1.01] shadow-md shadow-coral/20 transition-all"
             style={{ fontFamily: 'var(--font-display)' }}
           >
-            {isPending ? 'Adding...' : `${buyButtonText} — Add Bundle`}
+            {isPending ? 'Adding...' : `${buyButtonText}, Add Bundle`}
           </button>
         </fetcher.Form>
       </div>

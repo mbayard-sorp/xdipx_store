@@ -218,7 +218,7 @@ export function VariantSelector({
 
       {oosFallback && (
         <p className="text-[13px] text-muted italic">
-          This one's out of stock —{' '}
+          This one's out of stock,{' '}
           <button
             type="button"
             onClick={() => onSelectionChange({ ...selectedOptions, [oosFallback.optionName]: oosFallback.value })}

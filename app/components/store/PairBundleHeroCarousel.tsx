@@ -149,7 +149,7 @@ export function PairBundleHeroCarousel({
                         className="ml-2.5 text-muted hidden md:inline"
                         style={{ fontFamily: 'var(--font-script)', fontSize: '17px' }}
                       >
-                        — the short, honest version
+                        the short, honest version
                       </span>
                     </div>
                   </div>
@@ -280,7 +280,7 @@ export function PairBundleHeroCarousel({
                     className="mt-6 text-coral-deep"
                     style={{ fontFamily: 'var(--font-script)', fontSize: '22px' }}
                   >
-                    — Emma
+                    Emma
                   </p>
                   <div aria-hidden="true" className="mt-4 mx-auto h-[2px] w-16 bg-coral" />
                 </div>

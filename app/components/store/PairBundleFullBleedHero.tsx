@@ -594,7 +594,7 @@ export function PairBundleFullBleedHero({ primary, partner, copy, discountPct, t
                     color:      'var(--color-coral-deep)',
                   }}
                 >
-                  — {copy.knotCaption} —
+                  {copy.knotCaption}
                 </span>
               )}
               <div
@@ -836,7 +836,7 @@ export function PairBundleFullBleedHero({ primary, partner, copy, discountPct, t
                   {renderWithHighlight(copy.emmaQuote)}
                 </p>
                 <p className="mt-2.5 text-coral-deep" style={{ fontFamily: 'var(--font-script)', fontSize: '18px' }}>
-                  — Emma
+                  Emma
                 </p>
               </div>
             )}
@@ -905,7 +905,7 @@ export function PairBundleFullBleedHero({ primary, partner, copy, discountPct, t
                 {renderWithHighlight(copy.emmaQuote)}
               </p>
               <p className="mt-5 text-coral-deep" style={{ fontFamily: 'var(--font-script)', fontSize: '22px' }}>
-                — Emma
+                Emma
               </p>
               <div aria-hidden="true" className="mt-3 mx-auto h-[2px] w-14 bg-coral" />
             </section>
