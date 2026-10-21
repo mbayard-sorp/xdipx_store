@@ -1,0 +1,98 @@
+import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+
+/**
+ * Guard for the mission brief §1 `/discover` link cap on the homepage.
+ *
+ * §1: "/discover appears at most twice on the page: once as the closer for
+ * people who genuinely do not know where to start ... and at most one preset
+ * pill deep-link. Nothing else points there." Later in the same section: "Only
+ * the mosaic promo slot may keep /discover."
+ *
+ * So the two permitted doors are the Nº 05 mosaic promo and the Nº 09 closer.
+ * The MOOD_PILLS comment in StorefrontHome.tsx has named exactly those two as
+ * the cap since the redesign-v2 spec, and the file still shipped a third: the
+ * Nº 04 Meet Emma band carried a hardcoded `to="/discover"`. The live page
+ * served three `href="/discover"` links, measured from 2026-10-14 (recorded in
+ * the teardown delta as "breached at three") through 2026-10-21, when
+ * `homepage-ia` ruled the Meet Emma link the over-cap one and Routine B run
+ * 1571 removed it. The file documented its own invariant and violated it, and
+ * nothing failed, which is why this guard exists.
+ *
+ * WHAT THIS GUARD CANNOT SEE, stated rather than implied: it reads source text,
+ * so it only covers the links the COMPONENT hardcodes. A Sanity-published rail,
+ * tile or band `ctaLink` pointing at /discover would breach the same cap and
+ * this test would stay green. Catching that needs a render assertion over a
+ * published payload, which is banked rather than built here.
+ */
+describe('StorefrontHome.tsx — the /discover link cap (mission brief §1)', () => {
+  const source = readFileSync(fileURLToPath(new URL('./StorefrontHome.tsx', import.meta.url)), 'utf8')
+
+  // Strip comments first. The cap is about links the component emits, and the
+  // prose around it legitimately says "/discover" many times to explain the
+  // rule; counting those would make the guard fire on its own documentation.
+  const code = source
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '')
+
+  // Every failure here points at the rule rather than at the assertion, so a
+  // reader hitting it on an unrelated refactor reaches for the brief instead of
+  // reaching for the delete key. A guard that gets deleted the first time it is
+  // inconvenient is worth less than no guard, because it also carries a claim.
+  const WHY = 'mission brief §1 caps /discover at two links on the homepage: the Nº 05 mosaic promo and the Nº 09 closer. If you are deliberately changing that cap, change the brief first.'
+
+  it('references the /discover route exactly twice in total', () => {
+    // Deliberately a word-boundary match on the ROUTE rather than on one
+    // spelling of one attribute. An exact `to="/discover"` test looked
+    // sufficient and was not: it is evaded by `to="/discover?preset=x"`,
+    // `to={'/discover'}`, a template literal, an `<a href>`, or
+    // `navigate('/discover')`. The query-param shape is not a hypothetical
+    // evasion either, it is the MOST likely next addition, because the second
+    // link mission brief §1 permits is precisely a `/discover?preset=...`
+    // deep-link. A guard blind to the permitted shape of the thing it caps
+    // would have given false confidence at exactly the wrong moment.
+    const refs = code.match(/\/discover\b/g) ?? []
+    expect(refs, WHY).toHaveLength(2)
+  })
+
+  it('places those two as the Nº 09 closer and the mosaic promo fallback', () => {
+    // Which two, not just how many. The closer hardcodes its href; the promo
+    // renders `to={promoCtaLink}`, so its /discover is a fallback string. Both
+    // are pinned because they are the two deliberate instances.
+    expect(code, WHY).toContain('to="/discover"')
+    expect(code.match(/to="\/discover"/g) ?? [], WHY).toHaveLength(1)
+    expect(code, WHY).toContain("promo?.ctaLink || '/discover'")
+  })
+
+  it('keeps the promo default equal to the label the hero guard excludes', () => {
+    // The rename that removed the duplicated 'Find your fit →' literal left one
+    // hazard: the hero's secondary CTA excludes FINDER_CTA_LABEL so it can never
+    // echo the promo's label, and that only holds while the promo actually
+    // DEFAULTS to that constant. Give the promo its own literal again and the
+    // duplicate protection lapses silently, because nothing else reads both.
+    // (Content-set promo ctaLabels are outside this guard, same gap as above.)
+    expect(code, 'the promo default and the hero duplicate-label guard must read the same constant').toContain(
+      'const promoCtaLabel = promo?.ctaLabel || FINDER_CTA_LABEL',
+    )
+    expect(code).toContain('secondaryLabelRaw !== FINDER_CTA_LABEL')
+  })
+
+  it('does not reintroduce a CTA in the Nº 04 Meet Emma band', () => {
+    // §8: her introduction is a trust beat, not a sell beat. The band is
+    // delimited by its own section id and the start of the next section.
+    const start = code.indexOf('id="meet-emma"')
+    expect(start).toBeGreaterThan(-1)
+    const end = code.indexOf('function FindYourWayIn', start)
+    // Assert the delimiter was FOUND. Without this, a reordering of the
+    // functions makes indexOf return -1, slice(start, -1) silently widens to
+    // most of the file, and the assertions below then fail on unrelated links,
+    // which reads as this band regressing when it has not.
+    expect(end, 'band end delimiter not found — the slice would silently widen').toBeGreaterThan(start)
+    const band = code.slice(start, end)
+    expect(band).not.toContain('<Link')
+    expect(band).not.toContain('trackCtaClick')
+    // An <a> or a <button> would be the same defect wearing a different tag.
+    expect(band).not.toMatch(/<a\s|<button\s/)
+  })
+})

@@ -2287,3 +2287,134 @@ resolved here.
 Traffic is still far below the 300-sessions/week weighting threshold, so the
 imagery and proof items above stay banked as design capital and this cycle spent
 only on the one certain fix.
+
+## Delta, 2026-10-21 (Routine B run 1571)
+
+Three real captures, four refusals, all recorded as results. Fetched and read
+this run: `dame.com`, `www.pinkcherry.com`, `www.smilemakerscollection.com`.
+Refused: `www.aesop.com` (403 on both WebFetch and curl), `vush.com` (DNS
+failure, no response), `www.womanizer.com` (503), `www.thisisnormal.com` (404).
+Two of the three captures are competitors never reviewed in this doc before
+(`pinkcherry.com`, `smilemakerscollection.com`), which satisfies the mission
+brief §4 "one new competitor you have not reviewed before" line twice over.
+Nothing below is quoted or inferred from memory. `www.dameproducts.com` 301s to
+`dame.com`, which is worth recording because the bench row and the previous
+delta both used the `dameproducts.com` form.
+
+### The finding that matters: three of three bill guided selling in the nav, and we bill it nowhere
+
+This is the first delta where every site captured converged on the same thing,
+and it is the thing our own backlog has had parked at item 11 for three months.
+
+- **Dame bills it at top level and names its time cost.** `Find Your Vibe` is a
+  primary nav item sitting beside `Vibrators`, `Personal Care`, `Sexual Health`,
+  `Home Goods`, `Bundles`, `Sale` and `About`. The mobile nav renders it as
+  "Find Your Vibe (2-minute quiz)". It then appears a second time as a mid-page
+  module: "Not sure which toy is right for you? Find Your Vibe" with the button
+  "Take Our Quiz".
+- **Smile Makers bills it inside the category dropdown.** The `Vibrators` menu
+  carries a "Find your perfect match" column whose link is "Take our quiz",
+  sitting under "Shop by type" and "Shop by collection".
+- **PinkCherry does not bill it at all** and is the counter-example that makes
+  the point: its nav is a wall of roughly 120 category links across nine
+  dropdowns with no guided entry anywhere. Density instead of guidance.
+
+Ours: the Compass has no nav entry on any surface. It is reachable only from
+inside the homepage body, and as of this run from one link fewer than before
+(see below). Dame's "(2-minute quiz)" is the specific detail worth stealing and
+the cheapest: naming the time cost answers the objection a cautious visitor
+actually has, which is not "will this help" but "how long will this take".
+
+### Adopted
+
+1. **Backlog item 11 moves from a parked line to the top of the shell queue,
+   with a named reason rather than a preference.** Three of three captured sites
+   that bill a quiz bill it in the nav; we bill ours in the body only. This
+   remains a `[shell-PR]` behind `homepage-ia` (the two-link cap means a nav
+   entry may have to replace an existing link, and IA rules which), so it does
+   not ship this cycle under the traffic gate. What changed is that it now has
+   field evidence behind it instead of an assertion.
+2. **Name the Compass's time cost wherever it is billed.** Dame's "(2-minute
+   quiz)" is content, not shell, so this one is inside Routine A's authority for
+   the two existing doors. Filed for the daily lane rather than built here. It
+   must clear `emma-empathy-reviewer` like any other string, and it must be
+   TRUE: somebody has to time the actual Compass flow before we print a number,
+   which is exactly the kind of claim doctrine §6 forbids inventing.
+3. **Dame's closing proof act, re-measured and still the model for item 17.**
+   Captured order: press pull-quotes → a trust trio (`Discreet Shipping`,
+   `3 year warranty`, `User-tested + doctor-approved`) → brand story → the quiz
+   → a named medical board (four practitioners with credentials: a
+   board-certified OB/GYN, a naturopathic doctor, a certified sex therapist, a
+   board-certified pelvic floor physical therapist) → podcast → six customer
+   pull-quotes attributed first-name-plus-initial → "See All Reviews". Ours
+   renders only the slots we can fill honestly, which today is none of them, so
+   item 17 stays banked. Recorded because the ORDER is the reusable part.
+
+### Rejected
+
+- **PinkCherry's entire first impression.** Its top strip reads "UP TO 80% OFF
+  COME EARLY: EARLY BLACK FRIDAY" beside a live countdown timer rendering
+  `1 : -- : -- : --`, with "Save Up to 80% Off! Use Code BLACK" in the strip
+  below. This is the literal thing our charter bans, found in the wild in our
+  own category: a countdown, a discount-led hero, and a code in the chrome.
+  Standing reject, and worth re-recording now rather than at the next delta,
+  because Q4 is when the pressure to match it arrives.
+- **Dame's reveal-mechanic discount.** A modal reading "It's Black Friday. Add
+  products to your cart to reveal up to 60% off." Rejected: it makes the
+  discount contingent on an action before the number is shown, which is urgency
+  theater wearing a gift wrapper. Noted because Dame is otherwise the bench row
+  we take the most from, and a bench row is not a blanket licence.
+- **Smile Makers' bundle-offer ticker.** "OFFER: Buy any 2 vibrators and save
+  $30." on a yellow strip, plus "Free discreet shipping on orders over $65".
+  The shipping threshold is a fact and we would run it; the bundle offer is a
+  promo in the chrome and goes through `promo-manager` and the calendar, never
+  into the shell.
+- **Review counts and aggregate badges, again, and this is a REJECT on
+  ourselves rather than on them.** Dame prints per-card star ratings and review
+  counts (for example `4.5` with `1,220 Reviews`, `4.8` with `1,352 Reviews`)
+  and a hero claim of `10,000+ 5 Star Reviews`. PinkCherry prints `120,000+
+  Product Reviews` and `4.4/5 Google Customer Reviews` in one strip and
+  `109,000+ Product Reviews` in another, two different numbers for the same
+  claim on one page, which is its own lesson about what happens when proof
+  strips are maintained by hand. Backlog item 8 stays hard-suppressed below
+  threshold. We have five review invites and no corpus; printing anything here
+  would be fabricated proof under doctrine §6.
+
+### One honest read-artifact, recorded so the next cycle does not misread it
+
+Every Dame product card in the fetched HTML carries BOTH "Add to cart" and
+"Sold out". That is a static-markup artifact (both labels ship and client JS
+picks one), not a finding that Dame's catalog is out of stock. Flagged because
+a run scoring card states from raw HTML would conclude the latter, and this doc
+has been burned before by an instrument that answers confidently while pointed
+at the wrong thing.
+
+### The one thing we will do that none of them do
+
+**Hold a hard numeric cap on our own guided-discovery links and enforce it in a
+test.** All three captured sites scatter finder and category entries freely;
+Dame bills its quiz in at least three places on one page. We cap /discover at
+two by rule, and as of this cycle the cap is enforced by
+`storefront-discover-cap.test.ts` rather than by a comment that the same file
+was already violating. The point is not asceticism: it is that a closer which
+appears everywhere stops reading as a closer, and the cap is what keeps the
+Nº 09 band meaning "you are still unsure" instead of meaning nothing.
+
+### IA fence check
+
+This delta proposes no new section type, no Sanity schema change, and no new
+URL or route, so nothing goes to `tech-architect`. Adopted item 1 is explicitly
+deferred as a `[shell-PR]` needing an IA ruling on which nav link it replaces;
+adopted item 2 is content for Routine A and gated on timing the real flow;
+adopted item 3 stays banked. The locked Nº 01 to Nº 11 shell is untouched: this
+cycle's code change removes one button from Nº 04 and leaves its numeral,
+heading, portrait and body in place. **The two-link `/discover` cap, carried
+forward breached at three since the 2026-10-14 delta, is ruled and closed this
+cycle:** `homepage-ia` ruled the Nº 04 Meet Emma link the over-cap one, it is
+removed, and the served page should now carry two. The retired-route denylist is
+untouched.
+
+Traffic is still far below the 300-sessions/week weighting threshold (GA4 reports
+276 sessions over 28 days this run, about 69 a week, against a stated action
+floor of 1,000), so the imagery, proof and nav items above stay banked as design
+capital and this cycle spent only on the one certain fix.

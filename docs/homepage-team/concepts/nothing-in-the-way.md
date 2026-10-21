@@ -488,3 +488,102 @@ worry-framing.
 accounting in the same run, the cycle's code budget went to the #12612 doctrine
 fixes (a few lines each, against a live page the critic gate scored REVISE) and
 the traffic gate stands. See `routine-design-cycle.md` §1.
+
+## 14. Voice gate on the framing — 2026-10-21, Routine B run 1571
+
+**VERDICT: REVISE. `emma-empathy-reviewer` does NOT reject worry-framing, so the
+§13 fallback trigger is NOT met on voice grounds and this concept stays ranked
+first. Two of the six chips cannot ship as drafted.**
+
+This closes the gate §13 named as a pre-build requirement ("`emma-empathy-reviewer`
+must rule on the framing before any build, not after"). It was the cheapest open
+blocker on the bench winner: no code, no spend, and it could have redirected the
+build to `either-or`. It did not.
+
+### The framing ruling
+
+Naming the reader's worry sits neutrally beside the dial-9 register, on one
+condition: **the worry is an input control, and desire is the destination.** A
+chip is wayfinding, closer to a category label than to selling copy, and the
+charter scopes 9 to selling copy; the dial applies to what the shelf says once
+the worry is cleared. Where the band can undercut the 9 is its chrome, not its
+chips.
+
+**The wireframe's H2 "What would stop you?" does not ship as written.** It tells
+the reader they are hesitating, which is narrating their thoughts, and "stop"
+reads close to a dare. The band heading and sub must point at the wanting; the
+chips stay flat and plain. A band whose heading, sub and aside all dwell on
+obstacles becomes a worry band with products attached.
+
+### The register seam, which §13 had not settled
+
+**The mechanics sentence runs plain-warm (3-4), not 9.** The charter's craft rule
+keeps mechanism language in spec blocks, feature bullets and education surfaces,
+and "mechanics sentence" is mechanism by name; written at 9 it would have to
+either overclaim or break the sell-the-experience rule. It stays a trust beat and
+the desire register is carried by the product cards, whose taglines are already
+at 9. One want-beat is still allowed per mission brief §8's "plainly and with
+want in it", so a flat spec line also fails.
+
+**The Meet Emma precedent does not cover this and should not be cited as cover.**
+That carve-out exists because heating up her self-introduction centres Emma over
+the reader, a rationale about who the SUBJECT is. Worry chips have the reader as
+the subject, so it does not transfer. What transfers is only the underlying
+scoping of 9 to selling copy.
+
+**The wireframe's own sample sentence fails and is a bad model, not a template:**
+"Quiet is a category, not a compromise. These three are built to stay under the
+noise of the room you are in." It carries the not-X-but-Y shape, an unevidenced
+claim, and a hardcoded count in the string.
+
+### Per-chip verdicts (charter compliance only, not polish)
+
+| Chip | Verdict |
+|---|---|
+| "Someone will hear it." → `Whisper-Quiet` | OK. The filter promises quieter, not silent, which the tag can support. The sentence may never say silent, inaudible, or "no one will hear". |
+| "There is nowhere to keep it." → `Discreet` | **BLOCKED as drafted.** See below. |
+| "It is my first one." → `Beginner-Friendly` | OK, and the safest of the six. The reader chose to tap it, so it is not narration. Normalise before selling, invent no "most people" figure. |
+| "The cleanup." → `Easy To Clean` | OK. Name a real material or finish from product data; no sterility or hygiene claims, which are medical-adjacent. |
+| "It will die halfway through." → `Rechargeable` | **REVISE, structurally unsafe.** The tag says "has a battery you charge"; the label's worry is runtime mid-use, which the tag does not speak to, and the sentence would be tempted to supply a runtime figure. It also puts a specific mid-act failure in the reader's mouth with a performance-anxiety edge. Needs a relabel the tag can honestly keep. |
+| "I want to take it with me." → `Travel-Ready` | OK, and the one chip that fits dial 9 natively. No TSA, security or luggage-inspection claims. |
+
+### The blocked pairing, and a real finding underneath it
+
+The `Discreet` pairing fails on three counts. The chip is about SPACE and the tag
+is not about space. It asserts a living situation (roommates, a partner, family)
+the reader never stated. And **the tag is semantically unstable in our own code,
+verified this run rather than asserted:** `app/lib/search.server.ts:246` maps
+`discreet` to `ivrFeatures: 'quiet'`, while
+`app/lib/sms-v2/slot-extractor.server.ts:382` pushes `discreet-packaging`, with
+`__tests__/slot-extractor-pills.test.ts:91` and `:111` pinning both readings in
+one file ("Discreet" → `discreet-packaging`, but "discreet motor" → quiet). So
+one word means quietness in search and packaging in SMS, and the concept doc
+assumed a third thing. Packaging is also a store-wide property, so as a
+per-product filter it is either meaningless or a duplicate of `Whisper-Quiet`.
+
+To clear the block: establish how `Discreet` is actually assigned across its
+1011 products, then either relabel to the one thing it demonstrably means, map
+the storage worry to a tag genuinely about size, or drop the chip.
+
+### Conditions carried to any build, so this is not read as blanket approval
+
+1. Chrome points at the wanting, not the hesitation.
+2. No chip states a feeling or situation beyond the obstacle: no home-privacy
+   assumption, no performance scenario.
+3. The mechanics sentence is plain-warm, one sentence, one want-beat, no
+   not-X-but-Y, no hedging.
+4. **The mechanics sentence is per-product, not per-pole**, which settles the
+   fabricated-proof trap §13 raised: no decibel figure, runtime, percentage,
+   count or certification that is not in that product's own data. A product with
+   no evidenced sentence shows none. Thin evidence means a vaguer sentence, never
+   a fuller one.
+5. No sentence may imply Emma tested quietness, cleanup, battery life or fit.
+6. Every chip label and sentence returns to the voice gate as copy. This ruling
+   covers framing only.
+7. The band is re-measured and re-gated with the two failing chips replaced or
+   dropped before it builds.
+8. No whisper-language anywhere in the band.
+
+**Also recorded:** the §13 re-measure condition still stands independently, and
+is now compounded by `Whisper-Quiet` (100 products) being both the thinnest pole
+and the most emotionally resonant chip. The best chip is still the first to break.
