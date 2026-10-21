@@ -30,7 +30,20 @@ export function EmmaCuratedRail({ block, products, ground }: EmmaCuratedRailProp
   return (
     <div className="relative">
       {block.emmaAside && (
-        <div className={`${bgClass} pt-10`}>
+        /* pt-16 md:pt-20, the doctrine §1 band rhythm, NOT a hand-picked
+            value. This wrapper used to carry a flat `pt-10` (40px) with no
+            responsive variant, so the four published aside-led rails opened
+            45px below their ground boundary at every width while every other
+            band on the page opened at 68px (375) / 84px (768 and 1440):
+            off the 64/80 scale AND breakpoint-deaf. Measured at all three
+            viewports by the design-critic gate, Routine B run 1571.
+            This is ticket #8418's defect one level up: that ticket moved the
+            RAIL off the legacy py-12 and onto the doctrine rhythm, and the
+            aside band added later by #12340 arrived with a fresh off-scale
+            value. The rail's own `py-16 md:py-20` below still supplies the
+            gap between this line and the heading it introduces, so this
+            changes where the band OPENS and nothing else. */
+        <div className={`${bgClass} pt-16 md:pt-20`}>
           <div className="mx-auto max-w-[1320px] px-6 md:px-16">
             <p
               // max-w-[46ch] (ticket #14124): matches the hero body's measure
