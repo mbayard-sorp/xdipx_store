@@ -70,7 +70,7 @@ export function PersonalizedSearchRail({
       {isLoggedIn ? (
         <Section>
           <p className="text-sm text-ink">
-            Hey <span className="font-semibold" style={{ fontFamily: 'var(--font-display)' }}>{firstName}</span> —
+            Hey <span className="font-semibold" style={{ fontFamily: 'var(--font-display)' }}>{firstName}</span>.
           </p>
           <p className="text-xs text-muted mt-1 italic">quick note</p>
           <p className="text-sm text-ink/75 mt-2 leading-relaxed">
@@ -79,7 +79,7 @@ export function PersonalizedSearchRail({
         </Section>
       ) : (
         <Section>
-          <p className="text-sm text-ink">Hey there —</p>
+          <p className="text-sm text-ink">Hey there.</p>
           <p className="text-sm text-ink/75 mt-2 leading-relaxed">
             First time? Start with a preset on the left, or ask Emma anything ♥
           </p>
@@ -201,9 +201,9 @@ function Section({ title, children }: { title?: string; children: React.ReactNod
 
 function buildTimeNote(): string | null {
   const h = new Date().getHours()
-  if (h < 6)  return '3 a.m. browsing — no judgement. Start slow.'
-  if (h < 11) return 'Morning coffee and a quiet scroll — I love that for you.'
-  if (h < 17) return "Afternoon shop. Take your time — I'm here if you need me."
+  if (h < 6)  return '3 a.m. browsing, no judgement. Start slow.'
+  if (h < 11) return 'Morning coffee and a quiet scroll, I love that for you.'
+  if (h < 17) return "Afternoon shop. Take your time. I'm here if you need me."
   if (h < 22) return 'Evening picks tend to be the good ones.'
   return 'Late-night tab with good intentions. Take a peek ♥'
 }
