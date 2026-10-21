@@ -42,18 +42,27 @@ describe('StorefrontHome.tsx — the /discover link cap (mission brief §1)', ()
   // inconvenient is worth less than no guard, because it also carries a claim.
   const WHY = 'mission brief §1 caps /discover at two links on the homepage: the Nº 05 mosaic promo and the Nº 09 closer. If you are deliberately changing that cap, change the brief first.'
 
-  it('hardcodes exactly one route literal, the Nº 09 closer', () => {
-    const hardcoded = code.match(/to="\/discover"/g) ?? []
-    expect(hardcoded, WHY).toHaveLength(1)
+  it('references the /discover route exactly twice in total', () => {
+    // Deliberately a word-boundary match on the ROUTE rather than on one
+    // spelling of one attribute. An exact `to="/discover"` test looked
+    // sufficient and was not: it is evaded by `to="/discover?preset=x"`,
+    // `to={'/discover'}`, a template literal, an `<a href>`, or
+    // `navigate('/discover')`. The query-param shape is not a hypothetical
+    // evasion either, it is the MOST likely next addition, because the second
+    // link mission brief §1 permits is precisely a `/discover?preset=...`
+    // deep-link. A guard blind to the permitted shape of the thing it caps
+    // would have given false confidence at exactly the wrong moment.
+    const refs = code.match(/\/discover\b/g) ?? []
+    expect(refs, WHY).toHaveLength(2)
   })
 
-  it('keeps the mosaic promo as the only other door, via its content fallback', () => {
-    // The promo renders `to={promoCtaLink}`, so its /discover is a fallback
-    // string rather than a literal href. Pinned here because it is the one
-    // deliberate remaining instance: the cap is two, and this is the second.
-    expect(code, WHY).toContain("const promoCtaLink = promo?.ctaLink || '/discover'")
-    const literals = code.match(/'\/discover'|"\/discover"/g) ?? []
-    expect(literals, WHY).toHaveLength(2)
+  it('places those two as the Nº 09 closer and the mosaic promo fallback', () => {
+    // Which two, not just how many. The closer hardcodes its href; the promo
+    // renders `to={promoCtaLink}`, so its /discover is a fallback string. Both
+    // are pinned because they are the two deliberate instances.
+    expect(code, WHY).toContain('to="/discover"')
+    expect(code.match(/to="\/discover"/g) ?? [], WHY).toHaveLength(1)
+    expect(code, WHY).toContain("promo?.ctaLink || '/discover'")
   })
 
   it('keeps the promo default equal to the label the hero guard excludes', () => {
@@ -74,8 +83,16 @@ describe('StorefrontHome.tsx — the /discover link cap (mission brief §1)', ()
     // delimited by its own section id and the start of the next section.
     const start = code.indexOf('id="meet-emma"')
     expect(start).toBeGreaterThan(-1)
-    const band = code.slice(start, code.indexOf('function FindYourWayIn', start))
+    const end = code.indexOf('function FindYourWayIn', start)
+    // Assert the delimiter was FOUND. Without this, a reordering of the
+    // functions makes indexOf return -1, slice(start, -1) silently widens to
+    // most of the file, and the assertions below then fail on unrelated links,
+    // which reads as this band regressing when it has not.
+    expect(end, 'band end delimiter not found — the slice would silently widen').toBeGreaterThan(start)
+    const band = code.slice(start, end)
     expect(band).not.toContain('<Link')
     expect(band).not.toContain('trackCtaClick')
+    // An <a> or a <button> would be the same defect wearing a different tag.
+    expect(band).not.toMatch(/<a\s|<button\s/)
   })
 })
