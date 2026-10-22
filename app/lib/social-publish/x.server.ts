@@ -35,7 +35,9 @@
 import type { SocialPublisher, PublishInput, PublishResult } from './types'
 import {
   X_CAPTION_MAX,
+  X_CREDITS_DEPLETED_PHRASE,
   X_MEDIA_MAX,
+  X_READONLY_TOKEN_PHRASE,
   X_VIDEO_MAX_DURATION_SEC,
   X_VIDEO_MAX_SIZE_BYTES,
   weightedTweetLength,
@@ -179,10 +181,10 @@ export const xPublisher: SocialPublisher = {
  */
 export function describeXApiError(message: string): string {
   if (message.includes('402')) {
-    return `${message}. X API credits are depleted. Add credits at developer.x.com; posting stays blocked until you do.`
+    return `${message}. ${X_CREDITS_DEPLETED_PHRASE}. Add credits at developer.x.com; posting stays blocked until you do.`
   }
   if (message.includes('403')) {
-    return `${message}. The access token is likely read-only. Set App permissions to Read and Write, then REGENERATE the access token and secret (changing the permission does not upgrade an existing token) and update the Vercel env vars.`
+    return `${message}. The access token is likely read-only. Set App permissions to Read and Write, then ${X_READONLY_TOKEN_PHRASE} and secret (changing the permission does not upgrade an existing token) and update the Vercel env vars.`
   }
   return message
 }

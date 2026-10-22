@@ -48,6 +48,25 @@ export function isRetryFutileXError(detail: string): boolean {
 }
 
 /**
+ * The two message fragments `describeXApiError` (x.server.ts) appends when an
+ * X publish failure cannot be fixed by code: X's pay-per-use credits are
+ * depleted, or the access token is read-only and needs regenerating with
+ * write permission. Named here, not just inline in x.server.ts, so the dead-
+ * row report below can detect the same two cases without restating them.
+ */
+export const X_CREDITS_DEPLETED_PHRASE = 'X API credits are depleted'
+export const X_READONLY_TOKEN_PHRASE = 'REGENERATE the access token'
+
+/**
+ * Is this X publish failure one only the owner can fix (adding credits at
+ * developer.x.com, or regenerating the access token's permissions), rather
+ * than a code defect a diff can retry its way past?
+ */
+export function describesOwnerOnlyXRemedy(detail: string): boolean {
+  return detail.includes(X_CREDITS_DEPLETED_PHRASE) || detail.includes(X_READONLY_TOKEN_PHRASE)
+}
+
+/**
  * Every link on X is rewritten through t.co and billed against the character
  * count at a fixed width regardless of the real URL's length. A 90-character
  * PDP URL therefore costs 23, and a naive `caption.length` would reject posts X
