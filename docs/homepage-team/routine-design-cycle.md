@@ -211,17 +211,42 @@ race-guard helper plus tests, and two nit fixes) — and a verification run afte
 passed" for tests that were no longer on disk, which reads as a pass and is not one. The gate behaved
 exactly right; the collision was the playbook's to prevent. Three rules:
 
-1. **Commit before dispatching any review gate**, so the gate has an immutable target and the
-   orchestrator has nothing uncommitted left to lose.
+1. **Commit before dispatching any review gate, and leave the tree untouched for the gate's whole
+   run, not just at dispatch (ticket #16884).** "Before" alone leaves a gap: run 1571 committed
+   before dispatching, then kept editing while `qa-reviewer` ran against that commit. The gate
+   correctly found and ignored three uncommitted files it had not made, so nothing was lost that
+   time, but it is the same collision #8423 exists to prevent, approached from the other direction.
+   Either hold all edits until the gate returns, or make your in-flight edits in a separate worktree
+   (`scripts/setup-worktree.sh`, named for the gate in rule 2 below — it works just as well for the
+   orchestrator's own concurrent edits).
 2. **Any gate asked to mutate the tree runs in an isolated git worktree, not the shared checkout** —
    `scripts/setup-worktree.sh` already exists for exactly this.
-3. **After any gate that reports touching the tree, re-verify your own work is still present**
-   (grep for a distinctive symbol from your change) before trusting a green test run. This is the
-   cheap check and catches the silent case even if 1 or 2 is skipped.
+3. **After any gate that reports touching the tree, OR that reports finding foreign content in the
+   tree without touching it (ticket #16884), re-verify your own work is still present** (grep for a
+   distinctive symbol from your change) before trusting a green test run. A gate reporting foreign
+   content is the earlier, cheaper signal that rule 1 above was violated — do not wait for it to also
+   report a mutation before re-verifying. This is the cheap check and catches the silent case even if
+   1 or 2 is skipped. Nothing in this rule requires a gate to volunteer the foreign-content caveat;
+   when one does (as run 1571's did, by its own choice and not because the playbook asked), treat it
+   as the trigger for this check, not as optional color in its report.
 
 The same hazard applies to Routine A whenever it dispatches a gate agent mid-edit. Keep the
 revert-to-prove-the-test instruction itself — it is genuinely valuable — these three rules stop it
 from colliding with uncommitted work, they do not remove it.
+
+**A new guard is checked against the other plausible shapes of the same defect, not just the shape
+you watched it take (ticket #16885).** Revert-to-prove is necessary and not sufficient: it proves a
+guard catches the defect in the exact form it already happened, which is the form least likely to
+recur now that it is fixed. Run 1571 fixed a third hardcoded `/discover` link, wrote a guard
+asserting the source contains exactly one `to=/discover` literal, and proved it by reverting the
+fix; the guard passed, and `qa-reviewer` then listed shapes it could not see — `to=/discover?preset=x`
+(not theoretical: mission brief §1 explicitly permits a second `/discover` link as a preset
+deep-link, so this is the single most likely next addition to the file), `to={/discover}` in braces,
+a template literal, an `<a href>`, and a programmatic `navigate(/discover)`. The fix was a
+word-boundary match on the route rather than one spelling of one attribute. Before trusting a new
+guard, spend one minute writing down the two or three other shapes the same defect could take (query
+params, template literals, a different tag or call site) and check the pattern against each — the
+query-param case above is the worked example.
 
 - `tech-architect` — coupling, layer, Oxygen-seam integrity, migration impact; writes/links an ADR if
   the change is non-trivial.
@@ -280,6 +305,15 @@ from colliding with uncommitted work, they do not remove it.
   375/768/1440 against `docs/design-doctrine.md` and scores its rubric (hierarchy, spacing rhythm,
   type, color, imagery, motion, overall). The PR does not open on a REVISE or BLOCK; fix and
   re-review. Record the verdict + scores as an `/event` row (`agentRole:'design-critic'`).
+  **Calibration (ticket #16881).** The gate's own `<calibration>` block (`.claude/agents/design-critic.md`)
+  requires scoring 5 known-good and 5 known-bad historical screenshots before a BLOCK is trusted;
+  until that calibration run is recorded as its own `/event` row, the gate issues REVISE wherever it
+  would otherwise BLOCK, because an untrusted BLOCK is worse than a visible REVISE. **This
+  orchestrator (Routine B) owns recording that calibration event** — provide the 5-good/5-bad set,
+  dispatch the calibration pass, and post the `/event` row once scores separate cleanly; until then,
+  every REVISE that design-critic reports as a withheld BLOCK must be surfaced as a withheld BLOCK in
+  this run's summary and event row, never folded into the ordinary REVISE count, so the record shows
+  what was actually scored rather than reading as one more routine REVISE.
   **When this cycle is working a filed defect ticket (ticket #12615):** before any fix is written,
   dispatch `design-critic` for a per-defect CONFIRMED / REFUTED verdict against a fresh capture and
   a stated measurement, not a re-score of the whole surface. Run 1162 wrote exactly that fix-first
