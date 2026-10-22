@@ -922,9 +922,13 @@ batch)`.
 3. **Save close.** The keepable line plus the engagement question, and the pointer that all of
    them are at xdipx.com/new, as plain text (link in bio reaches it).
 
-**Caption.** A two-line summary of what came in (product types, not a list of names), one sentence
-on who each is for at most, the `/new` pointer as plain text, the engagement close. No price, no
-CTA, no PDP link (Step 4c). Hashtags per the Instagram rules.
+**Caption.** A two-line summary of the category or problem the batch addresses (product types, not
+a list of names, and never that the batch exists, is available, or just arrived — "pick one", "it
+just landed", "in stock", "the restock covers X" all read to the voice gate as a commerce-event
+announcement even with no price attached; `instagram-campaigns.md` §3.3 has the full rule and the
+worked example, ticket #16978), one sentence on who each is for at most, the `/new` pointer as plain
+text, the engagement close. No price, no CTA, no PDP link (Step 4c). Hashtags per the Instagram
+rules.
 
 **X companion, mandatory.** The first four slides (the hook and three cards) as the tweet's media,
 a one-sentence summary, and the link `https://xdipx.com/new?utm_source=x&utm_medium=social&utm_campaign=new-in`.
