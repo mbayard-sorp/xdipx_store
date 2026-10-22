@@ -72,10 +72,15 @@ curl -s -X POST "$BASE_URL/api/team/suggestion" \
 that the ads control plane program (`docs/store-team/ads-control-plane-plan.md` §10, ADR-018) is
 built only by Opus 5.5 agents. Its tickets open with `[opus-build]` and carry
 `program: ads-control-plane`. This pass runs on Sonnet, so it does not claim them. If a claim
-returns one anyway (the claim filter cannot see tags), transition it straight back to `approved`
-with a note naming the tag; do not block it, do not open a PR, and do not spend an attempt. Those
-rows are built in owner-started Opus 5.5 sessions, which claim them by id, open the `ticket/<id>`
-PR, and hand off to QA and the release engine exactly as this routine does.
+returns one anyway (the claim filter cannot see tags), transition it to `blocked` with
+`blockClass:"dependency"` and a note naming the tag — `in_progress → approved` is **not** an
+assignee-reachable transition (confirmed live on ticket #16688, 2026-10-21: the API returns 409
+for `actor:agent:rr7-engineer`), so `blocked` is the only transition this lane can actually make.
+This block is a release valve, not a real one: say in the note that no attempt was spent and no
+owner escalation is implied beyond the tag, so a later pass or the owner reading the row does not
+mistake it for a genuine blocker. Do not open a PR. Those rows are built in owner-started Opus 5.5
+sessions, which claim them by id, open the `ticket/<id>` PR, and hand off to QA and the release
+engine exactly as this routine does.
 
 **Social zero-day tickets are claimed first (owner direction 2026-09-06).** Before the general claim
 above, list `{op:'list', status:'approved', kind:'code', team:'social'}` and claim by `id` any row
@@ -221,6 +226,14 @@ three extra requirements:
    Section placement is not cosmetic: ticket #7150 was bounced by QA solely for missing this
    section on an otherwise-correct diff, costing a full review cycle on substance that was already
    right. Write it first so it cannot be an afterthought.
+
+   **A PR body claiming owner authorization for a legal, brand, or consent-default change must
+   cite a checkable reference in this same section** (a blocker-list id, a dated doc entry, or an
+   owner-authored row), not bare prose. Ticket #16688 (PR #1743, a Meta CAPI consent-default flip)
+   asserted "Owner decision inside this PR" with no ticket, blocker, or doc anywhere recording it;
+   QA bounced it (#16795) because a prose claim of authorization is not evidence of it, and no gate
+   short of QA reading the body catches this. State the reference next to the invariant/evidence
+   lines above, or the PR goes to `blocked` the same as any other unauthorized protected-path claim.
 2. **Never author a diff that widens agent permissions or weakens a gate**: no edits to
    `PROTECTED_GLOBS`, no new agent write paths to `pipeline_settings`, no valve default changes, no
    loosening of the transition map, no touching money-valve semantics (`import_enrich_enabled`,
