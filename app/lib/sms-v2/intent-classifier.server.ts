@@ -108,12 +108,29 @@ const REGEX_BANK: RegexEntry[] = [
     // help me relax" (use-case disclosure) does NOT fire COMMIT_PICK.
     // "I want it to..." → NAME_ITEM/DISCOVERY via Haiku fallback.
     // "I want it now", "I want it ♥", "I want it shipped" → still match (no \s+to\b after).
-    re: /\b(i'?ll\s+take\s+it|let'?s\s+do\s+it|add\s+to\s+cart|buy\s+it|buy\s+now|place\s+order|order\s+now|check\s+out|get\s+it|send\s+it|i\s+want\s+it(?!\s+to\b)|i\s+want\s+that|i'?ll\s+get\s+it|i'?m\s+in)\b/i,
+    //
+    // "i'm in" is deliberately NOT in this group (ticket #17212): every other
+    // alternative here is an unambiguous buy phrase wherever it appears in a
+    // sentence, but "I'm in" reads naturally as ordinary context ("I'm in the
+    // Air Pulse & Suction Vibrators collection", "I'm in a rush") far more
+    // often than as a buy confirmation. See the standalone entry below.
+    re: /\b(i'?ll\s+take\s+it|let'?s\s+do\s+it|add\s+to\s+cart|buy\s+it|buy\s+now|place\s+order|order\s+now|check\s+out|get\s+it|send\s+it|i\s+want\s+it(?!\s+to\b)|i\s+want\s+that|i'?ll\s+get\s+it)\b/i,
     intent: 'COMMIT_PICK',
   },
   // Short buy signals (any stage)
   {
     re: /^\s*(buy|order|checkout|sold|yes\s+please|yes\s+buy|i\s+want)\s*[!.]*\s*$/i,
+    intent: 'COMMIT_PICK',
+  },
+  // "I'm in" as a bare commit confirmation — works in all stages, but ONLY
+  // when it IS the whole message (optionally with trailing punctuation), not
+  // as a substring (ticket #17212, run 1593-adjacent, web chat
+  // a28ef201-5e2e-4182-b51e-70eda2d51efc): "I'm in the Air Pulse & Suction
+  // Vibrators collection" is the customer stating context, not confirming a
+  // purchase, and used to match the broad phrase bank above via a bare \b
+  // boundary with no end-of-phrase anchor.
+  {
+    re: /^\s*i'?m\s+in\s*[!.]*\s*$/i,
     intent: 'COMMIT_PICK',
   },
 
