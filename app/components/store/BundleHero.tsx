@@ -9,7 +9,7 @@ interface BundleHeroProps {
   compact?: boolean
 }
 
-export function BundleHero({ bundle, buyButtonText = 'Dip In ♥', compact = false }: BundleHeroProps) {
+export function BundleHero({ bundle, buyButtonText = "I'll take it ♥", compact = false }: BundleHeroProps) {
   const fetcher = useFetcher()
   const isPending = fetcher.state !== 'idle'
   const savings = +(bundle.originalTotal - bundle.bundlePrice).toFixed(2)
@@ -107,7 +107,7 @@ export function BundleHero({ bundle, buyButtonText = 'Dip In ♥', compact = fal
             className="w-full py-4 rounded-full font-bold text-lg bg-coral text-white hover:opacity-90 hover:scale-[1.01] shadow-md shadow-coral/20 transition-all"
             style={{ fontFamily: 'var(--font-display)' }}
           >
-            {isPending ? 'Adding...' : `${buyButtonText}, Add Bundle`}
+            {isPending ? 'Adding...' : buyButtonText}
           </button>
         </fetcher.Form>
       </div>
