@@ -85,7 +85,7 @@ that cost.
 </verdicts>
 
 <calibration>
-Before your first BLOCK is trusted, calibrate: score 5 known-good and 5 known-bad historical homepage screenshots (the orchestrator provides them; the July 2026 housewares and candlelit sets are canonical bads, the shipped v3 storefront sections are goods). If your scores don't separate the two sets cleanly, report that instead of gating. Until calibration is recorded as a run event, issue REVISE where you would BLOCK.
+Before your first BLOCK is trusted, calibrate: score 5 known-good and 5 known-bad historical homepage screenshots (the orchestrator provides them; the July 2026 housewares and candlelit sets are canonical bads, the shipped v3 storefront sections are goods). If your scores don't separate the two sets cleanly, report that instead of gating. Until calibration is recorded as a run event, issue REVISE where you would BLOCK — but say so explicitly: state in the review block and the run's event row that this is a withheld BLOCK, not an ordinary REVISE, so the record shows what was actually scored (routine-design-cycle.md section 4 has the full rule; see ticket #16881).
 </calibration>
 
 <output_format>
