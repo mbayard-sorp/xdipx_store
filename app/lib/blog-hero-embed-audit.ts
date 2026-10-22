@@ -65,6 +65,11 @@ const GENERIC_TOKENS = new Set<string>([
   'bullet', 'bullets', 'plug', 'plugs', 'massager', 'massagers', 'lube',
   'lubricant', 'lubricants', 'ring', 'rings', 'harness', 'stroker', 'strokers',
   'masturbator', 'masturbators', 'beads', 'rabbit',
+  // Restraint-category words (ticket #16978, run 1593): "cuffs" is the bare
+  // category name for handcuffs/restraint products, structurally identical to
+  // "harness"/"stroker" above, and "soft" is a firmness/texture descriptor
+  // like "rechargeable"/"waterproof" below, not a brand/model token.
+  'cuffs', 'soft',
   'mini', 'max', 'pro', 'plus', 'lite', 'xl', 'deluxe',
   'rechargeable', 'silicone', 'waterproof', 'wireless', 'remote', 'app',
   'adult', 'wellness', 'product', 'toy', 'toys', 'pleasure', 'couples',
@@ -76,7 +81,7 @@ const GENERIC_TOKENS = new Set<string>([
   // arbitrary unrelated SKU that happens to share it.
   'pink', 'purple', 'blue', 'teal', 'black', 'noir', 'onyx', 'magenta',
   'coral', 'rose', 'red', 'green', 'grey', 'gray', 'white', 'silver', 'gold',
-  'peach', 'lilac', 'violet', 'aqua', 'ombre',
+  'peach', 'lilac', 'violet', 'aqua', 'ombre', 'mint',
   // Staging / composition vocabulary (ticket #15409, second occurrence of the
   // #11731 class: an ordinary word from the image-brief's own shared prompt
   // scaffold reads as a distinctive brand/model token when it happens to
@@ -216,25 +221,30 @@ export function findHeroEmbedMismatches(
     // product's Emma title "Glans Massager" carries none of "penis massager",
     // the manufacturer's own term, which a sibling SKU's un-rewritten title
     // shares in full).
-    const embeddedTokenSets = productsWithTokens
-      .filter(({ p }) => embedSet.has(p.handle.toLowerCase()))
-      .flatMap(({ p, dt }) => {
-        const sets = [new Set(dt)]
-        const manufacturerName = p.manufacturerTitle?.trim()
-        if (manufacturerName) {
-          const manufacturerDt = distinctiveTokens(normalize(manufacturerName))
-          if (manufacturerDt.length > 0) sets.push(new Set(manufacturerDt))
-        }
-        return sets
-      })
+    //
+    // These sets are merged into one UNION, not tested independently (ticket
+    // #16978, run 1593): a section 0-H hero prompt legitimately mixes BOTH of
+    // an embed's vocabularies in the same sentence (it must name the Shopify
+    // product AND describe it faithfully to the plate), so a foreign
+    // candidate's distinctive tokens can be split across the two sets —
+    // "soft" only in the Shopify title, "cuffs" only in the manufacturer
+    // title — and pass neither set's subset test alone while still being a
+    // false positive against the sibling embed as a whole.
+    const embeddedTokenUnion = new Set<string>()
+    for (const { p, dt } of productsWithTokens) {
+      if (!embedSet.has(p.handle.toLowerCase())) continue
+      for (const t of dt) embeddedTokenUnion.add(t)
+      const manufacturerName = p.manufacturerTitle?.trim()
+      if (manufacturerName) {
+        for (const t of distinctiveTokens(normalize(manufacturerName))) embeddedTokenUnion.add(t)
+      }
+    }
 
     for (const { p, dt, ct } of productsWithTokens) {
       if (embedSet.has(p.handle.toLowerCase())) continue
       if (!isNamedIn(dt, copyTokens, ct)) continue
       // Skip if this candidate is indistinguishable from an embedded sibling.
-      const subsetOfEmbedded = embeddedTokenSets.some(
-        (emb) => dt.length > 0 && dt.every((t) => emb.has(t)),
-      )
+      const subsetOfEmbedded = dt.length > 0 && dt.every((t) => embeddedTokenUnion.has(t))
       if (subsetOfEmbedded) continue
 
       results.push({
