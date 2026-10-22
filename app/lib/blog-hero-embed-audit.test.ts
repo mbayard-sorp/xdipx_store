@@ -450,6 +450,46 @@ describe('bundled-accessory clause in title does not block a faithful hero match
   })
 })
 
+// Ticket #16978 (run 1593, blogPost-what-is-healthy-dominance): the
+// sibling-SKU subset guard tested a candidate's distinctive tokens against
+// each embedded product's token set INDEPENDENTLY rather than against their
+// UNION. A section 0-H hero prompt legitimately mixes an embed's two
+// vocabularies (its Emma-rewritten Shopify title and its manufacturer
+// title) in the same sentence, so a foreign candidate's tokens can split
+// across both sets — "soft" only in the Shopify title, "cuffs" only in the
+// manufacturer title — and pass neither set's subset test alone, which is
+// exactly how an unrelated "Soft Cuffs" SKU false-matched a hero that was
+// faithfully depicting its own embedded sibling.
+describe('sibling-SKU subset guard tests the UNION of embedded token sets (#16978)', () => {
+  const embedBoth: CatalogProduct = {
+    handle: 'biird-biind-silicone-cuffs-mint',
+    title: 'Biird Cuffii Soft Silicone Handcuffs Mint',
+    manufacturerTitle: 'Biird Biind Silicone Cuffs Mint',
+  }
+  const foreign: CatalogProduct = {
+    handle: 'sportsheets-soft-cuffs-with-velcro-straps',
+    title: 'Soft Cuffs',
+  }
+  const post: AuditBlogPost = {
+    slug: 'what-is-healthy-dominance',
+    heroImageAlt: 'holds a pair of pale-blue ribbed Biird Cuffii soft silicone handcuffs (listed as mint)',
+    imagePrompt: 'He holds the Biird Cuffii Soft Silicone Handcuffs Mint from reference 2 ... cuffs not worn on wrists',
+    embedHandles: ['biird-biind-silicone-cuffs-mint', 'bijoux-indiscrets-shhh-satin-blindfold'],
+  }
+
+  it('does not false-match a foreign SKU whose tokens split across the embed\'s two vocabularies', () => {
+    expect(findHeroEmbedMismatches([post], [embedBoth, foreign])).toEqual([])
+  })
+
+  it('still suppresses the same foreign SKU when both tokens live in one unified title', () => {
+    const embedUnified: CatalogProduct = {
+      handle: 'biird-biind-silicone-cuffs-mint',
+      title: 'Biird Cuffii Soft Silicone Cuffs Mint',
+    }
+    expect(findHeroEmbedMismatches([post], [embedUnified, foreign])).toEqual([])
+  })
+})
+
 // Ticket #11543, THIRD-PLUS OCCURRENCE: heroImageAlt is a customer-facing,
 // LLM-ingested string no gate reviews, and it routinely carries spec claims
 // whose only source is our own Emma-rewritten Shopify title — which the
