@@ -1123,6 +1123,16 @@ not on the §3.3 educational arc, it runs on any day the enrich chain published 
 exempt from the cadence rule below (cap one a day). It still counts toward the rolling-14 carousel
 obligation.
 
+**The caption body describes the category or problem the batch addresses, never that the batch
+exists, is available, or just arrived (ticket #16978).** The no-price/no-CTA/no-PDP-link rule above
+bans the obvious sale-attempt signals; the subtler one is any sentence naming what the reader can
+*do* with the new stock right now ("pick one", "it just landed", "in stock", "the restock covers
+X") — that reads to the voice gate as a commerce-event announcement even with no price attached,
+and cost one draft 4 REVISE iterations before dropping every availability/restock reference
+entirely for pure problem-and-solution education, mentioning the products only as subjects of the
+piece. Availability, arrival, and "it's here" belong to the hook slide and the `/new` pointer only,
+never to the caption body.
+
 **Up to 5 campaign carousels a week, never two days running** (raised from three on 2026-08-16 to serve the
 advice lane in §4a). The reason for the old cap has not gone away: more carousels cost more, halve
 completion, and turn the save-close template from a signature into a tic. Rotate the save-close
