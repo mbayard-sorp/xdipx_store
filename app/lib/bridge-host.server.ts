@@ -71,7 +71,9 @@ export function bridgeSlugFromPath(pathname: string): string | null {
  * the 2026-10-18 funnel audit, a test lead on production). Accept the
  * `.data` twin of each support path, the same way bridgeSlugFromPath does.
  */
-const SUPPORT_PATHS = new Set(['/__manifest', '/api/consent', '/api/lead'])
+// '/api/meta-event' is the server copy of the bridge page's own PageView
+// (ticket #16688); without it the curious host 404s the beacon.
+const SUPPORT_PATHS = new Set(['/__manifest', '/api/consent', '/api/lead', '/api/meta-event'])
 
 export function bridgeHostSupportPath(pathname: string): boolean {
   return SUPPORT_PATHS.has(pathname.replace(/\.data$/i, ''))

@@ -16,8 +16,10 @@
  *      the switch off, phone and smsConsent are dropped before validation
  *      even if a client sends them: no phone on the profile, no enrollment,
  *      no consent_log row;
- *   3. sends a Meta Lead through CAPI and returns its event id so the
- *      browser pixel's Lead dedupes against it;
+ *   3. sends a Meta Lead through CAPI (hashed email, phone and first name,
+ *      external_id, fbp/fbc, ip and user agent) and returns its event id so
+ *      the browser pixel's Lead dedupes against it, and sets the `_xem`
+ *      email-hash cookie so a later Purchase can match on the same email;
  *   4. returns the code, its terms, and the shop link that puts the code on
  *      the cart.
  * After a successful subscribe it also writes one lead_post_event row to
@@ -38,7 +40,7 @@ import { LEAD_OFFER } from '~/lib/lead-interests'
 import { buildShopUrl, validateLeadInput, type FunnelUtm } from '~/lib/lead-funnel'
 import { isLeadSmsOptinEnabled } from '~/lib/lead-sms-optin.server'
 import { enrollLeadSms } from '~/lib/lead-sms.server'
-import { sendCapiLead } from '~/lib/meta-capi.server'
+import { leadEmailHashCookie, sendCapiLead } from '~/lib/meta-capi.server'
 import { checkRateLimit, rateLimited } from '~/lib/rate-limit.server'
 import { normalizePhoneToE164 } from '~/lib/sms-v2/web-sms-link.server'
 
@@ -156,11 +158,18 @@ export async function action({ request }: ActionFunctionArgs) {
     ...(lead.interest ? { category: lead.interest } : {}),
   })
 
+  // The email's hash (never the address) rides to xdipx.com in a cookie, so a
+  // lead who goes on to buy carries it onto the cart and the Purchase can
+  // match on it (attribution-cart.server.ts `_em_h`).
+  const headers = new Headers()
+  const emailHash = leadEmailHashCookie(request, lead.email)
+  if (emailHash) headers.append('Set-Cookie', emailHash)
+
   return Response.json({
     ok: true,
     code: LEAD_OFFER.code,
     terms: LEAD_OFFER.terms,
     shopUrl: buildShopUrl(lead.interest, utm, lead.slug),
     eventId,
-  })
+  }, { headers })
 }

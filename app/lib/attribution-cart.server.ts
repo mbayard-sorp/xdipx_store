@@ -22,7 +22,8 @@ import {
   getStoredRefCode,
   getStoredUTM,
 } from './attribution.server'
-import { getMarketingConsent } from './consent.server'
+import { getMarketingConsent, getMarketingConsentState } from './consent.server'
+import { getLeadEmailHash, getVisitorId } from './meta-capi.server'
 import { setCartAttributes, getCustomerProfile } from './shopify.server'
 import { getCustomerToken } from './customer-session.server'
 
@@ -31,9 +32,8 @@ export interface CartAttr { key: string; value: string }
 /**
  * Attribution cart attributes from the request's cookies: `_fbp`, `_fbc`,
  * `_ga_cid`, `_ga_sid`, the `_gclid` and `_msclkid` sets, the `_utm_` set,
- * and `_ref_code`. Only cookies that
- * are actually present produce an attribute, so this can return an empty
- * array.
+ * `_ref_code`, `_xid`, `_em_h` and `_consent_state`. Only cookies that are
+ * actually present produce an attribute, so this can return an empty array.
  */
 export function attributionCartAttrs(request: Request): CartAttr[] {
   const { fbp, fbc } = getFbCookies(request)
@@ -77,6 +77,18 @@ export function attributionCartAttrs(request: Request): CartAttr[] {
   const utmContent = utm?.content?.trim().slice(0, 255)
   if (utmContent)    attrs.push({ key: '_utm_content',  value: utmContent })
   if (refCode) attrs.push({ key: '_ref_code', value: refCode })
+  // Meta Purchase matching (ticket #16688). The order webhook has no cookies
+  // and, on the Basic plan, no customer email, name or address, so these are
+  // the only customer signals a Purchase can carry: the visitor id every
+  // browser event already sends as external_id, the SHA-256 of a captured
+  // lead's email (never the address itself), and the consent state that
+  // decides whether either may be sent.
+  const xid = getVisitorId(request)
+  if (xid) attrs.push({ key: '_xid', value: xid })
+  const emHash = getLeadEmailHash(request)
+  if (emHash) attrs.push({ key: '_em_h', value: emHash })
+  const consentState = getMarketingConsentState(request)
+  if (consentState !== 'unset') attrs.push({ key: '_consent_state', value: consentState })
   return attrs
 }
 

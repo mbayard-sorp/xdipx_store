@@ -11,7 +11,9 @@
  *
  * Each step is isolated: a failure records a failed step and stops, so a broken
  * selector reports a diagnosable result rather than crashing the job. Analytics
- * requests are blocked so the probe never pollutes GA4 / Meta data.
+ * requests (GA4, Meta, Shopify's web pixels) are blocked and every storefront
+ * request carries the xdipx_synthetic cookie, so the probe never pollutes GA4
+ * or the Meta dataset.
  *
  * Env: BASE_URL, CRON_SECRET (required), PROBE_PRODUCT_HANDLE (optional),
  * PLAYWRIGHT_MODULE (absolute path to the isolated playwright install).
@@ -72,8 +74,20 @@ let ok = true
 try {
   browser = await chromium.launch()
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } })
-  // Never let the probe touch analytics.
-  await context.route(/googletagmanager\.com|google-analytics\.com|facebook\.(com|net)|connect\.facebook/, r => r.abort())
+  // Mark every storefront request as synthetic. The app drops Meta CAPI and
+  // pixel events for it (app/lib/capi-eligibility.server.ts SYNTHETIC_COOKIE,
+  // app/lib/meta-pixel.client.ts isSyntheticBrowser). First-party only, so it
+  // never reaches Shopify or a third party.
+  const host = new URL(BASE).hostname
+  await context.addCookies([{ name: 'xdipx_synthetic', value: '1', domain: host, path: '/', secure: BASE.startsWith('https'), sameSite: 'Lax' }])
+  // Never let the probe touch analytics. The last three patterns are Shopify's
+  // Web Pixels Manager sandbox and its monorail event endpoint: on the hosted
+  // checkout, Shopify's Facebook & Instagram app reports the visit to Meta
+  // from there (as InitiateCheckout and PageView, server side, with Shopify's
+  // own external_id), which put one synthetic AddToCart + InitiateCheckout +
+  // PageView trio in the Meta dataset every day this probe ran (ticket
+  // #16688). Checkout itself does not depend on any of them.
+  await context.route(/googletagmanager\.com|google-analytics\.com|facebook\.(com|net)|connect\.facebook|\/web-pixels(@|-manager)|\/wpm(@|\/)|monorail-edge\.shopifysvc\.com|\/\.well-known\/shopify\/monorail/, r => r.abort())
   const page = await context.newPage()
 
   // 1. Homepage.

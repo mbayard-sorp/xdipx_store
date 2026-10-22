@@ -25,7 +25,7 @@
 import { eq, inArray } from 'drizzle-orm'
 import { db } from './db.server'
 import { metaCapiOutbox } from '../../db/schema'
-import { sendCapiEvent, type CapiEvent } from './meta-capi.server'
+import { buildHashedUserData, sendCapiEvent, type CapiEvent, type CustomerInfo } from './meta-capi.server'
 
 /** Meta rejects events older than this, so reconciliation cannot help beyond it. */
 const META_MAX_EVENT_AGE_MS = 7 * 24 * 60 * 60 * 1000
@@ -50,6 +50,43 @@ export interface PurchaseOrder {
   /** Order creation time in ms. Reconciliation must report when the sale
    *  happened, not when the sweep noticed it. */
   createdAtMs:  number
+  /**
+   * Customer information for Meta matching, raw or already SHA-256 hashed
+   * (buildHashedUserData passes a hash through). On this store's Basic plan
+   * Shopify redacts the order's email, name, phone and addresses, so in
+   * practice this is the cart-attribute signals (`_customer_email`, `_em_h`,
+   * `_xid`); the address fields fill in by themselves if PII access is ever
+   * granted. Optional so older callers and fixtures still build.
+   */
+  customer?:    CustomerInfo
+  /**
+   * False only when the shopper explicitly declined marketing cookies (cart
+   * attribute `_consent_state=denied`). Then no customer information is
+   * built into the event at all, so the ledger never holds it either.
+   */
+  piiAllowed?:  boolean
+}
+
+/**
+ * Consent for a Purchase, read from cart attributes: the order webhook has no
+ * cookies. `_consent_state` is written by attribution-cart.server.ts. A cart
+ * from before it existed only has `_marketing_consent`, which folds "never
+ * answered" into "false"; that legacy "false" is read as a decline, the
+ * conservative reading.
+ */
+export function purchasePiiAllowed(attr: (key: string) => string | null): boolean {
+  const state = attr('_consent_state')
+  if (state) return state !== 'denied'
+  return attr('_marketing_consent') !== 'false'
+}
+
+/** Customer information carried on cart attributes, for either Shopify surface. */
+export function customerFromAttributes(attr: (key: string) => string | null): CustomerInfo {
+  return {
+    // A logged-in customer's own address (ticket #9329) wins over a lead hash.
+    email:       attr('_customer_email') ?? attr('_em_h'),
+    externalIds: [attr('_xid')],
+  }
 }
 
 // ─── Event construction ───────────────────────────────────────────────────────
@@ -66,6 +103,9 @@ export function buildPurchaseEvent(order: PurchaseOrder): CapiEvent {
   const user_data: CapiEvent['user_data'] = {
     fbp: order.fbp,
     fbc: order.fbc,
+    // Hashed em/ph/fn/ln/ct/st/zp/country/external_id, whichever exist. Built
+    // only when allowed, so a declined shopper's data never reaches the ledger.
+    ...(order.piiAllowed !== false && order.customer ? buildHashedUserData(order.customer) : {}),
   }
   // Omit rather than send a placeholder. A junk value reads as 100% coverage in
   // Event Match Quality while matching nobody, which is worse than a gap.
@@ -201,7 +241,9 @@ export async function sendPurchaseWithLedger(order: PurchaseOrder): Promise<Purc
     await recordLedgerWriteFailure()
   }
 
-  const result = await sendCapiEvent(event, { consentGranted: false })
+  // buildPurchaseEvent already left customer information out when it is not
+  // allowed, so whatever the event holds may be sent.
+  const result = await sendCapiEvent(event, { consentGranted: order.piiAllowed !== false })
 
   try {
     if (result.ok) {
@@ -239,6 +281,24 @@ export interface WebhookOrderShape {
   client_details?:  { user_agent?: string; browser_ip?: string } | null
   line_items?:      { product_id?: number; quantity?: number }[]
   note_attributes?: { name: string; value: string }[]
+  // Customer fields. Redacted on the Basic plan today (empty or absent); read
+  // when present so the Purchase matches better the day PII access exists.
+  email?:           string | null
+  contact_email?:   string | null
+  phone?:           string | null
+  customer?:        { id?: number | null; email?: string | null; phone?: string | null; first_name?: string | null; last_name?: string | null } | null
+  billing_address?: WebhookAddress | null
+  shipping_address?: WebhookAddress | null
+}
+
+interface WebhookAddress {
+  first_name?:    string | null
+  last_name?:     string | null
+  phone?:         string | null
+  city?:          string | null
+  province_code?: string | null
+  zip?:           string | null
+  country_code?:  string | null
 }
 
 export function fromWebhookOrder(order: WebhookOrderShape, nowMs: number = Date.now()): PurchaseOrder {
@@ -262,6 +322,26 @@ export function fromWebhookOrder(order: WebhookOrderShape, nowMs: number = Date.
     clientIp:    order.client_details?.browser_ip || order.browser_ip || null,
     userAgent:   order.client_details?.user_agent || null,
     createdAtMs: Number.isFinite(createdAt) ? createdAt : nowMs,
+    customer:    webhookCustomer(order, noteAttr),
+    piiAllowed:  purchasePiiAllowed(noteAttr),
+  }
+}
+
+/** Every customer signal a webhook order carries, order fields first, cart attributes as fallback. */
+function webhookCustomer(order: WebhookOrderShape, noteAttr: (name: string) => string | null): CustomerInfo {
+  const addr = order.billing_address ?? order.shipping_address ?? null
+  const fromAttrs = customerFromAttributes(noteAttr)
+  const nonEmpty = (...vals: Array<string | null | undefined>) => vals.find(v => typeof v === 'string' && v.trim() !== '') ?? null
+  return {
+    email:       nonEmpty(order.email, order.contact_email, order.customer?.email, fromAttrs.email),
+    phone:       nonEmpty(order.phone, order.customer?.phone, addr?.phone),
+    firstName:   nonEmpty(order.customer?.first_name, addr?.first_name),
+    lastName:    nonEmpty(order.customer?.last_name, addr?.last_name),
+    city:        nonEmpty(addr?.city),
+    state:       nonEmpty(addr?.province_code),
+    zip:         nonEmpty(addr?.zip),
+    country:     nonEmpty(addr?.country_code),
+    externalIds: [...(fromAttrs.externalIds ?? []), order.customer?.id ? `shopify:${order.customer.id}` : null],
   }
 }
 
@@ -410,6 +490,10 @@ export async function reconcilePurchases(
       clientIp:    o.clientIp,
       userAgent:   null, // Not exposed on the Admin order object.
       createdAtMs: Date.parse(o.createdAt),
+      // The Admin API refuses the Customer object on this plan, so cart
+      // attributes are the only customer signal the reconciler can read.
+      customer:    customerFromAttributes(attr),
+      piiAllowed:  purchasePiiAllowed(attr),
     }
 
     out.gaps.push(id)

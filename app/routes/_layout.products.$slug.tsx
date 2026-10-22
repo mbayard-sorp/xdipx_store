@@ -33,7 +33,6 @@ import {
 import { getCustomerToken } from '~/lib/customer-session.server'
 import { customerAPI } from '~/lib/customer-api.server'
 import { getCartIdFromCookie } from '~/lib/cart.server'
-import { fireCapiEvent } from '~/lib/meta-capi.server'
 import { isCapiEligible } from '~/lib/capi-eligibility.server'
 import { getMarketingConsent } from '~/lib/consent.server'
 import { trackViewedProduct } from '~/lib/klaviyo.server'
@@ -462,17 +461,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   const browseCookieHeader = buildBrowseCookie(deal.shopifyProductId, previousBrowseIds)
 
-  // Generate dedup id shared with the browser pixel. ViewContent failure is non-fatal.
-  // Crawlers, scrapers and hover-prefetches all run this loader, and each one
-  // used to mint a conversion event. A null id suppresses BOTH sides: no CAPI
-  // send here, and the client effect skips the browser pixel, so the dedup
-  // contract holds either way.
-  const viewContentEventId = isCapiEligible(request)
-    ? fireCapiEvent(request, 'ViewContent', {
-        contentIds: [deal.shopifyProductId],
-        value:      deal.dealPrice,
-      })
-    : null
+  // Meta ViewContent no longer fires here (ticket #16688). This response is
+  // edge-cached, so the loader ran for cache misses, SWR revalidations,
+  // /cron/warm and probes rather than for the people reading the page, and a
+  // cached render handed one event id to every visitor who got it. The
+  // component fires it from the browser instead (trackFbViewContent), with a
+  // fresh id shared with its server copy via /api/meta-event.
 
   return data(
     {
@@ -493,7 +487,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       emmaAsidePromise,
       breadcrumbs,
       pdpTrustBar,
-      viewContentEventId,
       reviewData,
       reviewPage,
       reviewSort,
@@ -919,15 +912,10 @@ function ProductPage() {
   }, [deal.handle])
 
   // ── Meta Pixel: ViewContent (fire-once side-effect, not data fetching) ───
-  // viewContentEventId was generated server-side so the browser pixel and
-  // server CAPI share the same id for Meta-side deduplication.
-  const viewContentEventId = loaderData.type === 'product' ? loaderData.viewContentEventId : null
+  // Mints its own event id and sends the browser pixel event plus a CAPI copy
+  // under that id (meta-pixel.client.ts trackMetaEvent), once per product view.
   useEffect(() => {
-    if (!viewContentEventId) return
-    trackFbViewContent(
-      { content_ids: [deal.shopifyProductId], value: price, currency: 'USD' },
-      viewContentEventId,
-    )
+    trackFbViewContent({ content_ids: [deal.shopifyProductId], value: price, currency: 'USD' })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deal.handle])
 

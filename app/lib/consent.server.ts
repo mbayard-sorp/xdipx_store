@@ -26,6 +26,29 @@ export function getMarketingConsent(request: Request): boolean {
   }
 }
 
+export type MarketingConsentState = 'granted' | 'denied' | 'unset'
+
+/**
+ * Three-way read of the same cookie. getMarketingConsent() folds "never
+ * answered the banner" into "declined", which is right for anything that needs
+ * an opt-in, but it cannot tell an explicit "Essential only" apart from a
+ * visitor who simply never clicked. The Meta CAPI PII rule needs that
+ * distinction (see piiAllowed in meta-capi.server.ts).
+ */
+export function getMarketingConsentState(request: Request): MarketingConsentState {
+  const cookies = parseCookie(request.headers.get('Cookie') ?? '')
+  const raw = cookies[MARKETING_CONSENT_COOKIE]
+  if (!raw) return 'unset'
+  try {
+    const parsed = JSON.parse(raw) as { marketing?: boolean }
+    if (parsed.marketing === true) return 'granted'
+    if (parsed.marketing === false) return 'denied'
+    return 'unset'
+  } catch {
+    return 'unset'
+  }
+}
+
 export async function logConsent(
   request: Request,
   opts: {
