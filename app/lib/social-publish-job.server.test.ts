@@ -694,6 +694,74 @@ describe('reporting a dead row immediately (ticket #13725)', () => {
   })
 })
 
+// Ticket #16995: a terminal X failure whose only fix is an owner money or
+// credential action (X API credits depleted, or a read-only access token)
+// has no code-shippable remedy, so it must reach the owner blocker list
+// directly rather than only sitting as a `code` ticket nobody can act on.
+describe('X failures only the owner can fix (ticket #16995)', () => {
+  const CREDITS_DETAIL =
+    'X API POST https://api.x.com/2/tweets → 402: {"detail":"credits depleted"}. ' +
+    'X API credits are depleted. Add credits at developer.x.com; posting stays blocked until you do.'
+  const TOKEN_DETAIL =
+    'X API POST https://api.x.com/2/tweets → 403: {"detail":"forbidden"}. ' +
+    'The access token is likely read-only. Set App permissions to Read and Write, then ' +
+    'REGENERATE the access token and secret (changing the permission does not upgrade an existing ' +
+    'token) and update the Vercel env vars.'
+
+  it('files an owner blocker, deduped by failure class, on depleted X credits', async () => {
+    const blockers: unknown[] = []
+    const { repo } = fakeRepo([post({ platform: 'x', errorMessage: 'first attempt also failed' })])
+    await tick({
+      platform: 'x', isEnabled: enabled, maxPerDay: cap(3), repo,
+      publish: async () => ({ ok: false, detail: CREDITS_DETAIL }),
+      fileOwnerApprovedBounceBlocker: async (input) => { blockers.push(input) },
+    })
+    expect(blockers).toHaveLength(1)
+    const blocker = blockers[0] as { dedupeKey: string; title: string; category: string; whereToGo: string }
+    expect(blocker.dedupeKey).toBe('x-publish-blocked-credits')
+    expect(blocker.title).toContain('credits depleted')
+    expect(blocker.category).toBe('decision')
+    expect(blocker.whereToGo).toBe('https://developer.x.com')
+  })
+
+  it('files a differently-keyed owner blocker on a read-only access token', async () => {
+    const blockers: unknown[] = []
+    const { repo } = fakeRepo([post({ platform: 'x', errorMessage: 'first attempt also failed' })])
+    await tick({
+      platform: 'x', isEnabled: enabled, maxPerDay: cap(3), repo,
+      publish: async () => ({ ok: false, detail: TOKEN_DETAIL }),
+      fileOwnerApprovedBounceBlocker: async (input) => { blockers.push(input) },
+    })
+    expect(blockers).toHaveLength(1)
+    const blocker = blockers[0] as { dedupeKey: string; title: string; category: string }
+    expect(blocker.dedupeKey).toBe('x-publish-blocked-token-permission')
+    expect(blocker.title).toContain('write permission')
+    expect(blocker.category).toBe('decision')
+  })
+
+  it('does not file this blocker for an ordinary terminal X failure', async () => {
+    const blockers: unknown[] = []
+    const { repo } = fakeRepo([post({ platform: 'x', errorMessage: 'first attempt also failed' })])
+    await tick({
+      platform: 'x', isEnabled: enabled, maxPerDay: cap(3), repo,
+      publish: async () => ({ ok: false, detail: 'X API POST ... → 500: internal error' }),
+      fileOwnerApprovedBounceBlocker: async (input) => { blockers.push(input) },
+    })
+    expect(blockers).toHaveLength(0)
+  })
+
+  it('does not fire on a first (non-terminal) credits-depleted failure', async () => {
+    const blockers: unknown[] = []
+    const { repo } = fakeRepo([post({ platform: 'x', errorMessage: null })])
+    await tick({
+      platform: 'x', isEnabled: enabled, maxPerDay: cap(3), repo,
+      publish: async () => ({ ok: false, detail: CREDITS_DETAIL }),
+      fileOwnerApprovedBounceBlocker: async (input) => { blockers.push(input) },
+    })
+    expect(blockers).toHaveLength(0)
+  })
+})
+
 describe('the owner edit wins', () => {
   it('gates and publishes the edited caption, not the original draft', async () => {
     // If he rewrote it, the rewrite is what ships and what gets checked.

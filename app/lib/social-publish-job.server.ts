@@ -33,7 +33,13 @@ import { effectiveGateStatus, isTickEligible, preserveGateStamp } from './social
 import { runRemovalWatch, type RemovalWatchResult } from './social-removal-watch.server'
 import { checkLinkedProductStock } from './social-publish/stock-guard.server'
 import { resolvePostProductHandle } from './social-publish/product-handle.server'
-import { estimateXPostCostUsd, estimateXSpendUsd, isRetryFutileXError } from './social-publish/x-limits'
+import {
+  describesOwnerOnlyXRemedy,
+  estimateXPostCostUsd,
+  estimateXSpendUsd,
+  isRetryFutileXError,
+  X_CREDITS_DEPLETED_PHRASE,
+} from './social-publish/x-limits'
 import { permalinkFor } from './social-permalink.server'
 import { formatLaSlot } from './social-schedule'
 import { fileBlocker } from './owner-blockers.server'
@@ -257,7 +263,9 @@ export interface PublishTickDeps {
   /**
    * Ticket #13725. Injected so a dead-row report is testable without a
    * database: defaults to the real ticket writer and the real owner blocker
-   * writer respectively. See `reportDeadPublishRow` below.
+   * writer respectively. See `reportDeadPublishRow` below. The blocker writer
+   * is shared by two cases there: an owner-approved row the gate bounced, and
+   * (ticket #16995) a terminal X failure with no code-shippable remedy.
    */
   fileDeadRowTicket?: (input: Parameters<typeof createSuggestion>[0]) => Promise<unknown>
   fileOwnerApprovedBounceBlocker?: (input: Parameters<typeof fileBlocker>[0]) => Promise<unknown>
@@ -637,24 +645,58 @@ export async function reportDeadPublishRow(
     // Same as reportOverdueApproved: an advisory must never take the tick down.
   }
 
-  if (outcome !== 'bounced_by_gate' || !ownerApproved) return
-
   const fileOwnerBlocker = deps.fileOwnerApprovedBounceBlocker ?? fileBlocker
-  try {
-    await fileOwnerBlocker({
-      dedupeKey: `social-publish-owner-approved-bounced-${post.id}`,
-      title: `${platform} post #${post.id} you approved did not publish`,
-      detail:
-        `You approved this post and it was due to ship, but the publish-time deterministic re-check bounced it ` +
-        `back to needs_changes before it went out. Detail: ${detail}`,
-      unblocks: `Post #${post.id} actually publishing the way you approved it.`,
-      whereToGo: '/admin/socials/queue?view=needs_changes',
-      category: 'approval',
-      priority: 1,
-      source: 'agent',
-    })
-  } catch {
-    // Same: an advisory must not take the tick down.
+
+  if (outcome === 'bounced_by_gate' && ownerApproved) {
+    try {
+      await fileOwnerBlocker({
+        dedupeKey: `social-publish-owner-approved-bounced-${post.id}`,
+        title: `${platform} post #${post.id} you approved did not publish`,
+        detail:
+          `You approved this post and it was due to ship, but the publish-time deterministic re-check bounced it ` +
+          `back to needs_changes before it went out. Detail: ${detail}`,
+        unblocks: `Post #${post.id} actually publishing the way you approved it.`,
+        whereToGo: '/admin/socials/queue?view=needs_changes',
+        category: 'approval',
+        priority: 1,
+        source: 'agent',
+      })
+    } catch {
+      // Same: an advisory must not take the tick down.
+    }
+  }
+
+  // Ticket #16995: a terminal X failure whose only fix is an owner money or
+  // credential action (add credits at developer.x.com, or regenerate the
+  // access token's permissions) has no code-shippable remedy, so it would
+  // otherwise only sit as a `code` ticket that every dev pass reads and can
+  // never act on. File it onto the blocker list too. Deduped per FAILURE
+  // CLASS rather than per post, so one billing outage that kills several
+  // queued posts in a row (each with its own dead-row ticket above) still
+  // produces one blocker line, not one per dead post. No verifyProbe: the
+  // only cheap authenticated X read (`xVerifyCredentials`, GET /2/users/me)
+  // answers fine on a read-only or credit-depleted account, so it cannot
+  // honestly tell "fixed" from "still blocked" here and would risk clearing
+  // the row while posting is still dead; `category: 'decision'` is the
+  // documented carve-out for exactly that shape, and needs no probe.
+  if (outcome === 'terminal_failed' && platform === 'x' && describesOwnerOnlyXRemedy(detail)) {
+    const isCredits = detail.includes(X_CREDITS_DEPLETED_PHRASE)
+    try {
+      await fileOwnerBlocker({
+        dedupeKey: isCredits ? 'x-publish-blocked-credits' : 'x-publish-blocked-token-permission',
+        title: isCredits
+          ? 'X posting is blocked: API credits depleted'
+          : 'X posting is blocked: access token needs write permission',
+        detail: `Post #${post.id} just died on this. Detail: ${detail}`,
+        unblocks: 'X autopublish resuming for every queued post, not just this one.',
+        whereToGo: isCredits ? 'https://developer.x.com' : '/admin/socials',
+        category: 'decision',
+        priority: 1,
+        source: 'agent',
+      })
+    } catch {
+      // Same: an advisory must not take the tick down.
+    }
   }
 }
 
