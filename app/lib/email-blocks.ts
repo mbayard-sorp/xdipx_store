@@ -35,6 +35,55 @@ export function headerBlock(homeHref = 'https://xdipx.com/'): string {
 </td></tr>`
 }
 
+export interface EmailNavItem {
+  title: string
+  /** Site-relative path ("/collections/play") or absolute https URL. */
+  url: string
+}
+
+/**
+ * The site header's navigation (owner direction 2026-10-23: the email header
+ * should let a reader click into any section of the site). "New" is MegaMenu's
+ * hardcoded NEW_ARRIVALS entry; the rest is Shopify's `main-menu` top level as
+ * of 2026-10-23. The assembler passes the live menu from getMainMenu() when it
+ * has one, so a menu edit in Shopify reaches the email without a code change.
+ */
+export const EMAIL_NAV_DEFAULT: readonly EmailNavItem[] = [
+  { title: 'New', url: '/new' },
+  { title: 'Pleasure', url: '/collections/pleasure' },
+  { title: 'Play', url: '/collections/play' },
+  { title: 'Body', url: '/collections/body' },
+  { title: 'Wear', url: '/collections/wear' },
+  { title: 'Discover', url: '/collections/discover' },
+  { title: 'Sale', url: '/collections/on-sale' },
+  { title: 'Notebook', url: '/notebook' },
+]
+
+function absoluteSiteUrl(url: string): string {
+  if (/^https?:\/\//.test(url)) return url
+  return `https://xdipx.com${url.startsWith('/') ? url : `/${url}`}`
+}
+
+/**
+ * Nav: one row of site-section links under the header, wrapping to a second
+ * line on phones. `utm` receives `nav-<slug>` and returns an already
+ * &amp;-escaped query string (no leading `?`), so block-level UTMs follow the
+ * same `utm_content=<block>-<thing>` scheme as the rest of the email.
+ */
+export function navBlock(items: readonly EmailNavItem[] = EMAIL_NAV_DEFAULT, utm?: (content: string) => string): string {
+  const links = items.map((item) => {
+    const base = absoluteSiteUrl(item.url)
+    const slug = item.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+    const href = utm ? `${base}${base.includes('?') ? '&amp;' : '?'}${utm(`nav-${slug}`)}` : base
+    return `<a href="${href}" target="_blank" class="x-ink" style="display:inline-block;padding:6px 7px;font-family:${BODY_FONT};font-size:12px;line-height:18px;font-weight:600;letter-spacing:0.05em;text-transform:uppercase;color:${C.ink};text-decoration:none;">${item.title}</a>`
+  })
+  return `<tr><td class="x-px" ${cell(C.paper)}padding:0 31px;" align="center">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+<td class="x-rule" align="center" ${cell(C.paper)}border-top:1px solid ${C.line};border-bottom:1px solid ${C.line};padding:8px 0;">${links.join('')}</td>
+</tr></table>
+</td></tr>`
+}
+
 export interface HeroBlockOpts {
   productName: string
   headline: string
