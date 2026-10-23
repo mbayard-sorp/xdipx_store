@@ -488,6 +488,8 @@ interface VariantInput {
 }
 
 interface ProductInput {
+  /** Shopify product GID; needed only to self-heal a missing discontinued_at (#17401). */
+  productId: string
   vendor: string | null
   productType: string | null
   metafields: {
@@ -543,6 +545,29 @@ async function recomputeFromData(
   const group = await getGroupForProductType(ruleType)
 
   const isDiscontinued = discontinuedByState || group?.usesClearanceLadder === true || productType === DISCONTINUED_PRODUCT_TYPE
+
+  // Self-heal a legacy-typed discontinued product that the feed-absence sweep
+  // never stamps (#17401). The sweep only writes `xdipx.discontinued_at` for a
+  // carried SKU it detects as newly ABSENT from every Nalpac feed; a product
+  // still typed "Discontinued" (or in a usesClearanceLadder group) that is
+  // still PRESENT in the feed reaches `isDiscontinued` above via the legacy
+  // productType/group check alone and is never visited by the sweep at all.
+  // Left unstamped, `discontinuedAt` stays null forever, `daysDisc` below
+  // defaults to 0 every single run, and the clearance ladder recomputes the
+  // identical first-day price change on every pass -- which the supersede
+  // block further down then marks the previous day's identical `pending` row
+  // 'rejected', manufacturing a permanent, growing "rejected" count that is
+  // really the same unresolved proposal recreating itself daily. Stamp it
+  // once, today, the same way the sweep stamps a feed-absence detection, so
+  // the ladder starts advancing instead of recurring at day 0 forever.
+  if (isDiscontinued && discontinuedAt == null) {
+    try {
+      const { updateProductMetafield } = await import('./shopify.server')
+      await updateProductMetafield(product.productId, 'discontinued_at', new Date().toISOString().slice(0, 10), 'date')
+    } catch (err) {
+      console.warn(`[pricing-apply-v2] discontinued_at backfill failed for ${sku} (ignored):`, err)
+    }
+  }
 
   // MAP is a per-brand contractual floor (owner rule 2026-08-29): honor the
   // feed's MAP only for the MAP brands. A Nalpac-verified brand is held at MAP
@@ -826,6 +851,7 @@ export async function recomputeVariant(
     }
 
     product = {
+      productId: data.product.id,
       vendor: data.product.vendor,
       productType: data.product.productType,
       metafields: {
