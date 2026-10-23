@@ -1087,6 +1087,16 @@ curl -s -X POST "$BASE_URL/api/team/suggestion" \
    no visibility into this week's pillar rotation or quota, and social's own queue-hygiene pass
    expires an unused row. **Do not file when the post stayed a draft.**
 
+   **Narrowed scope (store-strategist per #14111, reaffirmed weekly brief #17, 2026-10-19): file
+   the row only when the post's embedded product(s) are on this week's social shortlist**
+   (`metricsJson.socialShortlist` on the active weekly brief, `GET /api/team/brief`). The
+   unconditional version of this obligation structurally outran social's daily quota (#14355,
+   #14775, #15607, #17232 each measured the backlog growing faster than any run could drain it).
+   This is a documented exception to the owner's 2026-10-03 "every new notebook post" direction,
+   not a reversal of it: when the post's product is on the shortlist, file exactly as above; when
+   it is not, say so in a `step` event instead of filing a row. Revisit if social capacity
+   (`social_freq_instagram`/`social_freq_x`) rises enough to carry the unconditional version again.
+
 **Valve off, or no hero image could be produced, with both gates PASS** → leave the post as a Sanity
 draft, post an event saying exactly that, re-queue the brief if one was claimed
 (`seoContentBrief` → `'queued'`, `podcastReviewBrief` → `'pending'`). **Finish status depends on the
