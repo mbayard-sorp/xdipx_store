@@ -37,6 +37,7 @@ Each send-day email is built from the block library (`app/lib/email-blocks.ts`, 
 - **Tip:** one short how-to for a product in the email, gated like selling copy.
 - **Imagery:** see `email-designer`. Owner-hearted Social Studio library frames first, Atlas generation when nothing fits.
 
+- **Header nav:** every email renders `navBlock()` under the logo so a reader can click into any site section (owner direction 2026-10-23).
 - **Good, better, best:** most sends carry one. Pick one product type, then three in-stock products at a low, mid, and lux price, each at 35% gross margin or better against the live price. Rotate the type every send.
 - **Featured brand:** about once a week, one brand with five or more in-stock products and healthy margin, told only through catalog facts.
 
