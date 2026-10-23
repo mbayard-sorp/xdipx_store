@@ -97,6 +97,18 @@ neither has shipped in weeks even though the publisher builds both (`instagram.s
   teaches, drafted in the first run that sees the row and live by the end of the following day. A
   promo row older than one day with no echo on either platform makes the day **short**, exactly as
   the carousel debt does. The quota pays the echo before anything else.
+
+  **Narrowed scope (store-strategist per #14111, reaffirmed weekly brief #17, 2026-10-19): echo
+  only the posts that carry a product this week's social shortlist (`metricsJson.socialShortlist`
+  on the active weekly brief) already names.** The unconditional version of this obligation
+  structurally outran social capacity — a 2-3-slot/day queue cannot carry one full IG+X pair per
+  weekday Notebook post on top of the carousel, Reel, New-in, and campaign-spine obligations above
+  (#14355, #14775, #15607, #17232 all measured the same growing, unpayable backlog). This is a
+  documented exception to the owner's 2026-10-03 direction, not a reversal of it: when the post's
+  embedded product(s) are on this week's shortlist, file and answer the row exactly as above; when
+  none are, say so in a `step` event instead of filing or answering a `notebook-promo-<slug>` row,
+  so the queue stops growing faster than any run can drain it. Revisit if `social_freq_instagram`/
+  `social_freq_x` rise enough to carry the unconditional version again.
 - **New-in carousel obligation (owner direction 2026-10-03).** The owner: *"when new products go
   live in /new on the site, we do a carousel of the products that are now on the site."* Every day
   the enrich chain files a `new-products-enrich-<day>` row (Step 2 item 10) with at least two
@@ -1806,6 +1818,16 @@ The only two attempts that cleared either showed the wordmark ALONE with no sub-
 glass and bamboo-tone cap visible) going forward, skipping the wordmark-visible attempt entirely
 rather than re-rolling it, per the two-failed-regen switch rule above.
 
+**ROMP 2.0** (`romp-2-0`, ticket #17231) — a dual-axis failure, distinct from a single-cause entry
+above: run 1580 (2026-10-21, 3 cast-composite attempts) BLOCKed on nudity (nipple/areola visible
+through the product's sheer mesh fabric), then run 1600 (2026-10-22, rows 489/490) BLOCKed on the
+embossed ROMP wordmark reading legible on the product body despite being accurate. Two independent
+failure axes across two runs trips the two-failed-regen switch rule above on its own. Treat this SKU
+as **occlude-only** going forward: a brief that both keeps the mesh fabric away from a nudity-reading
+angle/crop AND occludes or angles the embossed wordmark out of frame, rather than a third fresh
+attempt gambling on clearing both axes at once. Re-test fresh generation only after a working
+occlude-only frame is found and logged in `social_media_assets`.
+
 For any SKU on this list, the `social-art-director` brief MUST
 either occlude or angle the marked region out of frame (hand-over-handle grip, band turned away,
 composite the real plate over the marked segment) OR the run prefers a clean-bodied product for that
@@ -2710,6 +2732,15 @@ had, so the replacement is not optional. Read instead:
    from Instagram's slate, not a fresh one") versus how many did not, and report the ratio as a
    number (matched/total). Two surfaces posting about different products in the same window is not
    one campaign spine across two channels even when X volume is healthy.
+7. **BLOCK-reason histogram, computed not asserted (ticket #16281).** Bucket every row this week's
+   runs gate-BLOCKed by its `gate_findings` reason, report the top three reasons with counts, and
+   name the single most common *fixable* cause (not a threshold or a rule to relax — a drafting
+   pattern a pre-generation check can catch, the way vision-legible-text and repetition already
+   are). The imagery chain spends real vision-gate calls on frames a known rule will refuse; the
+   fix is to stop generating them, never to loosen the rule that refuses them. Report this week's
+   BLOCK rate (BLOCKed / rows created) against last week's, whether it moved or not, and whatever
+   pre-generation check the top cause gets (a repetition check against the last 30 published
+   captions is the existing model, per #14938's pre-screen for legible text).
 
 One `decision` event (`phase:'retro'`). When **two or more** pieces of feedback share a theme,
 file a suggestion (`team:'social'`, kind `instructions`) proposing the concrete change to your own
