@@ -12,6 +12,8 @@
 
 export const EMAIL_HEAD_FONT = "Newsreader, Georgia, 'Times New Roman', serif"
 export const EMAIL_BODY_FONT = "'DM Sans', Arial, Helvetica, sans-serif"
+/** Mirrors the brand's `font-mono` token (JetBrains Mono), kicker-style labels only. */
+export const EMAIL_MONO_FONT = "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace"
 
 /** Flattened v3 tokens (app/app.css @theme) for light-mode email clients. */
 export const EMAIL_COLORS = {
@@ -27,6 +29,8 @@ export const EMAIL_COLORS = {
   line3: '#B6B4B5',
   coral: '#C2350F',
   plum: '#7A2BB8',
+  /** v3 `plum-soft` tint, used for the lux-tier card in goodBetterBestBlock. */
+  plumSoft: '#F3E8FB',
 } as const
 
 /** Dark-mode palette, used only where a client asks for it (Apple Mail, iOS Mail, Outlook.com). */
@@ -79,6 +83,9 @@ a[x-apple-data-detectors] { color:inherit !important; text-decoration:none !impo
 @media only screen and (max-width:620px) {
   .x-wrap { width:100% !important; }
   .x-px { padding-left:24px !important; padding-right:24px !important; }
+}
+@media only screen and (max-width:480px) {
+  .x-stack { display:block !important; width:100% !important; padding:0 0 16px 0 !important; }
 }
 </style>
 <style>
