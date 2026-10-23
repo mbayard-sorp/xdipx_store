@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs'
 import {
   CTA_WHITELIST,
   EMAIL_LOGO_DISPLAY_WIDTH,
+  EMAIL_NAV_DEFAULT,
+  navBlock,
   dealsBlock,
   emmaNoteBlock,
   footerBlock,
@@ -34,6 +36,7 @@ const DEAL_ITEMS: DealItem[] = [
 function allBlocks(): string[] {
   return [
     headerBlock(),
+    navBlock(),
     heroBlock({ productName: 'The Compass Wand', headline: 'Right where you left it.', imageUrl: 'https://cdn.shopify.com/a.jpg', href: 'https://xdipx.com/products/the-compass-wand', cta: CTA }),
     newInGridBlock(GRID_ITEMS),
     dealsBlock(DEAL_ITEMS),
@@ -129,5 +132,30 @@ describe('email-blocks', () => {
     expect(base.height).toBe(EMAIL_LOGO_DISPLAY_WIDTH)
     expect(retina.width).toBe(EMAIL_LOGO_DISPLAY_WIDTH * 2)
     expect(retina.height).toBe(EMAIL_LOGO_DISPLAY_WIDTH * 2)
+  })
+
+  describe('navBlock', () => {
+    it('links every section of the site header, New first, as absolute https URLs', () => {
+      const html = navBlock()
+      const hrefs = [...html.matchAll(/<a href="([^"]+)"[^>]*>([^<]+)<\/a>/g)].map((m) => [m[1], m[2]])
+      expect(hrefs.map(([, t]) => t)).toEqual(EMAIL_NAV_DEFAULT.map((i) => i.title))
+      expect(hrefs[0]).toEqual(['https://xdipx.com/new', 'New'])
+      for (const [href] of hrefs) expect(href).toMatch(/^https:\/\/xdipx\.com\//)
+    })
+
+    it('appends a per-link UTM with nav-<slug> content, &amp;-joined after an existing query', () => {
+      const html = navBlock(
+        [{ title: 'Sale', url: '/collections/on-sale' }, { title: 'Notebook', url: 'https://xdipx.com/notebook?x=1' }],
+        (c) => `utm_source=klaviyo&amp;utm_content=${c}`,
+      )
+      expect(html).toContain('href="https://xdipx.com/collections/on-sale?utm_source=klaviyo&amp;utm_content=nav-sale"')
+      expect(html).toContain('href="https://xdipx.com/notebook?x=1&amp;utm_source=klaviyo&amp;utm_content=nav-notebook"')
+    })
+
+    it('renders the live menu when the assembler passes one', () => {
+      const html = navBlock([{ title: 'Gifts', url: '/collections/gifts' }])
+      expect(html).toContain('https://xdipx.com/collections/gifts')
+      expect(html).not.toContain('Pleasure')
+    })
   })
 })
