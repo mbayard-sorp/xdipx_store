@@ -59,6 +59,15 @@ paraphrasing it into a stronger one; and an inference worth adding that the page
 goes in its own field or is explicitly marked as the reviewer's own extrapolation, never attributed
 to the episode. A claim that cannot be sourced this way is dropped, not softened.
 
+**Host credentials trace to the show's own page (ticket #14798).** Any host name or credential
+(title, company, certification) named in the brief must be traced to that show's own About/Hosts
+page, cited by URL alongside `episodeUrl` — never supplied from memory. A credential the show does
+not itself claim is omitted, not guessed (one brief named a host "co-owner of Hot Octopuss" when the
+show's own About page says Vice President of Pipedream Products, a different company). A topic
+bullet copied from the episode page into `keyTakeaways[].claim` is quoted verbatim; any added
+population, outcome, or scope the page itself doesn't state belongs only in `agreeOrPushback`,
+visibly the reviewer's own.
+
 ## Step 5 — Write the brief
 
 One `podcastReviewBrief`, status `pending`, `createdBy` = run id, `_id` =
@@ -75,5 +84,8 @@ perspective must return `'pending'` before the run finishes.
 
 ## Step 6 — Finish
 
-One `event` (phase `brief`), then the final run update (`status:'succeeded'`, summary = show +
-episode + sourceQuality + takeaway count). If nothing was written, the summary says exactly why.
+One `event` (phase `brief`), then the final run update. If Step 5's post-publish verification could
+not confirm `'pending'` on the published perspective, finish `status:'failed'`, not `'succeeded'` —
+a brief that cannot be confirmed on the published perspective is indistinguishable from no brief at
+all to every downstream consumer. Otherwise finish `status:'succeeded'`, summary = show + episode +
+sourceQuality + takeaway count. If nothing was written, the summary says exactly why.
