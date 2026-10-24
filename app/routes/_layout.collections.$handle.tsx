@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { LoaderFunctionArgs, MetaDescriptor, MetaFunction } from 'react-router'
-import { useLoaderData, useSearchParams, Link } from 'react-router'
+import { redirect, useLoaderData, useSearchParams, Link } from 'react-router'
 import { getCollection, getCollectionDeals, getCollectionAllDeals, getMainMenu, type CollectionSort } from '~/lib/shopify.server'
 import type { VaultDeal } from '~/types'
-import { getCollectionPage, getEmmaPresets, getBlogPosts, getNotebookPostsForProductHandles } from '~/lib/sanity.server'
+import { getBrandIdentity, getCollectionPage, getEmmaPresets, getBlogPosts, getNotebookPostsForProductHandles } from '~/lib/sanity.server'
 import { getCategoryPage, getDropPage } from '~/lib/category-page.server'
 import { CategoryBlockRenderer } from '~/components/category/CategoryBlockRenderer'
 import { canonicalUrl, pageTitle, robotsContent, truncateForMeta } from '~/lib/seo'
 import { COLLECTION_CANONICAL_ALIASES } from '~/lib/collection-canonical-aliases'
+import { collectionRedirect, isUnlistedCollection } from '~/lib/collection-taxonomy'
 import { buildSocialMeta, SITE_ORIGIN } from '~/lib/social-meta'
 import { VaultCard } from '~/components/store/VaultCard'
 import { AskEmmaRail, matchesAskEmmaFilters } from '~/components/store/AskEmmaRail'
@@ -75,7 +76,9 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
   // sort orders both qualify — canonical points at the bare URL either way,
   // but the meta tag stops Google wasting crawl budget on N×4 sort variants
   // and consolidates link equity. `follow` keeps PDP discovery intact.
-  if ((data as { nonCanonicalVariant?: boolean }).nonCanonicalVariant ?? filtersApplied) {
+  // Utility and retired collections (discount eligibility lists, the Shop
+  // price floor, for-him / for-her) are never shelves; keep them out of the index.
+  if (isUnlistedCollection(data.handle) || ((data as { nonCanonicalVariant?: boolean }).nonCanonicalVariant ?? filtersApplied)) {
     tags.push({ name: 'robots', content: robotsContent({ index: false, follow: true }) })
   }
 
@@ -182,7 +185,7 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
   // Treat them like filters for indexing purposes — see meta() above.
   const nonCanonicalVariant = filtersApplied || sort !== 'manual'
 
-  const [collection, sanity, dealsResult, presets, menu, notebook, categoryPage] = await Promise.all([
+  const [collection, sanity, dealsResult, presets, menu, notebook, categoryPage, brandIdentity] = await Promise.all([
     getCollection(handle),
     getCollectionPage(handle),
     loadCollectionDeals(handle, page, sort, filtersApplied, url.searchParams),
@@ -203,10 +206,16 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
       : handle === 'on-sale'
         ? getDropPage('on-sale').catch(() => null)
         : getCategoryPage(handle).catch(() => null),
+    // Sourced brand logo for brand collections (null everywhere else).
+    getBrandIdentity(handle),
   ])
 
-  // 404 — no Shopify collection at this handle.
+  // No Shopify collection at this handle: a retired or merged handle goes to
+  // its keeper (301) or reports Gone (410); anything else 404s.
   if (!collection) {
+    const moved = collectionRedirect(handle)
+    if (moved?.kind === 'redirect') throw redirect(moved.to, 301)
+    if (moved?.kind === 'gone') throw new Response('Collection removed', { status: 410 })
     throw new Response('Collection not found', { status: 404 })
   }
 
@@ -315,6 +324,7 @@ export async function loader({ params, request }: LoaderFunctionArgs) {
     categoryBlocks: categoryPage?.blocks ?? null,
     productsCount: collection.productsCount,
     notebookPosts,
+    brandLogo: brandIdentity ? { name: brandIdentity.brandName, url: brandIdentity.logoUrl } : null,
   }
 }
 
@@ -353,6 +363,7 @@ export default function CollectionPage() {
     filtersApplied,
     productsCount,
     notebookPosts,
+    brandLogo,
   } = useLoaderData<typeof loader>()
   // Page 1 is the canonical document — render the full editorial frame
   // (hero, intro, FAQs, notebook rail). Pages > 1 are pagination-only and
@@ -519,6 +530,14 @@ export default function CollectionPage() {
           two h1 elements on the page. */}
       {!merchandised && (
         <header className="mb-6">
+          {brandLogo && (
+            <img
+              src={brandLogo.url}
+              alt={brandLogo.name}
+              decoding="async"
+              className="h-9 md:h-11 w-auto max-w-[220px] object-contain object-left mb-3"
+            />
+          )}
           <h1
             className="text-3xl md:text-4xl font-bold text-ink"
             style={{ fontFamily: 'var(--font-display)' }}

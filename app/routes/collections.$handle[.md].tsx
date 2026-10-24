@@ -3,12 +3,13 @@
  * Cache-Control: 1h (collection product lists change infrequently).
  */
 
-import type { LoaderFunctionArgs } from 'react-router'
+import { redirect, type LoaderFunctionArgs } from 'react-router'
 import { getCollection, getCollectionProducts } from '~/lib/shopify.server'
 import { getCollectionPage } from '~/lib/sanity.server'
 import { getCategoryPage } from '~/lib/category-page.server'
 import { collectionToMarkdown, htmlToMarkdown } from '~/lib/markdown-page.server'
 import { cached } from '~/lib/kv.server'
+import { collectionRedirect, markdownRedirectTarget } from '~/lib/collection-taxonomy'
 
 const BASE_URL = 'https://xdipx.com'
 
@@ -23,9 +24,17 @@ export async function loader({ params }: LoaderFunctionArgs) {
       return fallback
     })
 
+  // Set when getCollection threw rather than returned nothing, so a Shopify
+  // blip never turns into a permanent redirect below.
+  let lookupFailed = false
+
   const body = await cached(cacheKey, TTL, async () => {
     const [col, products, sanity, categoryPage] = await Promise.all([
-      guard(getCollection(handle), null, 'getCollection'),
+      getCollection(handle).catch(err => {
+        lookupFailed = true
+        console.error(`[md:collections/${handle}] getCollection failed:`, err)
+        return null
+      }),
       guard(getCollectionProducts(handle, 50), [], 'getCollectionProducts'),
       guard(getCollectionPage(handle), null, 'getCollectionPage'),
       guard(getCategoryPage(handle), null, 'getCategoryPage'),
@@ -59,6 +68,9 @@ export async function loader({ params }: LoaderFunctionArgs) {
   })
 
   if (body === null) {
+    const moved = lookupFailed ? null : collectionRedirect(handle)
+    if (moved?.kind === 'redirect') throw redirect(markdownRedirectTarget(moved.to), 301)
+    if (moved?.kind === 'gone') return new Response('Collection removed', { status: 410 })
     return new Response('Collection not found', { status: 404 })
   }
 

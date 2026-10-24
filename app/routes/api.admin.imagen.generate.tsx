@@ -57,7 +57,9 @@ export async function action({ request }: ActionFunctionArgs) {
   // Kontext path it is worth naming in the prompt: it anchors the edit to the
   // real product rather than a lookalike.
   const productNote  = productTitle ? ` The product is ${productTitle}; reproduce it exactly as shown in the reference image.` : ''
-  const fullPrompt = `${prompt}. ${suffix}. No text overlays, no logos.${productNote}`
+  // Doctrine §4 item 4 (owner ruling 2026-09-19): a stocked product's own brand
+  // mark may render, so ban added text rather than every logo.
+  const fullPrompt = `${prompt}. ${suffix}. No text overlays, captions, watermarks or invented text.${productNote}`
 
   // Fetch reference images server-side — never expose CDN URLs to the API
   let referenceImageBuffers: Buffer[] | undefined

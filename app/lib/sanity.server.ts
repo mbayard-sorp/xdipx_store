@@ -1428,6 +1428,187 @@ export async function getCollectionTypeMap(): Promise<Map<string, CollectionType
   }
 }
 
+// ─── Brand identity (collection logos) ─────────────────────────────────────
+
+export interface BrandIdentity {
+  handle:          string
+  brandName:       string
+  logoUrl:         string
+  logoReversedUrl: string | null
+}
+
+/**
+ * Every brand logo, keyed by collection handle. One query serves both the
+ * brand PLP header and the hub's brand cards. Missing Sanity or a fetch error
+ * returns an empty map, and the page shows the plain brand name.
+ */
+export async function getBrandIdentityMap(): Promise<Map<string, BrandIdentity>> {
+  const out = new Map<string, BrandIdentity>()
+  if (!projectId) return out
+  try {
+    const client = getClient()
+    if (!client) return out
+    const rows = await client.fetch<Array<{
+      handle: string | null; brandName: string | null; logoUrl: string | null; logoReversedUrl: string | null
+    }>>(
+      `*[_type == "brandIdentity" && defined(logo.asset)]{
+        "handle": collectionHandle,
+        brandName,
+        "logoUrl": logo.asset->url,
+        "logoReversedUrl": logoReversed.asset->url
+      }`,
+    )
+    for (const r of rows ?? []) {
+      if (!r.handle || !r.logoUrl) continue
+      out.set(r.handle, {
+        handle:          r.handle,
+        brandName:       r.brandName ?? r.handle,
+        logoUrl:         r.logoUrl,
+        logoReversedUrl: r.logoReversedUrl ?? null,
+      })
+    }
+    return out
+  } catch (err) {
+    console.error('[sanity] getBrandIdentityMap error:', err)
+    return out
+  }
+}
+
+/** One brand's logo for its collection page header, or null (plain H1). */
+export async function getBrandIdentity(handle: string): Promise<BrandIdentity | null> {
+  if (!projectId) return null
+  try {
+    const client = getClient()
+    if (!client) return null
+    const r = await client.fetch<{
+      brandName: string | null; logoUrl: string | null; logoReversedUrl: string | null
+    } | null>(
+      `*[_type == "brandIdentity" && collectionHandle == $handle && defined(logo.asset)][0]{
+        brandName,
+        "logoUrl": logo.asset->url,
+        "logoReversedUrl": logoReversed.asset->url
+      }`,
+      { handle },
+    )
+    if (!r?.logoUrl) return null
+    return { handle, brandName: r.brandName ?? handle, logoUrl: r.logoUrl, logoReversedUrl: r.logoReversedUrl ?? null }
+  } catch (err) {
+    console.error('[sanity] getBrandIdentity error:', err)
+    return null
+  }
+}
+
+// ─── Collections hub layout (shopper-facing groups) ────────────────────────
+
+export interface CollectionsHubLayout {
+  groups:               Array<{ heading: string; handles: string[] }>
+  featuredBrandHandles: string[]
+}
+
+/** The hub's group layout, or null when no groups are set (the hub then renders as before). */
+export async function getCollectionsHubLayout(preview = false): Promise<CollectionsHubLayout | null> {
+  if (!projectId) return null
+  try {
+    const client = getClient(false, preview)
+    if (!client) return null
+    const data = await client.fetch<{
+      groups: Array<{ heading: string | null; handles: string[] | null }> | null
+      featuredBrandHandles: string[] | null
+    } | null>(
+      `*[_type == "collectionsHubLayout" && _id == "singleton.collectionsHubLayout"][0]{
+        "groups": groups[]{ heading, handles },
+        featuredBrandHandles
+      }`,
+    )
+    const groups = (data?.groups ?? [])
+      .filter((g): g is { heading: string; handles: string[] } => !!g?.heading && Array.isArray(g.handles) && g.handles.length > 0)
+      .map(g => ({ heading: g.heading, handles: g.handles.filter(Boolean) }))
+    if (groups.length === 0) return null
+    return { groups, featuredBrandHandles: (data?.featuredBrandHandles ?? []).filter(Boolean).slice(0, 24) }
+  } catch (err) {
+    console.error('[sanity] getCollectionsHubLayout error:', err)
+    return null
+  }
+}
+
+// ─── Collection hero candidates (owner review) ─────────────────────────────
+
+export type HeroCandidateStatus = 'candidate' | 'approved' | 'rejected' | 'redo' | 'superseded'
+
+export interface CollectionHeroCandidate {
+  id:               string
+  collectionHandle: string
+  imageUrl:         string
+  alt:              string | null
+  status:           HeroCandidateStatus
+  note:             string | null
+  batch:            string | null
+  story:            string | null
+  castSlugs:        string[]
+  productHandles:   string[]
+  createdAt:        string
+}
+
+function heroCandidateWriteClient() {
+  const client = getClient(true, false, 'raw')
+  if (!client) throw new Error('Sanity not configured: SANITY_API_TOKEN or SANITY_PROJECT_ID missing')
+  return client
+}
+
+/** Candidates for the review page, newest first. Admin-only read, never cached. */
+export async function listCollectionHeroCandidates(filter: {
+  status?: HeroCandidateStatus | 'all'
+  batch?: string | null
+}): Promise<CollectionHeroCandidate[]> {
+  const client = heroCandidateWriteClient()
+  const status = filter.status ?? 'candidate'
+  const rows = await client.fetch<Array<CollectionHeroCandidate & { castSlugs: string[] | null; productHandles: string[] | null }>>(
+    `*[_type == "collectionHeroCandidate" && !(_id in path("drafts.**"))
+      && ($status == "all" || status == $status)
+      && (!defined($batch) || batch == $batch)] | order(_createdAt desc)[0...300]{
+      "id": _id, collectionHandle, imageUrl, alt, status, note, batch, story,
+      castSlugs, productHandles, "createdAt": _createdAt
+    }`,
+    { status, batch: filter.batch ?? null },
+  )
+  return (rows ?? []).map(r => ({ ...r, castSlugs: r.castSlugs ?? [], productHandles: r.productHandles ?? [] }))
+}
+
+export async function getCollectionHeroCandidate(id: string): Promise<CollectionHeroCandidate | null> {
+  const client = heroCandidateWriteClient()
+  const row = await client.fetch<(CollectionHeroCandidate & { castSlugs: string[] | null; productHandles: string[] | null }) | null>(
+    `*[_type == "collectionHeroCandidate" && _id == $id][0]{
+      "id": _id, collectionHandle, imageUrl, alt, status, note, batch, story,
+      castSlugs, productHandles, "createdAt": _createdAt
+    }`,
+    { id },
+  )
+  return row ? { ...row, castSlugs: row.castSlugs ?? [], productHandles: row.productHandles ?? [] } : null
+}
+
+/** Record the owner's verdict on one candidate. */
+export async function setCollectionHeroCandidateStatus(
+  id: string,
+  status: HeroCandidateStatus,
+  note: string | null,
+): Promise<void> {
+  const client = heroCandidateWriteClient()
+  const patch = client.patch(id).set({ status, reviewedAt: new Date().toISOString() })
+  await (note ? patch.set({ note }) : patch).commit()
+}
+
+/** After an approval, retire the other approved candidate(s) for that collection. */
+export async function supersedeOtherApprovedHeroes(collectionHandle: string, keepId: string): Promise<void> {
+  const client = heroCandidateWriteClient()
+  const ids = await client.fetch<string[]>(
+    `*[_type == "collectionHeroCandidate" && collectionHandle == $h && status == "approved" && _id != $keep]._id`,
+    { h: collectionHandle, keep: keepId },
+  )
+  for (const id of ids ?? []) {
+    await client.patch(id).set({ status: 'superseded' }).commit()
+  }
+}
+
 // ─── Collections Hub (editorial overrides) ─────────────────────────────────
 
 export interface CollectionsHubSanity {

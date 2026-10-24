@@ -138,8 +138,15 @@ export default defineConfig({
                       .id('collectionsHub')
                       .icon(() => '🏷️')
                       .child(S.document().schemaType('collectionsHub').documentId('singleton.collectionsHub')),
+                    S.listItem()
+                      .title('Hub layout (groups and featured brands)')
+                      .id('collectionsHubLayout')
+                      .icon(() => '🧭')
+                      .child(S.document().schemaType('collectionsHubLayout').documentId('singleton.collectionsHubLayout')),
                     S.divider(),
                     S.documentTypeListItem('collectionPage').title('Collection Pages').icon(() => '🗃️'),
+                    S.documentTypeListItem('brandIdentity').title('Brand logos').icon(() => '🔖'),
+                    S.documentTypeListItem('collectionHeroCandidate').title('Collection hero candidates').icon(() => '🖼️'),
                   ]),
               ),
             S.documentTypeListItem('comparison').title('Comparisons (vs pages)').icon(() => '⚖️'),

@@ -39,6 +39,7 @@
  * than the flat "everything is 0.9, daily" the file used to emit, which told
  * a crawler nothing and was demonstrably false for 4,400 PDPs.
  */
+import { UNLISTED_COLLECTION_HANDLES } from '~/lib/collection-taxonomy'
 import { neon } from '@neondatabase/serverless'
 import { getBlogPostsForSitemap, getBlogCategories, getAllBlogSeries, getPageList, getProductHandlesForSitemap, getComparisonsForSitemap, getEditoriallyLinkedHandles } from '~/lib/sanity.server'
 import { getProductImagesForSitemap, getCollectionsForSitemap, getMainMenu, getIndexableProductHandles, type SitemapProductImages, type SitemapCollection } from '~/lib/shopify.server'
@@ -256,15 +257,10 @@ const PAGE_SLUG_DENYLIST = new Set([
   'components',      // internal style guide, should not be indexed
 ])
 
-// Collections that duplicate clean-URL routes, are Shopify defaults, or back a
-// retired gendered route (/vault, /for-him, /for-her all 301 into /collections
-// or a product-type collection now — never index these handles).
-const COLLECTION_DENYLIST = new Set([
-  'frontpage', // Shopify default auto-collection
-  'vault',     // /vault is retired (301 → /collections)
-  'for-him',   // /for-him is retired (301 → a product-type collection)
-  'for-her',   // /for-her is retired (301 → a product-type collection)
-])
+// Collections that duplicate clean-URL routes, are Shopify defaults, back a
+// retired gendered route, or are utility lists (discount eligibility, the Shop
+// price floor). One list for the hub, sitemap and llms.txt: collection-taxonomy.ts.
+const COLLECTION_DENYLIST = UNLISTED_COLLECTION_HANDLES
 
 /**
  * Build every sitemap segment.

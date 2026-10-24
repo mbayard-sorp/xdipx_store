@@ -2,6 +2,7 @@ import crypto from 'node:crypto'
 import type { Deal, Product, VaultDeal, Cart, CartLine, CartUpsell, ProductImage, ProductVideo, ProductScore, ProductTypeDial, SellingPlan, SellingPlanGroup, SensationDial, SensationDialV2, SensationDialItem, DialValue, CareInstructions, EmmaHeroCopy } from '~/types'
 import { toHTML } from '@portabletext/to-html'
 import { cached, invalidateCache, kvGet, kvSet, KV_KEYS } from '~/lib/kv.server'
+import { isUnlistedCollection } from '~/lib/collection-taxonomy'
 import { isOperationalTag, editorialTagsOnly } from '~/lib/tag-normalize'
 import { UNCATEGORIZED_SENTINEL } from '~/lib/master-collapse.server'
 import { deriveProductType } from '~/lib/product-type-derive'
@@ -2737,6 +2738,9 @@ export async function getCollectionList(): Promise<CollectionListItem[]> {
         // Filter out empty collections — they pollute the hub and rank poorly.
         const hasProducts = n.products.edges.length > 0 || n.products.pageInfo.hasNextPage
         if (!hasProducts) continue
+        // Utility and retired collections (discount eligibility, Shop price
+        // floor, for-him / for-her) are never shelves.
+        if (isUnlistedCollection(n.handle)) continue
         out.push({
           handle:        n.handle,
           title:         n.title,
@@ -6396,14 +6400,90 @@ function buildProductTags(product: ProductScore): string[] {
 }
 
 
+/** A collection image either already hosted (a Shopify Files CDN URL) or raw bytes to stage. */
+export type CollectionImageSource =
+  | { url: string }
+  | { buffer: Buffer; filename: string; mimeType: 'image/jpeg' | 'image/png' | 'image/webp' }
+
+/**
+ * Set a collection's featured image (`collection.image`), which feeds the
+ * /collections hub cards, the PLP hero, og:image and the sitemap image. A URL
+ * source is handed to Shopify as-is; bytes go through a staged upload first.
+ * Returns the image URL Shopify now serves.
+ */
 export async function updateCollectionImage(
-  _collectionId: string,
-  _imageBuffer: Buffer,
-  _filename: string,
-  _alt: string,
+  collectionId: string,
+  source: CollectionImageSource,
+  alt: string,
 ): Promise<string> {
-  console.warn('updateCollectionImage: not yet implemented')
-  return ''
+  const gid = collectionId.startsWith('gid://') ? collectionId : `gid://shopify/Collection/${collectionId}`
+
+  let src: string
+  if ('url' in source) {
+    src = source.url
+  } else {
+    const staged = await adminGraphQL<{
+      stagedUploadsCreate: {
+        stagedTargets: StagedTarget[]
+        userErrors: { field: string[]; message: string }[]
+      }
+    }>(`
+      mutation StagedUploadsCreate($input: [StagedUploadInput!]!) {
+        stagedUploadsCreate(input: $input) {
+          stagedTargets { url resourceUrl parameters { name value } }
+          userErrors { field message }
+        }
+      }
+    `, {
+      input: [{
+        filename:   source.filename,
+        mimeType:   source.mimeType,
+        httpMethod: 'POST',
+        resource:   'COLLECTION_IMAGE',
+        fileSize:   String(source.buffer.length),
+      }],
+    })
+    if (staged.stagedUploadsCreate.userErrors.length > 0) {
+      const errs = staged.stagedUploadsCreate.userErrors.map(e => e.message).join('; ')
+      throw new Error(`Shopify stagedUploadsCreate (collection image) error: ${errs}`)
+    }
+    const target = staged.stagedUploadsCreate.stagedTargets[0]
+    if (!target) throw new Error('Shopify returned no staged upload target for collection image')
+
+    const form = new FormData()
+    for (const param of target.parameters) form.append(param.name, param.value)
+    form.append('file', new Blob([new Uint8Array(source.buffer)], { type: source.mimeType }), source.filename)
+    const uploadRes = await fetch(target.url, { method: 'POST', body: form })
+    if (!uploadRes.ok) {
+      throw new Error(`Staged collection image upload failed: ${uploadRes.status} ${await uploadRes.text()}`)
+    }
+    src = target.resourceUrl
+  }
+
+  const data = await adminGraphQL<{
+    collectionUpdate: {
+      collection: { handle: string; image: { url: string } | null } | null
+      userErrors: { field: string[]; message: string }[]
+    }
+  }>(`
+    mutation CollectionImageUpdate($input: CollectionInput!) {
+      collectionUpdate(input: $input) {
+        collection { handle image { url } }
+        userErrors { field message }
+      }
+    }
+  `, { input: { id: gid, image: { src, altText: alt } } })
+
+  if (data.collectionUpdate.userErrors.length > 0) {
+    const errs = data.collectionUpdate.userErrors.map(e => e.message).join('; ')
+    throw new Error(`Shopify collectionUpdate (image) error: ${errs}`)
+  }
+  const collection = data.collectionUpdate.collection
+  if (!collection?.image?.url) throw new Error('Shopify accepted the collection image but returned no image URL')
+
+  invalidateCache(`shopify:col-meta:${collection.handle}`)
+  invalidateCache('shopify:collection-list:public')
+  return collection.image.url
 }
 
 export async function getAccessoryProductsAdmin(

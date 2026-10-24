@@ -71,6 +71,9 @@ import editorialAuthor    from '../schemas/authors/editorialAuthor.js'
 import healthReviewer     from '../schemas/healthReviewer.js'
 import collectionPage     from '../schemas/collectionPage.js'
 import collectionsHub     from '../schemas/collectionsHub.js'
+import collectionsHubLayout from '../schemas/collectionsHubLayout.js'
+import brandIdentity      from '../schemas/brandIdentity.js'
+import collectionHeroCandidate from '../schemas/collectionHeroCandidate.js'
 // Phase 6d — Manufacturer specs data layer (additive; does not touch existing schemas).
 import mfgProductSpecs    from '../schemas/mfgProductSpecs.js'
 
@@ -226,6 +229,9 @@ export const schemaTypes = [
   // Hub SEO — editorial copy + FAQs for the /collections hub PLP. Singleton.
   // Additive — falls back to hardcoded defaults when the doc doesn't exist.
   collectionsHub,
+  collectionsHubLayout,
+  brandIdentity,
+  collectionHeroCandidate,
   // Phase 6d — Manufacturer specs per product (additive; does not touch existing schemas).
   mfgProductSpecs,
   // Ad Studio v2 PR-D — bridge pages + curated lane subset (additive).
