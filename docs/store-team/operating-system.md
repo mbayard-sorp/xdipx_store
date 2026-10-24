@@ -315,6 +315,18 @@ the row text and its links are the only carriers, so the conventions are the con
     op as something to reuse, modify, or call, `git grep` that exact name once. If it doesn't exist,
     either find the real name or say plainly that no such symbol exists yet and the ticket is asking
     for a new one.
+11. **A note that introduces a new hard dependency re-blocks the ticket in the same action.**
+    (#17496) When a note added to an `approved`/`in_progress` ticket names a new hard dependency
+    (a `Depends-on`, a `navBlock()`-style gate, a blocking PR), the filer — owner or agent — also
+    transitions the ticket back to `blocked` (or at minimum sets `blockedById`) in that same action,
+    rather than leaving status unchanged with the dependency note sitting among earlier notes that
+    already said "cleared." R-DEV's claim filter reads status, not every note in order, so a status
+    left unchanged reads as still-claimable even when the latest note says otherwise. Concrete
+    instance: #14999 was re-approved on owner direction citing "dependency cleared (#14998 merged)",
+    then a later note on the same ticket added a brand-new hard dependency (`navBlock()`/#17476/
+    PR #1770) without re-blocking the ticket or flagging the earlier re-approval note stale; #15002
+    and #17445 both depended on #14999 and inherited the same silent gap, costing R-DEV run 1616
+    three of five claims to independently rediscover the one unmet condition.
 
 ### Playbook-authoring conventions
 
