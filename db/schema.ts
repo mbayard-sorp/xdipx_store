@@ -2958,3 +2958,49 @@ export const adHealthSnapshots = pgTable('ad_health_snapshots', {
 }, t => ({
   channelKindObservedIdx: index('idx_ad_health_snapshots_channel_kind_observed').on(t.channel, t.kind, t.observedAt),
 }))
+
+// Meta CRM integration for Instant Form leads (migration 137). One row per
+// Meta-generated lead id; contact details only as Meta's SHA-256 match hashes.
+// Written by app/lib/meta-crm.server.ts.
+export const metaLeads = pgTable('meta_leads', {
+  id:               bigserial('id', { mode: 'number' }).primaryKey(),
+  leadId:           text('lead_id').notNull().unique(),
+  formId:           text('form_id'),
+  pageId:           text('page_id'),
+  adId:             text('ad_id'),
+  adsetId:          text('adset_id'),
+  campaignId:       text('campaign_id'),
+  platform:         text('platform'),
+  leadCreatedAt:    timestamp('lead_created_at', { withTimezone: true }).notNull(),
+  emailHash:        text('email_hash'),
+  phoneHash:        text('phone_hash'),
+  firstNameHash:    text('first_name_hash'),
+  interest:         text('interest'),
+  klaviyoProfileId: text('klaviyo_profile_id'),
+  subscribedAt:     timestamp('subscribed_at', { withTimezone: true }),
+  convertedAt:      timestamp('converted_at', { withTimezone: true }),
+  convertedValue:   numeric('converted_value', { precision: 10, scale: 2 }),
+  ingestAttempts:   integer('ingest_attempts').notNull().default(0),
+  ingestError:      text('ingest_error'),
+  createdAt:        timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt:        timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => ({
+  leadCreatedIdx: index('idx_meta_leads_lead_created').on(t.leadCreatedAt),
+}))
+
+// Send ledger for the CRM funnel-stage events, one row per lead per stage.
+export const metaLeadStageEvents = pgTable('meta_lead_stage_events', {
+  id:        bigserial('id', { mode: 'number' }).primaryKey(),
+  leadId:    text('lead_id').notNull(),
+  stage:     text('stage').notNull(),
+  eventId:   text('event_id').notNull().unique(),
+  eventTime: bigint('event_time', { mode: 'number' }).notNull(),
+  sentAt:    timestamp('sent_at', { withTimezone: true }),
+  attempts:  integer('attempts').notNull().default(0),
+  lastError: text('last_error'),
+  fbtraceId: text('fbtrace_id'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => ({
+  leadStageUq: uniqueIndex('uq_meta_lead_stage_events_lead_stage').on(t.leadId, t.stage),
+  createdIdx:  index('idx_meta_lead_stage_events_created').on(t.createdAt),
+}))

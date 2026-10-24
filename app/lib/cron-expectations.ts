@@ -801,6 +801,21 @@ export const CRON_EXPECTATIONS: readonly CronExpectation[] = [
       + 'ads_audience_sync_enabled is off. A missed week leaves last week\'s members in place, so new '
       + 'buyers can still see ads for a few more days; that is wasted spend at the margin, not a money event.',
   },
+  {
+    route: '/cron/meta-crm-sync',
+    plane: 'vercel',
+    schedule: '40 * * * *',
+    periodMinutes: HOURLY,
+    graceMinutes: 120,
+    recorded: false,
+    moneyRelevant: false,
+    ownerTeam: 'ads',
+    notes:
+      'Meta CRM integration for Instant Form leads: backfills leads the leadgen webhook missed, checks '
+      + 'Klaviyo for each lead\'s first Placed Order and sends the Converted stage, and resends unsent '
+      + 'stage events (app/lib/meta-crm.server.ts). Skips until META_LEADS_ACCESS_TOKEN is set. A missed '
+      + 'hour delays a stage event; Meta accepts them up to 7 days late, so only a week-long outage loses data.',
+  },
 ]
 
 /** Indexed by route, for the wrapper's per-request lookup. */
