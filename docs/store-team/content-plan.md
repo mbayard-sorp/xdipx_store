@@ -284,7 +284,7 @@ extend freely — additions need a slug, problem, and target query):
 | 26 | what-if-you-feel-self-conscious-during-sex | Body self-consciousness dimming everything **COVERED, do not write as-is** | "how do I stop feeling self conscious in bed" |
 | 27 | how-do-you-restart-after-a-long-dry-spell | Restarting solo or partnered sex after a long break | "how to get back into sex after a long time without it" |
 | 28 | how-do-you-choose-toys-when-mobility-is-limited | Grip, reach, and mobility limits | "sex toys that work with arthritis or limited mobility" |
-| 29 | how-do-you-keep-toys-private-in-a-shared-home | Privacy with roommates or kids in the house | "how do I keep sex toys private at home" |
+| 29 | how-do-you-keep-toys-private-in-a-shared-home | Privacy with roommates or kids in the house **COVERED, do not write as-is** | "how do I keep sex toys private at home" |
 | 30 | can-you-travel-with-a-sex-toy | Travel worry: security lines, packing, batteries | "can you bring a sex toy on a plane" |
 
 † = health-adjacent; the "worth seeing a clinician if…" line is mandatory.
@@ -312,6 +312,17 @@ to its current brief would ship near-identical intent at a second URL rather tha
 reordered past both rows for exactly this reason. Either give each row a genuinely distinct angle that
 its podcast post does not already answer, or strike it and let the podcast post hold the cluster. Do
 not write either row to the brief as written.
+
+**Row 29 is already covered too, for the same reason as rows 15, 25 and 26 (content run 1613,
+2026-10-23).** The published care post `/notebook/how-do-you-store-sex-toys-discreetly` already
+carries row 29's whole resolution, down to an H2 "How do you store sex toys out of sight without
+hiding them?" plus FAQs "How do you store sex toys with kids in the house?" and "How do you store
+sex toys if you share a bedroom with a partner?" The published real-talk post
+`/notebook/when-vibration-feels-like-too-much-noise` already carries "Can my roommates hear my
+vibrator through the wall?" Writing row 29 to its current brief would ship near-identical intent at
+a second URL rather than add one. Either give the row a genuinely distinct angle that neither post
+already answers, or strike it and let the two published posts hold the cluster. Do not write it to
+the brief as written.
 
 Bank composition: roughly a third health-adjacent, a third relationship and communication, a third
 practical confidence. Rows 1-10 are the original launch bank and seed the `real-talk` series in
