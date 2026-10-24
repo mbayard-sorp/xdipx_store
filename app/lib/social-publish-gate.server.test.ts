@@ -17,6 +17,7 @@ import {
   defaultCheckMediaReachable,
 } from './social-publish-gate.server'
 import { VISION_CHECK_NAMES, type VisionVerdict } from './social-vision-gate.server'
+import { jpegImageUrl } from './social-publish/instagram.server'
 
 const CDN = 'https://cdn.shopify.com/s/files/1/0761/6872/4651/files'
 const GOOD_MEDIA = [`${CDN}/social-rosales-cast-maya-20260812-1.jpg`]
@@ -256,6 +257,35 @@ describe('media reachability (ticket #11453)', () => {
     const finding = r.findings.find(f => f.check === 'media-unreachable')
     expect(finding?.detail).toContain(ROW_306_URL)
     expect(finding?.detail).toContain(second)
+  })
+
+  // Ticket #17546. Post #498 passed this gate (the raw url resolved) and then
+  // died at the publish tick with Meta's 9004 "Only photo or video can be
+  // accepted as media type" — the error `jpegImageUrl`'s own JPEG pin exists
+  // to prevent. The gate never checked that pinned variant, so a CDN url that
+  // resolves by default but fails on the exact `format=pjpg` request Meta
+  // makes cleared this gate with nothing to show for it.
+  describe('JPEG-pinned reachability (ticket #17546)', () => {
+    it('blocks a url whose raw form resolves but whose JPEG-pinned form does not, on Instagram', async () => {
+      const r = await runChecks(
+        { caption: CLEAN, mediaUrls: GOOD_MEDIA, platform: 'instagram' },
+        { checkMediaReachable: async (u) => u !== jpegImageUrl(GOOD_MEDIA[0]!) },
+      )
+      expect(checks(r)).toContain('media-unreachable')
+      expect(r.blocked).toBe(true)
+      const finding = r.findings.find(f => f.check === 'media-unreachable')
+      // Named by the raw url the drafter recognizes, not the pinned variant.
+      expect(finding?.detail).toContain(GOOD_MEDIA[0])
+    })
+
+    it('does not check the JPEG-pinned variant on X, which uploads bytes directly', async () => {
+      const r = await runChecks(
+        { caption: CLEAN, mediaUrls: GOOD_MEDIA, platform: 'x' },
+        { checkMediaReachable: async (u) => u !== jpegImageUrl(GOOD_MEDIA[0]!) },
+      )
+      expect(checks(r)).not.toContain('media-unreachable')
+      expect(r.blocked).toBe(false)
+    })
   })
 
   describe('defaultCheckMediaReachable', () => {
