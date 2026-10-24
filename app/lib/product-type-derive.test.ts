@@ -17,6 +17,15 @@ describe('vocabulary integrity', () => {
     }
   })
 
+  // Ticket #17600: "Discontinued" is a pricing-GROUP key (xdipx.discontinued_at
+  // is the real state), never a product type, and the enrich/publish guard in
+  // product-type.server.ts relies on no rule ever emitting it. It stays in
+  // CANONICAL_PRODUCT_TYPES only because pricing_product_type_map still needs
+  // the row the state path resolves rules through.
+  it('no rule can ever output "Discontinued" — it is a pricing-group key, not a derivable type', () => {
+    expect(allRuleOutputTypes()).not.toContain('Discontinued')
+  })
+
   it('canonical list has no duplicates', () => {
     expect(new Set(CANONICAL_PRODUCT_TYPES).size).toBe(CANONICAL_PRODUCT_TYPES.length)
   })
@@ -166,6 +175,69 @@ describe('category/title collisions (#15376)', () => {
 
   it('Classic + Cockring Sets alone (no Vibrator Kits) still resolves to Cock Ring as before', () => {
     expect(derive(['Classic', 'Cockring Sets']).productType).toBe('Cock Ring')
+  })
+})
+
+// Ticket #17600, from the 2026-10-24 Discontinued-retype audit: four more
+// category/title collisions found while retyping the 894 active products that
+// had been mistyped "Discontinued" (a pricing-group key, not a real type).
+describe('category/title collisions (#17600)', () => {
+  it('strap-on harness kits beat the dildo-shape categories they ship with (no "Strap On" category of their own)', () => {
+    expect(
+      derive(['Sets and Kits', 'Silicone Dildos and Dongs'], 'Booty Shorts Silicone Strap-On Harness with 6-Inch Dildo')
+        .productType,
+    ).toBe('Strap-On Harness')
+    expect(
+      derive(['Sets and Kits', 'Fabric'], 'Lace Envy Crotchless Strap-On Harness with Curved Dildo Set').productType,
+    ).toBe('Strap-On Harness')
+    expect(
+      derive(['Realistic', 'Fabric'], 'Tomboii Nylon Boxer Briefs Strap-On Harness with Bullet Pockets').productType,
+    ).toBe('Strap-On Harness')
+  })
+
+  it('a real dildo keeps its type when the title says nothing about a harness', () => {
+    expect(derive(['Sets and Kits', 'Silicone Dildos and Dongs'], 'Ripple Silicone Dildo Set').productType)
+      .toBe('Silicone Dildo')
+  })
+
+  it('masturbators/strokers beat the generic Non-Realistic dildo modifier when it is their only category', () => {
+    expect(derive(['Non-Realistic'], 'Spring Fling 2 AM Twisting Stroker').productType).toBe('Stroker')
+    expect(derive(['Non-Realistic'], 'Hotrod Rechargeable Warming Dual Motor Masturbator').productType).toBe('Stroker')
+    expect(derive(['Non-Realistic'], 'Jock 10X Vibrating Double-Ended Masturbator TPE').productType).toBe('Stroker')
+  })
+
+  it('a non-realistic dildo with no stroker/masturbator wording keeps Dildo', () => {
+    expect(derive(['Non-Realistic'], 'Glow in the Dark Silicone Dildo').productType).toBe('Dildo')
+  })
+
+  it('Fantasy Dildos wins over the Plugs and Probes/Tails category it co-occurs with', () => {
+    expect(
+      derive(['Fantasy Dildos', 'Plugs and Probes'], 'Silicone Tantus Magma Fantasy Dildo 7-Inch').productType,
+    ).toBe('Fantasy Dildo')
+  })
+
+  it('Plugs and Probes alone (no Fantasy Dildos) still resolves to Anal Plug as before', () => {
+    expect(derive(['Plugs and Probes']).productType).toBe('Anal Plug')
+  })
+
+  it('G-Spot and Classic Slimline wins over the Prostate Toys category it co-occurs with', () => {
+    expect(derive(['G-Spot and Classic Slimline', 'Prostate Toys'], 'AV23 Arched Ring G-Spot Vibrator Teal').productType)
+      .toBe('G-Spot Vibrator')
+  })
+
+  it('Prostate Toys alone (no G-Spot category) still resolves to Prostate Massager as before', () => {
+    expect(derive(['Prostate Toys']).productType).toBe('Prostate Massager')
+  })
+
+  it('Slings maps to Penis Extender for extender sheaths instead of Cock Ring', () => {
+    expect(derive(['Slings'], 'Fat Boy Ultra Fat Penis Extender Sleeve').productType).toBe('Penis Extender')
+    expect(
+      derive(['Slings'], 'XXXPANDER Ribbed Penis Extender Sheath With Cockring & Anal Plug').productType,
+    ).toBe('Penis Extender')
+  })
+
+  it('Slings without extender wording in the title still resolves to Cock Ring as before', () => {
+    expect(derive(['Slings'], 'Leather Cock and Ball Sling').productType).toBe('Cock Ring')
   })
 })
 
