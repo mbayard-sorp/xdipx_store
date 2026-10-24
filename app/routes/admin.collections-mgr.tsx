@@ -139,7 +139,9 @@ export default function CollectionsManager() {
           prompt: prompt.trim(),
           style,
           count: 1,
-          aspectRatio: '4:3',
+          // One 16:9 master survives the 16:6 PLP hero, the hub cards and
+          // the 4:3 category masthead (collections audit 2026-10-23).
+          aspectRatio: '16:9',
           referenceImageUrls,
           productTitle: collection.title,
         }),

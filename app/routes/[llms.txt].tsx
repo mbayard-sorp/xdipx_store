@@ -10,6 +10,7 @@
  * Cache-Control: 1h (deal handle changes at midnight; other lists are stable).
  */
 
+import { UNLISTED_COLLECTION_HANDLES } from '~/lib/collection-taxonomy'
 import { getBlogCategories, getBlogPostsForSitemap, getPageList, getProductHandlesForSitemap, getComparisonList } from '~/lib/sanity.server'
 import { getCollectionsForSitemap, getLiveDealHandle } from '~/lib/shopify.server'
 
@@ -42,15 +43,9 @@ function humanizeHandle(handle: string): string {
     .join(' ')
 }
 
-// Collection handles that duplicate clean-URL routes or back a retired
-// gendered route. /vault, /for-him, /for-her all 301 permanently into
-// /collections or a product-type collection; never cite these handles.
-const COLLECTION_DENYLIST = new Set([
-  'frontpage',
-  'vault',
-  'for-him',
-  'for-her',
-])
+// Retired, duplicate and utility collection handles; shared with the hub and
+// sitemap (collection-taxonomy.ts).
+const COLLECTION_DENYLIST = UNLISTED_COLLECTION_HANDLES
 
 export async function loader() {
   const guard = <T,>(p: Promise<T>, fallback: T, name: string): Promise<T> =>
