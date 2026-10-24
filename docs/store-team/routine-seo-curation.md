@@ -136,6 +136,24 @@ Trend `suggestedTerms` missing from the keyword bank go into the Step 6 report (
 `keyword_research_enabled` conversation), never directly into `seoKeyword` docs. One `step` event
 (`phase:'trend-review'`) with adopted/skipped/expired counts and per-id outcomes.
 
+## Step 4c: Re-mark covered §8B rows (weekly, before planning)
+
+**The content-plan §8B Real Talk cross-category check belongs here, not in the daily run.**
+(#17415) `docs/store-team/content-plan.md` §8B's "check across categories" rule asks every Tuesday/
+Friday run to re-derive, per candidate row, whether a published podcast-notes or care/wellness-basics
+post already answers it — a fact that is stable between runs, not something each run should
+re-discover from scratch. Four occurrences (rows 15, 25, 26, 29) each reached topic-selection before
+anyone noticed a published post already covered them, and each time the fix was a one-off prose
+annotation added after the fact. Since this routine already reads the whole published corpus to plan
+Step 5's briefs, re-mark the bank here instead: for each §8B row not already annotated **COVERED**,
+check its target query and problem against all published `blogPost` docs (podcast-notes, care,
+wellness-basics, and other real-talk posts); if an existing post's H2s or FAQs already carry the
+row's resolution, patch `docs/store-team/content-plan.md` with a **COVERED, do not write as-is**
+annotation on that row plus a one-line note naming the covering post(s), matching the existing rows
+15/25/26/29 annotations. This does not replace the daily per-run check (cheap insurance, left as
+written); it drains the backlog so the daily check increasingly finds nothing to re-discover. One
+`step` event (`phase:'content-plan-coverage'`) naming any newly-covered rows.
+
 ## Step 5: Plan the week's briefs (cap 4 — the answer-shaped days only)
 
 **Real-talk (Tue/Fri) and podcast-notes (Thu) are backlog-and-brief-sourced by design; the curator
