@@ -65,7 +65,7 @@ describe('sendCapiEvent credentials', () => {
 describe('sendCapiEvent response handling', () => {
   it('succeeds when Meta confirms it received the event', async () => {
     mockFetch(200, { events_received: 1, fbtrace_id: 'abc' })
-    await expect(sendCapiEvent(EVENT, { consentGranted: false })).resolves.toEqual({ ok: true })
+    await expect(sendCapiEvent(EVENT, { consentGranted: false })).resolves.toEqual({ ok: true, fbtraceId: 'abc' })
   })
 
   it('treats HTTP 200 with events_received 0 as a failure', async () => {

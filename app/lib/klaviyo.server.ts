@@ -41,14 +41,15 @@ export async function upsertProfile(opts: {
   phone?: string | null | undefined
   firstName?: string | null | undefined
   properties?: Record<string, unknown> | undefined
-}): Promise<void> {
+}): Promise<string | null> {
   const attributes: Record<string, unknown> = {}
   if (opts.email) attributes['email'] = opts.email
   if (opts.phone) attributes['phone_number'] = opts.phone
   if (opts.firstName) attributes['first_name'] = opts.firstName
   if (opts.properties && Object.keys(opts.properties).length > 0) attributes['properties'] = opts.properties
-  if (!attributes['email'] && !attributes['phone_number']) return
-  await klaviyoFetch('/profile-import/', 'POST', { data: { type: 'profile', attributes } })
+  if (!attributes['email'] && !attributes['phone_number']) return null
+  const res = await klaviyoFetch<{ data?: { id?: string } }>('/profile-import/', 'POST', { data: { type: 'profile', attributes } })
+  return res.data?.id ?? null
 }
 
 /**
@@ -94,7 +95,7 @@ export async function subscribeLead(opts: {
   firstName?: string
   phone?: string | null
   properties: Record<string, unknown>
-}): Promise<void> {
+}): Promise<string | null> {
   let listId = process.env['KLAVIYO_LIST_ID_PAID_LEADS']
   if (!listId) {
     console.warn('[klaviyo.subscribeLead] KLAVIYO_LIST_ID_PAID_LEADS unset, using the daily-deal list')
@@ -102,7 +103,7 @@ export async function subscribeLead(opts: {
   }
   // Profile fields first (profile-import), then the email subscription with
   // identifiers only; see upsertProfile for why they cannot ride together.
-  await upsertProfile({ email: opts.email, phone: opts.phone, firstName: opts.firstName, properties: opts.properties })
+  const profileId = await upsertProfile({ email: opts.email, phone: opts.phone, firstName: opts.firstName, properties: opts.properties })
 
   const profileAttrs: Record<string, unknown> = {
     email: opts.email,
@@ -117,6 +118,7 @@ export async function subscribeLead(opts: {
       relationships: { list: { data: { type: 'list', id: listId } } },
     },
   })
+  return profileId
 }
 
 export async function subscribeToDailyDeal(

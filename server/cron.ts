@@ -1038,6 +1038,29 @@ export function createCronRoutes() {
   })
 
   /**
+   * GET|POST /cron/meta-crm-sync
+   * Schedule: hourly at :40. Meta CRM integration for Instant Form leads
+   * (app/lib/meta-crm.server.ts): backfills leads the leadgen webhook missed,
+   * sends the Converted stage for leads with a Klaviyo Placed Order, and
+   * resends unsent stage events. `skipped` until META_LEADS_ACCESS_TOKEN is
+   * set; 500 when any step failed, with the steps named in `errors`.
+   */
+  cronRoute('/meta-crm-sync', async (_req, res) => {
+    try {
+      const { runMetaCrmSync } = await import('../app/lib/meta-crm.server.js')
+      const result = await runMetaCrmSync()
+      if (result.skipped) {
+        res.json({ ok: true, ...result })
+        return
+      }
+      res.status(result.errors.length > 0 ? 500 : 200).json({ ok: result.errors.length === 0, ...result })
+    } catch (err) {
+      console.error('[cron/meta-crm-sync] failed:', err)
+      res.status(500).json({ ok: false, error: (err as Error).message })
+    }
+  })
+
+  /**
    * GET|POST /cron/social-asset-auto-archive
    * Schedule: daily. Archives unpicked social_media_assets rows past a
    * tunable age threshold (default 60 days, `social_library_auto_archive_days`

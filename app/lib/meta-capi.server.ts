@@ -366,7 +366,7 @@ export async function sendCapiLead(
     },
     { consentGranted: piiAllowed(getMarketingConsentState(request)) },
   )
-  if (result.ok) console.info('[meta-capi] Lead delivered', eventId, opts.contentName)
+  if (result.ok) console.info('[meta-capi] Lead delivered', eventId, opts.contentName, `fbtrace=${result.fbtraceId ?? 'none'}`)
   else console.error('[meta-capi] Lead not delivered:', result.error ?? result.skipped, eventId)
   return eventId
 }
@@ -393,13 +393,7 @@ export async function sendCapiLead(
 export async function sendCapiEvent(
   event: CapiEvent,
   opts: { consentGranted: boolean; testMode?: boolean },
-): Promise<{ ok: boolean; error?: string; skipped?: string }> {
-  const pixelId = process.env['META_PIXEL_ID']
-  const token   = process.env['META_CAPI_TOKEN']
-
-  if (!pixelId) return { ok: false, skipped: 'no META_PIXEL_ID' }
-  if (!token)   return { ok: false, skipped: 'no META_CAPI_TOKEN' }
-
+): Promise<CapiPostResult> {
   const user_data: CapiUserData = { ...event.user_data }
   if (!opts.consentGranted) {
     for (const k of PII_KEYS) delete user_data[k]
@@ -408,20 +402,46 @@ export async function sendCapiEvent(
   if (user_data.fbp == null) delete user_data.fbp
   if (user_data.fbc == null) delete user_data.fbc
 
-  const payload: Record<string, unknown> = {
-    data: [
-      {
-        event_name:    event.event_name,
-        event_id:      event.event_id,
-        event_time:    event.event_time,
-        action_source: event.action_source,
-        ...(event.event_source_url ? { event_source_url: event.event_source_url } : {}),
-        user_data,
-        ...(event.custom_data ? { custom_data: event.custom_data } : {}),
-      },
-    ],
-    access_token: token,
+  const row = {
+    event_name:    event.event_name,
+    event_id:      event.event_id,
+    event_time:    event.event_time,
+    action_source: event.action_source,
+    ...(event.event_source_url ? { event_source_url: event.event_source_url } : {}),
+    user_data,
+    ...(event.custom_data ? { custom_data: event.custom_data } : {}),
   }
+  return postCapiData(JSON.stringify([row]), opts.testMode === true ? { testMode: true } : {})
+}
+
+/** Graph API version for every Conversions API call this store makes. */
+export const META_GRAPH_VERSION = 'v26.0'
+
+export interface CapiPostResult {
+  ok: boolean
+  error?: string
+  skipped?: string
+  /** Meta's trace id for an accepted request. Quote it to Meta support. */
+  fbtraceId?: string
+}
+
+/**
+ * POST an already-serialized `data` array to the dataset's /events edge.
+ *
+ * Takes JSON text rather than objects so a caller can carry a value
+ * JSON.stringify cannot: the CRM integration's lead_id is a 15-17 digit int64,
+ * past Number.MAX_SAFE_INTEGER, and has to go out as a bare JSON number
+ * (app/lib/meta-crm.server.ts). Credentials, test-event routing and the
+ * acceptance checks live here so every sender gets the same rules.
+ *
+ * NEVER throws.
+ */
+export async function postCapiData(dataJson: string, opts: { testMode?: boolean } = {}): Promise<CapiPostResult> {
+  const pixelId = process.env['META_PIXEL_ID']
+  const token   = process.env['META_CAPI_TOKEN']
+
+  if (!pixelId) return { ok: false, skipped: 'no META_PIXEL_ID' }
+  if (!token)   return { ok: false, skipped: 'no META_CAPI_TOKEN' }
 
   // Test events are opt-in per call, never ambient. Attaching test_event_code
   // to a live send diverts it into Events Manager's Test Events tab and out of
@@ -444,15 +464,17 @@ export async function sendCapiEvent(
     ? vercelEnv === 'production'
     : process.env['NODE_ENV'] === 'production'
   const wantsTest = opts.testMode === true || !isRealProduction
-  if (testCode && wantsTest) payload['test_event_code'] = testCode
+  const body = `{"data":${dataJson},"access_token":${JSON.stringify(token)}${
+    testCode && wantsTest ? `,"test_event_code":${JSON.stringify(testCode)}` : ''
+  }}`
 
   try {
     const res = await fetch(
-      `https://graph.facebook.com/v21.0/${pixelId}/events`,
+      `https://graph.facebook.com/${META_GRAPH_VERSION}/${pixelId}/events`,
       {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify(payload),
+        body,
       },
     )
     if (!res.ok) {
@@ -464,18 +486,19 @@ export async function sendCapiEvent(
     // { events_received: 0 } plus a `messages` array when it drops an event for
     // a payload problem, which is exactly the silent failure this whole module
     // exists to stop.
-    const body = await res.json().catch(() => null) as
+    const parsed = await res.json().catch(() => null) as
       { events_received?: number; messages?: unknown[]; fbtrace_id?: string } | null
+    const trace = typeof parsed?.fbtrace_id === 'string' ? { fbtraceId: parsed.fbtrace_id } : {}
 
-    if (body && typeof body.events_received === 'number' && body.events_received < 1) {
-      const messages = Array.isArray(body.messages) ? JSON.stringify(body.messages).slice(0, 300) : ''
-      return { ok: false, error: `Meta CAPI accepted 0 events${messages ? `: ${messages}` : ''}` }
+    if (parsed && typeof parsed.events_received === 'number' && parsed.events_received < 1) {
+      const messages = Array.isArray(parsed.messages) ? JSON.stringify(parsed.messages).slice(0, 300) : ''
+      return { ok: false, error: `Meta CAPI accepted 0 events${messages ? `: ${messages}` : ''}`, ...trace }
     }
-    if (body && Array.isArray(body.messages) && body.messages.length > 0) {
-      return { ok: false, error: `Meta CAPI warning: ${JSON.stringify(body.messages).slice(0, 300)}` }
+    if (parsed && Array.isArray(parsed.messages) && parsed.messages.length > 0) {
+      return { ok: false, error: `Meta CAPI warning: ${JSON.stringify(parsed.messages).slice(0, 300)}`, ...trace }
     }
 
-    return { ok: true }
+    return { ok: true, ...trace }
   } catch (err) {
     return { ok: false, error: String(err) }
   }
