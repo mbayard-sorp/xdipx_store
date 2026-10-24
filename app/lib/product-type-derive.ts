@@ -126,6 +126,70 @@ function lubeDespiteCollidingShapeCategory(cats: ReadonlySet<string>, normalized
 }
 
 /**
+ * Sub-Category values Nalpac also tags onto strap-on harness + dildo kits
+ * (ticket #17600): 'Booty Shorts Silicone Strap-On Harness with 6-Inch
+ * Dildo', 'Lace Envy Crotchless Strap-On Harness with Curved Dildo Set', and
+ * 'Tomboii Nylon Boxer Briefs Strap-On Harness with Bullet Pockets' each carry
+ * one of these alongside no 'Strap On' category of their own, so the dildo
+ * rules above won the match before the harness rule (title-only) ever ran.
+ */
+const HARNESS_COLLIDING_SHAPE_ALIASES = new Set(['sets and kits', 'silicone dildos and dongs', 'realistic', 'fabric'])
+
+/** True when the categories+title pair unambiguously describes a strap-on
+ *  harness kit mis-tagged under a dildo-shape or kit category — see the set
+ *  above. The title check mirrors the existing title-fallback harness rule. */
+function harnessDespiteCollidingShapeCategory(cats: ReadonlySet<string>, normalizedTitle: string): boolean {
+  if (!/\bharness\b/.test(normalizedTitle)) return false
+  return [...HARNESS_COLLIDING_SHAPE_ALIASES].some(a => cats.has(a))
+}
+
+/**
+ * Masturbators/strokers Nalpac tags only with the generic 'Non-Realistic'
+ * dildo-material modifier and no 'Masturbators'/'Strokers' category of their
+ * own (ticket #17600): 'Spring Fling 2 AM Twisting Stroker', 'Hotrod
+ * Rechargeable Warming Dual Motor Masturbator', 'Jock 10X Vibrating
+ * Double-Ended Masturbator TPE'.
+ */
+function strokerDespiteNonRealisticCategory(cats: ReadonlySet<string>, normalizedTitle: string): boolean {
+  if (!cats.has('non realistic')) return false
+  return /\b(stroker|masturbator)\b/.test(normalizedTitle)
+}
+
+/**
+ * 'Fantasy Dildos' wins over the anal categories it was found co-occurring
+ * with (ticket #17600): nalpac-sku carrying both 'Fantasy Dildos' and 'Plugs
+ * and Probes'/'Tails' ('Silicone Tantus Magma Fantasy Dildo 7-Inch') matched
+ * the earlier-ordered Anal Plug rule by accident. Scoped to that exact
+ * collision, not a blanket reorder, so Fantasy Dildo's existing priority
+ * relative to the vibrating/strapless dildo rules above it is untouched.
+ */
+function fantasyDildoDespiteAnalCategory(cats: ReadonlySet<string>): boolean {
+  return cats.has('fantasy dildos') && (cats.has('plugs and probes') || cats.has('tails'))
+}
+
+/**
+ * 'G-Spot and Classic Slimline'/'G-Spot Vibrators' wins over the prostate
+ * categories it was found co-occurring with (ticket #17600): nalpac-sku
+ * carrying both ('AV23 Arched Ring G-Spot Vibrator Teal') matched the
+ * earlier-ordered Prostate Massager rule by accident.
+ */
+function gSpotDespiteProstateCategory(cats: ReadonlySet<string>): boolean {
+  return (cats.has('g spot and classic slimline') || cats.has('g spot vibrators')) &&
+    (cats.has('prostate toys') || cats.has('prostate'))
+}
+
+/**
+ * 'Slings' maps to Cock Ring (cock-and-ball slings) except for penis
+ * extender sheaths Nalpac also files under it (ticket #17600): 'Fat Boy
+ * Ultra Fat Penis Extender Sleeve', 'XXXPANDER Ribbed Penis Extender Sheath
+ * With Cockring & Anal Plug'.
+ */
+function penisExtenderDespiteSlingsCategory(cats: ReadonlySet<string>, normalizedTitle: string): boolean {
+  if (!cats.has('slings')) return false
+  return /\b(penis|cock) extenders?\b/.test(normalizedTitle)
+}
+
+/**
  * Priority-ordered category rules. For each rule (top to bottom), if ANY of the
  * product's normalized categories equals one of the rule's aliases, that rule's
  * type wins. Order encodes specificity: e.g. "Vibrating Cockrings" must beat
@@ -369,6 +433,21 @@ export function deriveProductType(input: DeriveProductTypeInput): DeriveProductT
   if (cats.size > 0) {
     if (lubeDespiteCollidingShapeCategory(cats, title)) {
       return { productType: 'Lubricant', matchedBy: 'category' }
+    }
+    if (harnessDespiteCollidingShapeCategory(cats, title)) {
+      return { productType: 'Strap-On Harness', matchedBy: 'category' }
+    }
+    if (strokerDespiteNonRealisticCategory(cats, title)) {
+      return { productType: 'Stroker', matchedBy: 'category' }
+    }
+    if (fantasyDildoDespiteAnalCategory(cats)) {
+      return { productType: 'Fantasy Dildo', matchedBy: 'category' }
+    }
+    if (gSpotDespiteProstateCategory(cats)) {
+      return { productType: 'G-Spot Vibrator', matchedBy: 'category' }
+    }
+    if (penisExtenderDespiteSlingsCategory(cats, title)) {
+      return { productType: 'Penis Extender', matchedBy: 'category' }
     }
     for (const rule of CATEGORY_RULES) {
       if (rule.unless && rule.unless.some(a => cats.has(a))) continue
