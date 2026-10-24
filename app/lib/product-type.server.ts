@@ -15,6 +15,17 @@ import { pricingProductTypeMap } from '../../db/schema'
 import { deriveProductType } from '~/lib/product-type-derive'
 import { getShopifyProductType, setShopifyProductType } from '~/lib/shopify.server'
 
+/**
+ * Pricing-GROUP key, never a real product type (ticket #17600; mirrors
+ * pricing-apply-v2.server.ts's own DISCONTINUED_PRODUCT_TYPE, kept as a
+ * separate literal here to avoid pulling that whole module in for one
+ * string). Discontinued state lives in `xdipx.discontinued_at` only (owner
+ * direction 2026-09-25); 894 products were mistyped this way and retyped on
+ * 2026-10-24 (docs/audits/collections-audit-2026-10-23.md §7). Neither a
+ * current nor a derived value of this is ever a valid thing to publish with.
+ */
+const DISCONTINUED_PRODUCT_TYPE = 'Discontinued'
+
 const VOCAB_TTL_MS = 10 * 60 * 1000
 let vocabCache: { types: Set<string>; fetchedAt: number } | null = null
 
@@ -73,6 +84,10 @@ export async function ensureProductTypeForPublish(input: {
   const vocab = await getCanonicalProductTypes()
 
   if (current) {
+    if (current === DISCONTINUED_PRODUCT_TYPE) {
+      console.error(`[product-type-guard] ${label} is typed "Discontinued", which is a pricing-group key (xdipx.discontinued_at is the real state), not a product type — refusing to publish with it; set a real type`)
+      return null
+    }
     if (vocab.size > 0 && !vocab.has(current)) {
       console.error(`[product-type-guard] ${label} publishing with product_type "${current}" that is NOT in pricing_product_type_map — pricing will fall through to the global rule`)
     }
@@ -80,8 +95,8 @@ export async function ensureProductTypeForPublish(input: {
   }
 
   const derived = deriveProductType({ categories, title })
-  if (!derived.productType) {
-    console.error(`[product-type-guard] ${label} would publish WITHOUT a product_type and none is derivable (categories=${JSON.stringify(categories)}, title=${JSON.stringify(title)}) — pricing will fall through to the global rule; set it manually`)
+  if (!derived.productType || derived.productType === DISCONTINUED_PRODUCT_TYPE) {
+    console.error(`[product-type-guard] ${label} would publish WITHOUT a valid product_type (categories=${JSON.stringify(categories)}, title=${JSON.stringify(title)}${derived.productType === DISCONTINUED_PRODUCT_TYPE ? ' — derivation produced "Discontinued", a pricing-group key, never a real type' : ''}) — pricing will fall through to the global rule; set it manually`)
     return null
   }
   if (vocab.size > 0 && !vocab.has(derived.productType)) {
