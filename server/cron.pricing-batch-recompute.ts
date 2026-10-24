@@ -111,6 +111,16 @@ export async function handlePricingBatchRecompute(req: Request, res: Response): 
     if (result.done) {
       await sendAutopilotDigest().catch(err =>
         console.error('[cron:pricing-batch-recompute] digest failed (ignored):', err))
+
+      // Nightly `sale:active` tag sweep (ticket #17601): keeps the `on-sale`
+      // smart collection matching the live catalog now that it is tag-ruled
+      // instead of ruled on the "Discontinued" pricing-group key. Runs here,
+      // once today's walk is done, rather than as its own scheduled surface —
+      // see app/lib/sale-tag-sweep.server.ts. Already fails closed internally;
+      // the outer catch is belt-and-braces.
+      const { runLiveSaleTagSweep } = await import('../app/lib/sale-tag-sweep.server.js')
+      await runLiveSaleTagSweep().catch(err =>
+        console.error('[cron:pricing-batch-recompute] sale-tag sweep failed (ignored):', err))
     }
 
     let continued = false

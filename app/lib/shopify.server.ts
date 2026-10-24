@@ -8389,6 +8389,117 @@ export async function bulkFetchProductsForPricing(opts?: {
   return results
 }
 
+// ─── Sale Tag Sweep (ticket #17601) ───────────────────────────────────────
+//
+// The `on-sale` smart collection used to rule on `product_type = 'Discontinued'`
+// until the 2026-10-24 retype audit emptied it (that type is a pricing-group
+// key, not a discount signal). It is now ruled on a `sale:active` tag instead;
+// this is the nightly sweep that keeps the tag matching the live catalog.
+// Scoped to every ACTIVE product, not just Nalpac-sourced ones (unlike the
+// pricing queries above, which filter to `metafields.xdipx.nalpac_sku:*`) —
+// a manually added or non-Nalpac product can go on sale too.
+
+export interface SaleTagCandidate {
+  productId: string
+  tags: readonly string[]
+  status: string
+  totalInventory: number
+  variants: ReadonlyArray<{ price: number; compareAtPrice: number | null }>
+}
+
+const SALE_TAG_SWEEP_QUERY = `
+  query SaleTagSweepProducts($first: Int!, $after: String) {
+    products(first: $first, after: $after, query: "status:active") {
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+      nodes {
+        id
+        status
+        tags
+        totalInventory
+        variants(first: 100) {
+          nodes {
+            price
+            compareAtPrice
+          }
+        }
+      }
+    }
+  }
+`
+
+interface SaleTagSweepQueryResult {
+  products: {
+    pageInfo: { hasNextPage: boolean; endCursor: string | null }
+    nodes: Array<{
+      id: string
+      status: string
+      tags: string[]
+      totalInventory: number | null
+      variants: { nodes: Array<{ price: string; compareAtPrice: string | null }> }
+    }>
+  }
+}
+
+/** Every ACTIVE product's tags, stock, and variant prices, paginated across
+ *  the whole catalog. Read-only; no throttle backoff of its own because this
+ *  runs once nightly right after the pricing batch already has, with no
+ *  tight budget to protect. */
+export async function listSaleTagCandidates(): Promise<SaleTagCandidate[]> {
+  const results: SaleTagCandidate[] = []
+  let after: string | null = null
+  for (;;) {
+    const page: SaleTagSweepQueryResult = await adminGraphQL(SALE_TAG_SWEEP_QUERY, { first: 100, after })
+    for (const node of page.products.nodes) {
+      results.push({
+        productId: node.id,
+        tags: node.tags,
+        status: node.status,
+        totalInventory: node.totalInventory ?? 0,
+        variants: node.variants.nodes.map((v: { price: string; compareAtPrice: string | null }) => ({
+          price: parseFloat(v.price),
+          compareAtPrice: v.compareAtPrice != null ? parseFloat(v.compareAtPrice) : null,
+        })),
+      })
+    }
+    if (!page.products.pageInfo.hasNextPage) break
+    after = page.products.pageInfo.endCursor
+  }
+  return results
+}
+
+/** Add one tag to a product without touching any other tag it carries. */
+export async function addShopifyProductTag(productId: string, tag: string): Promise<void> {
+  const res = await adminGraphQL<{ tagsAdd: { userErrors: { field: string[]; message: string }[] } }>(`
+    mutation SaleTagAdd($id: ID!, $tags: [String!]!) {
+      tagsAdd(id: $id, tags: $tags) {
+        userErrors { field message }
+      }
+    }
+  `, { id: productId, tags: [tag] })
+  if (res.tagsAdd.userErrors.length > 0) {
+    const errs = res.tagsAdd.userErrors.map(e => `${e.field.join('.')}: ${e.message}`).join('; ')
+    throw new Error(`tagsAdd rejected for ${productId}: ${errs}`)
+  }
+}
+
+/** Remove one tag from a product without touching any other tag it carries. */
+export async function removeShopifyProductTag(productId: string, tag: string): Promise<void> {
+  const res = await adminGraphQL<{ tagsRemove: { userErrors: { field: string[]; message: string }[] } }>(`
+    mutation SaleTagRemove($id: ID!, $tags: [String!]!) {
+      tagsRemove(id: $id, tags: $tags) {
+        userErrors { field message }
+      }
+    }
+  `, { id: productId, tags: [tag] })
+  if (res.tagsRemove.userErrors.length > 0) {
+    const errs = res.tagsRemove.userErrors.map(e => `${e.field.join('.')}: ${e.message}`).join('; ')
+    throw new Error(`tagsRemove rejected for ${productId}: ${errs}`)
+  }
+}
+
 // ─── Webhook SKU Lookup ───────────────────────────────────────────────────
 
 export interface VariantSkuMatch {
