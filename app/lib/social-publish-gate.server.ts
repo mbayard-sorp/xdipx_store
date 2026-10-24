@@ -55,6 +55,7 @@
 import { allMediaAreGeneratedSocialAssets, isGeneratedSocialAsset, isRenderedCardAsset } from './social-media.server'
 import { X_CAPTION_MAX, T_CO_LENGTH, weightedTweetLength } from './social-publish/x-limits'
 import { VISION_CHECK_NAMES, type VisionCheckName, type VisionVerdict } from './social-vision-gate.server'
+import { jpegImageUrl } from './social-publish/instagram.server'
 
 /**
  * Is this product sellable right now?
@@ -939,6 +940,31 @@ export async function runDeterministicPublishChecks(
       reachable = false
     }
     if (!reachable) unreachable.add(u)
+
+    // Instagram's publisher never requests this raw url: it pins every
+    // Shopify CDN image to `format=pjpg` (`jpegImageUrl`) before handing it to
+    // Meta's container API, because cdn.shopify.com negotiates webp vs jpeg
+    // off the fetcher's Accept header and Instagram ingests JPEG only. That
+    // pinned url is a DIFFERENT CDN cache entry from the one just checked
+    // above, so a check against the raw url proves nothing about the one Meta
+    // actually fetches. Post #498 (ticket #17546) passed this gate and then
+    // died at the publish tick with Meta's 9004 "Only photo or video can be
+    // accepted as media type" on exactly that pinned variant. Checked only
+    // when the raw url already passed, so one bad url still gets exactly one
+    // finding instead of two.
+    if (reachable && platform === 'instagram') {
+      const pinned = jpegImageUrl(u)
+      if (pinned !== u) {
+        let pinnedReachable = true
+        try {
+          pinnedReachable = await checkReachable(pinned)
+        } catch (err) {
+          console.error(`[social-publish-gate] JPEG-pinned media reachability check threw, treating as unreachable: ${pinned}`, err)
+          pinnedReachable = false
+        }
+        if (!pinnedReachable) unreachable.add(u)
+      }
+    }
   }
   if (unreachable.size > 0) {
     findings.push({
