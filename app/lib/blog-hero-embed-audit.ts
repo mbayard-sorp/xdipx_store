@@ -307,14 +307,26 @@ const DIMENSION_RE = /\b\d+(?:\.\d+)?\s*(?:inches?\b|in\.(?!\w)|in\b|cm\b|mm\b)/
 const FIRMNESS_RE = /\b(?:extra[- ]?soft|extra[- ]?firm|medium[- ]?firm|medium[- ]?soft|soft[- ]?firm)\b/gi
 
 /**
- * Detects a specific material name. Deliberately excludes the generic
- * marketing materials already in GENERIC_TOKENS ("silicone", "waterproof")
- * that describe a whole product category rather than asserting a spec;
- * these are the less common, more clinical material names that read as a
- * genuine spec claim (run 1037-adjacent: "SKYN Elite ultra-thin polyisoprene
- * condoms").
+ * Detects a material-identity claim: either a clinical material name
+ * (polyisoprene, borosilicate, …) or a bare composition noun (nylon, steel,
+ * chrome, …). Ticket #17663 (second occurrence after #11543): #11543's
+ * original DONE WHEN only covered dimension/firmness/runtime/mechanism
+ * claims plus a short clinical-material list, which let heroImageAlt assert
+ * "WOVEN NYLON WEBBING, STEEL RINGS and a CHROME CLASP" about a named
+ * third-party product (sportsheets.com/products/black-beginners-handcuffs,
+ * whose own published materials are "polyester, polypropylene, nickel free
+ * metal, hook and loop" — none of nylon/steel/chrome) and still exit 0,
+ * because a bare material-identity noun is exactly as checkable and as
+ * wrong-able as a dimension, but wasn't in the list.
+ *
+ * Deliberately excludes "silicone" and "waterproof" (also in
+ * GENERIC_TOKENS): those are the single most common words in this catalog's
+ * marketing copy, not an occasional clinical spec claim, so flagging them
+ * unconditionally would make this check fire on a large fraction of
+ * ordinary hero alts rather than the rare, checkable claim this ticket is
+ * about. Two pre-existing tests below pin that exclusion.
  */
-const MATERIAL_RE = /\b(?:polyisoprene|polyurethane|borosilicate|elastomer|thermoplastic elastomer|\bTPE\b|\bTPR\b|\bABS plastic\b|stainless steel)\b/gi
+const MATERIAL_RE = /\b(?:polyisoprene|polyurethane|borosilicate|elastomer|thermoplastic elastomer|TPE|TPR|ABS|stainless|steel|nylon|polyester|polypropylene|chrome|brass|alumin(?:i)?um|leather|latex|elastane|velboa|satin|glass)\b/gi
 
 /**
  * Detects a runtime or battery figure, e.g. "90 minutes of run time" or

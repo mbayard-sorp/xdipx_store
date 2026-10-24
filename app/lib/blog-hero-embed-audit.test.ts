@@ -549,6 +549,25 @@ describe('findUnsourcedSpecClaims', () => {
     expect(findUnsourcedSpecClaims('soft, flexible, waterproof silicone finish')).toEqual([])
   })
 
+  it('flags bare material-identity nouns (ticket #17663, how-do-you-clean-and-store-bondage-gear)', () => {
+    const hits = findUnsourcedSpecClaims(
+      'Velboa Sex & Mischief Beginners Handcuffs Black, plush-lined with woven nylon webbing, ' +
+        'steel rings and a chrome clasp, lying open and large on a paper surface',
+    )
+    expect(hits).toContainEqual({ category: 'material', match: 'Velboa' })
+    expect(hits).toContainEqual({ category: 'material', match: 'nylon' })
+    expect(hits).toContainEqual({ category: 'material', match: 'steel' })
+    expect(hits).toContainEqual({ category: 'material', match: 'chrome' })
+  })
+
+  it('does NOT flag the corrected alt that describes the frame without asserting composition', () => {
+    const hits = findUnsourcedSpecClaims(
+      'Sex & Mischief Beginners Handcuffs Black with flat woven straps and bright metal rings ' +
+        'and a swivel clasp, lying open on a paper surface',
+    )
+    expect(hits).toEqual([])
+  })
+
   it('returns empty for null/empty alt', () => {
     expect(findUnsourcedSpecClaims(null)).toEqual([])
     expect(findUnsourcedSpecClaims('')).toEqual([])
