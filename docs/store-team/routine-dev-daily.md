@@ -672,8 +672,11 @@ detectors, other agents, and scraped error text all feed the bus.
 - **Never flip a ticket `proposed → approved`.** That is the owner's or the valve's, never yours.
 - **Never write `pipeline_settings`.**
 - **Empathy review gate.** Any ticket or PR touching `app/lib/ai-agent/prompt.ts`,
-  `app/lib/sms-v2/templates/**`, `ivr/src/prompts.ts`, or customer-facing strings in the Twilio
-  routes requires an `emma-empathy-reviewer` PASS recorded on the ticket before the PR opens.
+  `app/lib/sms-v2/templates/**`, `app/lib/sms-v2/conversation-agent.server.ts` (holds
+  `CONVERSATION_RULES_CORE` and the per-stage `ADDENDUM` blocks — hardcoded system-prompt rules
+  governing Emma's tone and conversational behavior, the same class of content as `prompt.ts`),
+  `ivr/src/prompts.ts`, or customer-facing strings in the Twilio routes requires an
+  `emma-empathy-reviewer` PASS recorded on the ticket before the PR opens.
 
 ## Before you file "X is not configured": check the instrument first
 
