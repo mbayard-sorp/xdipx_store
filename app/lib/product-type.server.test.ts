@@ -1,8 +1,11 @@
-// Enrich/publish-time product_type guard (ticket #17600): "Discontinued" is a
-// pricing-GROUP key (xdipx.discontinued_at is the real state), never a
-// product type, and neither a current nor a derived value of it may ever
-// publish. The derivation side of that invariant (no rule can emit it) is
-// covered in product-type-derive.test.ts; these cover the guard itself.
+// Enrich/publish-time product_type guard (ticket #17600; premise corrected
+// by #17678). "Discontinued" IS a real product_type — Nalpac's own
+// Integration app writes it on the live Shopify product when Nalpac
+// discontinues an item (owner decision 2026-10-24) — but this import/enrich
+// path must never be the one to set or overwrite it, so neither a current
+// nor a derived value of it may ever publish through here. The derivation
+// side of that invariant (no rule here can emit it) is covered in
+// product-type-derive.test.ts; these cover the guard itself.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const h = {

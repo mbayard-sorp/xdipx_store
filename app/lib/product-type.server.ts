@@ -16,13 +16,25 @@ import { deriveProductType } from '~/lib/product-type-derive'
 import { getShopifyProductType, setShopifyProductType } from '~/lib/shopify.server'
 
 /**
- * Pricing-GROUP key, never a real product type (ticket #17600; mirrors
- * pricing-apply-v2.server.ts's own DISCONTINUED_PRODUCT_TYPE, kept as a
- * separate literal here to avoid pulling that whole module in for one
- * string). Discontinued state lives in `xdipx.discontinued_at` only (owner
- * direction 2026-09-25); 894 products were mistyped this way and retyped on
- * 2026-10-24 (docs/audits/collections-audit-2026-10-23.md §7). Neither a
- * current nor a derived value of this is ever a valid thing to publish with.
+ * Mirrors pricing-apply-v2.server.ts's own DISCONTINUED_PRODUCT_TYPE, kept as
+ * a separate literal here to avoid pulling that whole module in for one
+ * string.
+ *
+ * Corrected premise (ticket #17678): "Discontinued" IS a real product_type —
+ * the Nalpac Integration app writes it directly on the live Shopify product
+ * when Nalpac discontinues an item, and it is a real, owner-confirmed signal
+ * that drives clearance pricing (owner decision 2026-10-24), not legacy
+ * mistyped data. 894 products WERE mistyped this way and retyped on
+ * 2026-10-24 (docs/audits/collections-audit-2026-10-23.md §7) — that was a
+ * one-time data-quality fix for legacy data, not evidence the value itself
+ * is fake; Nalpac keeps writing it going forward for items it genuinely
+ * discontinues.
+ *
+ * What stays true: THIS import/enrich path must never be the one to set it
+ * — Nalpac's own app is the sole legitimate writer — so neither a current
+ * nor a derived value of this is ever a valid thing for
+ * ensureProductTypeForPublish to publish with. Collections no longer depend
+ * on product_type at all; see shelf-tag.ts.
  */
 const DISCONTINUED_PRODUCT_TYPE = 'Discontinued'
 
@@ -85,7 +97,7 @@ export async function ensureProductTypeForPublish(input: {
 
   if (current) {
     if (current === DISCONTINUED_PRODUCT_TYPE) {
-      console.error(`[product-type-guard] ${label} is typed "Discontinued", which is a pricing-group key (xdipx.discontinued_at is the real state), not a product type — refusing to publish with it; set a real type`)
+      console.error(`[product-type-guard] ${label} is typed "Discontinued" — Nalpac's own app writes that value, and this import/enrich path must never set or overwrite it; refusing to publish with it, set a real type`)
       return null
     }
     if (vocab.size > 0 && !vocab.has(current)) {
@@ -96,7 +108,7 @@ export async function ensureProductTypeForPublish(input: {
 
   const derived = deriveProductType({ categories, title })
   if (!derived.productType || derived.productType === DISCONTINUED_PRODUCT_TYPE) {
-    console.error(`[product-type-guard] ${label} would publish WITHOUT a valid product_type (categories=${JSON.stringify(categories)}, title=${JSON.stringify(title)}${derived.productType === DISCONTINUED_PRODUCT_TYPE ? ' — derivation produced "Discontinued", a pricing-group key, never a real type' : ''}) — pricing will fall through to the global rule; set it manually`)
+    console.error(`[product-type-guard] ${label} would publish WITHOUT a valid product_type (categories=${JSON.stringify(categories)}, title=${JSON.stringify(title)}${derived.productType === DISCONTINUED_PRODUCT_TYPE ? ' — derivation produced "Discontinued", which only Nalpac may write, never a value this path derives' : ''}) — pricing will fall through to the global rule; set it manually`)
     return null
   }
   if (vocab.size > 0 && !vocab.has(derived.productType)) {

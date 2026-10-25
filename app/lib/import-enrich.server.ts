@@ -60,6 +60,7 @@ import { fetchAllNalpacFeeds } from '~/lib/nalpac-feeds.server'
 import { createSuggestionDetailed } from '~/lib/team.server'
 import { upsertProductPage } from '~/lib/sanity.server'
 import { ensureProductTypeForPublish } from '~/lib/product-type.server'
+import { isRealShelfType, shelfTagForProductType } from '~/lib/shelf-tag'
 import { getPipelineSetting, deriveSection } from '~/lib/feed-processor.server'
 import { IVR_EXPERIENCE_LEVELS } from '~/lib/claude.server'
 import { EMMA_VOICE_ENRICHMENT } from '~/lib/emma-voice.server'
@@ -210,13 +211,23 @@ export async function applyFullEnrichmentWrites(numericProductId: string, writes
   // the 2026-07-22 fix set it at creation; this backfills any product that
   // reached enrichment without one (reused drafts, pre-fix imports). Guard
   // logging happens inside — never blocks the enrichment write.
-  if (!snap.product_type?.trim()) {
-    await ensureProductTypeForPublish({
+  let resolvedProductType: string | null = snap.product_type?.trim() || null
+  if (!resolvedProductType) {
+    resolvedProductType = await ensureProductTypeForPublish({
       numericProductId: numericProductId,
       categories:       editorialTags,
       title:            snap.title,
       currentType:      null,
     })
+  }
+
+  // Ticket #17678: whenever this product gets or already has a real type,
+  // make sure its shelf:<type> tag matches — collections rule on that tag
+  // now, not product_type, since Nalpac can retype a live product
+  // "Discontinued" independently of this publish path.
+  if (isRealShelfType(resolvedProductType)) {
+    await appendProductTag(numericProductId, shelfTagForProductType(resolvedProductType)).catch(err =>
+      console.error(`[import-enrich] appendProductTag(shelf) failed for product ${numericProductId}:`, err instanceof Error ? err.message : err))
   }
 
   // Em-dash-sanitized copy (house rule) — computed once, used for Shopify + Sanity.
@@ -1167,6 +1178,18 @@ export async function publishEnrichedProducts(): Promise<{
         await appendProductTag(r.productId, 'new-arrival')
       } catch (tagErr) {
         console.warn(`[import-enrich] appendProductTag('new-arrival') failed for product ${r.productId} (candidate ${r.id}):`, tagErr instanceof Error ? tagErr.message : tagErr)
+      }
+
+      // Ticket #17678: stamp the shelf:<type> tag at publish time too, from
+      // whatever real type this product resolved to above. Collections rule
+      // on this tag now, not product_type, since the Nalpac Integration app
+      // can retype a live product "Discontinued" independently of this path.
+      if (isRealShelfType(resolvedProductType)) {
+        try {
+          await appendProductTag(r.productId, shelfTagForProductType(resolvedProductType))
+        } catch (shelfErr) {
+          console.warn(`[import-enrich] appendProductTag(shelf) failed for product ${r.productId} (candidate ${r.id}):`, shelfErr instanceof Error ? shelfErr.message : shelfErr)
+        }
       }
 
       // Ticket #12875: resolve xdipx.bare_product_reference at publish time
