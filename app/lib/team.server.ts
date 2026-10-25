@@ -2307,6 +2307,18 @@ export interface TransitionOpts {
   /** Force an attempt increment on an edge that does not always spend one. */
   incrementAttempt?: boolean | undefined
   /**
+   * Suppress the attempt increment on an edge that otherwise always spends
+   * one (ticket #17739: the release engine's `verified -> in_progress`
+   * bounce, when the PR's head moved only because of a pure base-merge/rebase
+   * that left every file the PR owns unchanged — re-verification is still
+   * needed, but the ticket's own content did nothing to deserve the cost).
+   * Deliberately NOT forwarded by the `/api/team/suggestion` transition op,
+   * same fence as `incrementAttempt`/the reconcile flags above: only a
+   * direct server-side caller that computed the "unchanged" fact itself (the
+   * release engine) may set this, never a value an agent can post over HTTP.
+   */
+  suppressAttemptIncrement?: boolean | undefined
+  /**
    * Declares this call the out-of-band merged-PR reconcile, unlocking the
    * `outOfBandReconcileOnly` edges. Passed only by the release engine's sweep
    * call sites, which have already asked GitHub and received `merged: true`
@@ -2642,7 +2654,7 @@ export async function transitionSuggestion(
 
   const now = new Date()
   const patch: Record<string, unknown> = { status: to, updatedAt: now }
-  if (rule.incrementAttempt || opts.incrementAttempt) {
+  if ((rule.incrementAttempt || opts.incrementAttempt) && !opts.suppressAttemptIncrement) {
     patch['attemptCount'] = sql`${homepageTeamSuggestions.attemptCount} + 1`
   }
   if (opts.lastError !== undefined) patch['lastError'] = opts.lastError

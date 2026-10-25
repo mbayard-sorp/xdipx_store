@@ -532,6 +532,24 @@ describe('transitionSuggestion', () => {
     expect(h.state.patches[0]!['attemptCount']).toBeDefined()
   })
 
+  // Ticket #17739: the release engine's own verdict-stale bounce, when the
+  // head move is a pure base-merge that left the PR's own files unchanged,
+  // passes this opt so the ticket's three-attempt budget is not spent on a
+  // bounce its content did nothing to deserve. The edge's `incrementAttempt:
+  // true` on the transition map is otherwise unconditional (previous test),
+  // so this has to be an explicit opt-out, never a default.
+  it('does NOT spend an attempt when the caller passes suppressAttemptIncrement', async () => {
+    seedTicket({ status: 'verified' })
+    await transitionSuggestion(42, 'in_progress', 'system', {
+      lastError: 'PR head moved after ticket was verified — net diff is empty',
+      suppressAttemptIncrement: true,
+    })
+    const patch = h.state.patches[0]!
+    expect(patch['status']).toBe('in_progress')
+    expect(patch['attemptCount']).toBeUndefined()
+    expect(patch['lastError']).toContain('net diff is empty')
+  })
+
   // A bounce used to leave claim_expires_at at whatever the original claim set,
   // hours in the past. expireStaleClaims() then reaped the row to `approved`
   // and cleared the assignee — and because that sweep runs inside gate(), the

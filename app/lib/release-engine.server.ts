@@ -53,6 +53,7 @@ import {
   addLabels,
   removeLabels,
   classifyChangedFiles,
+  compareCommits,
   createRevertBranch,
   getChecksForRef,
   getJobVerdictsForSha,
@@ -442,6 +443,17 @@ export interface PullRequestFacts {
    * it; the gate blocks on both labels either way.
    */
   labelSplitEnabled: boolean
+  /**
+   * Ticket #17739. Only meaningful when `ticket.verifiedHeadSha` is set and
+   * differs from `headSha` (the condition that produces the `verdict-stale`
+   * bounce below); `false` otherwise. True when the net diff between the two
+   * shas touches none of `changedPaths` — the PR's own files are byte-for-byte
+   * identical across the move, so it was a pure base-merge/rebase (typically
+   * a conflict resolution that kept "ours") rather than new content landing
+   * unreviewed. Computed by the caller, once, with a real GitHub `compare`
+   * call, so `evaluatePullRequest` itself stays synchronous and pure.
+   */
+  staleVerificationReviewedFilesUnchanged: boolean
 }
 
 /**
@@ -516,6 +528,17 @@ export interface ReleaseDecision {
   isRevert: boolean
   /** True when every changed path is on the agent-editor docs allowlist. */
   docsOnly: boolean
+  /**
+   * Ticket #17739: true only on a `code: 'verdict-stale'` bounce whose head
+   * move is a pure base-merge/rebase that left every file the PR actually
+   * owns byte-identical (see `staleVerificationReviewedFilesUnchanged` on
+   * `PullRequestFacts`). `bounceTicket` reads this to spend zero attempts on
+   * a bounce the ticket's own content did nothing to deserve, mirroring the
+   * attempt-count-fairness treatment this bug report asked for. Absent (not
+   * `false`) on every other decision, so a stray truthy check elsewhere
+   * never does anything.
+   */
+  suppressAttemptIncrement?: boolean
 }
 
 export function isAgentBranch(headRef: string): boolean {
@@ -1014,10 +1037,25 @@ export function evaluatePullRequest(facts: PullRequestFacts): ReleaseDecision {
     // did before this check existed. Reuses the exact bounce path the
     // red-build case already uses, above, rather than adding a new state.
     if (facts.ticket.verifiedHeadSha && facts.ticket.verifiedHeadSha !== facts.headSha) {
+      // #17739: a pure base-merge/rebase that left every file this PR owns
+      // unchanged did not actually invalidate the verdict — only re-verify,
+      // don't also spend one of the ticket's three attempts on it. Still
+      // bounces (the engine must re-pin against the new head before it will
+      // merge), just without the cost.
+      const unchangedSuffix = facts.staleVerificationReviewedFilesUnchanged
+        ? ' — net diff on this PR\'s own files is empty (base-merge/rebase only); re-verifying without spending an attempt'
+        : ''
       const lastError =
         `PR #${facts.number} head moved after ticket #${facts.ticket.id} was verified `
-        + `(verified ${facts.ticket.verifiedHeadSha.slice(0, 12)}, now ${facts.headSha.slice(0, 12)})`
-      return { ...base, action: 'bounce', code: 'verdict-stale', reason: lastError, lastError }
+        + `(verified ${facts.ticket.verifiedHeadSha.slice(0, 12)}, now ${facts.headSha.slice(0, 12)})${unchangedSuffix}`
+      return {
+        ...base,
+        action: 'bounce',
+        code: 'verdict-stale',
+        reason: lastError,
+        lastError,
+        ...(facts.staleVerificationReviewedFilesUnchanged ? { suppressAttemptIncrement: true } : {}),
+      }
     }
     // ...and a verification with NO pin at all fails CLOSED once it is new
     // enough to have been pinnable (ticket #10671). Without this the whole
@@ -2002,7 +2040,7 @@ async function cycleBody(dryRun: boolean): Promise<ReleaseCycleResult> {
       await escalateRevertCiFailure(summary, dryRun)
     }
     if (decision.action === 'bounce') {
-      await bounceTicket(decision.ticketId, decision.lastError ?? decision.reason, summary, dryRun)
+      await bounceTicket(decision.ticketId, decision.lastError ?? decision.reason, summary, dryRun, decision.suppressAttemptIncrement === true)
       continue
     }
     // ADR-008 step 2. The single enforcement point for autofile: by the time a
@@ -2151,6 +2189,21 @@ async function gatherFacts(
     console.warn(`${LOG} ticket resolution failed for PR #${pr.number}`, err)
   }
 
+  // #17739: only worth the extra GitHub call when the stale-verification
+  // bounce would otherwise fire. A failed or inconclusive compare fails
+  // CLOSED (stays `false`) so a read hiccup never suppresses an attempt that
+  // real content movement should cost.
+  let staleVerificationReviewedFilesUnchanged = false
+  if (ticket?.verifiedHeadSha && ticket.verifiedHeadSha !== pr.headSha) {
+    const cmp = await compareCommits(ticket.verifiedHeadSha, pr.headSha, 'release-engine')
+    if (cmp.ok) {
+      const movedFiles = new Set(cmp.data.flatMap((f) => f.previousFilename ? [f.filename, f.previousFilename] : [f.filename]))
+      staleVerificationReviewedFilesUnchanged = !changedPaths.some((p) => movedFiles.has(p))
+    } else {
+      console.warn(`${LOG} could not compare ${ticket.verifiedHeadSha.slice(0, 12)}..${pr.headSha.slice(0, 12)} for PR #${pr.number}, treating as changed: ${cmp.error}`)
+    }
+  }
+
   return {
     number: pr.number,
     headRef: pr.headRef,
@@ -2168,6 +2221,7 @@ async function gatherFacts(
     ticket,
     ciRetriggers: Number((await kvGet<number>(KEYS.ciRetrigger(pr.headSha))) ?? 0),
     labelSplitEnabled,
+    staleVerificationReviewedFilesUnchanged,
   }
 }
 
@@ -2999,10 +3053,11 @@ async function bounceTicket(
   lastError: string,
   pr: PullRequestSummary | null,
   dryRun: boolean,
+  suppressAttemptIncrement = false,
 ): Promise<void> {
   if (ticketId === null) return
   if (dryRun) {
-    console.log(`${LOG} [dry-run] would bounce ticket #${ticketId}: ${lastError}`)
+    console.log(`${LOG} [dry-run] would bounce ticket #${ticketId}${suppressAttemptIncrement ? ' (no attempt spent)' : ''}: ${lastError}`)
     return
   }
   let attemptCount = 0
@@ -3010,6 +3065,7 @@ async function bounceTicket(
     const row = await transitionSuggestion(ticketId, 'in_progress', 'system', {
       lastError: lastError.slice(0, 2000),
       ...(pr ? { links: [{ kind: 'pr', ref: pr.htmlUrl, state: 'open' }] } : {}),
+      ...(suppressAttemptIncrement ? { suppressAttemptIncrement: true } : {}),
     })
     attemptCount = row.attemptCount
   } catch (err) {

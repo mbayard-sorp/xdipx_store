@@ -822,6 +822,46 @@ export async function createCommit(
   })
 }
 
+/**
+ * The net file-level diff between two arbitrary commits (ticket #17739),
+ * via GitHub's `compare` endpoint. Unlike `listPullRequestFiles` (always
+ * against the PR's merge base), this compares two literal shas — typically
+ * a ticket's pinned `verifiedHeadSha` against the PR's current head — so
+ * the release engine can tell a pure base-merge with no net change to the
+ * files it actually reviewed apart from one that introduced real new
+ * content. `files` is empty for two commits with identical trees (a no-op
+ * merge), which is the only shape this ticket cares about; GitHub's own
+ * `status` field (`identical`/`ahead`/`behind`/`diverged`) is not read here
+ * on purpose, since either side can legitimately be "behind" after a base
+ * merge and still carry a real diff on the files this PR owns. */
+export async function compareCommits(
+  base: string,
+  head: string,
+  context = 'github',
+): Promise<GithubResult<ChangedFile[]>> {
+  const res = await githubRequest<{
+    files?: Array<{
+      filename: string
+      status: string
+      additions?: number
+      deletions?: number
+      previous_filename?: string
+    }>
+  }>(`/repos/{owner}/{repo}/compare/${base}...${head}`, { context })
+  if (!res.ok) return res
+  return {
+    ok: true,
+    status: res.status,
+    data: (res.data.files ?? []).map((f) => ({
+      filename: f.filename,
+      status: f.status,
+      additions: f.additions ?? 0,
+      deletions: f.deletions ?? 0,
+      ...(f.previous_filename ? { previousFilename: f.previous_filename } : {}),
+    })),
+  }
+}
+
 export async function createRef(
   input: { ref: string; sha: string; context?: string },
 ): Promise<GithubResult<{ ref: string; object: { sha: string } }>> {
