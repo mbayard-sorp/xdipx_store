@@ -424,7 +424,10 @@ curl -s -X POST "$BASE_URL/api/team/suggestion" \
 `attemptCount` for a bounce) match what you just sent, before reporting the verdict in the run
 summary or to the coordinator. If the re-read does not reflect the intended state, retry the
 transition and re-check; do not report a verdict as delivered until the get-based re-read confirms
-it landed.
+it landed. This applies to a head-moved re-verification too: a note claiming re-verification is not
+evidence the transition landed (ticket #17666 found a ticket stranded at `pr_open` for over an hour
+after a note said it had been re-verified but the status transition itself was never called) — always
+confirm via a fresh `get` before treating a head-moved ticket as settled.
 
 A bounce increments `attempt_count` and hands the ticket back to its assignee under a fresh
 six-hour lease, so the 20:00 dev pass finds it still `in_progress` and still theirs. At three
