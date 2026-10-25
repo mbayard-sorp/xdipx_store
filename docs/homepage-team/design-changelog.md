@@ -501,4 +501,14 @@ Keep entries terse and factual. This file is content/documentation on the agent-
 - **Evidence:** run_id 1606, Sanity doc `teamRail-2026-09-06-0` rev confirmed via get after patch; `singleton.homepage` rev confirmed via get after patch; live-HTML verify at https://xdipx.com/ confirmed both new strings present post-warm+5min-wait.
 - **Appended by:** homepage-orchestrator, run 1606 (filed as ticket #17339; appended here by agent-editor since run 1606's dispatch was content-only and could not open a PR itself).
 
+### 2026-10-24 (Routine A, run 1624)
+- Hero re-pinned inbloom-rosales-sucking-vibrator -> camtoyz-flexicurve-ergonomic-rabbit-vibrator (emmaHero headline/body/pullQuote rewritten; emmaHeroStorefront pin + primaryCtaLink). Shopify primary promoted 100134A->100134B (also winx 93184B, zola 81517B) via sweep-packshot-primaries --apply.
+- Rail teamRail-2026-09-06-0 (section teamRail-2026-07-24-0) relineup: winx honey bunny, zola warming dual, romp jazz, me-you-us ultra joy, JO H2O 4oz; new eyebrow/heading/aside; ctaLink /collections/first-time (pre-publish probe: jo-h2o-4oz on page 1). Asides on teamRail-2026-09-06-1 and -2 rewritten to match their actual lineups; -2 ships with no See-all (no containing collection).
+- Wayfinder wayfinderMosaic-run8: promo image image-5c8bc43de5c99fa6baf70730ab527765a16d9241-2560x1440-jpg (archetype B, plum-soft) + new heading/body; tile wf65a image image-cb523df260af7075ef38526a5223e5a3416b9744-2560x1440-jpg label 'Soft enough to start'; tile wf65c image image-d515976902f665a8ea733ece08335981c0ef51cf-2560x1440-jpg label 'Your first, picked plainly'.
+- Couples band playTogether-starter: new heading/body; generated image 8138b2e7 failed self-review (product misrendered from packaging-shot ref), retry errored (ref 404), reverted to prior asset db730295.
+- Ticker a1003m4 refreshed. panelDeck lg-new blurb refreshed (7-day floor). dropPage-new and dropPage-on-sale masthead standfirsts refreshed (weekly day-3 slot).
+- Why: Beginner's On-Ramp Week (calendar row 41); hero cadence >=2x/week; rail ctaLink/aside DOD defects.
+- Evidence: run 1624; Step 2c sameness surfaces changed: hero (product+copy), rails (product selection), wayfinder (tile art+labels), promo (image+copy), couples (copy), announcement (copy); rails-fingerprint --assert-changed rails,hero,couples,deck exit 0.
+- **Appended by:** homepage-orchestrator, run 1624 (filed as ticket #17635; appended here by agent-editor since run 1624's dispatch could not open a PR itself).
+
 <!-- Newest entries appended above this line by each routine's changelog step. -->
