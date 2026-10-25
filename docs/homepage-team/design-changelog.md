@@ -501,4 +501,11 @@ Keep entries terse and factual. This file is content/documentation on the agent-
 - **Evidence:** run_id 1606, Sanity doc `teamRail-2026-09-06-0` rev confirmed via get after patch; `singleton.homepage` rev confirmed via get after patch; live-HTML verify at https://xdipx.com/ confirmed both new strings present post-warm+5min-wait.
 - **Appended by:** homepage-orchestrator, run 1606 (filed as ticket #17339; appended here by agent-editor since run 1606's dispatch was content-only and could not open a PR itself).
 
+### 2026-10-25 · Routine A (run 1641)
+
+- **What changed:** couples band moved from Dame Eva to the SVibe Gizi Duo couples stimulator, with new art (asset image-bae14596…, archetype C, plum ground, ref image 95897B because the primary 95897A is a packaging box), new heading and body, and `ctaLink` repointed to `/products/svibe-snail-gizi-duo-couples-stimulator-burgundy`. Wayfinder tile `wf65c` got new art (image-ef412374…, archetype B glide bottle on coral) and the label "First toy, first glide". Bullet rail `teamRail-2026-09-29-0` gained the Moon Bloom hybrid glide as its pairing item, the Hana now leads, the aside was rewritten, and `ctaLink` was unset. Discover You promo heading and body, `emmaHero` headline/body/pull quote (FlexiCurve pin held) and ticker line `a1003m4` were refreshed.
+- **Why:** calendar row 41, Beginner's On-Ramp Week, last day. Brief 17 asks for no featured swap this week, so the hero product held and freshness came from the couples band, a rail and a tile. The bullet rail had no pairing item, and its See-all pointed at `/collections/vibrators`. The probe found none of the rail's five handles on page 1 there, or on `rechargeable` or `first-time`, so the rail now ships with no See-all.
+- **Evidence:** run 1641. `rails-fingerprint --assert-changed rails,couples` exit 0 (rails, hero and couples all moved). Step 2c surfaces: couples (imagery + product), rails (product selection), mosaic (imagery + label), promo (copy), hero (copy), announcement (copy). 2 images generated, both passed self-review, 0 reused. Render truth is in the run summary.
+- **Appended by:** homepage-orchestrator, run 1641.
+
 <!-- Newest entries appended above this line by each routine's changelog step. -->
