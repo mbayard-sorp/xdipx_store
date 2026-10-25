@@ -8580,6 +8580,73 @@ export async function removeShopifyProductTag(productId: string, tag: string): P
   }
 }
 
+// ─── Shelf Tag Sweep (ticket #17678) ──────────────────────────────────────
+//
+// Collections rule on a `shelf:<type>` tag instead of Shopify `product_type`
+// directly, because the Nalpac Integration app can write `product_type =
+// 'Discontinued'` on a still-live, still-sellable product. Scoped to every
+// ACTIVE and DRAFT product (unlike the sale-tag sweep above, which is
+// ACTIVE-only) because a still-draft import can already carry a real type
+// worth shelving once it publishes.
+
+export interface ShelfTagShopifyCandidate {
+  productId: string
+  title: string
+  productType: string | null
+  tags: readonly string[]
+}
+
+const SHELF_TAG_SWEEP_QUERY = `
+  query ShelfTagSweepProducts($first: Int!, $after: String) {
+    products(first: $first, after: $after, query: "status:active OR status:draft") {
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+      nodes {
+        id
+        title
+        productType
+        tags
+      }
+    }
+  }
+`
+
+interface ShelfTagSweepQueryResult {
+  products: {
+    pageInfo: { hasNextPage: boolean; endCursor: string | null }
+    nodes: Array<{
+      id: string
+      title: string
+      productType: string | null
+      tags: string[]
+    }>
+  }
+}
+
+/** Every ACTIVE and DRAFT product's type, tags, and title, paginated across
+ *  the whole catalog. Read-only; runs once nightly alongside the pricing
+ *  batch, same budget shape as listSaleTagCandidates above. */
+export async function listShelfTagCandidates(): Promise<ShelfTagShopifyCandidate[]> {
+  const results: ShelfTagShopifyCandidate[] = []
+  let after: string | null = null
+  for (;;) {
+    const page: ShelfTagSweepQueryResult = await adminGraphQL(SHELF_TAG_SWEEP_QUERY, { first: 100, after })
+    for (const node of page.products.nodes) {
+      results.push({
+        productId: node.id,
+        title: node.title,
+        productType: node.productType ?? null,
+        tags: node.tags,
+      })
+    }
+    if (!page.products.pageInfo.hasNextPage) break
+    after = page.products.pageInfo.endCursor
+  }
+  return results
+}
+
 // ─── Webhook SKU Lookup ───────────────────────────────────────────────────
 
 export interface VariantSkuMatch {
