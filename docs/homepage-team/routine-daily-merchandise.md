@@ -303,6 +303,11 @@ in the final summary. A run that publishes a page visually identical to yesterda
 unless the summary names an explicit hold reason (deliberate editorial hold, gate refusal, a named
 supply or data problem). "Nothing scored well enough to swap" is not a hold reason.
 
+**`ctaLink` null check on every wired rail (#17636).** Before publishing, confirm every wired rail's
+`ctaLink` is set (non-null), per the Step 5 rule. Run 1624 (2026-10-24) found `teamRail-2026-09-06-0`
+and `-2` published with a blank `ctaLink`. A blank `ctaLink` silently falls back to
+`/collections/best-sellers` (see Step 5) — catch it here, before publish, not after.
+
 **How this and the 300-sessions rule fit together, so they do not read as contradictory:** the
 sparse-data rule blocks *optimizing on noise*: you may not swap a slot because yesterday's four
 sessions said so. The sameness diff mandates *editorial cadence*: the page changes because a shop
@@ -638,6 +643,13 @@ Every merchandise run touches all of these, not just the hero and rails:
    `ctaLink` silently falls back to `/collections/best-sellers`, which is why a lube rail's "See all"
    landed on best sellers on 2026-07-27. **A published rail with a blank `ctaLink` is a
    definition-of-done failure.**
+   **Every wired rail's `emmaAside` must name only products present in that rail's `productHandles`
+   (second occurrence, #17636).** Run 1606 (2026-10-23) found `teamRail-2026-09-06-0`'s aside
+   describing anal plugs absent from the actual lineup; run 1624 (2026-10-24) found `-1` and `-2`
+   asides describing a P-spot massager, Little Flirt, clamps and panties absent from their lineups.
+   Whenever a rail's `productHandles` change, re-read the `emmaAside` against the new lineup and
+   rewrite any line naming a product, category, or sensation the lineup no longer carries — stale
+   aside copy from a prior run is not assumed accurate.
    **Destination continuity is a hard rule for EVERY See-all on the page, not just team-published
    rails.** The Nº 03 "Most picked" anchor grid is auto-generated and its See-all is hardcoded in
    `app/components/store/StorefrontHome.tsx`, so this playbook rule cannot reach it — a companion
