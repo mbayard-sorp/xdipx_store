@@ -17,12 +17,18 @@ describe('vocabulary integrity', () => {
     }
   })
 
-  // Ticket #17600: "Discontinued" is a pricing-GROUP key (xdipx.discontinued_at
-  // is the real state), never a product type, and the enrich/publish guard in
-  // product-type.server.ts relies on no rule ever emitting it. It stays in
-  // CANONICAL_PRODUCT_TYPES only because pricing_product_type_map still needs
-  // the row the state path resolves rules through.
-  it('no rule can ever output "Discontinued" — it is a pricing-group key, not a derivable type', () => {
+  // Ticket #17600, premise corrected by #17678: "Discontinued" IS a real
+  // product_type — the Nalpac Integration app writes it directly on the live
+  // Shopify product when Nalpac discontinues an item (owner decision
+  // 2026-10-24), and it is not legacy mistyped data. What stays true is
+  // narrower: Nalpac's own app is the sole legitimate writer of that value,
+  // so deriveProductType's rules here — which run only from Nalpac
+  // categories/title at import/enrich time — must never emit it themselves,
+  // and the enrich/publish guard in product-type.server.ts relies on that.
+  // It stays in CANONICAL_PRODUCT_TYPES because pricing_product_type_map
+  // still needs the row the state/legacy pricing routes resolve rules
+  // through.
+  it('no rule can ever output "Discontinued" — only Nalpac\'s own app may write that value', () => {
     expect(allRuleOutputTypes()).not.toContain('Discontinued')
   })
 

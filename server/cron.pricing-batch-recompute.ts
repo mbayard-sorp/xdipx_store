@@ -121,6 +121,15 @@ export async function handlePricingBatchRecompute(req: Request, res: Response): 
       const { runLiveSaleTagSweep } = await import('../app/lib/sale-tag-sweep.server.js')
       await runLiveSaleTagSweep().catch(err =>
         console.error('[cron:pricing-batch-recompute] sale-tag sweep failed (ignored):', err))
+
+      // Nightly `shelf:<type>` tag sweep (ticket #17678): keeps every active
+      // and draft product's shelf tag matching its real type, and derives
+      // one for a Discontinued product that never got a shelf tag at all.
+      // See app/lib/shelf-tag-sweep.server.ts. Already fails closed
+      // internally; the outer catch is belt-and-braces.
+      const { runLiveShelfTagSweep } = await import('../app/lib/shelf-tag-sweep.server.js')
+      await runLiveShelfTagSweep().catch(err =>
+        console.error('[cron:pricing-batch-recompute] shelf-tag sweep failed (ignored):', err))
     }
 
     let continued = false
