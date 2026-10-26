@@ -231,7 +231,6 @@ function IdeaCard({ idea, dark }: { idea: AdventIdea; dark: boolean }) {
 export function AdventSalesView({ d }: { d: AdventViewData }) {
   const [key, setKey] = useState<AdventKey>(d.initial)
   const [img, setImg] = useState(0)
-  const [sticky, setSticky] = useState(false)
   const timer = useCountdown(d.nowMs)
 
   const p = ADVENT_CALENDARS[key]
@@ -245,13 +244,6 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
   const saveStr = money(Math.round((p.value - price) * 100) / 100)
   const stock = shop?.stock ?? null
   const stockLine = shop?.available && stock !== null && stock > 0 ? stock : null
-
-  useEffect(() => {
-    const onScroll = () => setSticky(window.scrollY > 900)
-    window.addEventListener('scroll', onScroll, { passive: true })
-    onScroll()
-    return () => window.removeEventListener('scroll', onScroll)
-  }, [])
 
   useEffect(() => {
     if (shop) trackFbViewContent({ content_ids: [shop.productId], value: shop.price, currency: 'USD' })
@@ -686,8 +678,8 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
         </div>
       </section>
 
-      {sticky ? (
-        <div className="fixed inset-x-0 bottom-0 z-20 border-t border-ink/10 bg-paper/95 shadow-[0_-8px_24px_rgba(26,20,24,0.08)] backdrop-blur-[10px]">
+      {/* Pinned buy bar, server-rendered and always on at every width, so it never waits on JS. */}
+      <div data-sticky-buy className="fixed inset-x-0 bottom-0 z-20 pb-[env(safe-area-inset-bottom)] border-t border-ink/10 bg-paper/95 shadow-[0_-8px_24px_rgba(26,20,24,0.08)] backdrop-blur-[10px]">
           <div className="mx-auto flex max-w-[1320px] items-center justify-between gap-3 px-4 py-3 sm:gap-5 sm:px-[clamp(16px,5vw,64px)]">
             <div className="flex min-w-0 items-center gap-3">
               <div className="h-11 w-11 flex-none overflow-hidden rounded-[10px] bg-paper-3">
@@ -708,8 +700,7 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
               {cta}
             </BuyForm>
           </div>
-        </div>
-      ) : null}
+      </div>
 
       <footer className={wrap + ' flex flex-wrap justify-between gap-x-7 gap-y-3 pb-24 pt-8 font-mono text-[10.5px] uppercase tracking-[0.14em] text-ink-4'}>
         <span>© 2026 xdipx · You must be 18 or older to shop.</span>
