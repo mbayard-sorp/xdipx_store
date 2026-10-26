@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildShopUrl, buildStartUrl, getLeadFunnelPage, isLeadFunnelSlug, validateLeadInput } from './lead-funnel'
+import { buildShopUrl, buildStartUrl, getLeadFunnelPage, isLeadFunnelSlug, SMS_PENDING_NOTICE, validateLeadInput } from './lead-funnel'
 import { LEAD_INTERESTS, LEAD_OFFER, getLeadInterest, isLeadInterest } from './lead-interests'
 import { safeRedirectPath } from '~/routes/discount.$code'
 import { bridgeSlugFromPath } from './bridge-host.server'
@@ -34,6 +34,14 @@ describe('funnel pages', () => {
     expect(JSON.stringify(page)).not.toContain('—')
     const whitelist = ['Take a peek →', 'Show me', 'Find your fit →', "I'll take it ♥"]
     for (const cta of [page.doorAButton, page.doorBButton, page.successButton]) expect(whitelist).toContain(cta)
+  })
+})
+
+describe('SMS_PENDING_NOTICE', () => {
+  it('is calm support-register copy with no em dash and no urgency language', () => {
+    expect(SMS_PENDING_NOTICE).not.toContain('—')
+    expect(SMS_PENDING_NOTICE).not.toMatch(/\b(now|today only|hurry|limited)\b/i)
+    expect(SMS_PENDING_NOTICE).toContain('YES')
   })
 })
 

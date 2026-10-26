@@ -57,6 +57,15 @@ export const SMS_CONSENT_TEXT =
 
 export const EMAIL_CONSENT_TEXT = 'You will get emails from xdipx. Unsubscribe anytime.'
 
+/**
+ * Shown on the success screen only when the visitor ticked the SMS box and
+ * `/api/lead` actually enrolled them (`smsPending: true`). The discount code
+ * is already on screen and in the Klaviyo email, so replying buys nothing
+ * new; this just tells the visitor the text is real.
+ */
+export const SMS_PENDING_NOTICE =
+  'We just sent a text from this number. Reply YES if you want texts. Skip it and your code and emails stay exactly as they are.'
+
 export interface FunnelUtm {
   source?: string | null
   medium?: string | null

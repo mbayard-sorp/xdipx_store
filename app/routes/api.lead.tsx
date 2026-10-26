@@ -20,8 +20,9 @@
  *      external_id, fbp/fbc, ip and user agent) and returns its event id so
  *      the browser pixel's Lead dedupes against it, and sets the `_xem`
  *      email-hash cookie so a later Purchase can match on the same email;
- *   4. returns the code, its terms, and the shop link that puts the code on
- *      the cart.
+ *   4. returns the code, its terms, the shop link that puts the code on the
+ *      cart, and `smsPending` (true only when step 2 actually queued a
+ *      confirmation text), so the success screen can say so.
  * After a successful subscribe it also writes one lead_post_event row to
  * ad_health_samples, the counter the hourly L3 funnel-break check reads
  * (app/lib/ads/health.server.ts, ticket #16410). Awaited, never throws.
@@ -98,7 +99,7 @@ export async function action({ request }: ActionFunctionArgs) {
   // Honeypot: look successful, do nothing.
   if (typeof body['company'] === 'string' && body['company'].trim() !== '') {
     const slug = parsed.ok ? parsed.value.slug : 'hello'
-    return Response.json({ ok: true, code: LEAD_OFFER.code, terms: LEAD_OFFER.terms, shopUrl: buildShopUrl(null, utm, slug), eventId: null })
+    return Response.json({ ok: true, code: LEAD_OFFER.code, terms: LEAD_OFFER.terms, shopUrl: buildShopUrl(null, utm, slug), eventId: null, smsPending: false })
   }
   if (!parsed.ok) return Response.json({ error: parsed.error }, { status: 400 })
   const lead = parsed.value
@@ -130,9 +131,14 @@ export async function action({ request }: ActionFunctionArgs) {
 
   await recordLeadPostEvent({ slug: lead.slug, ...(utm.content ? { utmContent: utm.content } : {}) })
 
+  // True only when the box was ticked and enrollLeadSms actually queued a
+  // confirmation text (outcome 'pending'); an opted-out number, the valve
+  // being off, or a failed enroll all leave this false so the success screen
+  // never claims a text went out that did not.
+  let smsPending = false
   if (smsOptin && phone && lead.smsConsent) {
     try {
-      await enrollLeadSms({
+      const enrolled = await enrollLeadSms({
         phone,
         email: lead.email,
         firstName: lead.firstName,
@@ -140,6 +146,7 @@ export async function action({ request }: ActionFunctionArgs) {
         source: `curious-${lead.slug}`,
         consentedAt: now,
       })
+      smsPending = enrolled.outcome === 'pending'
     } catch (err) {
       console.error('[api.lead] SMS enrollment failed:', err)
     }
@@ -171,5 +178,6 @@ export async function action({ request }: ActionFunctionArgs) {
     terms: LEAD_OFFER.terms,
     shopUrl: buildShopUrl(lead.interest, utm, lead.slug),
     eventId,
+    smsPending,
   }, { headers })
 }
