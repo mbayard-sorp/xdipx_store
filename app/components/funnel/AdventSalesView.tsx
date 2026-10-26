@@ -200,7 +200,7 @@ function BuyForm({
     >
       <input type="hidden" name="handle" value={cal.handle} />
       <button type="submit" disabled={!canBuy} className={className + (canBuy ? '' : ' cursor-not-allowed opacity-50')}>
-        {canBuy ? children : 'Sold out for 2026'}
+        {canBuy ? children : 'Sold out'}
       </button>
     </Form>
   )
@@ -405,9 +405,9 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
           </div>
 
           <div className="flex flex-col gap-2.5 border-t border-line pt-5 text-sm text-ink-3">
-            <div className="flex gap-[9px]"><span className="text-sage">♥</span> Ships in plain packaging, no product names on the label</div>
-            <div className="flex gap-[9px]"><span className="text-sage">♥</span> Billed as XDIPX</div>
-            <div className="flex gap-[9px]"><span className="text-sage">♥</span> Ships before {ADVENT_SHIP_BY} to arrive by Dec 1</div>
+            <div className="flex gap-[9px]"><span className="text-sage">♥</span> Plain box, plain label, no product names. Your statement reads XDIPX</div>
+            <div className="flex gap-[9px]"><span className="text-sage">♥</span> Unopened calendars can be returned within 30 days</div>
+            <div className="flex gap-[9px]"><span className="text-sage">♥</span> Order by {ADVENT_SHIP_BY} and door one is ready on December 1</div>
           </div>
         </div>
       </section>
@@ -416,7 +416,7 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
       <section data-screen-label="Doors" className="bg-paper-2">
         <div className={wrap + ' ' + section + ' flex flex-wrap items-center gap-8 md:gap-[clamp(32px,5vw,72px)]'}>
           <div className="max-w-[440px] flex-[1_1_320px]">
-            <div className={kicker + ' mb-4'}>How it works</div>
+            <div className={kicker + ' mb-4'}>What you get</div>
             <h2 className={h2 + ' mb-[18px]'}>
               {p.days} doors. Open one a <span className={accent}>night</span>.
             </h2>
@@ -461,7 +461,7 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
               <p className="text-base leading-[1.6]">{p.fitFor}</p>
             </div>
             <div className="rounded-[22px] border border-ink/10 p-7">
-              <div className="mb-3 font-mono text-[11px] uppercase tracking-[0.16em] text-ink-4">Skip it if</div>
+              <div className="mb-3 font-mono text-[11px] uppercase tracking-[0.16em] text-ink-4">Not quite it?</div>
               <p className="text-base leading-[1.6] text-ink-3">{p.skipIf}</p>
             </div>
           </div>
@@ -473,16 +473,16 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
         <div className={wrap + ' ' + section}>
           <div className={kicker + ' mb-3.5'}>Do the math</div>
           <h2 className={h2 + ' mb-3.5 max-w-[22ch]'}>
-            A whole collection, for the price of <span className={accent}>one</span> good toy.
+            Every door, for less than buying them <span className={accent}>one by one</span>.
           </h2>
           <p className="mb-9 max-w-[56ch] text-[16.5px] leading-[1.65] text-ink-3">
-            Bought one at a time, everything behind these doors would cost {valueStr}. Here it's one box, one checkout, one plain package.
+            Everything behind these doors is valued at {valueStr}. You pay {priceStr}, in one checkout, and it arrives in one plain box.
           </p>
           <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,220px),1fr))] gap-3.5">
             {[
               { l: 'Valued at', v: valueStr },
               { l: 'You pay', v: priceStr },
-              { l: 'Product behind each door', v: money(Math.round((p.value / p.days) * 100) / 100) },
+              { l: 'Average value per door', v: money(Math.round((p.value / p.days) * 100) / 100) },
             ].map(c => (
               <div key={c.l} className="rounded-[22px] border border-line bg-paper p-7">
                 <div className="mb-3.5 font-mono text-[10.5px] uppercase tracking-[0.16em] text-ink-4">{c.l}</div>
@@ -500,9 +500,9 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
       {/* RITUAL */}
       <section data-screen-label="Ritual">
         <div className={wrap + ' ' + section}>
-          <div className={kicker + ' mb-3.5'}>What December looks like</div>
+          <div className={kicker + ' mb-3.5'}>What the nights look like</div>
           <h2 className={h2 + ' mb-10 max-w-[20ch]'}>
-            The countdown becomes the <span className={accent}>best part</span> of your night.
+            From door one to the <span className={accent}>last</span>.
           </h2>
           <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,230px),1fr))] gap-x-6 gap-y-7">
             {adventRitual(p.days).map((r, i, a) => (
@@ -524,14 +524,14 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
             Ways to make it a <span className={accent}>tradition</span>.
           </h2>
           <p className="mb-10 max-w-[54ch] text-[16.5px] leading-[1.65] text-ink-3">
-            Buy it once on a whim. Here's how it tends to stick.
+            Order it on a whim and December is sorted. Here are a few ways to open it together.
           </p>
           <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,340px),1fr))] gap-[18px]">
             {ADVENT_COUPLE_IDEAS.map(s => (
               <IdeaCard key={s.title} idea={s} dark={false} packshot={d.products[s.key]?.images[0]} />
             ))}
           </div>
-          <div className="mt-7 text-[12.5px] text-ink-4">Ideas for how to open it, not customer reviews. Photos are AI-generated illustrations.</div>
+          <div className="mt-7 text-[12.5px] text-ink-4">Illustrated ideas, not reviews. Photos are AI-generated.</div>
         </div>
       </section>
 
@@ -541,10 +541,10 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
         <div className={wrap + ' ' + section + ' relative'}>
           <div className="mb-3.5 font-mono text-[11px] uppercase tracking-[0.18em] text-coral-2">For yourself</div>
           <h2 className={h2 + ' mb-3.5 max-w-[22ch] text-paper-3'}>
-            The smartest way to build a <span className="italic text-[#C9A2EE]">collection</span>.
+            A December that's all <span className="italic text-[#C9A2EE]">yours</span>.
           </h2>
           <p className="mb-10 max-w-[54ch] text-[16.5px] leading-[1.65] text-[#C9BCC4]">
-            No partner required. A December gift to yourself counts.
+            No partner required. Every door is a gift to yourself, and you set the pace.
           </p>
           <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,320px),1fr))] gap-[18px]">
             {ADVENT_SOLO_IDEAS.map(s => (
@@ -553,13 +553,13 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
           </div>
           <div className="mt-10 flex flex-wrap items-center justify-between gap-x-6 gap-y-4 border-t border-paper-3/10 pt-7">
             <div className="font-display text-[1.35rem] text-paper-3">
-              This year: {valueStr} of product, yours for {priceStr}.
+              Valued at {valueStr}. Yours for {priceStr}.
             </div>
             <BuyForm cal={p} shop={shop} className="rounded-full bg-coral px-7 py-[15px] text-[15px] font-medium text-white">
               {cta}
             </BuyForm>
           </div>
-          <div className="mt-7 text-[12.5px] text-ink-4">Ideas for how to open it, not customer reviews. Photos are AI-generated illustrations.</div>
+          <div className="mt-7 text-[12.5px] text-ink-4">Illustrated ideas, not reviews. Photos are AI-generated.</div>
         </div>
       </section>
 
@@ -642,13 +642,13 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
       <section data-screen-label="Urgency" className="bg-coral">
         <div className={wrap + ' flex flex-wrap items-center justify-between gap-x-14 gap-y-7 py-12 text-white md:py-[clamp(48px,7vw,80px)]'}>
           <div className="flex-[1_1_440px]">
-            <div className="mb-4 font-mono text-[11px] uppercase tracking-[0.18em]">One run. No restocks.</div>
+            <div className="mb-4 font-mono text-[11px] uppercase tracking-[0.18em]">2026 holiday editions</div>
             <h2 className="mb-4 font-display text-[clamp(2rem,4.5vw,3.2rem)] font-normal leading-[1.08] tracking-[-0.01em]">
-              When they're gone, they're gone until <span className="italic">next December</span>.
+              Once they're <span className="italic">gone</span>, they're gone.
             </h2>
             <p className="max-w-[52ch] text-[16.5px] leading-[1.6]">
-              Advent calendars are made once a year in a single run.
-              {timer.live ? ` ${priceStr} is the advent price, and it ends ${timer.endLabel}.` : ''} Order by {ADVENT_SHIP_BY} so door one is ready on December 1.
+              These are 2026 holiday editions, and stock is limited.
+              {timer.live ? ` ${priceStr} is the advent price, and it ends ${timer.endLabel}.` : ''} Order by {ADVENT_SHIP_BY} and door one is ready on December 1.
             </p>
           </div>
           <div className="flex flex-[0_1_auto] flex-col items-start gap-3.5">
@@ -665,7 +665,7 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
       <section data-screen-label="FAQ" className="bg-paper-2">
         <div className={'mx-auto max-w-[820px] px-4 sm:px-[clamp(20px,5vw,64px)] ' + section}>
           <h2 className={h2 + ' mb-9'}>
-            Questions, <span className={accent}>answered</span>.
+            Before you <span className={accent}>order</span>.
           </h2>
           {ADVENT_FAQ.map(q => (
             <details key={q.q} data-faq className="border-t border-ink/10">
@@ -693,7 +693,7 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
               {cta} · {priceStr}
             </BuyForm>
           </div>
-          <div className="mt-4 text-sm text-[#C9BCC4]">{valueStr} of products inside.</div>
+          <div className="mt-4 text-sm text-[#C9BCC4]">Valued at {valueStr}. Plain box, XDIPX on your statement, unopened returns within 30 days.</div>
         </div>
       </section>
 
