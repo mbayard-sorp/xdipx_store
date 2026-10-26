@@ -219,12 +219,17 @@ export interface AdventIdea {
   label: string
   title: string
   body: string[]
+  /** AI-generated (fal, 2026-10-26) illustration of the idea, on the Sanity CDN. Not a customer. */
+  image: { src: string; alt: string }
 }
+
+const CDN = 'https://cdn.sanity.io/images/0nlwk8cf/production/'
 
 export const ADVENT_COUPLE_IDEAS: AdventIdea[] = [
   {
     key: 'couples-24',
     label: 'The standing date',
+    image: { src: CDN + '3ee9f160f76351e91f38f6b55704b0ad0cacc0a5-1024x768.jpg', alt: 'A couple in their thirties laughing together on a sofa on a December evening' },
     title: 'Start it as a joke gift. Watch it become how December starts.',
     body: [
       "Give it as a gag gift and see how long the joke lasts. By door three it usually doesn't. Phones go in a kitchen drawer at nine, the lights come down, and whoever lost the morning coin toss opens the door.",
@@ -234,6 +239,7 @@ export const ADVENT_COUPLE_IDEAS: AdventIdea[] = [
   {
     key: 'luxury-24',
     label: 'Two full calendars',
+    image: { src: CDN + 'efb8ca6344caa0481379c90ca6742029691364f6-1024x768.jpg', alt: 'Two men in their forties hugging and laughing while they cook dinner' },
     title: 'Skip the Christmas presents. Make this the present.',
     body: [
       'Two careers, two calendars, almost no overlap. The countdown becomes the one appointment neither of you moves, twenty-four nights in a row.',
@@ -243,6 +249,7 @@ export const ADVENT_COUPLE_IDEAS: AdventIdea[] = [
   {
     key: 'indulge-12',
     label: 'A full house',
+    image: { src: CDN + 'e826458295a3ac779551898a308f976f412b3893-1024x768.jpg', alt: 'A couple sharing cocoa and a laugh on the living room rug after bedtime' },
     title: 'Twelve doors fits real life. Two kids, one bedtime, one door.',
     body: [
       'With small kids, a 24-night commitment can feel ambitious. Twelve is doable. The door waits until the house is quiet, and the whole day has a little secret running underneath it.',
@@ -252,6 +259,7 @@ export const ADVENT_COUPLE_IDEAS: AdventIdea[] = [
   {
     key: 'romance-7',
     label: 'Long stretches apart',
+    image: { src: CDN + '67cfea666787e6aabcab98fd033681a180935fed-1024x768.jpg', alt: 'A couple in their sixties sharing a welcome-home hug beside a suitcase' },
     title: 'On the road all fall? Make the seven-day your welcome-home week.',
     body: [
       'Save it for the week one of you lands home before the holidays, one door a night to make up for every hotel room.',
@@ -261,6 +269,7 @@ export const ADVENT_COUPLE_IDEAS: AdventIdea[] = [
   {
     key: 'womanizer-24',
     label: 'The slow build',
+    image: { src: CDN + 'a9b67295790bb617068ee4f22f0892d1f33b1a10-1024x768.jpg', alt: 'Two women cuddled under a knit blanket on a window seat, laughing' },
     title: 'Twenty-three nights of teasing. Door 24 becomes its own holiday.',
     body: [
       "Treat the first twenty-three doors as a month-long warm-up. Every night small, playful, a little bit of a dare. Nobody peeks ahead. That's the rule.",
@@ -273,6 +282,7 @@ export const ADVENT_SOLO_IDEAS: AdventIdea[] = [
   {
     key: 'luxury-24',
     label: 'Building a collection',
+    image: { src: CDN + '2bef40bb0085f46f844ea14626491ff3c44dded3-1024x768.jpg', alt: 'A woman in her forties smiling to herself in an armchair with a mug of tea' },
     title: 'Do the math once and full price stops making sense.',
     body: [
       'Four premium brands, twenty-four pieces, one checkout. Treat December as your own private month.',
@@ -282,6 +292,7 @@ export const ADVENT_SOLO_IDEAS: AdventIdea[] = [
   {
     key: 'womanizer-24',
     label: 'Evenings that are yours',
+    image: { src: CDN + '86704a0e7e26304856819f9a765d60f52eb6c5ac-880x768.jpg', alt: 'A woman in her sixties at home with a lit candle and a glass of red wine' },
     title: "The first year feels brave. After that it's the ritual you wait for.",
     body: [
       'A candle, a glass of wine, one door a night, and twenty-four evenings that are completely yours.',
@@ -291,6 +302,7 @@ export const ADVENT_SOLO_IDEAS: AdventIdea[] = [
   {
     key: 'indulge-12',
     label: 'Finding what you like',
+    image: { src: CDN + '020a325feb6b6b8d993ab52f87d36bc80b3cb4ec-1024x768.jpg', alt: 'A woman in her twenties in pajamas laughing on the sofa with a mug' },
     title: 'Not sure what you like yet? Twelve doors will tell you.',
     body: [
       'Skip the endless product pages. Twelve doors do the choosing, and every night is a low-pressure way to try something new.',

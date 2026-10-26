@@ -29,6 +29,7 @@ import {
 } from '~/lib/advent-sales-page'
 import { trackAddToCart, trackBeginCheckout, trackCtaClick } from '~/lib/analytics.client'
 import { trackFbViewContent } from '~/lib/meta-pixel.client'
+import { sanityImageUrl } from '~/lib/sanity-image'
 import { shopifyImageUrl } from '~/lib/shopify-image'
 
 export interface AdventShopifyData {
@@ -205,25 +206,43 @@ function BuyForm({
   )
 }
 
-function IdeaCard({ idea, dark }: { idea: AdventIdea; dark: boolean }) {
+function IdeaCard({ idea, dark, packshot }: { idea: AdventIdea; dark: boolean; packshot: string | undefined }) {
   const cal = ADVENT_CALENDARS[idea.key]
+  const src = (w: number) => sanityImageUrl(idea.image.src, { w, h: Math.round((w * 3) / 4), fit: 'crop' })
   return (
     <article
-      className={
-        'flex flex-col gap-4 rounded-[22px] p-[30px] ' + (dark ? 'border border-paper-3/10 bg-[#261E23]' : 'bg-paper')
-      }
+      className={'flex flex-col overflow-hidden rounded-[22px] ' + (dark ? 'border border-paper-3/10 bg-[#261E23]' : 'bg-paper')}
     >
-      <div className={'font-mono text-[10.5px] uppercase leading-[1.6] tracking-[0.14em] ' + (dark ? 'text-[#C9BCC4]' : 'text-ink-4')}>
-        {idea.label}
-        <br />
-        {cal.short} {cal.days}-day
+      <div className="relative aspect-[4/3] w-full bg-paper-3">
+        <img
+          src={src(640)}
+          srcSet={`${src(480)} 480w, ${src(640)} 640w, ${src(960)} 960w`}
+          sizes="(min-width: 768px) 420px, 100vw"
+          alt={idea.image.alt}
+          width={640}
+          height={480}
+          loading="lazy"
+          decoding="async"
+          className="block h-full w-full object-cover"
+        />
+        <div className="absolute bottom-3 left-3 flex items-center gap-2 rounded-full bg-paper/92 py-1 pl-1 pr-3 shadow-[0_4px_14px_rgba(26,20,24,0.18)] backdrop-blur-[6px]">
+          <span className="h-8 w-8 flex-none overflow-hidden rounded-full bg-paper-3">
+            {packshot ? <img src={shopifyImageUrl(packshot, 96)} alt="" loading="lazy" className="block h-full w-full object-cover" /> : null}
+          </span>
+          <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-ink">
+            {cal.short} {cal.days}-day
+          </span>
+        </div>
       </div>
-      <h3 className={'font-display text-[1.55rem] font-normal leading-[1.25] ' + (dark ? 'text-paper-3' : '')}>{idea.title}</h3>
-      {idea.body.map((p, i) => (
-        <p key={i} className={'text-[15.5px] leading-[1.7] ' + (dark ? 'text-[#C9BCC4]' : 'text-ink-3')}>
-          {p}
-        </p>
-      ))}
+      <div className="flex flex-1 flex-col gap-4 p-6 md:p-[30px]">
+        <div className={'font-mono text-[10.5px] uppercase tracking-[0.14em] ' + (dark ? 'text-[#C9BCC4]' : 'text-plum')}>{idea.label}</div>
+        <h3 className={'font-display text-[1.55rem] font-normal leading-[1.25] ' + (dark ? 'text-paper-3' : '')}>{idea.title}</h3>
+        {idea.body.map((p, i) => (
+          <p key={i} className={'text-[15.5px] leading-[1.7] ' + (dark ? 'text-[#C9BCC4]' : 'text-ink-3')}>
+            {p}
+          </p>
+        ))}
+      </div>
     </article>
   )
 }
@@ -509,10 +528,10 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
           </p>
           <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,340px),1fr))] gap-[18px]">
             {ADVENT_COUPLE_IDEAS.map(s => (
-              <IdeaCard key={s.title} idea={s} dark={false} />
+              <IdeaCard key={s.title} idea={s} dark={false} packshot={d.products[s.key]?.images[0]} />
             ))}
           </div>
-          <div className="mt-7 text-[12.5px] text-ink-4">Ideas for how to open it, not customer reviews.</div>
+          <div className="mt-7 text-[12.5px] text-ink-4">Ideas for how to open it, not customer reviews. Photos are AI-generated illustrations.</div>
         </div>
       </section>
 
@@ -529,7 +548,7 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
           </p>
           <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,320px),1fr))] gap-[18px]">
             {ADVENT_SOLO_IDEAS.map(s => (
-              <IdeaCard key={s.title} idea={s} dark />
+              <IdeaCard key={s.title} idea={s} dark packshot={d.products[s.key]?.images[0]} />
             ))}
           </div>
           <div className="mt-10 flex flex-wrap items-center justify-between gap-x-6 gap-y-4 border-t border-paper-3/10 pt-7">
@@ -540,7 +559,7 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
               {cta}
             </BuyForm>
           </div>
-          <div className="mt-7 text-[12.5px] text-ink-4">Ideas for how to open it, not customer reviews.</div>
+          <div className="mt-7 text-[12.5px] text-ink-4">Ideas for how to open it, not customer reviews. Photos are AI-generated illustrations.</div>
         </div>
       </section>
 
