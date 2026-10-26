@@ -14,8 +14,8 @@
  */
 
 import { useState } from 'react'
-import type { LoaderFunctionArgs, MetaFunction } from 'react-router'
-import { data, useLoaderData, useRouteError, useRouteLoaderData } from 'react-router'
+import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from 'react-router'
+import { data, redirect, useActionData, useLoaderData, useRouteError, useRouteLoaderData } from 'react-router'
 import { Analytics } from '~/components/store/Analytics'
 import { CookieConsent } from '~/components/store/CookieConsent'
 import { BRIDGE_404, STOREFRONT_404, isBridgeError } from '~/lib/bridge-error'
@@ -23,6 +23,17 @@ import { plainHeadline, splitHeadline } from '~/lib/ad-bridge-copy'
 import { buildBridgeDestination, getAdBridgePage, pickBridgePackshot } from '~/lib/ad-bridge.server'
 import { getLaneSubset } from '~/lib/ad-lane-subset.server'
 import { LeadFunnelView } from '~/components/funnel/LeadFunnelView'
+import { AdventSalesView, type AdventShopifyData } from '~/components/funnel/AdventSalesView'
+import {
+  ADVENT_CALENDARS,
+  ADVENT_DEFAULT,
+  ADVENT_ORDER,
+  adventByHandle,
+  isAdventKey,
+  isAdventSalesSlug,
+  type AdventKey,
+} from '~/lib/advent-sales-page'
+import { applyAttributionAttrs } from '~/lib/attribution-cart.server'
 import { getLeadFunnelPage, type FunnelUtm } from '~/lib/lead-funnel'
 import { isLeadSmsOptinEnabled } from '~/lib/lead-sms-optin.server'
 import { LEAD_OFFER } from '~/lib/lead-interests'
@@ -31,7 +42,7 @@ import { trackCtaClick } from '~/lib/analytics.client'
 import { isBridgeHost, isBridgeHostRequest, requestHost, BRIDGE_HOST } from '~/lib/bridge-host.server'
 import { sanityImageUrl } from '~/lib/sanity-image'
 import { isPreviewRequest } from '~/lib/sanity.server'
-import { getProductByHandle } from '~/lib/shopify.server'
+import { createCartWithLines, getProductByHandle } from '~/lib/shopify.server'
 import { shopifyImageUrl } from '~/lib/shopify-image'
 import { useAgeVerified } from '~/lib/use-age-verified'
 
@@ -69,6 +80,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       canonical: `${origin}/${funnel.slug}`,
     }
   }
+
+  if (isAdventSalesSlug(slug)) return adventLoaderData(request)
 
   const preview = isPreviewRequest(request)
   const page = await getAdBridgePage(slug, preview)
@@ -115,8 +128,77 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   }
 }
 
+/** Shopify data for the five calendars. A product that fails to load is left out, never faked. */
+async function adventLoaderData(request: Request) {
+  const url = new URL(request.url)
+  const c = url.searchParams.get('c')
+  const results = await Promise.all(
+    ADVENT_ORDER.map(async k => [k, await getProductByHandle(ADVENT_CALENDARS[k].handle).catch(() => null)] as const),
+  )
+  const products: Partial<Record<AdventKey, AdventShopifyData>> = {}
+  for (const [k, product] of results) {
+    if (!product) continue
+    const variant = product.variants.find(v => v.availableForSale) ?? product.variants[0] ?? null
+    products[k] = {
+      handle: product.handle,
+      productId: product.id,
+      variantId: variant?.id ?? null,
+      price: variant ? parseFloat(variant.price) : product.price,
+      compareAtPrice: variant?.compareAtPrice ? parseFloat(variant.compareAtPrice) : (product.compareAtPrice ?? null),
+      images: product.images.map(i => i.url),
+      stock: product.totalInventory ?? null,
+      available: product.variants.some(v => v.availableForSale),
+    }
+  }
+  if (Object.keys(products).length === 0) throw data(BRIDGE_404, { status: 404 })
+  const initial: AdventKey = isAdventKey(c) && products[c] ? c : products[ADVENT_DEFAULT] ? ADVENT_DEFAULT : (Object.keys(products)[0] as AdventKey)
+  const onHost = isBridgeHost(requestHost(request.headers))
+  const origin = onHost ? `https://${BRIDGE_HOST}` : url.origin
+  return {
+    kind: 'advent' as const,
+    initial,
+    products,
+    nowMs: Date.now(),
+    canonical: `${origin}/advents26`,
+  }
+}
+
+/**
+ * The advent page's buy buttons post here. Build a one-line cart for the
+ * calendar, stamp attribution, and send the visitor straight to Shopify
+ * checkout. Only the five calendar handles are accepted.
+ */
+export async function action({ request, params }: ActionFunctionArgs) {
+  if (!isBridgeHostRequest(request)) throw data(STOREFRONT_404, { status: 404 })
+  if (!isAdventSalesSlug(params['slug'] ?? '')) throw data(BRIDGE_404, { status: 404 })
+
+  const form = await request.formData()
+  const cal = adventByHandle(String(form.get('handle') ?? ''))
+  if (!cal) return { error: 'That calendar is not on this page. Pick one below.' }
+
+  try {
+    const product = await getProductByHandle(cal.handle)
+    const variant = product?.variants.find(v => v.availableForSale)
+    if (!variant) return { error: `The ${cal.short} calendar just sold out. Another one below might fit.` }
+    const cart = await createCartWithLines([{ variantId: variant.id, quantity: 1 }])
+    await applyAttributionAttrs(cart.id, request, [{ key: '_landing', value: 'curious/advents26' }])
+    return redirect(cart.checkoutUrl)
+  } catch (err) {
+    console.error('[advents26] checkout failed', cal.handle, err)
+    return { error: 'Checkout did not open on our side. Give it another tap.' }
+  }
+}
+
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
   if (!data) return [{ title: 'Not found' }, { name: 'robots', content: 'noindex' }]
+  if (data.kind === 'advent') {
+    return [
+      { title: 'Advent calendars 2026 | xdipx' },
+      { name: 'description', content: 'The 2026 Lovehoney, Womanizer, We-Vibe and Arcwave advent calendars. Ships discreet, billed as XDIPX.' },
+      { name: 'robots', content: 'noindex' },
+      { tagName: 'link', rel: 'canonical', href: data.canonical },
+    ]
+  }
   if (data.kind === 'funnel') {
     return [
       { title: `${plainHeadline(data.page.headline)} | xdipx` },
@@ -227,6 +309,7 @@ type BridgeData = Extract<LoaderData, { kind: 'bridge' }>
 
 export default function BridgeRoute() {
   const d = useLoaderData<typeof loader>()
+  const actionData = useActionData<typeof action>()
 
   // The Meta PageView (browser pixel plus its CAPI copy) comes from
   // MetaPageViews in root.tsx, which covers this host too.
@@ -238,7 +321,13 @@ export default function BridgeRoute() {
     <main className="min-h-[100svh] bg-paper text-ink">
       <style dangerouslySetInnerHTML={{ __html: GATE_CSS }} />
       <script dangerouslySetInnerHTML={{ __html: AGE_PRECHECK }} />
-      {d.kind === 'funnel' ? <LeadFunnelView page={d.page} utm={d.utm} terms={d.terms} smsOptin={d.smsOptin} /> : <BridgeView d={d} />}
+      {d.kind === 'funnel' ? (
+        <LeadFunnelView page={d.page} utm={d.utm} terms={d.terms} smsOptin={d.smsOptin} />
+      ) : d.kind === 'advent' ? (
+        <AdventSalesView d={{ initial: d.initial, products: d.products, nowMs: d.nowMs, error: actionData?.error ?? null }} />
+      ) : (
+        <BridgeView d={d} />
+      )}
       <AgeGate />
       <CookieConsent />
       <Analytics ga4Id={ga4Id} />
