@@ -66,6 +66,12 @@ export interface NotebookZeroDayDeps {
   isAutopublishOn: () => Promise<boolean>
   /** The slug of a blogPost published today (UTC), or null if none. */
   publishedSlugToday: () => Promise<string | null>
+  /**
+   * The slug of a `comparison` doc published today (UTC), or null if none.
+   * Per routine-content-daily.md Step 4, the Sunday comparison-doc quota ships
+   * this type "instead of" a blogPost; a day that lands one is not a missed day.
+   */
+  publishedComparisonSlugToday: () => Promise<string | null>
   /** The most recently created non-published blogPost from today (UTC), if any. */
   heldDraftToday: () => Promise<NotebookHeldDraft | null>
   /** The hold reason recorded on today's content run, if any. */
@@ -78,7 +84,7 @@ export interface NotebookZeroDayDeps {
 export interface NotebookZeroDayReport {
   day: string
   checked: boolean
-  reason?: 'valve_off' | 'live'
+  reason?: 'valve_off' | 'live' | 'live-comparison'
   publishedSlug?: string | null
   heldDraft?: NotebookHeldDraft | null
   holdReason?: string | null
@@ -135,6 +141,11 @@ export async function checkNotebookZeroDay(deps: NotebookZeroDayDeps): Promise<N
     return { day, checked: true, reason: 'live', publishedSlug }
   }
 
+  const comparisonSlug = await deps.publishedComparisonSlugToday()
+  if (comparisonSlug) {
+    return { day, checked: true, reason: 'live-comparison', publishedSlug: comparisonSlug }
+  }
+
   const [heldDraft, holdReason] = await Promise.all([deps.heldDraftToday(), deps.holdReasonToday()])
   const ticket = await deps.fileTicket({
     dedupeKey: NOTEBOOK_ZERO_DAY_DEDUPE_KEY,
@@ -171,6 +182,17 @@ async function publishedSlugInRangeFromSanity(start: Date, end: Date): Promise<s
   if (!client) return null
   const row = (await client.fetch(
     `*[_type == "blogPost" && status == "published" && publishedAt >= $start && publishedAt < $end]
+      | order(publishedAt desc) [0]{ "slug": slug.current }`,
+    { start: start.toISOString(), end: end.toISOString() },
+  )) as { slug?: string } | null
+  return row?.slug ?? null
+}
+
+async function publishedComparisonSlugInRangeFromSanity(start: Date, end: Date): Promise<string | null> {
+  const client = getClient(false, false, 'published')
+  if (!client) return null
+  const row = (await client.fetch(
+    `*[_type == "comparison" && status == "published" && publishedAt >= $start && publishedAt < $end]
       | order(publishedAt desc) [0]{ "slug": slug.current }`,
     { start: start.toISOString(), end: end.toISOString() },
   )) as { slug?: string } | null
@@ -223,6 +245,7 @@ export async function runNotebookZeroDayCheck(now = new Date()): Promise<Noteboo
     isContentEnabled: async () => (await getTeamConfig('content')).enabled,
     isAutopublishOn: () => getValve(VALVE_KEYS.contentAutopublish),
     publishedSlugToday: () => publishedSlugInRangeFromSanity(start, end),
+    publishedComparisonSlugToday: () => publishedComparisonSlugInRangeFromSanity(start, end),
     heldDraftToday: () => heldDraftInRangeFromSanity(start, end),
     holdReasonToday: async () => holdReasonFromRunError((await run())?.error ?? null),
     fileTicket: async t => {
@@ -255,6 +278,8 @@ export interface NotebookDayStatus {
 async function notebookDayStatusForRange(start: Date, end: Date, day: string): Promise<NotebookDayStatus> {
   const slug = await publishedSlugInRangeFromSanity(start, end)
   if (slug) return { day, slug, holdReason: null }
+  const comparisonSlug = await publishedComparisonSlugInRangeFromSanity(start, end)
+  if (comparisonSlug) return { day, slug: comparisonSlug, holdReason: null }
   const run = await contentRunInRangeFromDb(start, end)
   return { day, slug: null, holdReason: holdReasonFromRunError(run?.error ?? null) }
 }

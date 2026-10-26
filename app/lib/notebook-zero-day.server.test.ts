@@ -31,6 +31,7 @@ function deps(over: Partial<NotebookZeroDayDeps> = {}): TestDeps {
     isContentEnabled: async () => true,
     isAutopublishOn: async () => true,
     publishedSlugToday: async () => null,
+    publishedComparisonSlugToday: async () => null,
     heldDraftToday: async () => null,
     holdReasonToday: async () => null,
     fileTicket,
@@ -80,6 +81,18 @@ describe('checkNotebookZeroDay', () => {
       checked: true,
       reason: 'live',
       publishedSlug: 'does-app-controlled-feel-different',
+    })
+  })
+
+  it('does nothing on a Sunday-quota day: a comparison doc published instead of a blogPost', async () => {
+    const d = deps({ publishedComparisonSlugToday: async () => 'air-pulse-toy-vs-vibrator' })
+    const report = await checkNotebookZeroDay(d)
+    expect(d.fileTicket).not.toHaveBeenCalled()
+    expect(d.recordEvent).not.toHaveBeenCalled()
+    expect(report).toMatchObject({
+      checked: true,
+      reason: 'live-comparison',
+      publishedSlug: 'air-pulse-toy-vs-vibrator',
     })
   })
 
