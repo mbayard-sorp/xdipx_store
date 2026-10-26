@@ -24,7 +24,7 @@ export const ADVENT_SALE_ENDS_AT = '2026-11-24T23:59:00-08:00'
 export const ADVENT_SHIP_BY = 'Nov 24'
 /** Emma's holiday portrait (fal Kontext from singleton.editor's photo, 2026-10-26). Not the canonical likeness. */
 export const ADVENT_EMMA_PHOTO = 'https://cdn.sanity.io/images/0nlwk8cf/production/36b67652ec0054a5df56f25d206d567d485d7275-1024x1024.jpg'
-export const ADVENT_ANNOUNCEMENT = 'Advent price ends Nov 24 · 2026 editions, limited stock · Plain box, billed XDIPX'
+export const ADVENT_ANNOUNCEMENT = 'Free shipping · Advent price ends Nov 24 · Plain box, billed XDIPX'
 
 export type AdventKey = 'indulge-12' | 'romance-7' | 'womanizer-24' | 'couples-24' | 'luxury-24'
 
@@ -197,7 +197,7 @@ export const ADVENT_FAQ = [
   },
   {
     q: 'When should I order to start on December 1?',
-    a: 'Order by November 24 and standard shipping gets it to you before door one. That is also the last day of the advent price. Expedited options are available at checkout.',
+    a: 'Order by November 24 and free standard shipping gets it to you before door one. That is also the last day of the advent price. Expedited options are available at checkout.',
   },
   {
     q: "Can I see what's inside before I buy?",

@@ -209,6 +209,25 @@ function BuyForm({
   )
 }
 
+/** Standard shipping is free on every calendar (owner, 2026-10-26). */
+function FreeShippingBadge({ size = 'md', className = '' }: { size?: 'sm' | 'md' | 'lg'; className?: string }) {
+  const sizes = {
+    sm: 'gap-1 px-2 py-[3px] text-[9.5px]',
+    md: 'gap-1.5 px-2.5 py-[5px] text-[11px]',
+    lg: 'gap-2 px-4 py-[9px] text-[12.5px] shadow-[0_6px_18px_rgba(26,20,24,0.22)]',
+  }
+  return (
+    <span className={'inline-flex items-center whitespace-nowrap rounded-full bg-sage font-mono font-medium uppercase tracking-[0.12em] text-white ' + sizes[size] + ' ' + className}>
+      <svg aria-hidden width="1.25em" height="1.25em" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M3 6h11v9H3zM14 9h4l3 3v3h-7z" />
+        <circle cx="7" cy="17.5" r="1.6" />
+        <circle cx="17" cy="17.5" r="1.6" />
+      </svg>
+      Free shipping
+    </span>
+  )
+}
+
 function IdeaCard({ idea, dark, packshot }: { idea: AdventIdea; dark: boolean; packshot: string | undefined }) {
   const cal = ADVENT_CALENDARS[idea.key]
   const src = (w: number) => sanityImageUrl(idea.image.src, { w, h: Math.round((w * 3) / 4), fit: 'crop' })
@@ -332,8 +351,11 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
             <div className="absolute -right-[58px] top-[30px] z-[1] w-[230px] rotate-45 border-y border-dashed border-white/45 bg-plum py-2 text-center font-mono text-[10.5px] uppercase tracking-[0.2em] text-white shadow-[0_4px_12px_rgba(26,20,24,0.18)]">
               Holiday 2026
             </div>
-            <div className="absolute left-4 top-4 z-[1] whitespace-nowrap rounded-full bg-coral px-4 py-[9px] text-[15px] font-semibold text-white shadow-[0_6px_18px_rgba(194,53,15,0.28)]">
-              Save {valuePct}%
+            <div className="absolute left-4 top-4 z-[1] flex flex-col items-start gap-2">
+              <div className="whitespace-nowrap rounded-full bg-coral px-4 py-[9px] text-[15px] font-semibold text-white shadow-[0_6px_18px_rgba(194,53,15,0.28)]">
+                Save {valuePct}%
+              </div>
+              <FreeShippingBadge size="lg" />
             </div>
             {active ? (
               // The LCP element: eager, high priority, explicit size, never in Reveal.
@@ -384,6 +406,7 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
             <span className="rounded-full border border-coral/35 px-2.5 py-[5px] font-mono text-[11px] uppercase tracking-[0.12em] text-coral">
               You save {saveStr}
             </span>
+            <FreeShippingBadge />
           </div>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2.5 rounded-[18px] bg-plum-soft px-5 py-4">
             <div className="font-display text-[1.25rem] leading-[1.3]">
@@ -415,7 +438,7 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
           <div className="flex flex-col gap-2.5 border-t border-line pt-5 text-sm text-ink-3">
             <div className="flex gap-[9px]"><span className="text-sage">♥</span> Plain box, plain label, no product names. Your statement reads XDIPX</div>
             <div className="flex gap-[9px]"><span className="text-sage">♥</span> Unopened calendars can be returned within 30 days</div>
-            <div className="flex gap-[9px]"><span className="text-sage">♥</span> Order by {ADVENT_SHIP_BY} and door one is ready on December 1</div>
+            <div className="flex gap-[9px]"><span className="text-sage">♥</span> Free standard shipping. Order by {ADVENT_SHIP_BY} and door one is ready on December 1</div>
           </div>
         </div>
       </section>
@@ -640,6 +663,7 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
                   </div>
                   <div className="text-right">
                     <div className="text-base font-semibold">{s ? money(s.price) : ''}</div>
+                    <FreeShippingBadge size="sm" className="my-1" />
                     <div className="text-[13px] font-medium text-coral">{cur ? 'Viewing' : 'Take a peek →'}</div>
                   </div>
                 </button>
@@ -718,6 +742,7 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
               <div className="min-w-0">
                 <div className="text-sm font-semibold">
                   {priceStr} <span className="font-normal text-plum">· {valueStr} value</span>
+                  <FreeShippingBadge size="sm" className="ml-2 align-middle" />
                 </div>
                 {timer.live || stockLine !== null ? (
                   <div className="text-[12.5px] font-semibold text-coral">
