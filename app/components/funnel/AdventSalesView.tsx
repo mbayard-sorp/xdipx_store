@@ -49,6 +49,8 @@ export interface AdventViewData {
   initial: AdventKey
   products: Partial<Record<AdventKey, AdventShopifyData>>
   nowMs: number
+  /** The store wordmark from Sanity site settings; null renders the text wordmark. */
+  logo: { src: string; alt: string } | null
   error: string | null
 }
 
@@ -305,8 +307,16 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
       <Lights />
 
       <header className={wrap + ' flex items-center justify-between gap-6 py-5'}>
-        <div className="text-[22px] font-semibold tracking-[0.02em]">xdipx</div>
-        <div className="font-mono text-[10.5px] uppercase tracking-[0.14em] text-ink-4">Ships discreet</div>
+        <div className="flex items-center gap-3 sm:gap-4">
+          {d.logo ? (
+            <img src={d.logo.src} alt={d.logo.alt} width={149} height={60} className="block h-7 w-auto sm:h-8" />
+          ) : (
+            <div className="text-[22px] font-semibold tracking-[0.02em]">xdipx</div>
+          )}
+          <span aria-hidden className="h-6 w-px bg-ink/15" />
+          <img src="/brands/lovehoney-logo.svg" alt="Lovehoney" width={306} height={48} className="block h-[18px] w-auto sm:h-5" />
+        </div>
+        <div className="hidden font-mono text-[10.5px] uppercase tracking-[0.14em] text-ink-4 sm:block">Ships discreet</div>
       </header>
 
       {d.error ? (
@@ -400,9 +410,6 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
             <BuyForm cal={p} shop={shop} className={buyBtn}>
               {cta}
             </BuyForm>
-            <a href="#emma" className="rounded-full border border-ink/15 px-[22px] py-4 text-[15px] font-medium hover:border-ink/30">
-              Find your fit →
-            </a>
           </div>
 
           <div className="flex flex-col gap-2.5 border-t border-line pt-5 text-sm text-ink-3">
