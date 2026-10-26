@@ -49,6 +49,8 @@ export interface AdventViewData {
   initial: AdventKey
   products: Partial<Record<AdventKey, AdventShopifyData>>
   nowMs: number
+  /** The page's other query params (UTMs, preview flags) without `c`, kept on lineup links. */
+  query: string
   /** The store wordmark from Sanity site settings; null renders the text wordmark. */
   logo: { src: string; alt: string } | null
   error: string | null
@@ -289,6 +291,8 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
   useEffect(() => {
     if (shop) trackFbViewContent({ content_ids: [shop.productId], value: shop.price, currency: 'USD' })
   }, [shop])
+
+  const lineupHref = (k: AdventKey) => `?${d.query ? d.query + '&' : ''}c=${k}`
 
   function pick(k: AdventKey) {
     setKey(k)
@@ -643,10 +647,15 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
               const s = d.products[k]
               const cur = k === key
               return (
-                <button
+                <a
                   key={k}
-                  type="button"
-                  onClick={() => pick(k)}
+                  href={lineupHref(k)}
+                  onClick={e => {
+                    // Swap in place once hydrated; without JS the link loads ?c=<key> from the server.
+                    if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return
+                    e.preventDefault()
+                    pick(k)
+                  }}
                   aria-current={cur ? 'true' : undefined}
                   className={'grid grid-cols-[64px_minmax(0,1fr)_auto] items-center gap-[18px] border-b border-ink/10 px-3 py-4 text-left ' + (cur ? 'bg-plum-soft' : 'bg-paper')}
                 >
@@ -666,7 +675,7 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
                     <FreeShippingBadge size="sm" className="my-1" />
                     <div className="text-[13px] font-medium text-coral">{cur ? 'Viewing' : 'Take a peek →'}</div>
                   </div>
-                </button>
+                </a>
               )
             })}
           </div>
