@@ -4,6 +4,7 @@ import { sendOwnerEmail, escapeHtml } from './owner-alerts.server'
 import type { EscalationClassName } from './owner-escalation'
 import { addSuggestionNote, listSuggestions } from './team.server'
 import { getProductsByHandles, findProductBySKU, adminGraphQL } from './shopify.server'
+import { laWallClockToUtc } from './social-schedule'
 import { db } from './db.server'
 import { suggestionLinks } from '../../db/schema'
 
@@ -18,7 +19,10 @@ import { suggestionLinks } from '../../db/schema'
  * any row that:
  *   - carries a MAP-conflict flag in its policy note,
  *   - lacks an explicit start and end window,
- *   - lacks a parseable code or discount depth, or
+ *   - lacks a parseable code or discount depth,
+ *   - states a usage cap, minimum purchase, per-customer limit, or combination
+ *     rule in a shape the parser cannot read (minting while silently dropping a
+ *     stated constraint is weaker than the brief, which this never does), or
  *   - names no eligible product it can resolve (minting a catalog-wide code is
  *     the exact unbounded-giveaway hazard the promo-manager warns about, so a
  *     promo with no resolvable products is refused rather than scoped to "all").
@@ -77,6 +81,12 @@ export interface ParsedPromo {
   handles: string[]
   /** Nalpac/variant SKU numbers pulled from labelled "SKU(s) N/N/..." lists. */
   skus: string[]
+  /** From a labelled "total usage N" line, the mutation's usageLimit (Int). */
+  usageLimit: number | null
+  /** From a labelled "minimum purchase $N" line, in dollars. */
+  minimumSubtotal: number | null
+  /** True only when the brief explicitly states "combinations none". */
+  combinesWithNone: boolean
   mapNote: string | null
   body: string
 }
@@ -85,7 +95,8 @@ export interface PromoDecision {
   ok: boolean
   /**
    * 'ok' | 'not-applicable' | 'map-conflict-flagged' | 'map-not-confirmed' |
-   * 'no-code' | 'no-depth' | 'ambiguous-window' | 'invalid-window'
+   * 'no-code' | 'no-depth' | 'ambiguous-window' | 'invalid-window' |
+   * 'unsupported-constraint'
    */
   reason: string
 }
@@ -213,9 +224,13 @@ export function extractPromoCode(text: string): string | null {
  */
 const SKU_MARGIN_LIST_RE = /(\d{4,6})[^\d$;\n]*\$[\d.]+\s*->\s*[\d.]+%/g
 
-/** One ISO date, bare (YYYY-MM-DD) or a full ISO-8601 timestamp
- *  (YYYY-MM-DDTHH:MM:SSZ, optional fractional seconds). */
-const ISO_DATE_ATOM = String.raw`\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)?`
+/**
+ * One date boundary, three shapes: bare (YYYY-MM-DD), a full ISO-8601 instant
+ * (YYYY-MM-DDTHH:MM:SSZ, optional fractional seconds), or a bare date plus a
+ * 12-hour time-of-day (e.g. "2026-11-17 12:00am") -- the form real briefs use
+ * when they mean a specific wall-clock moment rather than the whole day.
+ */
+const ISO_DATE_ATOM = String.raw`\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z|\s+\d{1,2}:\d{2}\s*[ap]m)?`
 
 /**
  * The window, matched ONLY from a labelled "window ... to ..." construct
@@ -238,16 +253,63 @@ const WINDOW_RE = new RegExp(
   'i',
 )
 
+/** Strip the Date's millisecond field, which `toIsoString()` always writes and no boundary here carries. */
+const isoNoMillis = (d: Date): string => d.toISOString().replace(/\.\d{3}Z$/, 'Z')
+
+/** A bare date plus an explicit 12-hour time, e.g. "2026-11-17 12:00am" or "2026-11-30 11:59pm". */
+const BARE_DATE_WITH_12H_RE = /^(\d{4}-\d{2}-\d{2})\s+(\d{1,2}):(\d{2})\s*(am|pm)$/i
+
+function to24Hour(hour12: number, minute: number, meridiem: string): { hour: string; minute: string } {
+  const h = hour12 % 12
+  const hour = meridiem.toLowerCase() === 'pm' ? h + 12 : h
+  return { hour: String(hour).padStart(2, '0'), minute: String(minute).padStart(2, '0') }
+}
+
 /**
- * Normalize one matched window boundary into a full ISO instant: a bare date
- * gets the existing start-of-day/end-of-day convention; a full timestamp (the
- * brief already stated the exact instant) passes through unchanged rather
- * than having a second, wrong start/end-of-day suffix appended to it.
+ * Normalize one matched window boundary into a full UTC instant.
+ *
+ * A full timestamp (the brief already stated the exact instant, always with
+ * an explicit `Z`) passes through unchanged. Everything else -- a bare date,
+ * or a bare date plus a 12-hour time-of-day -- is a wall-clock moment in the
+ * shop's own timezone (America/Los_Angeles, ticket #18004), not UTC: a bare
+ * date previously got a literal `T00:00:00Z`/`T23:59:59Z` suffix, which opens
+ * and closes the promo up to 8 hours off the Pacific day the brief actually
+ * means (the DRESSUP25 incident this fixes: its own correctly-stated window
+ * opens `2026-10-07T07:00:00Z`, i.e. Pacific midnight, not literal UTC
+ * midnight).
  */
 function toIsoBoundary(raw: string, edge: 'start' | 'end'): string {
-  if (raw.includes('T')) return raw
-  return edge === 'start' ? `${raw}T00:00:00Z` : `${raw}T23:59:59Z`
+  if (/T\d{2}:\d{2}:\d{2}/.test(raw)) return raw
+
+  const explicit = BARE_DATE_WITH_12H_RE.exec(raw.trim())
+  if (explicit) {
+    const date = explicit[1] as string
+    const { hour, minute } = to24Hour(Number(explicit[2]), Number(explicit[3]), explicit[4] as string)
+    return isoNoMillis(laWallClockToUtc(date, `${hour}:${minute}`))
+  }
+
+  if (edge === 'start') return isoNoMillis(laWallClockToUtc(raw, '00:00'))
+  // laWallClockToUtc only takes minute granularity; the existing ":59" second
+  // convention is added on top of its 23:59 instant.
+  return isoNoMillis(new Date(laWallClockToUtc(raw, '23:59').getTime() + 59_000))
 }
+
+/** "total usage 250" or "total usage: 250" -> the mutation's usageLimit (Int). */
+const USAGE_LIMIT_RE = /\btotal\s+usage\s*:?\s*(\d{1,7})\b/i
+/** Any usage-cap language at all, parseable or not; used only to detect one USAGE_LIMIT_RE failed to read. */
+const USAGE_MENTION_RE = /\btotal\s+usage\b|\busage\s*(?:cap|limit)\b/i
+
+/** "minimum purchase $40" -> the mutation's minimumRequirement.subtotal (a Decimal string). */
+const MIN_PURCHASE_RE = /\bminimum\s+purchase\s*:?\s*\$\s*(\d+(?:\.\d{1,2})?)\b/i
+const MIN_PURCHASE_MENTION_RE = /\bminimum\s+purchase\b/i
+
+/** "combinations none" -> combinesWith set explicitly false on every axis. */
+const COMBINATIONS_NONE_RE = /\bcombinations?\s*:?\s*none\b/i
+const COMBINATIONS_MENTION_RE = /\bcombinations?\s*:?\s*(\w+)\b/i
+
+/** "one use per customer" is the only per-customer shape this executor can honor: appliesOncePerCustomer is always sent true. */
+const ONCE_PER_CUSTOMER_SUPPORTED_RE = /\bone\s+use\s+per\s+customer\b/i
+const PER_CUSTOMER_MENTION_RE = /\b\w+\s+uses?\s+per\s+customer\b/i
 
 export function extractSkus(text: string): string[] {
   const skus = new Set<string>()
@@ -287,6 +349,14 @@ export function parsePromoBrief(text: string): ParsedPromo {
   const mapLine = text.match(/^.*\bmap\b.*$/im)
   const mapNote = mapLine?.[0] ? mapLine[0].trim() : null
 
+  const usageMatch = text.match(USAGE_LIMIT_RE)
+  const usageLimit = usageMatch?.[1] ? parseInt(usageMatch[1], 10) : null
+
+  const minPurchaseMatch = text.match(MIN_PURCHASE_RE)
+  const minimumSubtotal = minPurchaseMatch?.[1] ? Number(minPurchaseMatch[1]) : null
+
+  const combinesWithNone = COMBINATIONS_NONE_RE.test(text)
+
   return {
     code,
     percentage,
@@ -294,9 +364,30 @@ export function parsePromoBrief(text: string): ParsedPromo {
     endsAt,
     handles: uniqueHandles,
     skus: extractSkus(text),
+    usageLimit,
+    minimumSubtotal,
+    combinesWithNone,
     mapNote,
     body: text,
   }
+}
+
+/**
+ * A constraint class (usage cap, minimum purchase, combinations, or a
+ * per-customer limit) that the brief states in a shape `parsePromoBrief`
+ * could not read. Minting while silently dropping a stated constraint would
+ * mint a code weaker than the brief, which this executor never does --
+ * returns the first unreadable class found, or null when every constraint
+ * the brief states parsed cleanly (or none was stated at all).
+ */
+export function findUnsupportedConstraint(text: string, parsed: ParsedPromo): string | null {
+  if (USAGE_MENTION_RE.test(text) && parsed.usageLimit == null) return 'usage cap'
+  if (MIN_PURCHASE_MENTION_RE.test(text) && parsed.minimumSubtotal == null) return 'minimum purchase'
+  const combinations = text.match(COMBINATIONS_MENTION_RE)
+  if (combinations && combinations[1]?.toLowerCase() !== 'none') return 'combinations'
+  const perCustomer = text.match(PER_CUSTOMER_MENTION_RE)
+  if (perCustomer && !ONCE_PER_CUSTOMER_SUPPORTED_RE.test(perCustomer[0])) return 'per-customer limit'
+  return null
 }
 
 /**
@@ -342,6 +433,10 @@ export function decidePromo(parsed: ParsedPromo, fullText: string, now: Date = n
   if (new Date(parsed.startsAt).getTime() < now.getTime()) {
     return { ok: false, reason: 'ambiguous-window' }
   }
+  // Never mint a code weaker than the brief: a stated usage cap, minimum
+  // purchase, combinations rule, or per-customer limit this parser could not
+  // read must refuse rather than mint silently without it.
+  if (findUnsupportedConstraint(fullText, parsed)) return { ok: false, reason: 'unsupported-constraint' }
   // Fail-closed: mint only when MAP compliance is explicitly stated, never on the
   // mere absence of a conflict word.
   if (!detectMapClean(fullText)) return { ok: false, reason: 'map-not-confirmed' }
@@ -354,24 +449,42 @@ export interface DiscountVariablesInput {
   startsAt: string
   endsAt: string
   productGids: string[]   // must be non-empty; the code is scoped to these
+  usageLimit?: number | null
+  minimumSubtotal?: number | null
+  combinesWithNone?: boolean
 }
 
-/** Variables for `discountCodeBasicCreate`. Percent is sent as a 0..1 decimal. */
+/**
+ * Variables for `discountCodeBasicCreate`. Percent is sent as a 0..1 decimal;
+ * `minimumRequirement.subtotal.greaterThanOrEqualToSubtotal` is Shopify's
+ * `Decimal` scalar, serialized as a string (verified live against the Admin
+ * schema, 2026-10-26). `usageLimit` and `combinesWith` are only set when the
+ * brief actually stated them -- a brief silent on a constraint leaves it
+ * unset, same as before this ticket.
+ */
 export function buildDiscountVariables(i: DiscountVariablesInput): Record<string, unknown> {
-  return {
-    basicCodeDiscount: {
-      title: i.code,
-      code: i.code,
-      startsAt: i.startsAt,
-      endsAt: i.endsAt,
-      customerSelection: { all: true },
-      customerGets: {
-        value: { percentage: i.percentage / 100 },
-        items: { products: { productsToAdd: i.productGids } },
-      },
-      appliesOncePerCustomer: true,
+  const basicCodeDiscount: Record<string, unknown> = {
+    title: i.code,
+    code: i.code,
+    startsAt: i.startsAt,
+    endsAt: i.endsAt,
+    customerSelection: { all: true },
+    customerGets: {
+      value: { percentage: i.percentage / 100 },
+      items: { products: { productsToAdd: i.productGids } },
     },
+    appliesOncePerCustomer: true,
   }
+  if (i.usageLimit != null) basicCodeDiscount['usageLimit'] = i.usageLimit
+  if (i.minimumSubtotal != null) {
+    basicCodeDiscount['minimumRequirement'] = {
+      subtotal: { greaterThanOrEqualToSubtotal: i.minimumSubtotal.toFixed(2) },
+    }
+  }
+  if (i.combinesWithNone) {
+    basicCodeDiscount['combinesWith'] = { orderDiscounts: false, productDiscounts: false, shippingDiscounts: false }
+  }
+  return { basicCodeDiscount }
 }
 
 export const DISCOUNT_CODE_BASIC_CREATE = `
@@ -556,6 +669,9 @@ export async function executeApprovedPromo(
     startsAt: parsed.startsAt as string,
     endsAt: parsed.endsAt as string,
     productGids,
+    usageLimit: parsed.usageLimit,
+    minimumSubtotal: parsed.minimumSubtotal,
+    combinesWithNone: parsed.combinesWithNone,
   })
 
   let result: ShopifyDiscountResult
