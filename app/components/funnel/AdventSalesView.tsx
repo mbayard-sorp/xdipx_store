@@ -16,6 +16,7 @@ import {
   ADVENT_ANNOUNCEMENT,
   ADVENT_CALENDARS,
   ADVENT_COUPLE_IDEAS,
+  ADVENT_EMMA_PHOTO,
   ADVENT_FAQ,
   ADVENT_ORDER,
   ADVENT_SALE_ENDS_AT,
@@ -441,7 +442,14 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
         <div className={wrap + ' ' + section + ' flex flex-wrap gap-8 md:gap-[clamp(32px,5vw,72px)]'}>
           <div className="flex-[1_1_460px]">
             <div className="mb-6 flex items-center gap-[13px]">
-              <div className="h-[46px] w-[46px] flex-none rounded-full bg-[#D7C6B8] shadow-[0_0_0_3px_rgba(89,103,86,0.30)]" />
+              <img
+                src={sanityImageUrl(ADVENT_EMMA_PHOTO, { w: 160, h: 160, fit: 'crop' })}
+                alt="Emma, the xdipx guide, smiling with a mug of cocoa by a holiday tree"
+                width={56}
+                height={56}
+                loading="lazy"
+                className="h-14 w-14 flex-none rounded-full bg-paper-3 object-cover shadow-[0_0_0_3px_rgba(89,103,86,0.30)]"
+              />
               <div className="leading-[1.35]">
                 <div className="text-sm font-semibold">Emma's take</div>
                 <div className="text-[13.5px] text-ink-3">Hand-checked, not auto-listed.</div>
@@ -459,10 +467,6 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
             <div className="rounded-[22px] bg-plum-soft p-7">
               <div className="mb-3 font-mono text-[11px] uppercase tracking-[0.16em] text-plum">Made for</div>
               <p className="text-base leading-[1.6]">{p.fitFor}</p>
-            </div>
-            <div className="rounded-[22px] border border-ink/10 p-7">
-              <div className="mb-3 font-mono text-[11px] uppercase tracking-[0.16em] text-ink-4">Not quite it?</div>
-              <p className="text-base leading-[1.6] text-ink-3">{p.skipIf}</p>
             </div>
           </div>
         </div>
