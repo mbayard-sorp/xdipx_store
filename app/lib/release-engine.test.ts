@@ -133,6 +133,10 @@ function facts(over: Partial<PullRequestFacts> = {}): PullRequestFacts {
     ciRetriggers: 0,
     // Production default: the valve is off-only, absent means on.
     labelSplitEnabled: true,
+    // #17739: false by default, so every existing verdict-stale test keeps
+    // exercising the "real content moved, spend the attempt" path unless it
+    // opts in explicitly.
+    staleVerificationReviewedFilesUnchanged: false,
     ...over,
   }
 }
@@ -793,6 +797,24 @@ describe('evaluatePullRequest: verified verdict pinned to a commit (ticket #1050
     expect(d.ticketId).toBe(41)
     expect(d.lastError).toContain(VERIFIED_SHA.slice(0, 12))
     expect(d.lastError).toContain('deadbeef')
+    expect(d.suppressAttemptIncrement).toBeUndefined()
+  })
+
+  // Ticket #17739: a pure base-merge/rebase that left the PR's own files
+  // byte-identical still has to bounce (the engine must re-pin against the
+  // new head before it will merge), but must not cost one of the ticket's
+  // three attempts, mirroring #17446/PR #1771's concrete case.
+  it('bounces WITHOUT spending an attempt when the move is a content-unchanged base-merge', () => {
+    const d = evaluatePullRequest(facts({
+      headSha: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+      ticket: { id: 41, status: 'verified', kind: 'code', attemptCount: 0, verifiedHeadSha: VERIFIED_SHA },
+      staleVerificationReviewedFilesUnchanged: true,
+    }))
+    expect(d.action).toBe('bounce')
+    expect(d.code).toBe('verdict-stale')
+    expect(d.ticketId).toBe(41)
+    expect(d.suppressAttemptIncrement).toBe(true)
+    expect(d.lastError).toContain('empty')
   })
 
   it('still merges when no verifiedHeadSha was recorded at all: cannot compare is not a mismatch', () => {

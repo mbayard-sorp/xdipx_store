@@ -111,6 +111,11 @@ vi.mock('~/lib/github.server', async (importOriginal) => {
     // unmocked githubRequest -> real fetch, same as the migration content
     // read below, and collide with that call's single-use Response mock.
     getJobVerdictsForSha: vi.fn(async () => ({ ok: true, status: 200, data: {} })),
+    // #17739: no fixture here sets a ticket.verifiedHeadSha that differs from
+    // the PR's headSha, so gatherFacts's new compare call is never reached —
+    // mocked anyway so a future fixture that does doesn't fall through to a
+    // real network call.
+    compareCommits: vi.fn(async () => ({ ok: true, status: 200, data: [] })),
     addLabels: vi.fn(async () => ({ ok: true, status: 200, data: [] })),
     removeLabels: vi.fn(async () => ({ ok: true, status: 200, data: [] })),
     markPullRequestReadyForReview: vi.fn(async () => ({ ok: true, status: 200, data: {} })),

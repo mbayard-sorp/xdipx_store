@@ -13,6 +13,7 @@ import {
   PROTECTED_GLOBS,
   UNRESOLVED_PATH_GLOB,
   classifyChangedFiles,
+  compareCommits,
   getJobVerdictsForSha,
   listPullRequestFiles,
   matchProtectedGlobs,
@@ -512,6 +513,65 @@ describe('listPullRequestFiles', () => {
     expect(result.ok).toBe(false)
     expect(result.status).toBe(403)
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('compareCommits', () => {
+  // Ticket #17739: the release engine's own way to tell a pure base-merge
+  // with no net content change (empty `files`) from one that actually moved
+  // something.
+  const fetchMock = vi.fn()
+
+  beforeEach(() => {
+    fetchMock.mockReset()
+    vi.stubGlobal('fetch', fetchMock)
+    process.env['GITHUB_TOKEN'] = 'test-token'
+    process.env['GITHUB_OWNER'] = 'test-owner'
+    process.env['GITHUB_REPO'] = 'test-repo'
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    delete process.env['GITHUB_TOKEN']
+    delete process.env['GITHUB_OWNER']
+    delete process.env['GITHUB_REPO']
+  })
+
+  it('returns an empty file list for two identical commits (a no-op base-merge)', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ status: 'identical', files: [] }), { status: 200 }))
+
+    const result = await compareCommits('abc1234', 'def5678', 'test')
+
+    expect(result.ok).toBe(true)
+    expect(result.ok && result.data).toEqual([])
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/compare/abc1234...def5678')
+  })
+
+  it('maps GitHub\'s file shape, including a rename\'s previous_filename', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      status: 'diverged',
+      files: [
+        { filename: 'db/migrations/090_x.sql', status: 'added', additions: 10, deletions: 0 },
+        { filename: 'app/lib/new-name.ts', previous_filename: 'app/lib/old-name.ts', status: 'renamed', additions: 1, deletions: 1 },
+      ],
+    }), { status: 200 }))
+
+    const result = await compareCommits('abc1234', 'def5678', 'test')
+
+    expect(result.ok).toBe(true)
+    expect(result.ok && result.data).toEqual([
+      { filename: 'db/migrations/090_x.sql', status: 'added', additions: 10, deletions: 0 },
+      { filename: 'app/lib/new-name.ts', status: 'renamed', additions: 1, deletions: 1, previousFilename: 'app/lib/old-name.ts' },
+    ])
+  })
+
+  it('propagates a non-ok response rather than treating it as "identical"', async () => {
+    fetchMock.mockResolvedValueOnce(new Response('Not Found', { status: 404 }))
+
+    const result = await compareCommits('abc1234', 'def5678', 'test')
+
+    expect(result.ok).toBe(false)
+    expect(result.status).toBe(404)
   })
 })
 
