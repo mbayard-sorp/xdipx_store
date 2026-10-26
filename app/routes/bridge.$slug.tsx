@@ -319,8 +319,13 @@ export default function BridgeRoute() {
 
   return (
     <main className="min-h-[100svh] bg-paper text-ink">
-      <style dangerouslySetInnerHTML={{ __html: GATE_CSS }} />
-      <script dangerouslySetInnerHTML={{ __html: AGE_PRECHECK }} />
+      {/* The advent sales page runs without the age gate (owner direction 2026-10-26). */}
+      {d.kind !== 'advent' ? (
+        <>
+          <style dangerouslySetInnerHTML={{ __html: GATE_CSS }} />
+          <script dangerouslySetInnerHTML={{ __html: AGE_PRECHECK }} />
+        </>
+      ) : null}
       {d.kind === 'funnel' ? (
         <LeadFunnelView page={d.page} utm={d.utm} terms={d.terms} smsOptin={d.smsOptin} />
       ) : d.kind === 'advent' ? (
@@ -328,7 +333,7 @@ export default function BridgeRoute() {
       ) : (
         <BridgeView d={d} />
       )}
-      <AgeGate />
+      {d.kind !== 'advent' ? <AgeGate /> : null}
       <CookieConsent />
       <Analytics ga4Id={ga4Id} />
     </main>
