@@ -2771,3 +2771,10 @@ cast: none
 - **Rounds:** four rounds. R1 fell to single-figure (fidelity gate; I had described the bottle as translucent, it is dark brown glass with cream label and black flip cap: describe it that way). R2 and R3 kept smiling/smirking and striped bedding. R4 added "lips pressed together, corners level or down, no smile, mouth not curved upward", "wet tear tracks", "eyes lowered looking at the bottle", "plain solid white bedding"; candidate 2 kept.
 - **Lesson:** sad faces need the mouth named, and "eyes lowered at the product" removes the smile better than "brow raised".
 - **Lesson (embed-match):** alt must carry every distinctive title token: Sliquid Massage Oil Unscented Natural Nut and Seed Blend 4.2oz.
+
+JO Refresh Foaming Toy Cleaner 7oz (`jo-refresh-foaming-toy-cleaner-7-oz`), guides, §0-P hero (run 1666, post
+`do-you-need-a-sex-toy-cleaner`): bottle large on white ground, foam cloud, water droplets, blurred sage sprig, warm
+daylight, real photo `37041A.jpg` as ref. 2 candidates: candidate 1 rendered a crimson/orange wall (off-palette, darker) and was
+rejected; candidate 2 (white ground, peach daylight) kept → `image-04047db314c6990c391bd686f4c142def18bbf21-2304x1728-jpg`.
+Fine-print multilingual label lines garble on both candidates; main label (JO, REFRESH, FOAMING TOY CLEANER) holds.
+Tip: say "pure white wall behind" explicitly, or the model paints a saturated colour wall.
