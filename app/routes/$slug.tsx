@@ -7,4 +7,4 @@
  * rendered. On any host other than curious.xdipx.com the loader throws a 404,
  * which is exactly what an unknown single-segment path returned before.
  */
-export { default, loader, meta, headers, ErrorBoundary } from './bridge.$slug'
+export { default, loader, action, meta, headers, ErrorBoundary } from './bridge.$slug'

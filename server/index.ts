@@ -14,6 +14,7 @@ import { validateStartupEnv } from '../app/lib/env.server.js'
 import { bridgeHostSupportPath, bridgeSlugFromPath, isBridgeHost, requestHost } from '../app/lib/bridge-host.server.js'
 import { getAdBridgePage } from '../app/lib/ad-bridge.server.js'
 import { isLeadFunnelSlug } from '../app/lib/lead-funnel.js'
+import { isAdventSalesSlug } from '../app/lib/advent-sales-page.js'
 
 const isProduction = process.env['NODE_ENV'] === 'production'
 
@@ -130,6 +131,8 @@ app.use(async (req, res, next) => {
   if (!slug) return bridgeNotFound(res)
   // The paid-lead funnel's two-door pages are defined in code (app/lib/lead-funnel.ts).
   if (isLeadFunnelSlug(slug)) return next()
+  // The 2026 advent sales page is code-defined too (app/lib/advent-sales-page.ts).
+  if (isAdventSalesSlug(slug)) return next()
   try {
     const preview = (req.headers.cookie ?? '').includes('__sanity_preview=1')
     const page = await getAdBridgePage(slug, preview)
