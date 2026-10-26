@@ -41,7 +41,7 @@ import { getStoredUTM } from '~/lib/attribution.server'
 import { trackCtaClick } from '~/lib/analytics.client'
 import { isBridgeHost, isBridgeHostRequest, requestHost, BRIDGE_HOST } from '~/lib/bridge-host.server'
 import { sanityImageUrl } from '~/lib/sanity-image'
-import { isPreviewRequest } from '~/lib/sanity.server'
+import { getSiteSettings, isPreviewRequest } from '~/lib/sanity.server'
 import { createCartWithLines, getProductByHandle } from '~/lib/shopify.server'
 import { shopifyImageUrl } from '~/lib/shopify-image'
 import { useAgeVerified } from '~/lib/use-age-verified'
@@ -132,9 +132,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 async function adventLoaderData(request: Request) {
   const url = new URL(request.url)
   const c = url.searchParams.get('c')
-  const results = await Promise.all(
-    ADVENT_ORDER.map(async k => [k, await getProductByHandle(ADVENT_CALENDARS[k].handle).catch(() => null)] as const),
-  )
+  const [results, settings] = await Promise.all([
+    Promise.all(
+      ADVENT_ORDER.map(async k => [k, await getProductByHandle(ADVENT_CALENDARS[k].handle).catch(() => null)] as const),
+    ),
+    // The store wordmark the navbar uses. Missing logo falls back to the text wordmark.
+    getSiteSettings().catch(() => null),
+  ])
   const products: Partial<Record<AdventKey, AdventShopifyData>> = {}
   for (const [k, product] of results) {
     if (!product) continue
@@ -159,6 +163,12 @@ async function adventLoaderData(request: Request) {
     initial,
     products,
     nowMs: Date.now(),
+    query: (() => {
+      const q = new URLSearchParams(url.search)
+      q.delete('c')
+      return q.toString()
+    })(),
+    logo: settings?.logoUrl ? { src: settings.logoUrl, alt: settings.logoAlt || 'xdipx' } : null,
     canonical: `${origin}/advents26`,
   }
 }
@@ -329,7 +339,7 @@ export default function BridgeRoute() {
       {d.kind === 'funnel' ? (
         <LeadFunnelView page={d.page} utm={d.utm} terms={d.terms} smsOptin={d.smsOptin} />
       ) : d.kind === 'advent' ? (
-        <AdventSalesView d={{ initial: d.initial, products: d.products, nowMs: d.nowMs, error: actionData?.error ?? null }} />
+        <AdventSalesView d={{ initial: d.initial, products: d.products, nowMs: d.nowMs, query: d.query, logo: d.logo, error: actionData?.error ?? null }} />
       ) : (
         <BridgeView d={d} />
       )}

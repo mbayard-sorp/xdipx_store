@@ -16,6 +16,7 @@ import {
   ADVENT_ANNOUNCEMENT,
   ADVENT_CALENDARS,
   ADVENT_COUPLE_IDEAS,
+  ADVENT_EMMA_PHOTO,
   ADVENT_FAQ,
   ADVENT_ORDER,
   ADVENT_SALE_ENDS_AT,
@@ -48,6 +49,10 @@ export interface AdventViewData {
   initial: AdventKey
   products: Partial<Record<AdventKey, AdventShopifyData>>
   nowMs: number
+  /** The page's other query params (UTMs, preview flags) without `c`, kept on lineup links. */
+  query: string
+  /** The store wordmark from Sanity site settings; null renders the text wordmark. */
+  logo: { src: string; alt: string } | null
   error: string | null
 }
 
@@ -206,6 +211,25 @@ function BuyForm({
   )
 }
 
+/** Standard shipping is free on every calendar (owner, 2026-10-26). */
+function FreeShippingBadge({ size = 'md', className = '' }: { size?: 'sm' | 'md' | 'lg'; className?: string }) {
+  const sizes = {
+    sm: 'gap-1 px-2 py-[3px] text-[9.5px]',
+    md: 'gap-1.5 px-2.5 py-[5px] text-[11px]',
+    lg: 'gap-2 px-4 py-[9px] text-[12.5px] shadow-[0_6px_18px_rgba(26,20,24,0.22)]',
+  }
+  return (
+    <span className={'inline-flex items-center whitespace-nowrap rounded-full bg-sage font-mono font-medium uppercase tracking-[0.12em] text-white ' + sizes[size] + ' ' + className}>
+      <svg aria-hidden width="1.25em" height="1.25em" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M3 6h11v9H3zM14 9h4l3 3v3h-7z" />
+        <circle cx="7" cy="17.5" r="1.6" />
+        <circle cx="17" cy="17.5" r="1.6" />
+      </svg>
+      Free shipping
+    </span>
+  )
+}
+
 function IdeaCard({ idea, dark, packshot }: { idea: AdventIdea; dark: boolean; packshot: string | undefined }) {
   const cal = ADVENT_CALENDARS[idea.key]
   const src = (w: number) => sanityImageUrl(idea.image.src, { w, h: Math.round((w * 3) / 4), fit: 'crop' })
@@ -268,6 +292,8 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
     if (shop) trackFbViewContent({ content_ids: [shop.productId], value: shop.price, currency: 'USD' })
   }, [shop])
 
+  const lineupHref = (k: AdventKey) => `?${d.query ? d.query + '&' : ''}c=${k}`
+
   function pick(k: AdventKey) {
     setKey(k)
     setImg(0)
@@ -304,8 +330,16 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
       <Lights />
 
       <header className={wrap + ' flex items-center justify-between gap-6 py-5'}>
-        <div className="text-[22px] font-semibold tracking-[0.02em]">xdipx</div>
-        <div className="font-mono text-[10.5px] uppercase tracking-[0.14em] text-ink-4">Ships discreet</div>
+        <div className="flex items-center gap-3 sm:gap-4">
+          {d.logo ? (
+            <img src={d.logo.src} alt={d.logo.alt} width={149} height={60} className="block h-7 w-auto sm:h-8" />
+          ) : (
+            <div className="text-[22px] font-semibold tracking-[0.02em]">xdipx</div>
+          )}
+          <span aria-hidden className="h-6 w-px bg-ink/15" />
+          <img src="/brands/lovehoney-logo.svg" alt="Lovehoney" width={306} height={48} className="block h-[18px] w-auto sm:h-5" />
+        </div>
+        <div className="hidden font-mono text-[10.5px] uppercase tracking-[0.14em] text-ink-4 sm:block">Ships discreet</div>
       </header>
 
       {d.error ? (
@@ -321,8 +355,11 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
             <div className="absolute -right-[58px] top-[30px] z-[1] w-[230px] rotate-45 border-y border-dashed border-white/45 bg-plum py-2 text-center font-mono text-[10.5px] uppercase tracking-[0.2em] text-white shadow-[0_4px_12px_rgba(26,20,24,0.18)]">
               Holiday 2026
             </div>
-            <div className="absolute left-4 top-4 z-[1] whitespace-nowrap rounded-full bg-coral px-4 py-[9px] text-[15px] font-semibold text-white shadow-[0_6px_18px_rgba(194,53,15,0.28)]">
-              Save {valuePct}%
+            <div className="absolute left-4 top-4 z-[1] flex flex-col items-start gap-2">
+              <div className="whitespace-nowrap rounded-full bg-coral px-4 py-[9px] text-[15px] font-semibold text-white shadow-[0_6px_18px_rgba(194,53,15,0.28)]">
+                Save {valuePct}%
+              </div>
+              <FreeShippingBadge size="lg" />
             </div>
             {active ? (
               // The LCP element: eager, high priority, explicit size, never in Reveal.
@@ -373,6 +410,7 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
             <span className="rounded-full border border-coral/35 px-2.5 py-[5px] font-mono text-[11px] uppercase tracking-[0.12em] text-coral">
               You save {saveStr}
             </span>
+            <FreeShippingBadge />
           </div>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2.5 rounded-[18px] bg-plum-soft px-5 py-4">
             <div className="font-display text-[1.25rem] leading-[1.3]">
@@ -399,15 +437,12 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
             <BuyForm cal={p} shop={shop} className={buyBtn}>
               {cta}
             </BuyForm>
-            <a href="#emma" className="rounded-full border border-ink/15 px-[22px] py-4 text-[15px] font-medium hover:border-ink/30">
-              Find your fit →
-            </a>
           </div>
 
           <div className="flex flex-col gap-2.5 border-t border-line pt-5 text-sm text-ink-3">
             <div className="flex gap-[9px]"><span className="text-sage">♥</span> Plain box, plain label, no product names. Your statement reads XDIPX</div>
             <div className="flex gap-[9px]"><span className="text-sage">♥</span> Unopened calendars can be returned within 30 days</div>
-            <div className="flex gap-[9px]"><span className="text-sage">♥</span> Order by {ADVENT_SHIP_BY} and door one is ready on December 1</div>
+            <div className="flex gap-[9px]"><span className="text-sage">♥</span> Free standard shipping. Order by {ADVENT_SHIP_BY} and door one is ready on December 1</div>
           </div>
         </div>
       </section>
@@ -441,7 +476,14 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
         <div className={wrap + ' ' + section + ' flex flex-wrap gap-8 md:gap-[clamp(32px,5vw,72px)]'}>
           <div className="flex-[1_1_460px]">
             <div className="mb-6 flex items-center gap-[13px]">
-              <div className="h-[46px] w-[46px] flex-none rounded-full bg-[#D7C6B8] shadow-[0_0_0_3px_rgba(89,103,86,0.30)]" />
+              <img
+                src={sanityImageUrl(ADVENT_EMMA_PHOTO, { w: 160, h: 160, fit: 'crop' })}
+                alt="Emma, the xdipx guide, smiling with a mug of cocoa by a holiday tree"
+                width={56}
+                height={56}
+                loading="lazy"
+                className="h-14 w-14 flex-none rounded-full bg-paper-3 object-cover shadow-[0_0_0_3px_rgba(89,103,86,0.30)]"
+              />
               <div className="leading-[1.35]">
                 <div className="text-sm font-semibold">Emma's take</div>
                 <div className="text-[13.5px] text-ink-3">Hand-checked, not auto-listed.</div>
@@ -459,10 +501,6 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
             <div className="rounded-[22px] bg-plum-soft p-7">
               <div className="mb-3 font-mono text-[11px] uppercase tracking-[0.16em] text-plum">Made for</div>
               <p className="text-base leading-[1.6]">{p.fitFor}</p>
-            </div>
-            <div className="rounded-[22px] border border-ink/10 p-7">
-              <div className="mb-3 font-mono text-[11px] uppercase tracking-[0.16em] text-ink-4">Not quite it?</div>
-              <p className="text-base leading-[1.6] text-ink-3">{p.skipIf}</p>
             </div>
           </div>
         </div>
@@ -609,10 +647,15 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
               const s = d.products[k]
               const cur = k === key
               return (
-                <button
+                <a
                   key={k}
-                  type="button"
-                  onClick={() => pick(k)}
+                  href={lineupHref(k)}
+                  onClick={e => {
+                    // Swap in place once hydrated; without JS the link loads ?c=<key> from the server.
+                    if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return
+                    e.preventDefault()
+                    pick(k)
+                  }}
                   aria-current={cur ? 'true' : undefined}
                   className={'grid grid-cols-[64px_minmax(0,1fr)_auto] items-center gap-[18px] border-b border-ink/10 px-3 py-4 text-left ' + (cur ? 'bg-plum-soft' : 'bg-paper')}
                 >
@@ -629,9 +672,10 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
                   </div>
                   <div className="text-right">
                     <div className="text-base font-semibold">{s ? money(s.price) : ''}</div>
+                    <FreeShippingBadge size="sm" className="my-1" />
                     <div className="text-[13px] font-medium text-coral">{cur ? 'Viewing' : 'Take a peek →'}</div>
                   </div>
-                </button>
+                </a>
               )
             })}
           </div>
@@ -707,6 +751,7 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
               <div className="min-w-0">
                 <div className="text-sm font-semibold">
                   {priceStr} <span className="font-normal text-plum">· {valueStr} value</span>
+                  <FreeShippingBadge size="sm" className="ml-2 align-middle" />
                 </div>
                 {timer.live || stockLine !== null ? (
                   <div className="text-[12.5px] font-semibold text-coral">

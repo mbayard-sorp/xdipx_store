@@ -22,7 +22,9 @@ export const ADVENT_SLUG = 'advents26'
 /** One moment for every visitor: end of Nov 24, Pacific. */
 export const ADVENT_SALE_ENDS_AT = '2026-11-24T23:59:00-08:00'
 export const ADVENT_SHIP_BY = 'Nov 24'
-export const ADVENT_ANNOUNCEMENT = 'Advent price ends Nov 24 · 2026 editions, limited stock · Plain box, billed XDIPX'
+/** Emma's holiday portrait (fal Kontext from singleton.editor's photo, 2026-10-26). Not the canonical likeness. */
+export const ADVENT_EMMA_PHOTO = 'https://cdn.sanity.io/images/0nlwk8cf/production/36b67652ec0054a5df56f25d206d567d485d7275-1024x1024.jpg'
+export const ADVENT_ANNOUNCEMENT = 'Free shipping · Advent price ends Nov 24 · Plain box, billed XDIPX'
 
 export type AdventKey = 'indulge-12' | 'romance-7' | 'womanizer-24' | 'couples-24' | 'luxury-24'
 
@@ -41,7 +43,6 @@ export interface AdventCalendar {
   ritual: string
   editorial: string[]
   fitFor: string
-  skipIf: string
   features: { k: string; v: string }[]
   closer: string
 }
@@ -70,7 +71,6 @@ export const ADVENT_CALENDARS: Record<AdventKey, AdventCalendar> = {
       'Twelve is the easy size: enough nights to settle into it, few enough to fit around everything else December asks of you.',
     ],
     fitFor: 'Couples who like unwrapping together, and anyone who wants a first calendar that is easy to say yes to.',
-    skipIf: 'You want one big finale. The Womanizer Enjoy ends on a signature Womanizer.',
     features: kv(['Format: 12-day advent calendar', 'Brand: Lovehoney', 'Collection: Indulge', 'Occasion: Holiday gift', 'Good for: Beginners']),
     closer: 'Open the first door and the other eleven get very hard to leave closed.',
   },
@@ -91,7 +91,6 @@ export const ADVENT_CALENDARS: Record<AdventKey, AdventCalendar> = {
       'Seven days is a full week of something to open, and short enough to fit any December.',
     ],
     fitFor: 'Couples who enjoy the lead-up as much as the night itself, with December as the reason.',
-    skipIf: "You're shopping for yourself. The Indulge 12-day works for one person or two.",
     features: kv(['Brand: Lovehoney x We-Vibe', 'Format: 7-day advent calendar', 'Theme: Romance gift set', 'Good for: Beginners', 'Doors: 7']),
     closer: 'Seven doors, one week, and nothing else on the calendar.',
   },
@@ -112,7 +111,6 @@ export const ADVENT_CALENDARS: Record<AdventKey, AdventCalendar> = {
       'Start on December 1 and door 24 falls on Christmas Eve.',
     ],
     fitFor: 'Anyone who wants pleasure to feel like an event, and loves not knowing what comes next.',
-    skipIf: "You'd rather pick your own toy. The finale here is a signature Womanizer, chosen for you.",
     features: kv([
       'Format: 24-day advent calendar',
       'Collaboration: Lovehoney x Womanizer',
@@ -139,7 +137,6 @@ export const ADVENT_CALENDARS: Record<AdventKey, AdventCalendar> = {
       'Twenty-four evenings with something new to open and nowhere else to be.',
     ],
     fitFor: 'Partners who want to discover something new together, a little more every night.',
-    skipIf: 'You want one specific toy. This is a box of surprises, so pick that toy on its own.',
     features: kv([
       'Format: 24-day advent calendar',
       'Edition: 2026 Couples Edition',
@@ -166,7 +163,6 @@ export const ADVENT_CALENDARS: Record<AdventKey, AdventCalendar> = {
       'Four brands in one box, with rechargeable pieces in the mix.',
     ],
     fitFor: 'Anyone who wants four brands in one box, from first-timers to collectors.',
-    skipIf: "You're after one specific toy. This one is variety across 24 doors.",
     features: kv([
       'Format: 24-day advent calendar',
       'Brands: Lovehoney, Womanizer, We-Vibe, Arcwave',
@@ -201,7 +197,7 @@ export const ADVENT_FAQ = [
   },
   {
     q: 'When should I order to start on December 1?',
-    a: 'Order by November 24 and standard shipping gets it to you before door one. That is also the last day of the advent price. Expedited options are available at checkout.',
+    a: 'Order by November 24 and free standard shipping gets it to you before door one. That is also the last day of the advent price. Expedited options are available at checkout.',
   },
   {
     q: "Can I see what's inside before I buy?",
