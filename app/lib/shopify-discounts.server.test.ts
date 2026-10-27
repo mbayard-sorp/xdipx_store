@@ -6,6 +6,7 @@ import {
   extractPromoCode,
   extractSkus,
   parsePromoBrief,
+  findUnsupportedConstraint,
   decidePromo,
   buildDiscountVariables,
   executeApprovedPromo,
@@ -302,8 +303,10 @@ describe('parsePromoBrief', () => {
     const p = parsePromoBrief(CLEAN_BRIEF)
     expect(p.code).toBe('SLOWEVENING15')
     expect(p.percentage).toBe(15)
-    expect(p.startsAt).toBe('2026-08-12T00:00:00Z')
-    expect(p.endsAt).toBe('2026-08-19T23:59:59Z')
+    // August is PDT (UTC-7): a bare-date window is the shop's own Pacific
+    // wall-clock day, not literal UTC midnight (ticket #18004).
+    expect(p.startsAt).toBe('2026-08-12T07:00:00Z')
+    expect(p.endsAt).toBe('2026-08-20T06:59:59Z')
     expect(p.handles).toEqual(['ferri', 'dolce'])
     expect(p.skus).toEqual([])
     expect(p.mapNote?.toLowerCase()).toContain('map')
@@ -312,8 +315,9 @@ describe('parsePromoBrief', () => {
     const p = parsePromoBrief(LIVE_BRIEF_51)
     expect(p.code).toBe('FIRSTLOOK10')
     expect(p.percentage).toBe(10)
-    expect(p.startsAt).toBe('2026-07-27T00:00:00Z')
-    expect(p.endsAt).toBe('2026-08-09T23:59:59Z')
+    // July is also PDT.
+    expect(p.startsAt).toBe('2026-07-27T07:00:00Z')
+    expect(p.endsAt).toBe('2026-08-10T06:59:59Z')
     expect(p.handles).toEqual([])
     expect(p.skus).toEqual(['84740', '84743', '84747', '84748'])
   })
@@ -345,8 +349,67 @@ describe('parsePromoBrief', () => {
     // LIVE_BRIEF_51's own window ("WINDOW: 2026-07-27 through 2026-08-09")
     // already covers this via the test above; this asserts it directly.
     const p = parsePromoBrief('Code: X10\nDepth: 10%\nWindow: 2026-08-12 through 2026-08-19')
-    expect(p.startsAt).toBe('2026-08-12T00:00:00Z')
-    expect(p.endsAt).toBe('2026-08-19T23:59:59Z')
+    expect(p.startsAt).toBe('2026-08-12T07:00:00Z')
+    expect(p.endsAt).toBe('2026-08-20T06:59:59Z')
+  })
+
+  // Ticket #18004: briefs #17448/#17449 were both REFUSED (ambiguous-window)
+  // because WINDOW_RE did not accept "2026-11-17 12:00am". A bare-date window
+  // must also convert in America/Los_Angeles, not UTC -- by Black Friday
+  // week, PST (UTC-8) applies (DST ended 2026-11-01).
+  it('converts a bare-date November window to Pacific Standard Time, not UTC', () => {
+    const p = parsePromoBrief('Code: BF20\nDepth: 20%\nWindow: 2026-11-27 to 2026-11-30')
+    expect(p.startsAt).toBe('2026-11-27T08:00:00Z')
+    expect(p.endsAt).toBe('2026-12-01T07:59:59Z')
+  })
+
+  it('accepts an explicit 12-hour time-of-day on a window boundary', () => {
+    const p = parsePromoBrief('Code: X10\nDepth: 10%\nWindow: 2026-11-17 12:00am to 2026-11-30 11:59pm')
+    expect(p.startsAt).toBe('2026-11-17T08:00:00Z')
+    expect(p.endsAt).toBe('2026-12-01T07:59:00Z')
+  })
+
+  it('parses "total usage N", "minimum purchase $N", and "combinations none"', () => {
+    const text = 'Code: BF20\nDepth: 20%\nWindow: 2026-11-27 to 2026-11-30\n' +
+      'one use per customer; total usage 250; minimum purchase $40; combinations none. MAP CHECK PASS.'
+    const p = parsePromoBrief(text)
+    expect(p.usageLimit).toBe(250)
+    expect(p.minimumSubtotal).toBe(40)
+    expect(p.combinesWithNone).toBe(true)
+  })
+
+  it('leaves usageLimit, minimumSubtotal, and combinesWithNone unset when the brief never mentions them', () => {
+    const p = parsePromoBrief(CLEAN_BRIEF)
+    expect(p.usageLimit).toBeNull()
+    expect(p.minimumSubtotal).toBeNull()
+    expect(p.combinesWithNone).toBe(false)
+  })
+})
+
+describe('findUnsupportedConstraint', () => {
+  it('is null when every stated constraint parsed', () => {
+    const text = 'total usage 250; minimum purchase $40; combinations none; one use per customer'
+    const p = parsePromoBrief(text)
+    expect(findUnsupportedConstraint(text, p)).toBeNull()
+  })
+  it('is null when no constraint is mentioned at all', () => {
+    expect(findUnsupportedConstraint(CLEAN_BRIEF, parsePromoBrief(CLEAN_BRIEF))).toBeNull()
+  })
+  it('flags a usage cap mentioned but not in the parseable shape', () => {
+    const text = 'usage cap: TBD, decide later'
+    expect(findUnsupportedConstraint(text, parsePromoBrief(text))).toBe('usage cap')
+  })
+  it('flags a minimum purchase mentioned but not in the parseable shape', () => {
+    const text = 'minimum purchase to be confirmed with finance'
+    expect(findUnsupportedConstraint(text, parsePromoBrief(text))).toBe('minimum purchase')
+  })
+  it('flags a combinations value other than "none"', () => {
+    const text = 'combinations: all'
+    expect(findUnsupportedConstraint(text, parsePromoBrief(text))).toBe('combinations')
+  })
+  it('flags a per-customer limit other than "one use per customer"', () => {
+    const text = 'two uses per customer'
+    expect(findUnsupportedConstraint(text, parsePromoBrief(text))).toBe('per-customer limit')
   })
 })
 
@@ -409,6 +472,24 @@ describe('decidePromo', () => {
   // non-percentage mechanism (free-shipping threshold, bundle, loyalty perk)
   // has no bare NN% anywhere and can never pass this pipeline's later checks
   // meaningfully — it is the wrong mechanism, not a malformed percent brief.
+  // Ticket #18004: never mint a code weaker than the brief. Rows #17448/#17449
+  // stated "total usage 250" / "minimum purchase $40" and were REFUSED
+  // (ambiguous-window, the window-parsing half of the same ticket); this
+  // covers the other half once the window parses: a brief whose usage/minimum/
+  // combinations/per-customer language the parser cannot read must still
+  // refuse, not mint without the constraint.
+  it('refuses a brief whose stated constraint the parser cannot read', () => {
+    const text = 'Code: BF20\nDepth: 20%\nWindow: 2026-11-27 to 2026-11-30\n' +
+      'usage cap: TBD. MAP CHECK PASS.'
+    expect(decidePromo(parsePromoBrief(text), text, BEFORE_ALL_TEST_WINDOWS)).toEqual({ ok: false, reason: 'unsupported-constraint' })
+  })
+
+  it('passes a brief whose stated constraints all parsed cleanly', () => {
+    const text = 'Code: BF20\nDepth: 20%\nWindow: 2026-11-27 to 2026-11-30\n' +
+      'one use per customer; total usage 250; minimum purchase $40; combinations none. MAP CHECK PASS.'
+    expect(decidePromo(parsePromoBrief(text), text, BEFORE_ALL_TEST_WINDOWS)).toEqual({ ok: true, reason: 'ok' })
+  })
+
   it('refuses a non-percentage mechanism as not-applicable, before any other check', () => {
     const freeShipping = 'Code: X10\nWindow: 2026-08-12 to 2026-08-19\nLower the free-shipping threshold from $99 to $59.'
     expect(decidePromo(parsePromoBrief(freeShipping), freeShipping)).toEqual({ ok: false, reason: 'not-applicable' })
@@ -436,6 +517,40 @@ describe('buildDiscountVariables', () => {
     expect(d.customerGets.items.products.productsToAdd).toHaveLength(2)
     expect(d.startsAt).toBe('2026-08-12T00:00:00Z')
     expect(d.endsAt).toBe('2026-08-19T23:59:59Z')
+    // Nothing stated beyond the base fields: no usageLimit, minimumRequirement, or combinesWith key.
+    expect('usageLimit' in d).toBe(false)
+    expect('minimumRequirement' in d).toBe(false)
+    expect('combinesWith' in d).toBe(false)
+  })
+
+  // Ticket #18004 DONE WHEN: "total usage 250; minimum purchase $40" yields
+  // usageLimit 250 and minimum 40 in the mutation variables. Brief rows
+  // #17448/#17449 stated these and the executor silently dropped them.
+  it('sets usageLimit (Int) and minimumRequirement.subtotal (Decimal string) when the brief states them', () => {
+    const v = buildDiscountVariables({
+      code: 'DRESSUP25',
+      percentage: 25,
+      startsAt: '2026-10-07T07:00:00Z',
+      endsAt: '2026-10-14T06:59:59Z',
+      productGids: ['gid://shopify/Product/1'],
+      usageLimit: 250,
+      minimumSubtotal: 40,
+    }) as any
+    const d = v.basicCodeDiscount
+    expect(d.usageLimit).toBe(250)
+    expect(d.minimumRequirement).toEqual({ subtotal: { greaterThanOrEqualToSubtotal: '40.00' } })
+  })
+
+  it('sets combinesWith to false on every axis only when the brief says "combinations none"', () => {
+    const v = buildDiscountVariables({
+      code: 'DRESSUP25',
+      percentage: 25,
+      startsAt: '2026-10-07T07:00:00Z',
+      endsAt: '2026-10-14T06:59:59Z',
+      productGids: ['gid://shopify/Product/1'],
+      combinesWithNone: true,
+    }) as any
+    expect(v.basicCodeDiscount.combinesWith).toEqual({ orderDiscounts: false, productDiscounts: false, shippingDiscounts: false })
   })
 })
 
@@ -574,6 +689,36 @@ describe('executeApprovedPromo', () => {
     const variables = (deps.createDiscount as any).mock.calls[0][0]
     expect(variables.basicCodeDiscount.startsAt).toBe('2026-09-28T00:00:00Z')
     expect(variables.basicCodeDiscount.endsAt).toBe('2026-10-04T23:59:59Z')
+  })
+
+  // Ticket #18004 end-to-end: the parsed usage cap and minimum purchase
+  // actually reach the mutation `createDiscount` is called with, not just
+  // `parsePromoBrief`'s own return value.
+  it('passes the parsed usage cap, minimum purchase, and combinations-none through to the mutation', async () => {
+    const deps = makeDeps()
+    const brief = 'Code: BF20\nDepth: 20%\nWindow: 2026-11-27 to 2026-11-30\n' +
+      'one use per customer; total usage 250; minimum purchase $40; combinations none. ' +
+      'MAP CHECK PASS. Products: https://xdipx.com/products/ferri'
+    const mintTime = new Date('2026-11-01T00:00:00Z')
+    const res = await executeApprovedPromo({ id: 18001, suggestion: brief }, deps, mintTime)
+    expect(res.minted).toBe(true)
+    const variables = (deps.createDiscount as any).mock.calls[0][0]
+    expect(variables.basicCodeDiscount.usageLimit).toBe(250)
+    expect(variables.basicCodeDiscount.minimumRequirement).toEqual({ subtotal: { greaterThanOrEqualToSubtotal: '40.00' } })
+    expect(variables.basicCodeDiscount.combinesWith).toEqual({ orderDiscounts: false, productDiscounts: false, shippingDiscounts: false })
+  })
+
+  it('refuses loudly, never minting, when a stated constraint cannot be read', async () => {
+    const deps = makeDeps()
+    const brief = 'Code: BF20\nDepth: 20%\nWindow: 2026-11-27 to 2026-11-30\n' +
+      'usage cap: TBD. MAP CHECK PASS. Products: https://xdipx.com/products/ferri'
+    const mintTime = new Date('2026-11-01T00:00:00Z')
+    const res = await executeApprovedPromo({ id: 18002, suggestion: brief }, deps, mintTime)
+    expect(res.minted).toBe(false)
+    expect(res.refused).toBe(true)
+    expect(res.reason).toBe('unsupported-constraint')
+    expect(deps.createDiscount).not.toHaveBeenCalled()
+    expect(deps.sendOwnerEmail).toHaveBeenCalledOnce()
   })
 
   it('reports a Shopify userError without throwing and does not claim a mint', async () => {
