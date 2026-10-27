@@ -323,6 +323,22 @@ post a `decision` event; the row stays `pr_open` for the owner to dismiss or re-
 Log tokens (`feature:'strategy-apply'`), then the final run update: table of suggestion id | files |
 PR URL (or skipped + why), conflicts flagged.
 
+**Close the run with the run-closing call, not just an event (#18145).** Posting the final run
+table as a `decision`/`step` event is not enough on its own: without the matching `op:'update'`
+call, the run row never gets `finishedAt` set, and the 120-minute auto-expiry watchdog later kills
+it as `status:'failed'` (`error: 'auto-expired: no recorded activity for 120 minutes'`) even though
+the real work finished in minutes. Two of the last twelve apply runs hit exactly this. After posting
+the final run table event, make this call in the same step:
+
+```bash
+curl -s -X POST "$BASE_URL/api/team/run" \
+  -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
+  -d '{"op":"update","id":'"$RUN_ID"',"update":{"status":"succeeded","finished":true,"summary":"<final run table + honesty lines>"}}'
+```
+
+Use `"status":"skipped"` instead of `"succeeded"` when Step 0's gate or valve check stopped the run
+before any work happened.
+
 **Honesty line (required).** The final run summary must state, in one line, three numbers:
 **actionable-backlog-at-start**, **PRs-opened**, and **the cap (15)**. This makes a lane running
 below capacity visible in the summary itself instead of buried in a parenthetical. If PRs-opened is
