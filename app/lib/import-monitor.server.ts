@@ -29,6 +29,7 @@ import {
   gapScore,
   needsReview,
   isNoveltyCategory,
+  isCrudeTitle,
 } from '~/lib/master-collapse.server'
 import type { MasterRecord } from '~/lib/master-collapse.server'
 import { dropshipRestriction } from '~/lib/nalpac-dropship-policy'
@@ -137,6 +138,16 @@ function buildMasterUpsertPayload(
   if (isNoveltyCategory(master)) {
     tier = 'D'
     gapReason = `[novelty] ${gapReason}`
+  }
+
+  // Crude-title hold (ticket #18014, relayed from product-manager). Same soft
+  // hold as the novelty flag above, not a hard reject: autoImportPhase2 admits
+  // only tiers A/B/C, so demoting to D keeps the deterministic path from
+  // shipping a crude-named row unattended while the editorial call (import,
+  // reject, or re-title) stays with product-manager at tier D.
+  if (isCrudeTitle(master)) {
+    tier = 'D'
+    gapReason = `[crude-title] ${gapReason}`
   }
 
   const score = gapScore(master)
