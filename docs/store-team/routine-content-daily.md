@@ -379,11 +379,20 @@ Content quality bar (all mandatory, from `.claude/agents/content-writer.md`):
   + statement H2s allowed) for real-talk. Register: authority max, desire capped 7-8, zero
   hedging, humor licensed (never on clinical beats), rhythm rules per the blog addendum.
 - **IP ratings are SAFETY claims, not feature copy — map them before drafting.** Never infer a
-  water permission from a vendor adjective ("splashproof", "shower-ready"). Resolve the actual IP
-  code first: IPX4 = splashes only, keep out of the shower and never submerge; IPX7 = submersion to
-  1m/30min, so shower, bath, and rinse-clean are all fine. A wrong water instruction is a safety
-  defect the accuracy gate will BLOCK on (run 148: an IPX4 wand written as shower-safe). IP-rating
-  and other safety strings then fall under the frozen-safety-string rule in Step 5.3.
+  water permission from a vendor adjective ("splashproof", "shower-ready"), and never extend an
+  IPX7 code into a shower/bath/running-water endorsement: IEC 60529 rates jets (IPX5, IPX6)
+  separately from immersion (IPX7) and the ratings do not stack, so state only what the code
+  GUARANTEES, never what it excludes. IPX4 = splashes only, keep out of the shower and never
+  submerge. IPX7 = immersion only, to 1m for 30 minutes; running water and jets carry their own
+  rating that does not stack onto an IPX7 mark, so an IPX7 toy on its own comes with no promise
+  about a shower or a tap (house wording: "IPX7 covers immersion only: one metre, thirty minutes.
+  Running water and jets carry their own ratings, those ratings do not stack onto an IPX7 mark,
+  and an IPX7 toy therefore comes with no promise about a shower or a tap." — match this rather
+  than re-deriving; see the published reading at `/notebook/what-is-a-gyroscope-sex-toy`). A wrong
+  water instruction is a safety defect the accuracy gate will BLOCK on (run 148: an IPX4 wand
+  written as shower-safe; run 1037 and run 1666 both caught an IPX7-as-shower-safe extension before
+  it shipped). IP-rating and other safety strings then fall under the frozen-safety-string rule in
+  Step 5.3.
 - A `## Frequently asked questions` section in every post.
 - At least one honest `blogProductEmbed` where it genuinely helps (in-stock products only,
   verified first). CTAs from the charter whitelist.
