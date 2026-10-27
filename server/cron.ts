@@ -1204,12 +1204,24 @@ export function createCronRoutes() {
    * `promo_execute_enabled` inside `executeApprovedPromo` itself and
    * idempotent (an already-handled promo row is skipped), so this is safe to
    * run daily alongside the still-standing weekly script invocation.
+   *
+   * Ticket #18006: also runs the read-only discount-exposure audit right
+   * after, the only other surface already touching discount codes, so a code
+   * minted here (or one found live with no paper trail, e.g. X25XPOFF) is
+   * checked the same day. Never gates the mint pass: a failure here is
+   * caught and reported, not thrown, since the mint pass is this route's
+   * primary job.
    */
   cronRoute('/promo-execute', async (_req, res) => {
     try {
       const { runPromoExecutionPass } = await import('../app/lib/shopify-discounts.server.js')
       const result = await runPromoExecutionPass()
-      res.status(200).json({ ok: true, ...result })
+      const { runDiscountExposureAudit } = await import('../app/lib/discount-exposure-audit.server.js')
+      const exposureAudit = await runDiscountExposureAudit().catch(err => {
+        console.error('[cron:promo-execute] discount-exposure-audit failed:', err)
+        return { error: String(err) }
+      })
+      res.status(200).json({ ok: true, ...result, exposureAudit })
     } catch (err) {
       console.error('[cron:promo-execute]', err)
       res.status(500).json({ error: String(err) })
