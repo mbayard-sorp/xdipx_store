@@ -5,6 +5,7 @@ import {
   classifySubmitBlocker,
   explainQualityGateFailure,
   isSubagentLease,
+  isNoStockAtPublish,
   SUBAGENT_LEASE_PREFIX,
   ENRICH_MAX_ATTEMPTS,
   STUCK_BATCH_MAX_HOURS,
@@ -228,5 +229,40 @@ describe('explainQualityGateFailure', () => {
   it('rejects a missing dial (fewer than 5 values)', () => {
     const reason = explainQualityGateFailure({ ...good, sensationDialV2: { items: [] } })
     expect(reason).toContain('sensation dial spread')
+  })
+})
+
+// Ticket #18007: 111 of 408 publishes since 2026-10-05 went live unbuyable
+// because publishEnrichedProducts activated a candidate on a stale
+// import-time quantity while the batch's own fresh feed read already showed
+// zero stock everywhere. isNoStockAtPublish is the gate extracted so the
+// held-vs-normal decision is verified without a database or live Shopify call.
+describe('isNoStockAtPublish (#18007)', () => {
+  it('holds a candidate whose fresh feed read shows zero stock on both sources', () => {
+    const freshQtyBySku = new Map([['sku-1', { nalpacQty: 0, entrenueQty: 0 }]])
+    expect(isNoStockAtPublish('sku-1', freshQtyBySku)).toBe(true)
+  })
+
+  it('does not hold a candidate with stock on either source', () => {
+    const freshQtyBySku = new Map([
+      ['sku-nalpac', { nalpacQty: 5, entrenueQty: 0 }],
+      ['sku-entrenue', { nalpacQty: 0, entrenueQty: 3 }],
+    ])
+    expect(isNoStockAtPublish('sku-nalpac', freshQtyBySku)).toBe(false)
+    expect(isNoStockAtPublish('sku-entrenue', freshQtyBySku)).toBe(false)
+  })
+
+  it('treats a null quantity from either source as zero, not as "unknown"', () => {
+    const freshQtyBySku = new Map([['sku-null', { nalpacQty: null, entrenueQty: null }]])
+    expect(isNoStockAtPublish('sku-null', freshQtyBySku)).toBe(true)
+  })
+
+  it('never holds a SKU absent from the map (feed fetch failed, or SKU unknown to the feed) — existing best-effort behavior', () => {
+    const freshQtyBySku = new Map([['sku-1', { nalpacQty: 0, entrenueQty: 0 }]])
+    expect(isNoStockAtPublish('sku-not-in-feed', freshQtyBySku)).toBe(false)
+  })
+
+  it('never holds anything when the feed fetch failed entirely (empty map)', () => {
+    expect(isNoStockAtPublish('sku-1', new Map())).toBe(false)
   })
 })

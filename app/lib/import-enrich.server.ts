@@ -1068,6 +1068,30 @@ export async function fileWentLiveSuggestion(
 }
 
 /**
+ * Ticket #18007: should a publish-ready candidate be held back rather than
+ * activated? True only when the batch's own fresh feed read (freshQtyBySku,
+ * fetched once per publish batch above) resolved this SKU and both Nalpac
+ * and Entrenue report zero stock. False when the SKU is absent from the map
+ * or the feed fetch failed entirely (empty map) — those keep the existing
+ * best-effort publish behavior unchanged, matching the ticket's note that a
+ * feed-fetch hiccup must never block publishing.
+ *
+ * 111 of 408 publishes since 2026-10-05 went live unbuyable, every one with
+ * Nalpac = 0, Entrenue = 0, and Total above 0 at publish time (so the
+ * candidate looked sellable only because of a stale import-time quantity);
+ * syncVariantInventoryQuantity below writes the correct 0 right after
+ * activation, so nothing backfills a product that already went live.
+ */
+export function isNoStockAtPublish(
+  sku: string,
+  freshQtyBySku: Map<string, { nalpacQty: number | null; entrenueQty: number | null }>,
+): boolean {
+  const entry = freshQtyBySku.get(sku)
+  if (!entry) return false
+  return (entry.nalpacQty ?? 0) + (entry.entrenueQty ?? 0) === 0
+}
+
+/**
  * Flip enriched-but-unpublished imported drafts to active on the curated
  * channels (POS excluded — handled inside activateShopifyProduct). Products are
  * priced at import time, so enriched is the only gate. Best-effort per product.
@@ -1078,6 +1102,7 @@ export async function publishEnrichedProducts(): Promise<{
   resynced: number
   skippedNoFeedRow: number
   invResyncFailed: number
+  heldNoStock: number
 }> {
   const rows = await db
     .select({
@@ -1124,6 +1149,7 @@ export async function publishEnrichedProducts(): Promise<{
   let resynced = 0
   let skippedNoFeedRow = 0
   let invResyncFailed = 0
+  let heldNoStock = 0
   // Collected for the social team's new-product suggestion below (#3736,
   // curated per ticket #12877): handle, title, category, vendor, plus the
   // resolved Shopify product_type, current stock, the bare-product-reference
@@ -1133,6 +1159,15 @@ export async function publishEnrichedProducts(): Promise<{
   for (const r of rows) {
     if (!r.productId) continue
     try {
+      // Ticket #18007: hold back a candidate the batch's own fresh feed read
+      // just confirmed is out of stock everywhere, rather than activating it
+      // on a stale import-time quantity. Row stays enriched-but-unpublished
+      // and retries on the next tick.
+      if (isNoStockAtPublish(r.sku, freshQtyBySku)) {
+        heldNoStock++
+        continue
+      }
+
       // Last-line guard: never flip a draft live without a product_type the
       // pricing engine can resolve. Backfills by derivation when missing and
       // error-logs (without blocking publish) when unresolvable — a typeless
@@ -1285,7 +1320,7 @@ export async function publishEnrichedProducts(): Promise<{
     }
   }
 
-  return { published, failed, resynced, skippedNoFeedRow, invResyncFailed }
+  return { published, failed, resynced, skippedNoFeedRow, invResyncFailed, heldNoStock }
 }
 
 export interface ImportEnrichTickResult {
