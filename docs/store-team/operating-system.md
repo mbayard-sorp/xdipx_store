@@ -314,7 +314,11 @@ the row text and its links are the only carriers, so the conventions are the con
     could have run first. Before writing a DONE WHEN that names a specific file, function, route, or
     op as something to reuse, modify, or call, `git grep` that exact name once. If it doesn't exist,
     either find the real name or say plainly that no such symbol exists yet and the ticket is asking
-    for a new one.
+    for a new one. Same rule applies to citing a CI check's scope: `.github/workflows/agent-allowlist.yml`
+    and `requiresAllowlistCheck()` (`app/lib/release-engine.server.ts`) only run on `agents/**` head
+    branches per the workflow's own header comment, so a `pm/`, `fix/`, or other non-`agents/`-branch
+    PR is never blocked by that check regardless of which paths it touches (#18061) — grep the check's
+    scope condition before citing it as the reason a non-`agents/` PR can't auto-merge.
 11. **A note that introduces a new hard dependency re-blocks the ticket in the same action.**
     (#17496) When a note added to an `approved`/`in_progress` ticket names a new hard dependency
     (a `Depends-on`, a `navBlock()`-style gate, a blocking PR), the filer — owner or agent — also
