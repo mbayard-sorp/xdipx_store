@@ -316,6 +316,19 @@ below, instead of — or alongside without duplicating — the Notebook post.
   silicone-vs-water-based-lube, ai-companion-toys-vs-what-you-can-actually-buy.
 - **Same gates as any published prose:** route the comparison doc's copy (`excerpt`, item
   `blurb`s, `verdict`, `faqs`) through Step 5's dual gate before publish.
+- **The five mandatory prose checkers below (check-aphorism-closers, check-antithesis-cap,
+  check-unsourced-frequency, check-self-consistency, check-fresh-language) do not read a comparison
+  doc's `items[].blurb`/`bestFor`, `attributes[].label`/`values`, `verdict`, or `faqs[].question`/
+  `answer`** (ticket #17824, second occurrence: comparison-water-based-vs-silicone-vs-hybrid-lube on
+  run 1377 and comparison-air-pulse-toy-vs-vibrator on run 1648 both shipped with all five reporting
+  clean on a doc they barely read). Every one of those checkers builds on
+  `app/lib/aphorism-closer.ts`'s `draftToParagraphs`, which reads exactly `title`, `excerpt`,
+  `seoTitle`, `seoDescription`, and `body` — on a comparison doc that is most of the customer-facing
+  copy, the verdict included, and the verdict is the single most quotable string on the page. Before
+  running the checkers on a comparison doc, flatten it into a checker-view draft: map each item's
+  `blurb`/`bestFor`, each attribute row, the `verdict`, and every FAQ `question`/`answer` into `body`
+  as h2-attributed normal blocks, keeping `title`/`excerpt`/`seoTitle`/`seoDescription` as-is. Run
+  the checkers against that flattened draft, not the raw comparison JSON.
 - **Honest in-stock, both-sides-real rule applies** (content-plan §2 line 27): every item is a
   real, currently in-stock option; never a fabricated or discontinued comparator.
 - Filed separately, not part of this procedure: comparison URLs are not yet in the sitemap, so a
@@ -1254,6 +1267,19 @@ and that copy carries no evidentiary weight. Close the row `applied` only after 
 the new strings. When the gates cannot be run in the remaining budget, file the diagnosis (which
 handle, which posts, the proposed replacement) and leave the row open for the next run rather than
 choosing between an ungated edit and a silent skip.
+
+**Budget-collision fast path (ticket #17416, second occurrence: #16894 and #17142 each re-confirmed
+dead across three-plus runs with neither remediated, because almost no dead embed is a bare
+substitution — the surrounding prose names the product and asserts a property of it, so full
+remediation needs two gate passes on a day the post itself already needs two to four).** When the
+day's gate budget is already spent on the post and a reported dead embed's surrounding sentences
+name the product or assert a spec/ingredient/material fact about it, do not wait on the row. Instead:
+first REMOVE the claim-carrying sentences so the embed stands with no surrounding product prose —
+this needs no re-gate, because it adds no new customer-facing words, only deletes old ones — then
+file a follow-up `kind:process` row (same `dedupeKey`, noted as a remediation-completion follow-up)
+proposing the richer replacement pairing copy for a future run's gate budget. This closes the
+original row's immediate defect (no dead product named in live prose) without waiting on a gate pass
+the day's budget cannot spare.
 
 ## Step 7: Retro + finish
 
