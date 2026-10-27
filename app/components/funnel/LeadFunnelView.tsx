@@ -20,6 +20,7 @@ import {
   EMAIL_CONSENT_TEXT,
   PRIVACY_URL,
   SMS_CONSENT_TEXT,
+  SMS_PENDING_NOTICE,
   type FunnelUtm,
   type LeadFunnelPage,
 } from '~/lib/lead-funnel'
@@ -27,7 +28,7 @@ import { LEAD_INTERESTS, type LeadInterestSlug } from '~/lib/lead-interests'
 import { trackFbLead } from '~/lib/meta-pixel.client'
 
 type LeadResponse =
-  | { ok: true; code: string; terms: string; shopUrl: string; eventId: string | null }
+  | { ok: true; code: string; terms: string; shopUrl: string; eventId: string | null; smsPending: boolean }
   | { ok?: false; error: string }
 
 const ERRORS: Record<string, string> = {
@@ -139,6 +140,7 @@ export function LeadFunnelView({
             <p className="mt-2 font-body text-sm text-ink-2">
               The button below puts it on your cart, or enter it at checkout.
             </p>
+            {success.smsPending ? <p className="mt-2 font-body text-sm text-ink-2">{SMS_PENDING_NOTICE}</p> : null}
             <a
               href={success.shopUrl}
               onClick={() => trackCtaClick('lead_shop_with_code', interest ?? 'none')}

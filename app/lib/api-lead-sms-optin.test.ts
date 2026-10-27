@@ -90,6 +90,7 @@ describe('/api/lead with lead SMS opt-in OFF (kill switch flipped)', () => {
     // One lead_post_event row for the hourly L3 counter.
     expect(mocks.recordLeadPostEvent).toHaveBeenCalledTimes(1)
     expect(mocks.recordLeadPostEvent.mock.calls[0]![0]).toMatchObject({ slug: 'hello' })
+    expect(json.smsPending).toBe(false)
   })
 
   it('does not 400 a stray smsConsent without a phone', async () => {
@@ -128,12 +129,31 @@ describe('/api/lead with lead SMS opt-in ON (default)', () => {
     expect(mocks.logConsent.mock.calls[0]![1]).toMatchObject({ consentType: 'all', policyVersion: 'lead-v1' })
   })
 
+  it('reports smsPending true only when enrollLeadSms actually queued a confirmation text', async () => {
+    const res = await post(lead)
+    expect((await res.json()).smsPending).toBe(true)
+  })
+
+  it('reports smsPending false when the number was already opted out', async () => {
+    mocks.enrollLeadSms.mockResolvedValue({ outcome: 'opted_out', id: 2 })
+    const res = await post(lead)
+    expect((await res.json()).smsPending).toBe(false)
+  })
+
+  it('reports smsPending false when enrollLeadSms throws', async () => {
+    mocks.enrollLeadSms.mockRejectedValue(new Error('twilio down'))
+    const res = await post(lead)
+    expect(res.status).toBe(200)
+    expect((await res.json()).smsPending).toBe(false)
+  })
+
   it('keeps the phone on the profile but skips SMS when the box was not ticked', async () => {
     const res = await post({ ...lead, smsConsent: false })
     expect(res.status).toBe(200)
     expect(mocks.subscribeLead.mock.calls[0]![0]).toMatchObject({ phone: PHONE })
     expect(mocks.enrollLeadSms).not.toHaveBeenCalled()
     expect(mocks.logConsent).not.toHaveBeenCalled()
+    expect((await res.json()).smsPending).toBe(false)
   })
 
   it('still 400s smsConsent without a phone, and a phone that will not normalise', async () => {
