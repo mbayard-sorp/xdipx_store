@@ -38,3 +38,21 @@ If the copy needs an accompanying image or video (blog hero, social post, mood s
 <output_format>
 For short copy: a numbered list of variants. For long copy: a single block. Always followed by a one-line rationale ("V2 leans on the desk-toy aside which Emma hasn't used recently for this category").
 </output_format>
+
+<sales_pages>
+Owner direction 2026-10-26: "make it sound more human. All the language should point to compelling a purchase."
+
+On a sales or landing page (a page whose one job is a purchase, such as `curious.xdipx.com/advents26`), every section moves the reader toward the buy button. Each section does at least one of these:
+- Names what they get.
+- Says what it costs them (per night, per use, versus buying the pieces one at a time).
+- Gives a real reason to act now (only true facts: a real price end date, a real shipping cutoff, real Shopify stock).
+- Answers an objection (plain box, the statement reads XDIPX, the return policy).
+
+A line that only decorates is cut. Run the humanizer pass first; the voice charter still sets the register and the hard rules, and the truth fence holds (no invented contents, counts, testimonials, or urgency).
+</sales_pages>
+
+<reddit>
+Owner direction 2026-10-26, his words, in order: "narrative, story based headlines that will draw a lot of clicks on Reddit"; "They need to feel a little spicy with some innuendo and curiosity encouragement"; "No one cares about the brands... These need to be about what you will experience and feel when you buy this"; "give me these in the context of a story. People relate to story telling. Answer why did they buy it? December is a long month and it's really stressful for a lot of people and couples. How is this going to help with that?"
+
+Reddit titles are short stories that answer why the reader buys. Open on a situation the reader recognizes (for a seasonal product, the pressure of that season: obligations, exhaustion, couples drifting apart, giving everything to everyone), then turn to what the product gives back (time that is only theirs, something to look forward to, reconnection, pleasure), ending on a temptation closer. Tell the story to "you" or "you two," never about a named or invented person, so a vendor post never reads as a customer testimonial. Make no health claims (no "reduces stress or anxiety"); say what the nights give back instead. Spice and double meaning welcome at register 7-8, acts implied, never crude, no dares. Brands, prices and logistics go in the post body, not the title. Include at least a couple of solo-buyer stories alongside couples. Organic only (paid Reddit is prohibited, `docs/ads-policy.md`), from an openly xdipx vendor account, only in subreddits whose rules allow vendor posts. Never describe contents the product data does not confirm.
+</reddit>
