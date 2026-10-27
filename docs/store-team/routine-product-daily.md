@@ -154,9 +154,11 @@ before ranking. Exclude what Instagram cannot run (dildos, anatomically realisti
 anything at 3 or fewer live sellable units, and report the published-but-unsellable count in the
 run summary each time it is nonzero, so the inventory-sync defect stays visible until it is fixed
 upstream. File one row:
-`kind:'process'`, `team:'product'`, `targetTeam:'social'`, `dedupeKey:'social-new-picks:<YYYY-MM-DD>'`,
-**and `dedupeScope:'daily'`** (without it the API strips the date and every day's row collapses onto
-one key; row #13082 landed as bare `social-new-picks` for exactly that reason), the top 3 to 6 with
+`kind:'process'`, `team:'product'`, `targetTeam:'social'`, and a literal dated
+**`dedupeKey:'social-new-picks-YYYY-MM-DD'`** (dashes, the real date spelled out, e.g.
+`social-new-picks-2026-10-24`). Do not pass the bare key with `dedupeScope:'daily'`: in practice that
+form does not append the date, so it collapses onto the stale bare `social-new-picks` row and returns
+a no-op (rows #13082 and #16277 both stranded this way). Pass the full dated key literally. The top 3 to 6 with
 handle, vendor, product type, a text-free bare-product image URL, and one line on why each earns a
 post. On a day nothing was published, file nothing. The social routine reads it at its Step 2.9 for
 single posts and at its Step 2.9a as the ranking for the day's New-in carousel (owner direction
