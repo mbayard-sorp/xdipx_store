@@ -128,6 +128,10 @@ describe('imageStem', () => {
     expect(imageStem('https://cdn.shopify.com/s/files/1/x/files/92272b.jpg?v=2')).toBe('92272B')
   })
 
+  it('drops a UUID collision suffix on a bare numeric stem', () => {
+    expect(imageStem('https://cdn.shopify.com/s/files/1/x/files/88373_203ad456-329d-422c-bbca-b459242b5f3f.jpg?v=3')).toBe('88373')
+  })
+
   it('keeps a plain underscored name whole', () => {
     expect(imageStem('https://cdn.example.com/wand_black.png')).toBe('WAND_BLACK')
   })

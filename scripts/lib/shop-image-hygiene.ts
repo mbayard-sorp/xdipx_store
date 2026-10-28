@@ -45,15 +45,17 @@ export function chunk<T>(items: T[], size: number): T[][] {
 
 /**
  * Comparable stem for an image URL: basename, minus query and extension, minus
- * Shopify's collision suffix (`92272A_a9496b8c-...` -> `92272A`), uppercased.
- * The suffix is only stripped after a digit-then-letter token, so a plain
- * `wand_black` name is left whole. Same rule as the packshot sweep.
+ * Shopify's collision suffix, uppercased. A UUID suffix is always stripped
+ * (`88373_203ad456-...` -> `88373`); a shorter suffix only after a
+ * digit-then-letter token (`77791B_1` -> `77791B`), so a plain `wand_black`
+ * name is left whole.
  */
 export function imageStem(url: string): string {
   const base = decodeURIComponent(url.split('?')[0]!.split('/').pop() ?? '')
   const noExt = base.replace(/\.[a-z0-9]+$/i, '')
-  const m = /^(.*\d[a-z])_[a-z0-9-]+$/i.exec(noExt)
-  return (m ? m[1]! : noExt).toUpperCase()
+  const noUuid = noExt.replace(/_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, '')
+  const m = /^(.*\d[a-z])_[a-z0-9-]+$/i.exec(noUuid)
+  return (m ? m[1]! : noUuid).toUpperCase()
 }
 
 /**
