@@ -40,6 +40,7 @@ import {
   isRetryFutileXError,
   X_CREDITS_DEPLETED_PHRASE,
 } from './social-publish/x-limits'
+import { isXPublishHalted, setXPublishHalt, clearXPublishHalt } from './social-publish/x-halt.server'
 import { permalinkFor } from './social-permalink.server'
 import { formatLaSlot } from './social-schedule'
 import { fileBlocker } from './owner-blockers.server'
@@ -89,6 +90,14 @@ export type PublishOutcome =
    * stays available to the owner's Post-now in the meantime.
    */
   | 'skipped_video_valve_off'
+  /**
+   * X's pay-per-use credits are depleted (ticket #18013). This is an
+   * account-wide condition, not a defect in this post: the row is returned to
+   * `draft` (not `failed`/terminal), the owner blocker is filed or bumped
+   * once, the account-wide halt flag is set, and the tick stops attempting
+   * the rest of the queue. See app/lib/social-publish/x-halt.server.ts.
+   */
+  | 'x_credits_halt'
 
 export interface PublishAttempt {
   postId: number
@@ -269,6 +278,14 @@ export interface PublishTickDeps {
    */
   fileDeadRowTicket?: (input: Parameters<typeof createSuggestion>[0]) => Promise<unknown>
   fileOwnerApprovedBounceBlocker?: (input: Parameters<typeof fileBlocker>[0]) => Promise<unknown>
+  /**
+   * The account-wide X credits-halt flag (ticket #18013). Defaults to the
+   * real KV-backed functions in x-halt.server.ts; a test injects fakes so the
+   * halt behaviour is verifiable without touching KV.
+   */
+  isXPublishHalted?: () => Promise<boolean>
+  setXPublishHalt?: () => Promise<void>
+  clearXPublishHalt?: () => Promise<void>
 }
 
 /**
@@ -904,6 +921,17 @@ export async function runSocialPublishTick(deps: PublishTickDeps): Promise<Publi
     }
   }
 
+  // Ticket #18013: X's pay-per-use credits depleted is an account-wide
+  // condition, not a defect in any one queued post. While the halt flag set
+  // below is live, the whole queue stays untouched (not even claimed) rather
+  // than every row individually failing and, on its second strike, filing its
+  // own per-post dead-row ticket for a cause that already has one owner
+  // blocker covering it.
+  const checkXHalted = deps.isXPublishHalted ?? isXPublishHalted
+  if (platform === 'x' && await checkXHalted()) {
+    return { skipped: 'x_credits_halt', swept, ...expiredField, ...overdueField, attempts: [], publishedToday, platform }
+  }
+
   // The video half of the double-gate, read fresh once per tick like the
   // platform valve above. When it is off, video rows are passed over without
   // being claimed, and the eligibility read looks further down the queue so
@@ -1072,7 +1100,41 @@ export async function runSocialPublishTick(deps: PublishTickDeps): Promise<Publi
       // never reached X.
       spentThisTick += cost
       attempts.push({ postId: post.id, outcome: 'published', ...(result.note ? { detail: result.note } : {}) })
+      // Ticket #18013: the first real post out the door is the signal that
+      // credits are back, so the halt lifts immediately rather than waiting
+      // out its own TTL.
+      if (platform === 'x') await (deps.clearXPublishHalt ?? clearXPublishHalt)()
       continue
+    }
+
+    // Ticket #18013: X's pay-per-use credits depleted is account-wide, not a
+    // defect in this post, so it skips the per-post terminal-failure path
+    // below entirely. Deliberately does NOT call repo.markFailed: that would
+    // stamp errorMessage on this row, making its very next attempt (once
+    // credits return) read as a second strike and go terminal for no reason
+    // of its own. Instead this row stays claimed (`publishing`) and
+    // sweepAbandonedPublishing resets it to a clean `draft` at the start of
+    // the next tick, with no error memory, once the halt flag (checked before
+    // this tick's eligibility read) lifts.
+    if (platform === 'x' && result.detail.includes(X_CREDITS_DEPLETED_PHRASE)) {
+      await (deps.setXPublishHalt ?? setXPublishHalt)()
+      const fileOwnerBlocker = deps.fileOwnerApprovedBounceBlocker ?? fileBlocker
+      try {
+        await fileOwnerBlocker({
+          dedupeKey: 'x-publish-blocked-credits',
+          title: 'X posting is blocked: API credits depleted',
+          detail: `Post #${post.id} just died on this. Detail: ${result.detail}`,
+          unblocks: 'X autopublish resuming for every queued post, not just this one.',
+          whereToGo: 'https://developer.x.com',
+          category: 'decision',
+          priority: 1,
+          source: 'agent',
+        })
+      } catch {
+        // An advisory must never take the tick down.
+      }
+      attempts.push({ postId: post.id, outcome: 'x_credits_halt', detail: result.detail })
+      break
     }
 
     // Two attempts, tracked without a new column: the first failure records the
