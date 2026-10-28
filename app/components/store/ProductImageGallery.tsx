@@ -572,7 +572,7 @@ function ThumbnailStrip({
         ref={thumbsRef}
         className="flex gap-2 overflow-x-auto scrollbar-hide scroll-smooth flex-1"
       >
-        {items.slice(0, 10).map((item, i) => (
+        {items.map((item, i) => (
           <button
             key={i}
             onMouseEnter={() => onHover(i)}
