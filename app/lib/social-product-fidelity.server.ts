@@ -252,10 +252,23 @@ function buildDefaultDeps(refId?: string): Required<ProductFidelityDeps> {
         {
           role: 'user',
           content: [
+            // Reference image FIRST, with the cache breakpoint on it: it is the
+            // one block genuinely repeated across calls (every candidate
+            // checked for a given SKU in a run reuses the same bare-product
+            // photo), so it needs to sit in a cacheable prefix position. The
+            // system prompt alone is under Anthropic's ~1024-token cacheable
+            // minimum for Sonnet; combined with this image it clears it. The
+            // GENERATED image (unique per call) and the final instruction stay
+            // after the breakpoint, so only the part that actually changes is
+            // billed uncached (ticket #18146).
+            { type: 'text', text: 'REAL BARE PRODUCT REFERENCE (compare against this one):' },
+            {
+              type: 'image',
+              source: { type: 'base64', media_type: mediaTypeOf(referenceImage.mediaType), data: referenceImage.data },
+              cache_control: { type: 'ephemeral' },
+            },
             { type: 'text', text: 'GENERATED image (judge the product in this one):' },
             { type: 'image', source: { type: 'base64', media_type: mediaTypeOf(renderedImage.mediaType), data: renderedImage.data } },
-            { type: 'text', text: 'REAL BARE PRODUCT REFERENCE (compare against this one):' },
-            { type: 'image', source: { type: 'base64', media_type: mediaTypeOf(referenceImage.mediaType), data: referenceImage.data } },
             { type: 'text', text: 'Return the JSON verdict now.' },
           ],
         },
