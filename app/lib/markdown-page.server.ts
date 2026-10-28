@@ -1072,3 +1072,52 @@ export function comparisonToMarkdown(comparison: Comparison): string {
 
   return lines.join('\n')
 }
+
+// ─── pseoComboToMarkdown ─────────────────────────────────────────────────────
+
+export interface PseoComboMarkdownInput {
+  tagSlug: string
+  typeSlug: string
+  tagLabel: string
+  typeLabel: string
+  products: Array<{ handle: string; title: string }>
+  faqs: Array<{ question: string; answer: string }>
+}
+
+/** Markdown twin for the programmatic SEO pilot pages (/shop/:tag/:type). */
+export function pseoComboToMarkdown(combo: PseoComboMarkdownInput): string {
+  const path = `/shop/${combo.tagSlug}/${combo.typeSlug}`
+  const lines: string[] = []
+
+  lines.push(`# ${combo.tagLabel} ${combo.typeLabel.toLowerCase()} picks`)
+  lines.push('')
+  lines.push(
+    `Emma's picks for a ${combo.typeLabel.toLowerCase()} that fits ${combo.tagLabel.toLowerCase()}, `
+    + `pulled from the live catalog.`,
+  )
+  lines.push('')
+
+  if (combo.products.length > 0) {
+    lines.push('## The picks')
+    lines.push('')
+    for (const p of combo.products) {
+      lines.push(`- [${p.title}](${BASE_URL}/products/${p.handle})`)
+    }
+    lines.push('')
+  }
+
+  if (combo.faqs.length > 0) {
+    lines.push('## Frequently asked questions')
+    lines.push('')
+    for (const f of combo.faqs) {
+      lines.push(`### ${f.question}`)
+      lines.push('')
+      lines.push(f.answer)
+      lines.push('')
+    }
+  }
+
+  lines.push(mdFooter(path))
+
+  return lines.join('\n')
+}
