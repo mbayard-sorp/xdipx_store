@@ -164,7 +164,7 @@ export function MobileExploreMenu({ menuItems }: MobileExploreMenuProps) {
                     type="button"
                     onClick={handleBack}
                     aria-label="Back"
-                    className="-ml-1 inline-flex h-8 w-8 items-center justify-center rounded-full text-ink hover:bg-cream-2 active:scale-95"
+                    className="-ml-1 inline-flex h-8 w-8 items-center justify-center rounded-full text-ink hover:bg-paper-2 active:scale-95"
                   >
                     <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                       <path d="M12 5l-5 5 5 5" />
@@ -192,8 +192,8 @@ export function MobileExploreMenu({ menuItems }: MobileExploreMenuProps) {
                 <Link
                   to={toRelativePath(currentNode.url)}
                   prefetch="intent"
-                  className="flex min-h-[52px] items-center justify-center rounded-full border-[1.5px] border-ink bg-ink px-5 text-base font-semibold text-cream transition-all active:scale-[0.98]"
-                  style={{ fontFamily: 'var(--font-display)' }}
+                  className="flex min-h-[52px] items-center justify-center rounded-full border-[1.5px] border-ink bg-ink px-5 text-base font-semibold text-paper transition-all active:scale-[0.98]"
+                  style={{ fontFamily: 'var(--font-body)' }}
                 >
                   Browse all {currentNode.title}
                 </Link>
@@ -202,7 +202,7 @@ export function MobileExploreMenu({ menuItems }: MobileExploreMenuProps) {
                 {(currentNode.items ?? []).map((child, i) => {
                   const hasChildren = (child.items?.length ?? 0) > 0
                   const baseClass =
-                    'flex min-h-[52px] items-center gap-3 rounded-full border-[1.5px] border-ink/15 bg-cream-2 px-5 text-base font-semibold text-ink transition-all hover:border-coral hover:text-coral active:scale-[0.98]'
+                    'flex min-h-[52px] items-center gap-3 rounded-full border-[1.5px] border-ink/15 bg-paper-2 px-5 text-base font-semibold text-ink transition-all hover:border-coral hover:text-coral active:scale-[0.98]'
                   if (hasChildren) {
                     return (
                       <button
@@ -210,7 +210,7 @@ export function MobileExploreMenu({ menuItems }: MobileExploreMenuProps) {
                         type="button"
                         onClick={() => handleDrillIn(i)}
                         className={`${baseClass} text-left`}
-                        style={{ fontFamily: 'var(--font-display)' }}
+                        style={{ fontFamily: 'var(--font-body)' }}
                       >
                         <span className="flex-1 min-w-0 truncate">{child.title}</span>
                         <svg
@@ -236,7 +236,7 @@ export function MobileExploreMenu({ menuItems }: MobileExploreMenuProps) {
                       to={toRelativePath(child.url)}
                       prefetch="intent"
                       className={`${baseClass} justify-center`}
-                      style={{ fontFamily: 'var(--font-display)' }}
+                      style={{ fontFamily: 'var(--font-body)' }}
                     >
                       {child.title}
                     </Link>
@@ -261,6 +261,26 @@ export function MobileExploreMenu({ menuItems }: MobileExploreMenuProps) {
         }}
         aria-label="Browse categories"
       >
+        {/* The tabs scroll; the account tab does not. Seven Sanity-published
+            menu items share this row, and `flex-1` gave each of them an equal
+            slice of it that is narrower than its own label at 375: measured on
+            a consented capture (run 1703), the seven labels ran from x=25 to
+            x=304 as ONE continuous glyph run, with inter-WORD gaps of 1-2px —
+            indistinguishable from the 1-2px gaps between letters inside a word.
+            The bar read "PleasurePlayBodyWearDiscoverSaleNotebook". Labels are
+            `shrink-0` with their own padding now, so each one always renders at
+            its natural width and the row scrolls when the item count outgrows
+            the viewport, the same strip idiom the hero pill row and the rails
+            already use. The account tab stays outside the scroller so it stays
+            pinned to the right edge where it was.
+
+            Why nobody had seen this: the `:has()` rule in app.css hides this
+            entire nav while the cookie-consent dialog is in the DOM, and the
+            capture CLI seeded only the age gate, never a consent choice. So
+            every design-critic capture in this project's history has scored a
+            page with the primary mobile navigation display:none. It surfaced
+            the first time a capture was taken with `--consent`. */}
+        <div className="flex min-w-0 flex-1 items-stretch overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {menuItems.map((item, i) => {
           const active = activeIndex === i
           const accent = isAccentLabel(item.title)
@@ -271,14 +291,26 @@ export function MobileExploreMenu({ menuItems }: MobileExploreMenuProps) {
               onClick={() => handleTabTap(i)}
               aria-expanded={active}
               aria-controls="explore-panel"
-              className="relative flex-1 inline-flex items-center justify-center transition-colors"
+              className="relative shrink-0 inline-flex items-center justify-center px-3 transition-colors"
               style={{
-                fontFamily: 'var(--font-display)',
+                // Doctrine §2 gives DM Sans "Body copy, nav, labels, CTA text".
+                // Run 1298 moved the desktop nav and the mobile drawer off the
+                // display serif (#12612 defect 1) across MegaMenu.tsx and
+                // Navbar.tsx; this bar is the third nav surface and it kept the
+                // serif, because the guard that fix added reads only those two
+                // files. Same lesson the playbook already draws from run 1298,
+                // one file further out: the surface was wider than the fix.
+                // Family only, no weight change, exactly as that fix was scoped.
+                fontFamily: 'var(--font-body)',
                 fontWeight: 700,
                 fontSize: '13px',
                 letterSpacing: '0.01em',
                 color: active
-                  ? 'var(--color-coral-deep)'
+                  // `coral-deep` is a v2 compatibility alias that maps 1:1 onto
+                  // plum-2 in app.css, so this renders the identical color.
+                  // Doctrine §3 says migrate the aliases opportunistically on
+                  // touch, and this line is being touched.
+                  ? 'var(--color-plum-2)'
                   : accent
                     ? 'var(--color-plum)'
                     : 'var(--color-ink)',
@@ -297,6 +329,7 @@ export function MobileExploreMenu({ menuItems }: MobileExploreMenuProps) {
             </button>
           )
         })}
+        </div>
 
         {/* My account — fixed-width tab on the right */}
         <Link
