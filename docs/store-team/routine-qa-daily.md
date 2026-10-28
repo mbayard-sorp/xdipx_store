@@ -46,6 +46,16 @@ take it through a lightweight verified transition instead: `in_review`, then `ve
 of the shape "PR #<n> already merged; CI was green at merge time", still confirming the transition
 landed per Step 6.
 
+**The "skip the diff read" shortcut only applies when the ticket already shows a prior
+`verifiedAt`** — i.e. the merge followed an actual QA pass. (#18296) A PR merged straight from
+`pr_open`/`in_review` with no prior `verifiedAt` — a hand-merge, an outage-driven bypass, anything
+that skipped the gate — still gets the full Step 3/4 review before any `verified` stamp, because
+`merged:true` is not by itself evidence the content is sound when QA was never in the loop. Run
+1680 (2026-10-27) hit exactly this during a ~26h `/cron/release-engine`/`/api/team/pr` outage: the
+owner hand-merged 9 `pr_open` tickets straight to main with none ever reaching `verified`, and one
+of them (#17626/PR #1781) carried a real regression that the full diff read caught and the
+fast-path would have stamped `verified` instead.
+
 The structural cause of this state is fixed as of 2026-09-02: the docs carve-out no longer skips the
 ticket gate, so the engine will not merge a docs-only agent-editor PR whose ticket has not reached
 `verified`. Before that, it did, and nothing wrote the ticket status forward on that path, so those
