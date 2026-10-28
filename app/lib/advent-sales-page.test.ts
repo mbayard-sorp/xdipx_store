@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ADVENT_CALENDARS, ADVENT_ORDER, ADVENT_SALE_ENDS_AT, adventByHandle, isAdventKey, isAdventSalesSlug } from './advent-sales-page'
+import { ADVENT_CALENDARS, ADVENT_ORDER, adventByHandle, isAdventKey, isAdventSalesSlug } from './advent-sales-page'
 import { bridgeSlugFromPath } from './bridge-host.server'
 
 describe('advent sales page', () => {
@@ -22,9 +22,6 @@ describe('advent sales page', () => {
     expect(isAdventKey(null)).toBe(false)
   })
 
-  it('ends the advent price at one fixed moment', () => {
-    expect(new Date(ADVENT_SALE_ENDS_AT).toISOString()).toBe('2026-11-25T07:59:00.000Z')
-  })
 
   it('carries no em dashes in customer copy', () => {
     expect(JSON.stringify(ADVENT_CALENDARS)).not.toContain(String.fromCharCode(0x2014))

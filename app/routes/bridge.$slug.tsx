@@ -162,7 +162,6 @@ async function adventLoaderData(request: Request) {
     kind: 'advent' as const,
     initial,
     products,
-    nowMs: Date.now(),
     query: (() => {
       const q = new URLSearchParams(url.search)
       q.delete('c')
@@ -339,7 +338,7 @@ export default function BridgeRoute() {
       {d.kind === 'funnel' ? (
         <LeadFunnelView page={d.page} utm={d.utm} terms={d.terms} smsOptin={d.smsOptin} />
       ) : d.kind === 'advent' ? (
-        <AdventSalesView d={{ initial: d.initial, products: d.products, nowMs: d.nowMs, query: d.query, logo: d.logo, error: actionData?.error ?? null }} />
+        <AdventSalesView d={{ initial: d.initial, products: d.products, query: d.query, logo: d.logo, error: actionData?.error ?? null }} />
       ) : (
         <BridgeView d={d} />
       )}
