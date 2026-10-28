@@ -57,6 +57,15 @@
  * contradicts, and need the manual whole-document re-read this checker is a
  * pre-flight for, not a replacement of.
  *
+ * ── Cross-post pass (ticket #18045) ─────────────────────────────────────────
+ * Everything above models the document against ITSELF. `findCrossPostIngressConflicts`
+ * is the same `conflicting-instruction` shape (same code, same water-exposure
+ * bucket, opposite polarity) but with one site in the draft and the other in
+ * an already-PUBLISHED post, because the corpus can hold two opposite water
+ * instructions for one printed code with every in-document checker staying
+ * green. See its own doc comment below for the incident that motivated it
+ * (run 1666).
+ *
  * ── Limit ────────────────────────────────────────────────────────────────────
  * Zero. Any finding trips the checker (exit 1), the same contract as the other
  * four deterministic pre-flights.
@@ -343,20 +352,27 @@ function toSite(t: TokenSentence | PromiseSite | CriterionSite): SelfConsistency
   return { section: t.section, sentence: t.sentence, paragraphIndex: t.paragraphIndex }
 }
 
+/** Every ingress/IP-rating-code mention across a flattened document, sentence by sentence. */
+function extractIngressMentions(paragraphs: DraftParagraph[]): TokenSentence[] {
+  const mentions: TokenSentence[] = []
+  paragraphs.forEach((para, paragraphIndex) => {
+    for (const sentence of splitSentences(para.text)) {
+      mentions.push(...scanIngressSentence(sentence, para.section, paragraphIndex))
+    }
+  })
+  return mentions
+}
+
 export function analyzeParagraphs(paragraphs: DraftParagraph[]): SelfConsistencyReport {
   const findings: SelfConsistencyFinding[] = []
 
   // ── Ingress codes ──
   const byToken = new Map<string, TokenSentence[]>()
-  paragraphs.forEach((para, paragraphIndex) => {
-    for (const sentence of splitSentences(para.text)) {
-      for (const ts of scanIngressSentence(sentence, para.section, paragraphIndex)) {
-        const list = byToken.get(ts.token) ?? []
-        list.push(ts)
-        byToken.set(ts.token, list)
-      }
-    }
-  })
+  for (const ts of extractIngressMentions(paragraphs)) {
+    const list = byToken.get(ts.token) ?? []
+    list.push(ts)
+    byToken.set(ts.token, list)
+  }
 
   for (const [token, mentions] of byToken) {
     const instructed = mentions.filter(m => m.instructions.length > 0)
@@ -479,4 +495,67 @@ export function analyzeParagraphs(paragraphs: DraftParagraph[]): SelfConsistency
 /** Convenience: analyze a raw draft (title + excerpt + seoTitle + seoDescription + portable-text body). */
 export function analyzeDraft(draft: DraftInput): SelfConsistencyReport {
   return analyzeParagraphs(draftToParagraphs(draft))
+}
+
+// ─── Cross-post ingress conflicts: draft vs ALREADY-PUBLISHED posts (ticket #18045) ──
+
+/**
+ * `conflicting-instruction` above can only see a contradiction inside ONE
+ * document. check-self-consistency.ts CANNOT see a safety contradiction
+ * between two published posts, only inside one: a draft can state an
+ * instruction for an ingress code that the live corpus already contradicts,
+ * and every deterministic checker stays green because none of them compares
+ * the draft against what xdipx's own published posts already tell readers
+ * about the same code (run 1666: a draft shower permission for IPX7 directly
+ * contradicted the published `/notebook/what-is-a-gyroscope-sex-toy`, caught
+ * only by a human re-read).
+ *
+ * This is the pure comparison half; the script wrapper
+ * (`scripts/check-self-consistency.ts`) supplies `priors` from a live GROQ
+ * read of published `blogPost` docs, the same split as `app/lib/fresh-language.ts`
+ * / `scripts/check-fresh-language.ts`.
+ */
+export interface CrossPostIngressConflict {
+  /** The ingress code both sites instruct on. */
+  token: string
+  bucket: string
+  draftSite: SelfConsistencySite
+  draftPolarity: InstructionPolarity
+  priorSlug: string
+  priorSite: SelfConsistencySite
+  priorPolarity: InstructionPolarity
+}
+
+export function findCrossPostIngressConflicts(
+  draftParagraphs: DraftParagraph[],
+  priors: { slug: string; paragraphs: DraftParagraph[] }[],
+): CrossPostIngressConflict[] {
+  const draftMentions = extractIngressMentions(draftParagraphs)
+  const conflicts: CrossPostIngressConflict[] = []
+
+  for (const prior of priors) {
+    const priorMentions = extractIngressMentions(prior.paragraphs)
+    for (const dm of draftMentions) {
+      for (const dInstr of dm.instructions) {
+        for (const pm of priorMentions) {
+          if (pm.token !== dm.token) continue
+          for (const pInstr of pm.instructions) {
+            if (pInstr.bucket !== dInstr.bucket) continue
+            if (pInstr.polarity === dInstr.polarity) continue
+            conflicts.push({
+              token: dm.token,
+              bucket: dInstr.bucket,
+              draftSite: toSite(dm),
+              draftPolarity: dInstr.polarity,
+              priorSlug: prior.slug,
+              priorSite: toSite(pm),
+              priorPolarity: pInstr.polarity,
+            })
+          }
+        }
+      }
+    }
+  }
+
+  return conflicts
 }

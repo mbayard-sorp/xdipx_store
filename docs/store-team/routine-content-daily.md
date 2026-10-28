@@ -685,10 +685,11 @@ ingress-code conflicts, two FAQ-vs-body claim divergences, one source-attributio
 run of this scan alone caught only one of the five.
 
 Run the deterministic checker on the draft JSON FIRST, alongside the other four mandatory checkers
-above, and drive it to exit 0 before the manual pass below:
+above, and drive it to exit 0 before the manual pass below. Always pass `--slug <slug>` (the
+post's own slug, decided by Step 4) so the cross-post pass below runs:
 
 ```bash
-npx tsx scripts/check-self-consistency.ts <draft.json>
+npx tsx scripts/check-self-consistency.ts <draft.json> --slug <slug>
 ```
 
 The checker extracts every TOKEN the post defines or instructs on — an ingress/IP rating code
@@ -701,6 +702,16 @@ promise whose own inline list does not match the number it just stated. See
 `app/lib/self-consistency.ts` for the full definition. This is the mechanical slice only: it would
 have caught run 1239's two ingress-code conflicts, not its FAQ-vs-body claim divergences or its
 source-attribution gap, because those share no reusable token the checker can key on.
+
+**Cross-post pass (ticket #18045).** The in-document check above can only see a contradiction
+inside ONE document. Run 1666 drafted an IPX7 shower permission that directly contradicted the
+already-published `/notebook/what-is-a-gyroscope-sex-toy`, and all six deterministic checkers
+passed clean on it — the draft was internally consistent, and the contradiction was entirely
+cross-post, caught only by a human re-read prompted by the accuracy gate. With `--slug` passed,
+the checker also GROQs every published post for the same ingress codes the draft mentions and reds
+on a disagreement, naming and quoting both the draft site and the published site the same way the
+in-document check does. Resolve a hit by matching the house wording already live (see the IP-rating
+house wording a few paragraphs up), never by softening the published post.
 
 The manual re-read below still runs after the checker is clean, because it catches what the checker
 cannot: before submit, list every RULE or STANDARD the draft tells the reader to apply (read the
