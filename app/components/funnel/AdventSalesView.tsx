@@ -19,7 +19,6 @@ import {
   ADVENT_EMMA_PHOTO,
   ADVENT_FAQ,
   ADVENT_ORDER,
-  ADVENT_SALE_ENDS_AT,
   ADVENT_SHIP_BY,
   ADVENT_SOLO_IDEAS,
   adventRitual,
@@ -48,7 +47,6 @@ export interface AdventShopifyData {
 export interface AdventViewData {
   initial: AdventKey
   products: Partial<Record<AdventKey, AdventShopifyData>>
-  nowMs: number
   /** The page's other query params (UTMs, preview flags) without `c`, kept on lineup links. */
   query: string
   /** The store wordmark from Sanity site settings; null renders the text wordmark. */
@@ -127,51 +125,6 @@ function Snow() {
           />
         )
       })}
-    </div>
-  )
-}
-
-function useCountdown(initialNow: number) {
-  const [now, setNow] = useState(initialNow)
-  useEffect(() => {
-    setNow(Date.now())
-    const t = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(t)
-  }, [])
-  const end = new Date(ADVENT_SALE_ENDS_AT).getTime()
-  const ms = Math.max(0, end - now)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  const d = Math.floor(ms / 864e5)
-  const h = Math.floor(ms / 36e5) % 24
-  const m = Math.floor(ms / 6e4) % 60
-  const s = Math.floor(ms / 1e3) % 60
-  return {
-    live: ms > 0,
-    units: [
-      { v: pad(d), l: 'days' },
-      { v: pad(h), l: 'hrs' },
-      { v: pad(m), l: 'min' },
-      { v: pad(s), l: 'sec' },
-    ],
-    short: `${d}d ${pad(h)}h ${pad(m)}m`,
-    endLabel: new Date(end).toLocaleDateString('en-US', { month: 'long', day: 'numeric', timeZone: 'America/Los_Angeles' }),
-  }
-}
-
-function Timer({ units, big = false }: { units: { v: string; l: string }[]; big?: boolean }) {
-  return (
-    <div className="flex gap-1.5" role="timer" aria-label="Time left at the advent price">
-      {units.map(u => (
-        <div
-          key={u.l}
-          className={
-            'rounded-[10px] bg-ink text-center text-paper-3 ' + (big ? 'min-w-16 px-2 pb-2 pt-2.5' : 'min-w-[52px] px-1.5 pb-1.5 pt-[7px]')
-          }
-        >
-          <div className={'font-mono font-medium leading-[1.1] ' + (big ? 'text-2xl' : 'text-lg')}>{u.v}</div>
-          <div className="font-mono text-[9px] uppercase tracking-[0.14em] text-[#C9BCC4]">{u.l}</div>
-        </div>
-      ))}
     </div>
   )
 }
@@ -274,7 +227,6 @@ function IdeaCard({ idea, dark, packshot }: { idea: AdventIdea; dark: boolean; p
 export function AdventSalesView({ d }: { d: AdventViewData }) {
   const [key, setKey] = useState<AdventKey>(d.initial)
   const [img, setImg] = useState(0)
-  const timer = useCountdown(d.nowMs)
 
   const p = ADVENT_CALENDARS[key]
   const shop = d.products[key]
@@ -419,17 +371,9 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
             <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-plum">{valuePct}% less</span>
           </div>
 
-          {timer.live || stockLine !== null ? (
-            <div className="flex flex-col gap-3.5 rounded-[18px] border border-coral/30 px-5 py-[18px]">
-              {timer.live ? (
-                <div className="flex flex-wrap items-center justify-between gap-x-[18px] gap-y-2.5">
-                  <div className="text-sm font-semibold">Advent pricing ends in</div>
-                  <Timer units={timer.units} />
-                </div>
-              ) : null}
-              {stockLine !== null ? (
-                <div className="text-[13.5px] font-semibold text-coral">Only {stockLine} left at this price</div>
-              ) : null}
+          {stockLine !== null ? (
+            <div className="rounded-[18px] border border-coral/30 px-5 py-[18px]">
+              <div className="text-[13.5px] font-semibold text-coral">Only {stockLine} left at this price</div>
             </div>
           ) : null}
 
@@ -692,11 +636,10 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
             </h2>
             <p className="max-w-[52ch] text-[16.5px] leading-[1.6]">
               These are 2026 holiday editions, and stock is limited.
-              {timer.live ? ` ${priceStr} is the advent price, and it ends ${timer.endLabel}.` : ''} Order by {ADVENT_SHIP_BY} and door one is ready on December 1.
+              {' '}{priceStr} is the advent price through November 24. Order by {ADVENT_SHIP_BY} and door one is ready on December 1.
             </p>
           </div>
           <div className="flex flex-[0_1_auto] flex-col items-start gap-3.5">
-            {timer.live ? <Timer units={timer.units} big /> : null}
             <BuyForm cal={p} shop={shop} className="rounded-full bg-ink px-8 py-[17px] text-base font-medium text-white transition hover:-translate-y-0.5">
               {cta}
             </BuyForm>
@@ -753,11 +696,7 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
                   {priceStr} <span className="font-normal text-plum">· {valueStr} value</span>
                   <FreeShippingBadge size="sm" className="ml-2 align-middle" />
                 </div>
-                {timer.live || stockLine !== null ? (
-                  <div className="text-[12.5px] font-semibold text-coral">
-                    {[timer.live ? `Ends in ${timer.short}` : null, stockLine !== null ? `${stockLine} left` : null].filter(Boolean).join(' · ')}
-                  </div>
-                ) : null}
+                {stockLine !== null ? <div className="text-[12.5px] font-semibold text-coral">{stockLine} left</div> : null}
               </div>
             </div>
             <BuyForm cal={p} shop={shop} className="whitespace-nowrap rounded-full bg-coral px-5 py-[13px] text-[15px] font-medium text-white sm:px-[26px]">
