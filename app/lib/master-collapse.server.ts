@@ -729,3 +729,32 @@ export function isNoveltyCategory(master: MasterRecord): boolean {
   return NOVELTY_PATTERNS.test(master.category) ||
     NOVELTY_PATTERNS.test(master.displayTitle)
 }
+
+// ─── Crude-title hold ──────────────────────────────────────────────────────────
+
+/**
+ * High-precision token list for crude-named SKUs, relayed from product-manager
+ * (weekly strategy run 1663, ticket #18014). The deterministic auto-import path
+ * (autoImportPhase2) has no editorial judgment of its own, so a crude title that
+ * clears the financial gates ships unattended while the product-manager agent
+ * rejects comparable rows by hand: phase2-auto imported 'Dick Boy 7in', 'Pussy
+ * Licker: Strawberry', and 'GoodHead Pussy Licker Spray' in the same week six
+ * similarly-named rows were rejected on sight.
+ *
+ * Tokens are deliberately specific so this never catches a legitimate wellness
+ * SKU that merely shares a word — see isNoveltyCategory's own note on the same
+ * failure mode. Mirrors NOVELTY_PATTERNS/isNoveltyCategory immediately above;
+ * see buildMasterUpsertPayload for the soft-hold consequence (tier D, still
+ * surfaced for manual approval — never a hard reject).
+ */
+export const CRUDE_TITLE_PATTERNS =
+  /\b(?:jizz|fuck(?:ing|slut)|cum\s*guzzlers?|sluts?|whores?|pussy\s*lickers?|dick\s*boy|dickalicious|cock\s*oil)\b/i
+
+/**
+ * True when a master's display title or brand matches a crude-token pattern.
+ * See CRUDE_TITLE_PATTERNS.
+ */
+export function isCrudeTitle(master: MasterRecord): boolean {
+  return CRUDE_TITLE_PATTERNS.test(master.displayTitle) ||
+    CRUDE_TITLE_PATTERNS.test(master.brand)
+}
