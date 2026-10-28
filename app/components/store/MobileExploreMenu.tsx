@@ -291,7 +291,16 @@ export function MobileExploreMenu({ menuItems }: MobileExploreMenuProps) {
               onClick={() => handleTabTap(i)}
               aria-expanded={active}
               aria-controls="explore-panel"
-              className="relative shrink-0 inline-flex items-center justify-center px-3 transition-colors"
+              // `shrink-0 grow`, not `flex-1`. Both let a tab fill spare room;
+              // only one of them refuses to go narrower than its own label.
+              // `flex-1` is `flex: 1 1 0%`, and that 0% basis is what let seven
+              // labels be squeezed into slices too small for them. `grow` with
+              // `shrink-0` keeps the basis at `auto` (the label's natural
+              // width), so the tabs still spread evenly across the bar when the
+              // Sanity menu is short enough to fit — which matters, because the
+              // item count is content, not a constant — and overflow into the
+              // scroller instead of overlapping when it is not.
+              className="relative shrink-0 grow inline-flex items-center justify-center px-3 transition-colors"
               style={{
                 // Doctrine §2 gives DM Sans "Body copy, nav, labels, CTA text".
                 // Run 1298 moved the desktop nav and the mobile drawer off the

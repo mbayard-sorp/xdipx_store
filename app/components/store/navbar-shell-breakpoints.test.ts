@@ -152,7 +152,12 @@ describe('Nav typography — every nav entry inherits font-body (#12612 defect 1
     expect(tab![0], '#16879-class defect: equal-width tabs are narrower than their labels at 375').not.toMatch(
       /(^|\s)flex-1(\s|")/,
     )
-    expect(tab![0]).toContain('shrink-0')
+    // The PAIR is the point, so pin both halves. `shrink-0` alone fixes the
+    // overlap but leaves the tabs bunched at the left whenever the Sanity menu
+    // is short enough to fit; `grow` alone re-admits the 0%-basis squeeze this
+    // whole guard exists to stop. Neither half is correct without the other.
+    expect(tab![0], 'shrink-0 stops the squeeze').toContain('shrink-0')
+    expect(tab![0], 'grow keeps the tabs spread when the menu is short enough to fit').toContain('grow')
     // The scroller must stay INSIDE the nav and must not swallow the account
     // tab, which is pinned to the right edge. If the account Link ever moves
     // inside the overflow container it scrolls away, which is a worse defect
