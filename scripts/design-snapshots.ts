@@ -28,6 +28,7 @@
  *   npx tsx scripts/design-snapshots.ts --viewport mobile|tablet|desktop|wide (comma list ok)
  *   npx tsx scripts/design-snapshots.ts --viewport both      # mobile+desktop (default)
  *   npx tsx scripts/design-snapshots.ts --viewport doctrine  # 375/768/1440, the design-critic set
+ *   npx tsx scripts/design-snapshots.ts --viewport 640x900   # explicit WIDTHxHEIGHT, for breakpoint checks
  *   npx tsx scripts/design-snapshots.ts --consent            # capture with consent already stored
  *
  * Output: <out>/<route-name>.<viewport>.png, printed one per line.
@@ -161,6 +162,22 @@ const VIEWPORTS: Record<string, { width: number; height: number }> = {
   tablet: { width: 768, height: 1024 },
   desktop: { width: 1280, height: 800 },
   wide: { width: 1440, height: 900 },
+}
+
+/**
+ * An explicit `WIDTHxHEIGHT` viewport, e.g. `640x900`. Breakpoint boundaries are
+ * exactly where responsive bugs live, and the named set has no entry at any of
+ * them: a fix keyed to `sm:` has to be checked at 640 and just under it, and
+ * before this the only options were to add a one-off name or to argue from the
+ * CSS. Height defaults to 900 because these captures are full-page anyway.
+ */
+export function parseExplicitViewport(spec: string): { width: number; height: number } | undefined {
+  const m = /^(\d{2,5})(?:x(\d{2,5}))?$/.exec(spec)
+  if (!m) return undefined
+  const width = Number(m[1])
+  const height = m[2] ? Number(m[2]) : 900
+  if (width < 200 || width > 5000 || height < 200 || height > 5000) return undefined
+  return { width, height }
 }
 
 /** `both` is the historical mobile+desktop pair; anything else is a comma list. */
@@ -520,8 +537,8 @@ async function main(): Promise<number> {
     return 2
   }
   for (const vp of viewports) {
-    if (!VIEWPORTS[vp]) {
-      process.stderr.write(`ERROR: unknown viewport "${vp}" (${known} | both | doctrine)\n`)
+    if (!VIEWPORTS[vp] && !parseExplicitViewport(vp)) {
+      process.stderr.write(`ERROR: unknown viewport "${vp}" (${known} | both | doctrine | WIDTHxHEIGHT)\n`)
       return 2
     }
   }
@@ -550,7 +567,7 @@ async function main(): Promise<number> {
 
   let failures = 0
   for (const vp of viewports) {
-    const { width, height } = VIEWPORTS[vp]!
+    const { width, height } = VIEWPORTS[vp] ?? parseExplicitViewport(vp)!
     const context = await preparedContext(width, height)
     try {
       for (const route of ROUTES) {
