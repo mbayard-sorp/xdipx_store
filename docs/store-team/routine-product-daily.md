@@ -154,11 +154,14 @@ before ranking. Exclude what Instagram cannot run (dildos, anatomically realisti
 anything at 3 or fewer live sellable units, and report the published-but-unsellable count in the
 run summary each time it is nonzero, so the inventory-sync defect stays visible until it is fixed
 upstream. File one row:
-`kind:'process'`, `team:'product'`, `targetTeam:'social'`, and a literal dated
+`kind:'process'`, `team:'product'`, `targetTeam:'social'`, with a literal dated
 **`dedupeKey:'social-new-picks-YYYY-MM-DD'`** (dashes, the real date spelled out, e.g.
-`social-new-picks-2026-10-24`). Do not pass the bare key with `dedupeScope:'daily'`: in practice that
-form does not append the date, so it collapses onto the stale bare `social-new-picks` row and returns
-a no-op (rows #13082 and #16277 both stranded this way). Pass the full dated key literally. The top 3 to 6 with
+`social-new-picks-2026-10-24`) **and `dedupeScope:'daily'`**. Both are required: the dated key alone,
+with no `dedupeScope`, defaults to `'recurring'` scope, which strips the date stamp back off
+(`app/lib/dedupe-key.ts` line ~135) and collapses onto the stale bare `social-new-picks` row as a
+no-op — `dedupeScope:'daily'` is what *preserves* the date, not what breaks it (rows #13082, #16277,
+and a 2026-10-24 recurrence were all stranded by omitting it; #17626 then shipped the exact opposite
+of this fix and was corrected by #18268). Pass both together. The top 3 to 6 with
 handle, vendor, product type, a text-free bare-product image URL, and one line on why each earns a
 post. On a day nothing was published, file nothing. The social routine reads it at its Step 2.9 for
 single posts and at its Step 2.9a as the ranking for the day's New-in carousel (owner direction
