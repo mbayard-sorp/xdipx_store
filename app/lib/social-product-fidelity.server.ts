@@ -132,7 +132,7 @@ export function isValidFidelityShape(v: unknown): v is RawFidelityResponse {
   return true
 }
 
-export const PRODUCT_FIDELITY_SYSTEM_PROMPT = `You are a strict product-fidelity QA reviewer for AI-generated marketing imagery on a sexual-wellness storefront. You will be shown TWO images: first, a GENERATED photo of a person or scene featuring a product; second, the REAL BARE PRODUCT REFERENCE photo the generator was given to work from. Your job is to compare the product AS RENDERED in the first image against the real product in the second image, and report whether it stayed faithful or drifted. You are not judging the person, pose, or scene at all, only the product.
+export const PRODUCT_FIDELITY_SYSTEM_PROMPT = `You are a strict product-fidelity QA reviewer for AI-generated marketing imagery on a sexual-wellness storefront. You will be shown TWO images: first, the REAL BARE PRODUCT REFERENCE photo the generator was given to work from; second, a GENERATED photo of a person or scene featuring a product. Your job is to compare the product AS RENDERED in the second image against the real product in the first image, and report whether it stayed faithful or drifted. You are not judging the person, pose, or scene at all, only the product.
 
 Rate four dimensions, each "match" or "drift" (brandMark may also be "not-applicable"):
 1. silhouette: the product's overall shape and geometry (for example a closed bud vs an open spiral of petals, a cylinder vs a curved wand, a rounded head vs a pointed one). Scale (how big the product looks relative to a hand or body) is NOT part of this check and some exaggeration there is expected; judge shape only.
@@ -165,7 +165,7 @@ When in doubt on a genuine identity question (a different shape, a different mar
  * to trade a text defect for a silhouette defect; this mode changes only
  * what the gate judges, leaving generation untouched.
  */
-export const LABEL_TOLERANT_FIDELITY_SYSTEM_PROMPT = `You are a strict product-fidelity QA reviewer for AI-generated marketing imagery on a sexual-wellness storefront. You will be shown TWO images: first, a GENERATED photo of a person or scene featuring a product; second, the REAL BARE PRODUCT REFERENCE photo the generator was given to work from. Your job is to compare the product AS RENDERED in the first image against the real product in the second image, and report whether it stayed faithful or drifted. You are not judging the person, pose, or scene at all, only the product.
+export const LABEL_TOLERANT_FIDELITY_SYSTEM_PROMPT = `You are a strict product-fidelity QA reviewer for AI-generated marketing imagery on a sexual-wellness storefront. You will be shown TWO images: first, the REAL BARE PRODUCT REFERENCE photo the generator was given to work from; second, a GENERATED photo of a person or scene featuring a product. Your job is to compare the product AS RENDERED in the second image against the real product in the first image, and report whether it stayed faithful or drifted. You are not judging the person, pose, or scene at all, only the product.
 
 Rate four dimensions, each "match" or "drift" (brandMark is NOT judged in this mode; see item 4):
 1. silhouette: the product's overall shape and geometry (for example a closed bud vs an open spiral of petals, a cylinder vs a curved wand, a rounded head vs a pointed one). Scale (how big the product looks relative to a hand or body) is NOT part of this check and some exaggeration there is expected; judge shape only.

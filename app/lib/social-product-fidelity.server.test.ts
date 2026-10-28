@@ -336,4 +336,13 @@ describe('buildDefaultDeps.callVision — cache breakpoint placement (ticket #18
     expect((content[3] as { cache_control?: unknown })['cache_control']).toBeUndefined()
     expect(content[4]).toMatchObject({ type: 'text', text: expect.stringContaining('Return the JSON verdict now') })
   })
+
+  it('states the image order in both system prompts consistently with the runtime message order (reference first, generated second)', async () => {
+    const { PRODUCT_FIDELITY_SYSTEM_PROMPT, LABEL_TOLERANT_FIDELITY_SYSTEM_PROMPT } = await import('./social-product-fidelity.server')
+    for (const prompt of [PRODUCT_FIDELITY_SYSTEM_PROMPT, LABEL_TOLERANT_FIDELITY_SYSTEM_PROMPT]) {
+      expect(prompt).toContain('first, the REAL BARE PRODUCT REFERENCE photo')
+      expect(prompt).toContain('second, a GENERATED photo')
+      expect(prompt).toContain('AS RENDERED in the second image against the real product in the first image')
+    }
+  })
 })
