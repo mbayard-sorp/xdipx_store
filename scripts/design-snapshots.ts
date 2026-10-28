@@ -10,6 +10,16 @@
  * page script runs) and the below-the-fold Reveal blanking (the full height is
  * scrolled to trip every observer before capture).
  *
+ * A third trap is OPT-IN rather than handled, because both states are real:
+ * the cookie-consent banner. It is bottom-anchored and fixed, so it occludes
+ * whatever sits at the bottom of the first viewport, and a static capture
+ * cannot tell "occluded by the banner" from "not rendered at this width" —
+ * exactly the ambiguity that stalled ticket #16878's third finding (the hero
+ * quick-start pill strip at 375). `--consent` seeds a stored choice so the
+ * gate can capture the page WITHOUT the banner and settle the question with
+ * pixels. The default stays banner-visible: that is a real first session, and
+ * the banner-over-hero defect is scored against it.
+ *
  * Usage:
  *   npx tsx scripts/design-snapshots.ts                              # localhost:3000, default routes
  *   npx tsx scripts/design-snapshots.ts --base https://xdipx.com     # against prod
@@ -18,6 +28,7 @@
  *   npx tsx scripts/design-snapshots.ts --viewport mobile|tablet|desktop|wide (comma list ok)
  *   npx tsx scripts/design-snapshots.ts --viewport both      # mobile+desktop (default)
  *   npx tsx scripts/design-snapshots.ts --viewport doctrine  # 375/768/1440, the design-critic set
+ *   npx tsx scripts/design-snapshots.ts --consent            # capture with consent already stored
  *
  * Output: <out>/<route-name>.<viewport>.png, printed one per line.
  * Requires the Playwright chromium binary (`npx playwright install chromium`).
@@ -136,6 +147,7 @@ const BASE = (flag('base') ?? process.env['VISUAL_BASE_URL'] ?? 'http://localhos
 const ROUTES = (flag('routes') ?? '/,/discover,/faq,/about').split(',').map((r) => r.trim()).filter(Boolean)
 const OUT = flag('out') ?? join('.design-snapshots', new Date().toISOString().slice(0, 10))
 const VIEWPORT = flag('viewport') ?? 'both'
+const CONSENT = boolFlag('consent')
 const VIA_FETCH = shouldUseFetchTransport(BASE, process.env, {
   force: boolFlag('via-fetch'),
   disable: boolFlag('no-via-fetch'),
@@ -432,6 +444,18 @@ async function preparedContext(width: number, height: number): Promise<BrowserCo
       JSON.stringify({ verified: true, timestamp: Date.now(), version: '1.0' }),
     )
   })
+  if (CONSENT) {
+    // The exact shape CookieConsent.tsx reads back (CONSENT_KEY /
+    // POLICY_VERSION): any stored value suppresses the banner, and
+    // 'essential_only' is the choice that leaves analytics off, so the
+    // capture does not also start firing pixels from the gate's own session.
+    await context.addInitScript(() => {
+      window.localStorage.setItem(
+        'xdipx_consent',
+        JSON.stringify({ type: 'essential_only', version: '1.0', ts: Date.now() }),
+      )
+    })
+  }
   if (VIA_FETCH) {
     // The transport is curl, which reads the proxy environment itself, so the
     // NODE_USE_ENV_PROXY shim the old undici path needed is gone with it.

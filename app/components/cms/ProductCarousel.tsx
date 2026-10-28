@@ -107,6 +107,15 @@ export function ProductCarousel({
   // doubled arrow. Grid layouts render no scroll buttons, so their CTA keeps
   // whatever arrow the label carries.
   const displayCtaLabel = layout === 'carousel' ? ctaLabel.replace(/\s*→\s*$/, '') : ctaLabel
+  // ...but the scroll buttons that justify the strip are `hidden sm:flex`, so
+  // BELOW `sm` there is no → button to double up against and the strip removes
+  // the arrow for nothing. That cost the one carousel rail on the live homepage
+  // its arrow at 375 while all nine grid-layout See-alls kept theirs
+  // (design-critic gate, run 1571, ticket #16879a), and it also renders a
+  // whitelist CTA in a form the whitelist does not carry: the charter lists
+  // "Take a peek →" WITH the arrow. Restored as a mobile-only glyph rather than
+  // by widening the strip, so the doubled-arrow case run 905 found stays fixed.
+  const arrowStrippedForCarousel = displayCtaLabel !== ctaLabel
 
   const bgClass = railGroundClass(chrome, bgStyle, ground)
   const dark = isDark(bgStyle)
@@ -139,12 +148,26 @@ export function ProductCarousel({
     // storefront doctrine surface this finding audited.
     <section className={`${storefront ? 'py-16 md:py-20' : 'py-12 px-4'} ${bgClass}`}>
       <div className={storefront ? 'mx-auto max-w-[1320px] px-6 md:px-16' : 'max-w-6xl mx-auto'}>
-        {/* Header — flex-wrap + gap so the CTA drops onto its own row instead of
-            colliding with the heading at narrow widths (390px / the 375px floor);
-            min-w-0 lets the heading column shrink, shrink-0 + whitespace-nowrap
-            keep the CTA a single unbroken line (ticket #468). */}
+        {/* Header — the CTA drops onto its own row below `sm` instead of
+            colliding with the heading at narrow widths (390px / the 375px
+            floor); shrink-0 + whitespace-nowrap keep the CTA a single unbroken
+            line (ticket #468).
+
+            `basis-full sm:basis-auto sm:flex-1` is doing the dropping, and the
+            bare `flex-wrap` it replaces could not: with `flex-1 min-w-0` the
+            heading column absorbed every pixel of available shrink, so the row
+            never overflowed and therefore never wrapped. The heading's own TEXT
+            wrapped instead, which put its last line on the same baseline as the
+            CTA with no vertical separation at all. Measured live at 375 by the
+            design-critic gate (run 1571, ticket #16879a) on the Under-$30 rail:
+            the heading's last line ended at x≈248 and the See-all began at
+            x≈269 — 21px of horizontal clearance, zero vertical. #468's comment
+            has claimed this wrap since it was written; `basis-full` is what
+            actually produces it. `sm` is the right breakpoint because it is
+            where the scroll-arrow buttons below appear (`hidden sm:flex`), so
+            the two-row stack and the arrow-glyph restore switch together. */}
         <div className="flex flex-wrap items-end justify-between gap-4 mb-6">
-          <div className="min-w-0 flex-1">
+          <div className="min-w-0 basis-full sm:basis-auto sm:flex-1">
             {eyebrow && (
               /* Storefront chrome takes the mono `.kicker` motif every other
                  section label on the page uses (app.css §11, doctrine §2). It
@@ -258,6 +281,9 @@ export function ProductCarousel({
                 style={storefront ? { fontFamily: 'var(--font-body)' } : { fontFamily: 'var(--font-display)' }}
               >
                 {displayCtaLabel}
+                {arrowStrippedForCarousel && (
+                  <span aria-hidden="true" className="sm:hidden">{' →'}</span>
+                )}
               </Link>
             )}
           </div>
