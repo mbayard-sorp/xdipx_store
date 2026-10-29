@@ -201,6 +201,26 @@ masturbation") that was in fact the brief's partnered-sex subsample, not its mas
 percentage with no stated denominator or subsample scope is exactly what makes a brief figure
 unsafe to draft from directly.
 
+**When the trace succeeds but the figure's LABEL and its MEASURE disagree (mandatory, ticket
+#18865).** Tracing can work perfectly and still leave a mismatch: the brief's label for a number
+(e.g. "sexual assault") does not match what the primary source actually measured under that label.
+Run 1724 hit exactly this (a podcastReviewBrief's "1 in 4 women, 1 in 6 men are survivors of sexual
+assault" traced to the CDC, whose own measures give neither figure under "sexual assault") and the
+DRAFTING of the correction, not the original claim, is where it went wrong twice: the voice gate
+BLOCKed a self-contradiction, then the accuracy gate BLOCKed the repaired version for asserting an
+origin ("this is really the CDC's technology-facilitated measure") the source never stated. Once a
+mismatch is found:
+1. Report only what the primary source itself states, measure by measure, naming each measure.
+2. Never assert that a cited figure is *wrong* — an unmatched label is not evidence of error, and a
+   term like "sexual assault" often spans several measures or none.
+3. Never assign a figure an origin, and never set it beside a different measure of the same source
+   that happens to share its numbers — adjacency reads as derivation even when no sentence claims
+   one.
+4. Say plainly that the source names no provenance when it does not, and let the direction of the
+   gap carry the point.
+The same resolution rule as elsewhere in this routine applies to the correction itself: narrow or
+delete, never hedge.
+
 ## Step 3.5: Intimacy-advisor brief (Real Talk days only)
 
 Before drafting a Real Talk post, hand the chosen §8B row (slug, problem, target query, † flag)
