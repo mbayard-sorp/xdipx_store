@@ -412,7 +412,7 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
               <div className="min-w-0">
                 <div className="mb-1 font-mono text-[10.5px] uppercase tracking-[0.14em] text-plum">Or go all in</div>
                 <div className="font-display text-[1.15rem] leading-[1.25]">
-                  {ADVENT_CALENDARS[stepUp.to].short} · {ADVENT_CALENDARS[stepUp.to].days}-day
+                  {ADVENT_CALENDARS[stepUp.to].short} · <span className="whitespace-nowrap">{ADVENT_CALENDARS[stepUp.to].days}-day</span>
                 </div>
                 <div className="mt-1 text-[13.5px] leading-snug text-ink-3">
                   <strong className="font-semibold text-ink">{money(stepUp.extraValue)} more in the box</strong> for {money(stepUp.extraPrice)} more.
