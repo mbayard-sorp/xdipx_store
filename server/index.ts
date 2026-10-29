@@ -13,6 +13,7 @@ import { createMcpRoutes } from './mcp-route.js'
 import { validateStartupEnv } from '../app/lib/env.server.js'
 import { bridgeHostSupportPath, bridgeSlugFromPath, isBridgeHost, requestHost } from '../app/lib/bridge-host.server.js'
 import { getAdBridgePage } from '../app/lib/ad-bridge.server.js'
+import { getSalesPage } from '../app/lib/sales-page.server.js'
 import { isLeadFunnelSlug } from '../app/lib/lead-funnel.js'
 import { isAdventSalesSlug } from '../app/lib/advent-sales-page.js'
 
@@ -135,8 +136,10 @@ app.use(async (req, res, next) => {
   if (isAdventSalesSlug(slug)) return next()
   try {
     const preview = (req.headers.cookie ?? '').includes('__sanity_preview=1')
-    const page = await getAdBridgePage(slug, preview)
+    const [page, sales] = await Promise.all([getAdBridgePage(slug, preview), getSalesPage(slug, preview)])
     if (page && (page.live || preview)) return next()
+    // Long-form sales pages for adult ad networks (app/lib/sales-page.ts).
+    if (sales && (sales.live || preview)) return next()
   } catch (err) {
     console.error('[bridge-host] gate lookup failed:', err)
   }
