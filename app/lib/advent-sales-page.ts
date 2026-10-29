@@ -316,3 +316,39 @@ export function adventRitual(days: number) {
 }
 
 export const money = (n: number) => '$' + (Number.isInteger(n) ? String(n) : n.toFixed(2))
+
+/** The calendar the hero offers as a step up from every other one. */
+export const ADVENT_STEP_UP_TO: AdventKey = 'luxury-24'
+
+export interface AdventStepUp {
+  to: AdventKey
+  extraPrice: number
+  extraValue: number
+  extraDoors: number
+  addedBrands: string[]
+}
+
+/**
+ * The honest math for stepping up to Luxury from the calendar on screen, using
+ * live Shopify prices. Null when there's nothing to pitch: already on Luxury, a
+ * price is missing, or the extra value in the box doesn't beat the extra spend.
+ */
+export function adventStepUp(from: AdventKey, prices: Partial<Record<AdventKey, number>>): AdventStepUp | null {
+  const to = ADVENT_STEP_UP_TO
+  if (from === to) return null
+  const fromPrice = prices[from]
+  const toPrice = prices[to]
+  if (!fromPrice || !toPrice) return null
+  const a = ADVENT_CALENDARS[from]
+  const b = ADVENT_CALENDARS[to]
+  const extraPrice = Math.round((toPrice - fromPrice) * 100) / 100
+  const extraValue = Math.round((b.value - a.value) * 100) / 100
+  if (extraPrice <= 0 || extraValue <= extraPrice) return null
+  return {
+    to,
+    extraPrice,
+    extraValue,
+    extraDoors: Math.max(0, b.days - a.days),
+    addedBrands: b.brands.filter(x => !a.brands.includes(x)),
+  }
+}

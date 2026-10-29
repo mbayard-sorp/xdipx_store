@@ -21,7 +21,9 @@ import {
   ADVENT_ORDER,
   ADVENT_SHIP_BY,
   ADVENT_SOLO_IDEAS,
+  ADVENT_STEP_UP_TO,
   adventRitual,
+  adventStepUp,
   money,
   type AdventCalendar,
   type AdventIdea,
@@ -127,6 +129,10 @@ function Snow() {
       })}
     </div>
   )
+}
+
+function listJoin(xs: string[]) {
+  return xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`
 }
 
 /**
@@ -240,16 +246,22 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
   const stock = shop?.stock ?? null
   const stockLine = shop?.available && stock !== null && stock > 0 ? stock : null
 
+  const stepUpShop = d.products[ADVENT_STEP_UP_TO]
+  const prices: Partial<Record<AdventKey, number>> = {}
+  for (const k of ADVENT_ORDER) if (d.products[k]) prices[k] = d.products[k]!.price
+  const stepUp = stepUpShop?.available ? adventStepUp(key, prices) : null
+
   useEffect(() => {
     if (shop) trackFbViewContent({ content_ids: [shop.productId], value: shop.price, currency: 'USD' })
   }, [shop])
 
   const lineupHref = (k: AdventKey) => `?${d.query ? d.query + '&' : ''}c=${k}`
 
-  function pick(k: AdventKey) {
+  // The step-up card logs which calendar the visitor left; the lineup logs the one they picked.
+  function pick(k: AdventKey, source: 'advent_lineup' | 'advent_upsell' = 'advent_lineup') {
     setKey(k)
     setImg(0)
-    trackCtaClick('advent_lineup', k)
+    trackCtaClick(source, source === 'advent_upsell' ? key : k)
     const url = new URL(window.location.href)
     url.searchParams.set('c', k)
     window.history.replaceState(window.history.state, '', url)
@@ -382,6 +394,38 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
               {cta}
             </BuyForm>
           </div>
+
+          {stepUp && stepUpShop ? (
+            <a
+              data-step-up
+              href={lineupHref(stepUp.to)}
+              onClick={e => {
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return
+                e.preventDefault()
+                pick(stepUp.to, 'advent_upsell')
+              }}
+              className="grid grid-cols-[64px_minmax(0,1fr)_auto] items-center gap-4 rounded-[18px] border border-plum/25 bg-paper px-4 py-4 text-left transition hover:border-plum/50 sm:gap-[18px]"
+            >
+              <div className="h-16 w-16 overflow-hidden rounded-[12px] bg-paper-3">
+                {stepUpShop.images[0] ? <img src={shopifyImageUrl(stepUpShop.images[0], 160)} alt="" loading="lazy" className="block h-full w-full object-cover" /> : null}
+              </div>
+              <div className="min-w-0">
+                <div className="mb-1 font-mono text-[10.5px] uppercase tracking-[0.14em] text-plum">Or go all in</div>
+                <div className="font-display text-[1.15rem] leading-[1.25]">
+                  {ADVENT_CALENDARS[stepUp.to].short} · <span className="whitespace-nowrap">{ADVENT_CALENDARS[stepUp.to].days}-day</span>
+                </div>
+                <div className="mt-1 text-[13.5px] leading-snug text-ink-3">
+                  <strong className="font-semibold text-ink">{money(stepUp.extraValue)} more in the box</strong> for {money(stepUp.extraPrice)} more.
+                  {' '}Adds {listJoin(stepUp.addedBrands)}
+                  {stepUp.extraDoors > 0 ? `, plus ${stepUp.extraDoors} more doors` : ''}.
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-base font-semibold">{money(stepUpShop.price)}</div>
+                <div className="mt-1 whitespace-nowrap text-[13px] font-medium text-coral">Take a peek →</div>
+              </div>
+            </a>
+          ) : null}
 
           <div className="flex flex-col gap-2.5 border-t border-line pt-5 text-sm text-ink-3">
             <div className="flex gap-[9px]"><span className="text-sage">♥</span> Plain box, plain label, no product names. Your statement reads XDIPX</div>
