@@ -476,7 +476,7 @@ export function ProductImageGallery({
       {/* Mobile dot indicators */}
       {items.length > 1 && (
         <div className="flex md:hidden justify-center gap-1.5 pt-1">
-          {items.slice(0, 10).map((_, i) => (
+          {items.map((_, i) => (
             <button
               key={i}
               onClick={() => selectMedia(i)}
