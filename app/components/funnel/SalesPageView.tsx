@@ -42,6 +42,8 @@ export interface SalesShopifyData {
 export interface SalesViewData {
   page: SalesPage
   shop: SalesShopifyData
+  /** With add-ons the buy button leads to them, so begin_checkout waits for the last screen. */
+  hasAddOns: boolean
   logo: { src: string; alt: string } | null
   preview: boolean
   error: string | null
@@ -69,9 +71,9 @@ const TONE_BG: Record<SalesTone, string> = {
   ink: 'bg-ink',
 }
 
-const money = (n: number) => '$' + (Number.isInteger(n) ? String(n) : n.toFixed(2))
+export const money = (n: number) => '$' + (Number.isInteger(n) ? String(n) : n.toFixed(2))
 
-function Heading({
+export function Heading({
   text,
   dark,
   emClass,
@@ -110,11 +112,13 @@ function sanityImg(img: SalesImage, w: number) {
 function BuyForm({
   shop,
   variant,
+  beginCheckout,
   className,
   children,
 }: {
   shop: SalesShopifyData
   variant: SalesVariant | undefined
+  beginCheckout: boolean
   className: string
   children: ReactNode
 }) {
@@ -127,7 +131,7 @@ function BuyForm({
         if (!variant) return
         const item = { item_id: shop.productId, item_name: shop.title, item_brand: shop.brand, item_variant: variant.title, price: variant.price, quantity: 1 }
         trackAddToCart(item)
-        trackBeginCheckout([item], variant.price)
+        if (beginCheckout) trackBeginCheckout([item], variant.price)
       }}
     >
       <input type="hidden" name="variantId" value={variant?.id ?? ''} />
@@ -282,7 +286,7 @@ export function SalesPageView({ d }: { d: SalesViewData }) {
 
           {stockLine !== null ? <div className="text-[13.5px] font-semibold text-coral">Only {stockLine} left</div> : null}
 
-          <BuyForm shop={shop} variant={variant} className={buyBtn + ' w-full sm:w-auto'}>{cta}</BuyForm>
+          <BuyForm shop={shop} variant={variant} beginCheckout={!d.hasAddOns} className={buyBtn + ' w-full sm:w-auto'}>{cta}</BuyForm>
 
           <div className="flex flex-col gap-2.5 border-t border-line pt-5 text-sm text-ink-3">
             {page.heroPoints.map(pt => (
@@ -302,7 +306,7 @@ export function SalesPageView({ d }: { d: SalesViewData }) {
           key={s.key}
           s={s}
           renderBuy={className => (
-            <BuyForm shop={shop} variant={variant} className={className}>
+            <BuyForm shop={shop} variant={variant} beginCheckout={!d.hasAddOns} className={className}>
               {cta} · {priceStr}
             </BuyForm>
           )}
@@ -318,7 +322,7 @@ export function SalesPageView({ d }: { d: SalesViewData }) {
             className="mx-auto mb-[34px] max-w-[20ch] font-display text-[clamp(2.1rem,5vw,3.6rem)] font-normal leading-[1.12] tracking-[-0.01em]"
           />
           <div className="flex justify-center">
-            <BuyForm shop={shop} variant={variant} className={buyBtn}>
+            <BuyForm shop={shop} variant={variant} beginCheckout={!d.hasAddOns} className={buyBtn}>
               {cta} · {priceStr}
             </BuyForm>
           </div>
@@ -341,7 +345,7 @@ export function SalesPageView({ d }: { d: SalesViewData }) {
               {stockLine !== null ? <div className="text-[12.5px] font-semibold text-coral">{stockLine} left</div> : null}
             </div>
           </div>
-          <BuyForm shop={shop} variant={variant} className="whitespace-nowrap rounded-full bg-coral px-5 py-[13px] text-[15px] font-medium text-white sm:px-[26px]">{cta}</BuyForm>
+          <BuyForm shop={shop} variant={variant} beginCheckout={!d.hasAddOns} className="whitespace-nowrap rounded-full bg-coral px-5 py-[13px] text-[15px] font-medium text-white sm:px-[26px]">{cta}</BuyForm>
         </div>
       </div>
 

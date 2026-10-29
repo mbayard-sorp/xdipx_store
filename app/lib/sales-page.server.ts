@@ -8,6 +8,7 @@
  * host gate, so it stays free of React imports.
  */
 
+import { parse as parseCookie, serialize as serializeCookie } from 'cookie'
 import { cached } from '~/lib/kv.server'
 import { getClient } from '~/lib/sanity.server'
 import { isValidSalesSlug, normalizeSalesPage, type SalesPage } from '~/lib/sales-page'
@@ -24,7 +25,8 @@ const SALES_GROQ = `*[_type == "salesPage" && slug.current == $slug] | order(_up
     reviews[]{ quote, name },
     "image": image${IMG}
   },
-  closer, closerLine
+  closer, closerLine,
+  addOns[]{ productHandle, headline, pitch }
 }`
 
 /**
@@ -46,4 +48,26 @@ export async function getSalesPage(slug: string, preview = false): Promise<Sales
   }
   if (preview) return run()
   return cached(`sanity:sales-page:${slug}`, 60, run, 15)
+}
+
+/**
+ * The cart a sales-page visitor is building while they step through the
+ * add-ons. Host-only on curious.xdipx.com, separate from the storefront cart
+ * cookie, and short-lived: it only has to last from the buy button to checkout.
+ */
+const SALES_CART_COOKIE = '__xdipx_sales_cart'
+
+export function getSalesCartId(request: Request): string | null {
+  const id = parseCookie(request.headers.get('Cookie') ?? '')[SALES_CART_COOKIE]
+  return id && id.startsWith('gid://shopify/Cart/') ? id : null
+}
+
+export function setSalesCartCookie(cartId: string): string {
+  return serializeCookie(SALES_CART_COOKIE, cartId, {
+    httpOnly: true,
+    path: '/',
+    sameSite: 'lax',
+    secure: process.env['NODE_ENV'] === 'production',
+    maxAge: 60 * 60 * 2,
+  })
 }

@@ -39,6 +39,16 @@ export type SalesSection =
   | (SectionBase & { type: 'buyBand'; body: string })
   | (SectionBase & { type: 'image'; image: SalesImage; caption: string })
 
+/** Offered one at a time after a buy button, before checkout. */
+export interface SalesAddOn {
+  productHandle: string
+  headline: string
+  pitch: string
+}
+
+/** The schema caps add-ons at two; the normalizer enforces it again. */
+export const MAX_ADD_ONS = 2
+
 export interface SalesPage {
   slug: string
   productHandle: string
@@ -54,6 +64,7 @@ export interface SalesPage {
   sections: SalesSection[]
   closer: string
   closerLine: string
+  addOns: SalesAddOn[]
 }
 
 export function isValidSalesSlug(slug: string): boolean {
@@ -174,5 +185,27 @@ export function normalizeSalesPage(raw: Record<string, unknown> | null | undefin
     sections,
     closer: clean(raw['closer']) || headline,
     closerLine: clean(raw['closerLine']),
+    addOns: rows(raw['addOns'], r => {
+      const handle = typeof r['productHandle'] === 'string' ? r['productHandle'] : ''
+      const pitch = clean(r['pitch'])
+      if (!HANDLE_RE.test(handle) || handle === productHandle || !pitch) return null
+      return { productHandle: handle, headline: clean(r['headline']), pitch }
+    }).slice(0, MAX_ADD_ONS),
   }
+}
+
+/**
+ * The 1-based add-on step to show after `after` (0 = right after the buy
+ * button), skipping add-ons that cannot be bought. Null means go to checkout.
+ */
+export function nextAddOnStep(available: boolean[], after: number): number | null {
+  for (let i = Math.max(0, after); i < available.length; i++) if (available[i]) return i + 1
+  return null
+}
+
+/** Parse the `addon` query param: a 1-based step within range, or null. */
+export function parseAddOnStep(raw: string | null, count: number): number | null {
+  if (!raw || !/^\d$/.test(raw)) return null
+  const n = Number(raw)
+  return n >= 1 && n <= count ? n : null
 }
