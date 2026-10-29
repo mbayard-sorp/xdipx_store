@@ -246,7 +246,15 @@ a template literal, an `<a href>`, and a programmatic `navigate(/discover)`. The
 word-boundary match on the route rather than one spelling of one attribute. Before trusting a new
 guard, spend one minute writing down the two or three other shapes the same defect could take (query
 params, template literals, a different tag or call site) and check the pattern against each — the
-query-param case above is the worked example.
+query-param case above is the worked example. **Before trusting a guard at all, state in one
+sentence how the class it pins produces the pixel it prevents (run 1703).** `product-carousel-header.test.ts`
+(ticket #468) asserted `min-w-0 flex-1` on the rail heading column and stayed green through the
+entire life of the collision it was written to prevent, because `flex-1` is the class that made the
+collision inevitable — a column that keeps shrinking never lets its row overflow, so the `flex-wrap`
+asserted beside it could never fire. Checking the guard against other *shapes* of the defect (the
+#16885 rule above) would not have caught this, because the shapes were never the problem; the causal
+direction was. If the one-sentence trace cannot be stated, the guard is a comment with an assertion
+attached, and it should be rewritten or deleted rather than kept for the reassurance.
 
 - `tech-architect` — coupling, layer, Oxygen-seam integrity, migration impact; writes/links an ADR if
   the change is non-trivial.
@@ -314,6 +322,12 @@ query-param case above is the worked example.
   every REVISE that design-critic reports as a withheld BLOCK must be surfaced as a withheld BLOCK in
   this run's summary and event row, never folded into the ordinary REVISE count, so the record shows
   what was actually scored rather than reading as one more routine REVISE.
+  **A subagent's task-output file size is not a liveness probe (run 1703).** The harness does not
+  write that file incrementally; it stays at its initial prompt's size until the agent completes, so
+  a transcript sitting at a few hundred bytes for several minutes does not mean `design-critic` has
+  stalled. Read liveness with `ListAgents` (running plus elapsed time) and give it room to finish;
+  stopping and re-dispatching on a false stall (run 1703 killed one mid-analysis) costs a full gate
+  pass of wall clock and tokens for nothing.
   **When this cycle is working a filed defect ticket (ticket #12615):** before any fix is written,
   dispatch `design-critic` for a per-defect CONFIRMED / REFUTED verdict against a fresh capture and
   a stated measurement, not a re-score of the whole surface. Run 1162 wrote exactly that fix-first
@@ -355,6 +369,11 @@ query-param case above is the worked example.
   real:** run 778 re-implemented it by hand and run 899 skipped the gate outright at the turn cap. If
   you find yourself hand-rolling a capture again, that is a code ticket against this script, not a
   longer paragraph here.
+  **Crop before you dispatch (run 1703).** A raw full-page capture runs 375x18,000px and up;
+  handing `design-critic` the pre-cropped region instead of the whole page let run 1703's re-dispatch
+  complete comfortably where the first attempt had trouble. Crop to the band or module actually under
+  review before the gate call, and keep the crop/measure helpers in `scripts/` rather than rebuilding
+  them by hand each run.
 - **Emma voice gate** — `emma-empathy-reviewer` signs off on all customer-facing copy against
   `docs/emma-voice.md` (the canonical voice charter).
 - `seo-pdp-auditor` + `aeo-geo-auditor` — when the change affects rendering, JSON-LD, canonical, the
