@@ -39,11 +39,20 @@
  * the existing utm_content/external_ad_id order match never covers (Advent26
  * attributes orders by a Shopify cart attribute, not a tagged URL --
  * `docs/store-team/ads-live-campaigns.md`), so `net_revenue_cents`/ROAS for
- * these rows reads honestly as 0 until that is wired separately. The
- * spend/click-based rules (R1, R2, R7, R8) evaluate correctly from the first
- * pull after this runs; the ROAS-based rules (R3, R5, R6) simply stay quiet
- * for these ads until revenue attribution exists, which is an accurate
- * silence, not a defect of this change.
+ * these rows reads honestly as 0 until that is wired separately.
+ *
+ * QA (bounce on ticket #18774's first PR) caught that reading a real, honest
+ * 0 is not the same as "stays quiet": `netRoas()` returns an actual `0`, not
+ * `null`, whenever spend is positive, so R1 (0 orders at 2x break-even spend)
+ * and R6 (ROAS under break-even in two windows) would eventually fire a false
+ * pause/brake against these rows, and only R5's scale threshold (which needs
+ * ROAS *above* break-even) happens to stay quiet on its own. So `exportPayload:
+ * { ownerBuilt: true }` set below also marks `revenueAttributed: false` on the
+ * `CreativeRuleInput` these rows produce (`ad-rules.server.ts`'s
+ * `loadRulesWindow`), and `ad-rules-core.ts` gates R1, R3 and R6 off that flag
+ * explicitly. R2 (CTR) and R8 (frequency) do not read revenue and are
+ * unaffected; R7 (account spend) is unaffected because it never reads orders
+ * or ROAS at all.
  *
  * Never touches the protected apply/mutate paths (`ad-platform-apply.server.ts`,
  * `ads/channels/*\/mutate.server.ts`) or any valve. A rule that fires for one
