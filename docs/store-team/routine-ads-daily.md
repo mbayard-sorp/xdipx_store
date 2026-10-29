@@ -45,7 +45,8 @@ bash scripts/team-api.sh GET  team/gate 'team=ads&excludeRun=<RUN_ID>'
 Read in full at the start of each pass, before any drafting, in this order: `docs/ads-policy.md`
 (especially §Meta strategic lane M1 to M8 and the copy-register table),
 `docs/emma-voice.md` marketing addendum, `docs/store-team/ad-creative-concept-bank-2026-10-03.md`,
-`docs/store-team/ad-owner-notes.md`, `docs/store-team/mission-brief.md`.
+`docs/store-team/ad-owner-notes.md`, `docs/store-team/ads-live-campaigns.md` (owner-built campaigns
+running now and their rules; Pass 2 reports every campaign in it), `docs/store-team/mission-brief.md`.
 
 Hard rules, every string, every idea:
 
@@ -98,9 +99,10 @@ list and that section disagree, the policy wins.
 | M7 health | Read `GET team/status`, the open suggestions, and the open `ads:meta-disapproval` blocker (Pass 2 Step 4a files it) for a Meta rejection. One rejection stops new Meta ideas until the owner decides. A second rejection citing the same policy, or any account restriction, pauses the lane |
 | M8 lead funnel | Exclusion audiences for existing customers and subscribers on the ad set; the offer claim matches what the Shopify code enforces; no failing creative staged in the same draft; one marked test lead proved end to end on curious.xdipx.com before spend; budget sized to about 50 Leads a week from a stated CPL, else labelled a smoke test; the pixel has received the optimized event |
 
-Until the bridge host ships (plan PR-D), a Meta idea may be filed against a planned
-`https://curious.xdipx.com/<idea slug>` URL, and its `policy_check` says "M1 depends on PR-D; not
-exportable until the bridge is live". It is an idea, not a launch.
+The bridge host is live: `curious.xdipx.com` serves the lead funnel and `/advents26`. A Meta idea
+for a page that does not exist yet may still be filed against a planned
+`https://curious.xdipx.com/<idea slug>` URL, and its `policy_check` says "M1 depends on the page
+shipping". It is an idea, not a launch.
 
 ## Pass 1: Ideas (14:30 UTC)
 
