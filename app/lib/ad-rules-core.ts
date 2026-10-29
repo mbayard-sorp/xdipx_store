@@ -25,6 +25,11 @@
  *     research table does not carry. Both are settings.
  *   - R8 needs frequency, which the metrics table does not store. Without it the
  *     rule stays quiet. The Meta insights import (PR-E) is what supplies it.
+ *   - `revenueAttributed: false` (ticket #18774) marks a creative whose
+ *     orders/revenue are known not to be attributed yet, rather than
+ *     genuinely zero -- an owner-built ad mirrored only for spend/click
+ *     visibility. R1, R3 and R6 (the order- and ROAS-based pause/brake rules)
+ *     stay quiet for it; R2, R5 and R8 are unaffected.
  *
  * Objective-aware rule sets (ticket #16428, plan section 9.3): a creative whose
  * mirrored campaign objective is leads gets L1 to L8 (ad-rules-lead-core.ts)
@@ -91,6 +96,16 @@ export interface CreativeRuleInput {
   adsetExternalId?: string | null
   /** Lead-side inputs. Read only for lead-campaign creatives. */
   lead?: LeadCreativeSignals
+  /**
+   * False only for a creative whose orders/revenue are known not to be
+   * attributed yet (an owner-built ad mirrored for spend/click visibility,
+   * ticket #18774's `exportPayload.ownerBuilt`) -- `netRevenueCents` reads an
+   * honest 0 forever, not a real loss. Missing or true is every ordinary
+   * creative. R1/R3/R6 (the order- and ROAS-based pause/brake rules) stay
+   * quiet rather than reading that 0 as a hard kill or a brake once revenue
+   * attribution for these ads is wired separately.
+   */
+  revenueAttributed?: boolean
 }
 
 export interface RulesWindow {
@@ -230,9 +245,16 @@ function evaluateCreative(c: CreativeRuleInput, s: RulesSettings, now: Date): Ru
     return out
   }
 
+  // Owner-built ads mirrored for visibility only (ticket #18774): orders/revenue
+  // read an honest 0 forever, not a real loss, so the order- and ROAS-based
+  // pause/brake rules (R1, R3, R6) stay quiet. R2 (CTR) and R8 (frequency) do
+  // not depend on revenue and still evaluate normally; R5 (scale) already
+  // stays quiet on its own since roas7 can never clear a positive threshold.
+  const revenueAttributed = c.revenueAttributed !== false
+
   // ---- Pause family -------------------------------------------------------
   // R1 hard kill: lifetime spend at least N x BE CPA, zero attributed orders, minimum hours live.
-  if (life.spendCents >= th.ads_rule_r1_be_multiple * be.cpaCents && life.orders === 0 && hoursLive >= th.ads_rule_r1_min_hours) {
+  if (revenueAttributed && life.spendCents >= th.ads_rule_r1_be_multiple * be.cpaCents && life.orders === 0 && hoursLive >= th.ads_rule_r1_min_hours) {
     out.push(fired(c, 'R1', 'pause',
       `Pause: ${formatMoney(life.spendCents)} spent in ${lifeDays}d, 0 orders, R1`,
       { spendCents: life.spendCents, orders: 0, breakEvenCpaCents: be.cpaCents, multiple: th.ads_rule_r1_be_multiple, hoursLive: Math.round(hoursLive), days: lifeDays }))
@@ -245,7 +267,7 @@ function evaluateCreative(c: CreativeRuleInput, s: RulesSettings, now: Date): Ru
       { impressions: life.impressions, ctrPct: Number(lifeCtr.toFixed(3)), minCtrPct: th.ads_rule_r2_min_ctr_pct, days: lifeDays }))
   }
   // R3 unprofitable: 7d spend at least N x BE and 7d net ROAS under F x break-even ROAS.
-  if (w7.spendCents >= th.ads_rule_r3_be_multiple * be.cpaCents && roas7 != null && roas7 < th.ads_rule_r3_roas_factor * be.roas) {
+  if (revenueAttributed && w7.spendCents >= th.ads_rule_r3_be_multiple * be.cpaCents && roas7 != null && roas7 < th.ads_rule_r3_roas_factor * be.roas) {
     out.push(fired(c, 'R3', 'pause',
       `Pause: ${formatRoas(roas7)} net ROAS against ${formatRoas(be.roas)} break-even over 7d on ${formatMoney(w7.spendCents)} spent, R3`,
       { roas7, breakEvenRoas: be.roas, spendCents: w7.spendCents, orders: w7.orders, factor: th.ads_rule_r3_roas_factor }))
@@ -276,7 +298,7 @@ function evaluateCreative(c: CreativeRuleInput, s: RulesSettings, now: Date): Ru
   // ---- R6 brake -----------------------------------------------------------
   const brakeSpend = th.ads_rule_r6_min_spend_be_multiple * be.cpaCents
   if (
-    w7.spendCents >= brakeSpend && w3.spendCents > 0 && roas7 != null && roas3 != null
+    revenueAttributed && w7.spendCents >= brakeSpend && w3.spendCents > 0 && roas7 != null && roas3 != null
     && roas7 < be.roas && roas3 < be.roas
   ) {
     const cooling = appliedEvents(c.events, 'brake').some(e => withinHours(e.appliedAt!, now, th.ads_rule_r6_cooldown_hours))
