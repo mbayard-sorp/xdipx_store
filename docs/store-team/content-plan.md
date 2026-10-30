@@ -251,7 +251,7 @@ Format rules added 2026-07-21 (owner-approved):
   if…" line even when the row is not marked †. Write it in on the first draft; do not spend a
   shared rewrite cycle adding it later.
 
-Topic bank (30; work top to bottom within the Tue/Fri rhythm, reorder to serve the theme week,
+Topic bank (31; work top to bottom within the Tue/Fri rhythm, reorder to serve the theme week,
 extend freely — additions need a slug, problem, and target query):
 
 | # | Slug | Problem | Target query |
@@ -286,8 +286,23 @@ extend freely — additions need a slug, problem, and target query):
 | 28 | how-do-you-choose-toys-when-mobility-is-limited | Grip, reach, and mobility limits | "sex toys that work with arthritis or limited mobility" |
 | 29 | how-do-you-keep-toys-private-in-a-shared-home | Privacy with roommates or kids in the house **COVERED, do not write as-is** | "how do I keep sex toys private at home" |
 | 30 | can-you-travel-with-a-sex-toy | Travel worry: security lines, packing, batteries | "can you bring a sex toy on a plane" |
+| 31 | when-should-you-throw-away-a-sex-toy | Knowing when a toy is past its usable life, not just when it smells | "how do you know when to throw away a sex toy" |
 
 † = health-adjacent; the "worth seeing a clinician if…" line is mandatory.
+
+**When no writable row remains (added 2026-10-28, #18359).** The bank ran fully dry on 2026-10-27:
+26 of 30 rows had published posts and the other four (15, 25, 26, 29) each carry a standing COVERED
+note, so a Tue/Fri run reading top to bottom found nothing left to write. This had already happened
+piecemeal three times before (runs 760, 1416, 1613 each reordered past one COVERED row) without the
+plan ever saying what to do once the whole bank is spent. A Tue/Fri run that finds no writable row
+uses the bank's own extend-freely licence from the heading above: author a new row in place (slug,
+problem, target query, dagger flag if health-adjacent) targeting a query this bank does not already
+cover, and append it to this table in the same run so the next run inherits it rather than
+rediscovering the gap. Row 31 above is the worked example (authored by run 1684, 2026-10-27,
+published clean). A COVERED row (15, 25, 26, 29) is not a permanent dead entry: retire it by
+striking it from the working rotation once a genuinely distinct angle is found or the cluster is
+judged fully held by its sibling post, rather than leaving every future run to re-read and
+re-reject the same four rows indefinitely.
 
 **Row 15 is already covered and needs a new angle before anyone writes it (content run 760, 2026-09-08).**
 The published podcast-notes post `/notebook/what-counts-as-premature-ejaculation` ("How Long Should It
