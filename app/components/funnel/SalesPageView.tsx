@@ -49,9 +49,6 @@ export interface SalesViewData {
   error: string | null
 }
 
-/** Real stock is shown only when it is low enough to be useful to know. */
-const STOCK_LINE_MAX = 20
-
 const CSS = `
 [data-sales] details[data-faq] summary::-webkit-details-marker { display: none; }
 [data-sales] details[data-faq] summary { list-style: none; }
@@ -153,8 +150,6 @@ export function SalesPageView({ d }: { d: SalesViewData }) {
   const compareAt = shop.showCompareAt && variant?.compareAtPrice && variant.compareAtPrice > price ? variant.compareAtPrice : null
   const savePct = compareAt ? Math.round((1 - price / compareAt) * 100) : 0
   const priceStr = money(price)
-  const canBuy = !!variant?.available
-  const stockLine = canBuy && shop.stock !== null && shop.stock > 0 && shop.stock <= STOCK_LINE_MAX ? shop.stock : null
 
   // The hero image (when set) leads; the Shopify gallery follows.
   const gallery: { src: (w: number) => string; alt: string }[] = [
@@ -284,8 +279,6 @@ export function SalesPageView({ d }: { d: SalesViewData }) {
             </fieldset>
           ) : null}
 
-          {stockLine !== null ? <div className="text-[13.5px] font-semibold text-coral">Only {stockLine} left</div> : null}
-
           <BuyForm shop={shop} variant={variant} beginCheckout={!d.hasAddOns} className={buyBtn + ' w-full sm:w-auto'}>{cta}</BuyForm>
 
           <div className="flex flex-col gap-2.5 border-t border-line pt-5 text-sm text-ink-3">
@@ -342,7 +335,6 @@ export function SalesPageView({ d }: { d: SalesViewData }) {
                 {priceStr}
                 {compareAt ? <s className="ml-2 font-normal text-ink-4">{money(compareAt)}</s> : null}
               </div>
-              {stockLine !== null ? <div className="text-[12.5px] font-semibold text-coral">{stockLine} left</div> : null}
             </div>
           </div>
           <BuyForm shop={shop} variant={variant} beginCheckout={!d.hasAddOns} className="whitespace-nowrap rounded-full bg-coral px-5 py-[13px] text-[15px] font-medium text-white sm:px-[26px]">{cta}</BuyForm>
