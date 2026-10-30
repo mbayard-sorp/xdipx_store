@@ -251,7 +251,7 @@ Format rules added 2026-07-21 (owner-approved):
   if…" line even when the row is not marked †. Write it in on the first draft; do not spend a
   shared rewrite cycle adding it later.
 
-Topic bank (30; work top to bottom within the Tue/Fri rhythm, reorder to serve the theme week,
+Topic bank (31; work top to bottom within the Tue/Fri rhythm, reorder to serve the theme week,
 extend freely — additions need a slug, problem, and target query):
 
 | # | Slug | Problem | Target query |
