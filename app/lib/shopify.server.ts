@@ -266,7 +266,9 @@ const PRODUCT_CORE_FRAGMENT = `
   collections(first: 10) {
     edges { node { handle title } }
   }
-  images(first: 10) {
+  # Matches variants(first: 20) below so a per-color variant photo past the
+  # old 10-image cap is never missing from the gallery (ticket #18560).
+  images(first: 20) {
     edges { node { url altText } }
   }
   media(first: 15) {

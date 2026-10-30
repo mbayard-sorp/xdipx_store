@@ -476,7 +476,7 @@ export function ProductImageGallery({
       {/* Mobile dot indicators */}
       {items.length > 1 && (
         <div className="flex md:hidden justify-center gap-1.5 pt-1">
-          {items.slice(0, 10).map((_, i) => (
+          {items.map((_, i) => (
             <button
               key={i}
               onClick={() => selectMedia(i)}
@@ -572,7 +572,7 @@ function ThumbnailStrip({
         ref={thumbsRef}
         className="flex gap-2 overflow-x-auto scrollbar-hide scroll-smooth flex-1"
       >
-        {items.slice(0, 10).map((item, i) => (
+        {items.map((item, i) => (
           <button
             key={i}
             onMouseEnter={() => onHover(i)}
