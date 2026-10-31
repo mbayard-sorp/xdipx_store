@@ -4,7 +4,8 @@ The campaigns running on paid platforms right now that the owner built by hand, 
 ad-action ledger, and the standing rules for each. The daily ads routine
 (`docs/store-team/routine-ads-daily.md`), `paid-media-buyer` and the weekly burn review read this
 file at the start of every run. A campaign gets a section here the day it goes live and leaves when
-it ends. Changes land through an `instructions` suggestion and an agent-editor PR, or an owner PR;
+it ends. A campaign the owner has paused keeps its section, marked paused, with its final numbers.
+Changes land through an `instructions` suggestion and an agent-editor PR, or an owner PR;
 nobody edits this file mid-run.
 
 ## What "manage" means for an owner-built campaign
@@ -13,9 +14,9 @@ The team reads these campaigns and proposes. It never writes to them. That holds
 in this file.
 
 1. Read it every Pass 2: spend, impressions, link clicks, CPC, landing page views, checkout starts
-   and purchases per ad, from the entity mirror and the Step 4a account read. These ads have no
-   `ad_creatives` rows yet, so `team/ad-metrics` does not see them (ticket below); report them from
-   the mirror until it does, and say so.
+   and purchases per ad, from `team/ad-metrics` and the Step 4a account read. Ticket #18774 (PR
+   #1828) made these ads visible to `team/ad-metrics`. They carry no attributed revenue, so read
+   orders from Shopify and not from those rows.
 2. Judge them on the same R1 to R8 thresholds as any synced ad, and send pauses and budget changes
    as `team/ad-action {op:'propose'}` cards for the owner. `appliedBy` stays null.
 3. Never edit a creative, open a draft in Ads Manager, duplicate an ad or add an ad. Opening an MCP
@@ -26,37 +27,67 @@ in this file.
 4. Put each campaign in the Sunday memo with spend, orders, contribution and a keep, cut or change
    verdict.
 
+## All Meta ads are paused
+
+The owner paused every Meta ad by 2026-10-31: "I paused all of my meta ads, it was getting too
+expensive and we didn't see any sales." That covers Advent26 and both Curious lead funnel campaigns.
+The Meta spend from 2026-10-24 through 2026-10-30 was $101.46, and 2026-10-31 had none at the time of
+this read.
+
+The pause is at the ad level, so the campaigns and ad sets still read `ACTIVE`, with delivery showing
+no active ads. Two paused ads read `WITH_ISSUES` (womanizer-24 Connection `120249883184860056` and the
+lead funnel's `120249792444390056`). None of that means an ad is running. Judge by the ad's own
+`status` and by spend.
+
+While the pause holds:
+
+- Only the owner restarts Meta. Do not propose a restart, a budget, or new creative for these
+  campaigns, and do not count Meta as an open channel when planning.
+- Any Meta spend after 2026-10-31 goes at the top of the run report, because it means an ad came back
+  on.
+- The Sunday memo carries one line for Meta: paused, with its final numbers.
+
 ## Advent26 (Meta)
 
-Live since 2026-10-28. Owner direction 2026-10-28 (/all-hands): "Make sure the team knows about these
-ads and will manage and optimize them accordingly."
+**Paused by the owner.** Ran 2026-10-28 to 2026-10-30.
 
 | | |
 |---|---|
 | Account | `920738511029316` |
 | Campaign | `120249883168230056` "Advent26", sales objective, purchase on pixel `1619122322498289` |
-| Budget | $25/day, campaign budget (CBO), scheduled stop 2026-11-25 |
+| Budget | $25/day, campaign budget (CBO), scheduled stop 2026-11-25, no spend while the ads are paused |
 | Ad set | `120249883168680056`, US, ages 25 to 65, Facebook and Instagram, the four M8 exclusion audiences, Advantage audience off |
 | Landing | `curious.xdipx.com/advents26?c=<calendar>`, UTM-tagged (GA4 reads source `meta`, medium `paid_social`) |
 
-| Ad | Ad id | Status 2026-10-28 |
+| Ad | Ad id | Status | Spent | Link clicks | Cost per click |
+|---|---|---|---|---|---|
+| womanizer-24 Relief | `120249884417940056` | Paused | $21.15 | 29 | $0.73 |
+| romance-7 Connection | `120249884416950056` | Paused | $7.94 | 12 | $0.66 |
+| womanizer-24 Connection | `120249883184860056` | Paused | $3.16 | 6 | $0.53 |
+| womanizer-24 Nostalgia | `120249884413170056` | Paused | $5.70 | 3 | $1.90 |
+| romance-7 Nostalgia | `120249884417260056` | Paused | $4.92 | 5 | $0.98 |
+| luxury-24 Connection | `120249884417460056` | Disapproved, dropped | | | |
+
+**Final numbers, read 2026-10-31.**
+- **Meta:** $42.90 spent, 1,047 impressions, 55 link clicks ($0.78 a click), 1 checkout start, 0 purchases.
+- **GA4:** 58 `meta` / `paid_social` sessions landed on `/advents26`, with no add to cart, checkout or
+  purchase. The page logged 1 `cta_click` from all traffic.
+
+Meta's link clicks and GA4's sessions do not agree by day, and nobody has traced why. Trace this before
+any restart, because it decides whether the page numbers above can be trusted.
+
+| Date | Meta link clicks | GA4 sessions on `/advents26` |
 |---|---|---|
-| womanizer-24 Connection | `120249883184860056` | Active |
-| womanizer-24 Nostalgia | `120249884413170056` | Active |
-| womanizer-24 Relief | `120249884417940056` | Active |
-| romance-7 Connection | `120249884416950056` | Active |
-| romance-7 Nostalgia | `120249884417260056` | Active |
-| luxury-24 Connection | `120249884417460056` | Disapproved, paused, dropped |
+| 2026-10-28 | 19 | 52 |
+| 2026-10-29 | 31 | 5 |
+| 2026-10-30 | 5 | 1 |
 
-**Baseline, lifetime through 2026-10-28 evening.**
-- **Meta:** $8.22 spent, 376 impressions, 17 link clicks ($0.48 a click), 0 landing page views, 0 checkout starts.
-- **GA4:** 52 `meta` / `paid_social` sessions landed on `/advents26` that day.
+On launch day Meta reported zero landing page views next to GA4's 52 sessions, so either the pixel is
+not reporting from the curious host or the dataset is dropping our events (#17642). Treat Meta's own
+conversion columns as unreliable until that is resolved. Count results from GA4 and Shopify.
 
-Meta's zero landing page views next to GA4's 52 sessions says the pixel is not reporting from the
-curious host, or the dataset is dropping our events (#17642). Treat Meta's own conversion columns as
-unreliable until that is resolved. Count results from GA4 and Shopify.
-
-Rules for this campaign:
+These rules apply if the owner restarts the campaign. Rule 1 holds now as well. Nothing gets proposed
+under rule 6 or rule 7 while it is paused.
 
 1. **Luxury stays off Meta.** luxury-24 was rejected four or more times, and on 2026-10-28 the owner
    dropped it from Meta. Do not propose Luxury creative for Meta, and do not resubmit the disapproved
