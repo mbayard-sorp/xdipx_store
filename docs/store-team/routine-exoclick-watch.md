@@ -27,7 +27,9 @@ $23.67 is the profit per order before ads, at $69.99 with $9.00 fulfillment. The
 
 ## How the owner hears
 
-Each issue is an `exoclick-watch-<issue>` owner blocker, with the blocker email forced when one is new or reopened. A clean run stays silent. The hourly ads pager also files rejected entities from the mirror.
+Each new issue sends a phone push and files an `exoclick-watch-<issue>` owner blocker. Push is the alert that reaches him: `owner_queue_enabled` is on (owner, 2026-09-02), so the blocker email reports `suppressed`, as it did on the first test run. A clean run stays silent. The hourly ads pager also files rejected entities from the mirror.
+
+Known limit: `op: list` returned exactly 50 open blockers on 2026-10-31 and left out a row filed minutes earlier, so the routine may not see its own rows to clear them. Re-filing a key stays deduped.
 
 ## When the campaign changes
 
