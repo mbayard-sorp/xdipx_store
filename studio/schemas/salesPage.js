@@ -393,6 +393,60 @@ export default {
               description: 'One to three sentences on why this goes with the main product.',
               validation: Rule => Rule.required().max(300).custom(noDashes),
             },
+            {
+              name: 'tiers',
+              title: 'Good, better, best',
+              type: 'array',
+              description:
+                'Optional. Up to three products offered as a choice on this one screen; the visitor takes one. The product handle above is the one selected when the screen opens, so point it at the tier you want most people to take. Rule for picking: docs/store-team/sales-pages.md.',
+              of: [
+                {
+                  type: 'object',
+                  fields: [
+                    {
+                      name: 'productHandle',
+                      title: 'Product handle',
+                      type: 'string',
+                      validation: Rule =>
+                        Rule.required().custom(v => (/^[a-z0-9][a-z0-9-]*$/.test(v ?? '') ? true : 'Bare handle only: lowercase letters, digits, hyphens')),
+                    },
+                    { name: 'label', title: 'Label', type: 'string', description: 'For example: Good', validation: Rule => Rule.required().max(16).custom(noDashes) },
+                    { name: 'blurb', title: 'Line', type: 'string', description: 'One short line on what this tier is.', validation: Rule => Rule.max(90).custom(noDashes) },
+                  ],
+                  preview: { select: { title: 'label', subtitle: 'productHandle' } },
+                },
+              ],
+              validation: Rule => Rule.max(3),
+            },
+            {
+              name: 'bulkLine',
+              title: 'Bulk discount line',
+              type: 'string',
+              description: 'The line above the quantity choices, written for this product. For example: More lube feels more real. Use extra.',
+              validation: Rule => Rule.max(70).custom(noDashes),
+            },
+            {
+              name: 'bulkOffers',
+              title: 'Bulk discount',
+              type: 'array',
+              description:
+                'Every add-on carries one: the more they buy, the better the discount. Each row needs a real Shopify discount code limited to these products with this minimum quantity. Keep each product above MAP and check the margin first: docs/store-team/sales-pages.md.',
+              of: [
+                {
+                  type: 'object',
+                  fields: [
+                    { name: 'quantity', title: 'Buy at least', type: 'number', validation: Rule => Rule.required().integer().min(2).max(12) },
+                    { name: 'percent', title: 'Percent off', type: 'number', validation: Rule => Rule.required().greaterThan(0).max(50) },
+                    { name: 'code', title: 'Shopify discount code', type: 'string', validation: Rule => Rule.required() },
+                  ],
+                  preview: {
+                    select: { q: 'quantity', p: 'percent', code: 'code' },
+                    prepare: ({ q, p, code }) => ({ title: `${q} for ${p}% off`, subtitle: code }),
+                  },
+                },
+              ],
+              validation: Rule => Rule.required().min(1).max(3),
+            },
           ],
           preview: { select: { title: 'headline', subtitle: 'productHandle' }, prepare: ({ title, subtitle }) => ({ title: (title ?? '').replace(/\*/g, ''), subtitle }) },
         },
