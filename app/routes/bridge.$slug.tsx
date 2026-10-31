@@ -41,7 +41,7 @@ import {
 import { applyAttributionAttrs } from '~/lib/attribution-cart.server'
 import { getLeadFunnelPage, type FunnelUtm } from '~/lib/lead-funnel'
 import { mapAllowsDiscountDisplay } from '~/lib/discount-badge'
-import { nextAddOnStep, parseAddOnStep, type SalesPage } from '~/lib/sales-page'
+import { addOnHandles, nextAddOnStep, parseAddOnStep, type SalesPage } from '~/lib/sales-page'
 import { getSalesCartId, getSalesPage, setSalesCartCookie } from '~/lib/sales-page.server'
 import type { Product } from '~/types'
 import { isLeadSmsOptinEnabled } from '~/lib/lead-sms-optin.server'
@@ -51,7 +51,7 @@ import { trackCtaClick } from '~/lib/analytics.client'
 import { isBridgeHost, isBridgeHostRequest, requestHost, BRIDGE_HOST } from '~/lib/bridge-host.server'
 import { sanityImageUrl } from '~/lib/sanity-image'
 import { getSiteSettings, isPreviewRequest } from '~/lib/sanity.server'
-import { addLinesToCart, createCartWithLines, getCart, getProductByHandle } from '~/lib/shopify.server'
+import { addCartDiscountCode, addLinesToCart, createCartWithLines, getCart, getProductByHandle } from '~/lib/shopify.server'
 import { shopifyImageUrl } from '~/lib/shopify-image'
 import { useAgeVerified } from '~/lib/use-age-verified'
 
@@ -202,12 +202,18 @@ function salesShopData(product: Product): SalesShopifyData {
   }
 }
 
-/** The page's add-on products, in order. One that fails to load is null and gets skipped. */
-function loadAddOns(page: SalesPage): Promise<(Product | null)[]> {
-  return Promise.all(page.addOns.map(a => getProductByHandle(a.productHandle).catch(() => null)))
+/**
+ * Each add-on's products, in display order: one, or its good, better, best
+ * tiers. A product that fails to load is null and gets skipped.
+ */
+function loadAddOns(page: SalesPage): Promise<(Product | null)[][]> {
+  return Promise.all(
+    page.addOns.map(a => Promise.all(addOnHandles(a).map(h => getProductByHandle(h).catch(() => null)))),
+  )
 }
 
-const buyable = (p: Product | null) => !!p && p.variants.some(v => v.availableForSale)
+const buyable = (p: Product | null): p is Product => !!p && p.variants.some(v => v.availableForSale)
+const screenBuyable = (products: (Product | null)[]) => products.some(buyable)
 
 /** Add-on screens depend on the visitor's cart, so the CDN must never keep them. */
 const NO_STORE = { 'Cache-Control': 'private, no-store' }
@@ -263,12 +269,18 @@ async function salesAddOnLoaderData(request: Request, page: SalesPage, step: num
     getSiteSettings().catch(() => null),
   ])
   if (!cart) throw redirect(pageUrl(request), { headers: NO_STORE })
-  const available = addOns.map(buyable)
-  const product = addOns[step - 1]
-  if (!product || !available[step - 1]) {
+  const available = addOns.map(screenBuyable)
+  if (!available[step - 1]) {
     const next = nextAddOnStep(available, step)
     throw redirect(next ? addOnStepUrl(request, next) : cart.checkoutUrl, { headers: NO_STORE })
   }
+  const addOn = page.addOns[step - 1]!
+  // Sold-out tiers drop off the screen; the rest keep their order.
+  const options = (addOns[step - 1] ?? []).flatMap((product, i) => {
+    if (!buyable(product)) return []
+    const tier = addOn.tiers[i]
+    return [{ handle: product.handle, label: tier?.label ?? '', blurb: tier?.blurb ?? '', shop: salesShopData(product) }]
+  })
   return data(
     {
       kind: 'salesAddOn' as const,
@@ -277,8 +289,9 @@ async function salesAddOnLoaderData(request: Request, page: SalesPage, step: num
       total: available.filter(Boolean).length,
       position: available.slice(0, step).filter(Boolean).length,
       isLast: nextAddOnStep(available, step) === null,
-      addOn: page.addOns[step - 1]!,
-      shop: salesShopData(product),
+      addOn,
+      options,
+      selected: Math.max(0, options.findIndex(o => o.handle === addOn.productHandle)),
       cart: {
         items: cart.lines.map(l => ({ title: l.merchandise.product.title, image: l.merchandise.product.images[0]?.url ?? null })),
         subtotal: parseFloat(cart.cost.subtotalAmount.amount),
@@ -353,11 +366,19 @@ async function salesAction(request: Request, slug: string) {
       const addOns = await loadAddOns(page)
       let cart = null
       if (form.get('take') === '1') {
-        const variant = pickVariant(addOns[step - 1] ?? null, wanted)
+        // The variant must belong to one of this screen's own products.
+        const variant = (addOns[step - 1] ?? []).map(p => pickVariant(p, wanted)).find(Boolean)
         if (!variant) return { error: 'That one just sold out. You can skip it and keep going.' }
-        cart = await addLinesToCart(cartId, [{ variantId: variant.id, quantity: 1 }])
+        const offers = page.addOns[step - 1]?.bulkOffers ?? []
+        // Only a quantity this screen offers; anything else is one bottle at full price.
+        const offer = offers.find(o => o.quantity === Number(form.get('quantity')))
+        cart = await addLinesToCart(cartId, [{ variantId: variant.id, quantity: offer?.quantity ?? 1 }])
+        if (offer && !(await addCartDiscountCode(cartId, offer.code))) {
+          // The screen promised this price, so a dead code has to reach Sentry.
+          console.error('[sales-page] bulk code did not apply', slug, offer.code)
+        }
       }
-      const next = nextAddOnStep(addOns.map(buyable), step)
+      const next = nextAddOnStep(addOns.map(screenBuyable), step)
       if (next) return redirect(addOnStepUrl(request, next))
       cart ??= await getCart(cartId)
       return redirect(cart ? cart.checkoutUrl : pageUrl(request))
@@ -373,7 +394,7 @@ async function salesAction(request: Request, slug: string) {
     if (!variant) return { error: 'That one just sold out. Pick another option above, or check back soon.' }
     const cart = await createCartWithLines([{ variantId: variant.id, quantity: 1 }])
     await applyAttributionAttrs(cart.id, request, [{ key: '_landing', value: `curious/${page.slug}` }])
-    const next = nextAddOnStep(addOns.map(buyable), 0)
+    const next = nextAddOnStep(addOns.map(screenBuyable), 0)
     if (next) return redirect(addOnStepUrl(request, next), { headers: { 'Set-Cookie': setSalesCartCookie(cart.id) } })
     return redirect(cart.checkoutUrl)
   } catch (err) {
@@ -385,7 +406,7 @@ async function salesAction(request: Request, slug: string) {
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
   if (!data) return [{ title: 'Not found' }, { name: 'robots', content: 'noindex' }]
   if (data.kind === 'salesAddOn') {
-    return [{ title: `${data.shop.title} | xdipx` }, { name: 'robots', content: 'noindex' }]
+    return [{ title: `${plainHeadline(data.addOn.headline) || data.options[data.selected]?.shop.title} | xdipx` }, { name: 'robots', content: 'noindex' }]
   }
   if (data.kind === 'sales') {
     return [

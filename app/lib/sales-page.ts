@@ -41,9 +41,67 @@ export type SalesSection =
 
 /** Offered one at a time after a buy button, before checkout. */
 export interface SalesAddOn {
+  /** The product, or with tiers the one selected when the screen opens. */
   productHandle: string
   headline: string
   pitch: string
+  /** Good, better, best: a choice of products on this one screen. */
+  tiers: SalesAddOnTier[]
+  /** The line above the quantity choices. */
+  bulkLine: string
+  /** Quantity discounts, smallest quantity first. The more they buy, the deeper it goes. */
+  bulkOffers: SalesBulkOffer[]
+}
+
+export interface SalesBulkOffer {
+  quantity: number
+  percent: number
+  /** The Shopify discount code that actually gives this price at checkout. */
+  code: string
+}
+
+export interface SalesAddOnTier {
+  productHandle: string
+  label: string
+  blurb: string
+}
+
+export const MAX_ADD_ON_TIERS = 3
+
+/**
+ * Valid offers, smallest quantity first. An offer has to beat the one before
+ * it on both quantity and depth, so buying more can never cost more per unit.
+ */
+export function normalizeBulkOffers(raw: unknown): SalesBulkOffer[] {
+  const offers = rows(raw, r => {
+    const quantity = r['quantity']
+    const percent = r['percent']
+    const code = typeof r['code'] === 'string' ? r['code'].trim() : ''
+    if (typeof quantity !== 'number' || !Number.isInteger(quantity) || quantity < 2 || quantity > 12) return null
+    if (typeof percent !== 'number' || percent <= 0 || percent > 50) return null
+    return /^[A-Za-z0-9-]{3,40}$/.test(code) ? { quantity, percent, code } : null
+  }).sort((a, b) => a.quantity - b.quantity)
+  const kept: SalesBulkOffer[] = []
+  for (const o of offers) {
+    const last = kept[kept.length - 1]
+    if (!last || (o.quantity > last.quantity && o.percent > last.percent)) kept.push(o)
+  }
+  return kept
+}
+
+/**
+ * Per-unit price after a percent off, matching Shopify's checkout: it takes the
+ * discount per unit and rounds that down to the cent ($21.99 at 10% off is
+ * $2.19 off, so $19.80, not $19.79). Measured on real carts 2026-10-31.
+ */
+export function bulkUnitPrice(price: number, percent: number): number {
+  const cents = Math.round(price * 100)
+  return (cents - Math.floor((cents * percent) / 100)) / 100
+}
+
+/** Every product an add-on screen can sell, in display order. */
+export function addOnHandles(addOn: SalesAddOn): string[] {
+  return addOn.tiers.length ? addOn.tiers.map(t => t.productHandle) : [addOn.productHandle]
 }
 
 /** The schema caps add-ons at two; the normalizer enforces it again. */
@@ -189,7 +247,12 @@ export function normalizeSalesPage(raw: Record<string, unknown> | null | undefin
       const handle = typeof r['productHandle'] === 'string' ? r['productHandle'] : ''
       const pitch = clean(r['pitch'])
       if (!HANDLE_RE.test(handle) || handle === productHandle || !pitch) return null
-      return { productHandle: handle, headline: clean(r['headline']), pitch }
+      const tiers = rows(r['tiers'], t => {
+        const h = typeof t['productHandle'] === 'string' ? t['productHandle'] : ''
+        const label = clean(t['label'])
+        return HANDLE_RE.test(h) && h !== productHandle && label ? { productHandle: h, label, blurb: clean(t['blurb']) } : null
+      }).slice(0, MAX_ADD_ON_TIERS)
+      return { productHandle: handle, headline: clean(r['headline']), pitch, tiers, bulkLine: clean(r['bulkLine']), bulkOffers: normalizeBulkOffers(r['bulkOffers']) }
     }).slice(0, MAX_ADD_ONS),
   }
 }

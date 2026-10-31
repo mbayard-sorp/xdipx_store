@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { nextAddOnStep, normalizeSalesPage, normalizeSection, parseAddOnStep } from './sales-page'
+import { addOnHandles, bulkUnitPrice, nextAddOnStep, normalizeBulkOffers, normalizeSalesPage, normalizeSection, parseAddOnStep } from './sales-page'
 
 const base = {
   slug: 'quiet-pulse',
@@ -104,5 +104,70 @@ describe('add-ons', () => {
     expect(parseAddOnStep('1', 0)).toBeNull()
     expect(parseAddOnStep('1x', 2)).toBeNull()
     expect(parseAddOnStep(null, 2)).toBeNull()
+  })
+})
+
+describe('add-on tiers', () => {
+  const addOn = {
+    productHandle: 'jo-4oz',
+    headline: 'Add the *glide*',
+    pitch: 'It wants lube.',
+    tiers: [
+      { productHandle: 'jelly', label: 'Good', blurb: 'Thick.' },
+      { productHandle: 'jo-4oz', label: 'Better', blurb: 'Silky.' },
+      { productHandle: 'jo-8oz', label: 'Best', blurb: 'Twice the bottle.' },
+      { productHandle: 'extra', label: 'Fourth', blurb: 'Too many.' },
+      { productHandle: 'quiet-pulse-wand', label: 'Itself', blurb: 'No.' },
+    ],
+  }
+
+  it('keeps three valid tiers in order', () => {
+    const [a] = normalizeSalesPage({ ...base, addOns: [addOn] })!.addOns
+    expect(addOnHandles(a!)).toEqual(['jelly', 'jo-4oz', 'jo-8oz'])
+    expect(a!.tiers[1]).toEqual({ productHandle: 'jo-4oz', label: 'Better', blurb: 'Silky.' })
+  })
+
+  it('drops a tier with no label or a bad handle, and the page product', () => {
+    const [a] = normalizeSalesPage({
+      ...base,
+      addOns: [{ ...addOn, tiers: [{ productHandle: 'ok', label: '' }, { productHandle: 'bad handle', label: 'X' }, { productHandle: 'quiet-pulse-wand', label: 'Y' }, { productHandle: 'keep', label: 'Z' }] }],
+    })!.addOns
+    expect(a!.tiers.map(t => t.productHandle)).toEqual(['keep'])
+  })
+
+  it('falls back to the single product with no tiers', () => {
+    const [a] = normalizeSalesPage({ ...base, addOns: [{ productHandle: 'solo', pitch: 'Yes.' }] })!.addOns
+    expect(a!.tiers).toEqual([])
+    expect(addOnHandles(a!)).toEqual(['solo'])
+  })
+})
+
+describe('bulk offers', () => {
+  it('keeps valid offers, smallest quantity first', () => {
+    expect(normalizeBulkOffers([{ quantity: 3, percent: 15, code: 'GLIDE15' }, { quantity: 2, percent: 10, code: 'GLIDE10' }])).toEqual([
+      { quantity: 2, percent: 10, code: 'GLIDE10' },
+      { quantity: 3, percent: 15, code: 'GLIDE15' },
+    ])
+  })
+
+  it('refuses an offer where buying more does not save more', () => {
+    expect(normalizeBulkOffers([{ quantity: 2, percent: 15, code: 'AAA' }, { quantity: 3, percent: 10, code: 'BBB' }])).toEqual([{ quantity: 2, percent: 15, code: 'AAA' }])
+  })
+
+  it('refuses bad quantities, depths and codes', () => {
+    expect(normalizeBulkOffers([{ quantity: 1, percent: 10, code: 'AAA' }, { quantity: 2, percent: 80, code: 'AAA' }, { quantity: 2, percent: 10, code: 'no spaces' }, { quantity: 2.5, percent: 10, code: 'AAA' }])).toEqual([])
+    expect(normalizeBulkOffers(undefined)).toEqual([])
+  })
+
+  it('reaches the page through the normalizer', () => {
+    const [a] = normalizeSalesPage({ ...base, addOns: [{ productHandle: 'solo', pitch: 'Yes.', bulkOffers: [{ quantity: 2, percent: 10, code: 'GLIDE10' }] }] })!.addOns
+    expect(a!.bulkOffers).toEqual([{ quantity: 2, percent: 10, code: 'GLIDE10' }])
+  })
+
+  it('prices a unit the way Shopify checkout does', () => {
+    expect(bulkUnitPrice(21.99, 10)).toBe(19.8)
+    expect(bulkUnitPrice(32.99, 15)).toBe(28.05)
+    expect(bulkUnitPrice(41.49, 15)).toBe(35.27)
+    expect(bulkUnitPrice(21.99, 0)).toBe(21.99)
   })
 })

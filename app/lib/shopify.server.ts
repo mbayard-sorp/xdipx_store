@@ -3113,6 +3113,29 @@ export async function applyCartDiscountCodes(cartId: string, codes: string[]): P
   return data.cartDiscountCodesUpdate.cart ? rawCartToCart(data.cartDiscountCodesUpdate.cart) : null
 }
 
+/**
+ * Add one code to the cart without dropping the ones already on it (the update
+ * above replaces the whole list). Returns whether Shopify says it applies.
+ */
+export async function addCartDiscountCode(cartId: string, code: string): Promise<boolean> {
+  const read = await storefront<{ cart: { discountCodes: { code: string }[] } | null }>(`
+    query CartDiscountCodes($id: ID!) { cart(id: $id) { discountCodes { code } } }
+  `, { id: cartId })
+  const codes = [...new Set([...(read.cart?.discountCodes ?? []).map(c => c.code), code])]
+  const data = await storefront<{
+    cartDiscountCodesUpdate: { cart: { discountCodes: { code: string; applicable: boolean }[] } | null }
+  }>(`
+    mutation AddCartDiscountCode($cartId: ID!, $codes: [String!]!) {
+      cartDiscountCodesUpdate(cartId: $cartId, discountCodes: $codes) {
+        cart { discountCodes { code applicable } }
+        userErrors { field message }
+      }
+    }
+  `, { cartId, codes })
+  const wanted = code.toLowerCase()
+  return data.cartDiscountCodesUpdate.cart?.discountCodes.some(c => c.code.toLowerCase() === wanted && c.applicable) ?? false
+}
+
 export async function getCart(cartId: string): Promise<Cart | null> {
   const data = await storefront<{ cart: RawCart | null }>(`
     query GetCart($id: ID!) { cart(id: $id) { ${CART_FRAGMENT} } }
