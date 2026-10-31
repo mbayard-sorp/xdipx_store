@@ -28,3 +28,5 @@ Format: `N. <rule>. Lever: <what it constrains>. Evidence: <idea or creative ids
    "SONA 3. Cancel the three o'clock.", #7 "Sync 2: settle who holds the remote." Evidence: owner
    direction 2026-10-05 (#13588), the reasons on those ideas (strong-hook, more-like-this). Added:
    2026-10-06.
+
+4. On adult networks, women sell. Every person in a banner is an adult woman, scantily dressed, offering the product to the viewer, and that includes men's products. Never cast a man. The audience is men watching porn, and they want to be sold to by women, not other men. The charter's nudity definition stays the ceiling. Lever: every `adult` lane idea and creative, including concept `for-him-plainly`. Evidence: owner direction 2026-10-31, given in two sessions; idea #326 came out with a man on the plate. Added: 2026-10-31.

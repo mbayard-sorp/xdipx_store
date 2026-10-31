@@ -89,6 +89,10 @@ The zip holds `<lane>-<idea>-<format>.png` for each creative (`.jpg` when only a
 
 Owner direction 2026-10-20: the ads team generates register-10 banners for ExoClick. Owner decision the same day: they land directly on the product page, no bridge.
 
+### Who is in the frame
+
+Owner direction 2026-10-31: every person in an adult banner is an adult woman, scantily dressed, offering the product to the viewer, on men's products too. Never a man. The binding copy is in `ad-owner-notes.md`.
+
 ### Sizes we render
 
 The adult lane renders ExoClick's six static banner sizes. The list comes from the owner's ExoClick account (2026-10-20) and matches ExoClick's Ad Formats page.
