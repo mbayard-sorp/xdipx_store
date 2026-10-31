@@ -102,6 +102,7 @@ Trigger IDs, for reference when editing or deleting a routine:
 | 27 | xdipx Ads Ideas (daily pass 1) | `trig_01Y1sZNUGXwBGcEV4s1fTM4H` (`30 14 * * *` UTC, created 2026-10-04) |
 | 28 | xdipx Ads Render (daily pass 2) | `trig_01V5uuqg4V96CgK3UFUMfyTX` (`30 20 * * *` UTC, created 2026-10-04). Should carry the read-only Meta Ads MCP pin from §Connector permissions. Ticket #16684 has merged, but on 2026-10-20 the trigger still carried only the Sanity floor, so the pin has not been applied |
 | 29 | xdipx Ads Weekly Burn Review | TBD (`0 16 * * 1` UTC, to be created after ticket #16684 merges, and only once `ads_team_max_runs` reads 3; see the run-cap table) |
+| 30 | xdipx — ExoClick Campaign Watch (R-EXO) | `20 */4 * * *` | none: starts no run row and consumes no team's run cap, like R-WATCH | `docs/store-team/routine-exoclick-watch.md` | Owner direction 2026-10-31 ("continue to monitor and notify me if there are issues"). Read only, notify only: reads ExoClick, the Shopify product and orders, and the landing page, then files `exoclick-watch-*` owner blockers and forces the blocker email on a new one. Never pauses, edits or funds a campaign. Disable the trigger when the campaign ends. |
 
 Routine 11 (Weekly Off-site Scout) was created 2026-07-23 as `trig_0131NQ3PLTRpcgdMU4wdoxh8` (Tue
 16:00 UTC). Its first fire is 2026-07-28. It is propose-only by construction, so no valve gates it.
@@ -332,6 +333,7 @@ none of which sends email). No trigger now carries a connector with an empty `pe
 | 26 | R-BLOCK | `trig_019VmGusB3DtmUMA72vCu7uj` | none |
 | 27 | Ads Ideas | `trig_01Y1sZNUGXwBGcEV4s1fTM4H` | Sanity floor |
 | 28 | Ads Render | `trig_01V5uuqg4V96CgK3UFUMfyTX` | Sanity floor. The Meta Ads pin in the next table is the target and is not attached yet |
+| 30 | ExoClick Campaign Watch | `trig_01WREZzWdEmXuRMPX5vKQVoq` | Shopify: `graphql_query`, `run-analytics-query`, `get-product`, `list-orders` |
 
 The **Sanity floor** is Sanity with `query_documents`, `get_document`, `get_schema` and nothing else.
 It is what a routine that needs no connector carries, because an `update` cannot take a trigger to
