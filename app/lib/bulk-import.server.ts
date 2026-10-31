@@ -12,7 +12,7 @@ import { dealHistory } from '../../db/schema'
 import { generateSEOTitle } from '~/lib/claude.server'
 import { enqueueBatchJob } from '~/lib/batch-orchestrator.server'
 import { cleanDescription, isDiscontinued, deriveSection } from '~/lib/feed-processor.server'
-import { dropshipRestriction } from '~/lib/nalpac-dropship-policy'
+import { dropshipRestriction, effectiveMap } from '~/lib/nalpac-dropship-policy'
 import { UNCATEGORIZED_SENTINEL } from '~/lib/master-collapse.server'
 import {
   findProductBySKU,
@@ -177,7 +177,7 @@ export function parseBulkImportCSV(csvText: string): {
     const variants: BulkVariantRow[] = allVariantRows.map(r => {
       const wholesale     = parseFloat(r.Wholesale) || 0
       const msrp          = parseFloat(r.MSRP)      || 0
-      const map           = parseFloat(r.MAP ?? '0') || 0
+      const map           = effectiveMap(r.Brand, parseFloat(r.MAP ?? '0') || 0, msrp)
       const qty           = parseInt(r['Total qty available']) || 0
       const value1        = r['Variant Option Value'] || r.SKU
       const optionValues  = hasAxis2Name
@@ -255,7 +255,7 @@ export async function importProductGroup(group: MasterProductGroup): Promise<{
     // 2. Parse product fields from master row
     const wholesale = parseFloat(masterRow.Wholesale) || 0
     const msrp      = parseFloat(masterRow.MSRP)      || 0
-    const map       = parseFloat(masterRow.MAP ?? '0') || 0
+    const map       = effectiveMap(masterRow.Brand, parseFloat(masterRow.MAP ?? '0') || 0, msrp)
     const qty       = parseInt(masterRow['Total qty available']) || 0
     const images    = getImages(masterRow)
     const rawDesc     = masterRow['Product Description'] ?? ''
@@ -528,7 +528,7 @@ export async function importProductGroupRaw(group: MasterProductGroup): Promise<
 
     const wholesale = parseFloat(masterRow.Wholesale) || 0
     const msrp      = parseFloat(masterRow.MSRP)      || 0
-    const map       = parseFloat(masterRow.MAP ?? '0') || 0
+    const map       = effectiveMap(masterRow.Brand, parseFloat(masterRow.MAP ?? '0') || 0, msrp)
     const qty       = parseInt(masterRow['Total qty available']) || 0
     const images    = getImages(masterRow)
     const rawDesc     = masterRow['Product Description'] ?? ''
