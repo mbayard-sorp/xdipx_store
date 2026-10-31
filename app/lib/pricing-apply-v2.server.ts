@@ -28,7 +28,7 @@ import {
   parseClearanceLadder,
 } from './pricing-engine-v2.server'
 import type { ClearanceLadder } from './pricing-engine-v2.server'
-import { NALPAC_MAP_VERIFIED_BRANDS, isNalpacMapVerifiedBrand } from './nalpac-dropship-policy'
+import { NALPAC_MAP_VERIFIED_BRANDS, effectiveMap, isNalpacMapVerifiedBrand } from './nalpac-dropship-policy'
 import {
   resolvePricingConfig,
   buildRationale,
@@ -287,14 +287,17 @@ export const DEFAULT_MAP_BRANDS: readonly string[] = NALPAC_MAP_VERIFIED_BRANDS
  * or its group is configured `ignore_map`, because a clearance price below MAP
  * fails Nalpac's verification the same as any other. This reverses the
  * 2026-09-25 direction that let discontinued Lovense/Playground clear below
- * MAP. Exported for unit testing.
+ * MAP. A blank MAP on a brand whose MAP is always MSRP binds at MSRP
+ * (effectiveMap). Exported for unit testing.
  */
 export function contractualMapFor(
   vendor: string | null | undefined,
   mapPrice: number | null | undefined,
+  msrp?: number | null,
 ): number | null {
-  if (mapPrice == null || mapPrice <= 0) return null
-  return isNalpacMapVerifiedBrand(vendor) ? mapPrice : null
+  const map = effectiveMap(vendor, mapPrice, msrp)
+  if (map <= 0) return null
+  return isNalpacMapVerifiedBrand(vendor) ? map : null
 }
 
 /**
@@ -576,7 +579,7 @@ async function recomputeFromData(
   // discontinued (owner direction 2026-09-25). Every other case resolves MAP
   // to null so it prices off the markup rules instead of being held at MAP/MSRP.
   const contractualMap = isNalpacMapVerifiedBrand(product.vendor)
-    ? contractualMapFor(product.vendor, (await getFeedMapForSku(sku)) ?? product.metafields.mapPrice)
+    ? contractualMapFor(product.vendor, (await getFeedMapForSku(sku)) ?? product.metafields.mapPrice, msrp)
     : null
   const map         = contractualMap
     ?? (!isDiscontinued && mapAppliesToVendor(product.vendor, mapBrands)
@@ -1012,10 +1015,10 @@ export async function dryRunRuleChange(opts: {
         // Mirrors recomputeFromData, except that this counts-only preview reads
         // the product-level metafield rather than each SKU's feed MAP.
         const vendor = (product as { vendor?: string | null }).vendor ?? null
-        const contractualMap = contractualMapFor(vendor, product.metafields.mapPrice)
+        const msrp = product.metafields.originalPrice
+        const contractualMap = contractualMapFor(vendor, product.metafields.mapPrice, msrp)
         const map = contractualMap
           ?? (!isDiscontinued && mapAppliesToVendor(vendor, mapBrands) ? product.metafields.mapPrice : null)
-        const msrp = product.metafields.originalPrice
         const oldSell = variant.price
 
         if (cost == null) continue

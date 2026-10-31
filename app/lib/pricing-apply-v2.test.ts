@@ -271,4 +271,17 @@ describe('contractualMapFor', () => {
     expect(contractualMapFor('Dame', null)).toBeNull()
     expect(contractualMapFor('Dame', 0)).toBeNull()
   })
+
+  it('holds a blank-MAP Lovense or Playground row at MSRP', () => {
+    expect(contractualMapFor('Lovense', 0, 129)).toBe(129)
+    expect(contractualMapFor('Lovense', null, 129)).toBe(129)
+    expect(contractualMapFor('Playground', 0, 24)).toBe(24)
+    expect(contractualMapFor('Lovense', 119, 129)).toBe(119)
+  })
+
+  it('does not invent a floor for other brands or a missing MSRP', () => {
+    expect(contractualMapFor('Doxy', 0, 149)).toBeNull()
+    expect(contractualMapFor('Blush', 0, 30)).toBeNull()
+    expect(contractualMapFor('Lovense', 0, null)).toBeNull()
+  })
 })

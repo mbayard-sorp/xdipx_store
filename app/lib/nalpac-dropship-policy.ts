@@ -80,6 +80,32 @@ export const NALPAC_MAP_VERIFIED_BRANDS: readonly string[] = [
   'Aneros',
 ]
 
+/**
+ * Brands whose published MAP is always their MSRP, so a blank MAP in the feed
+ * means "not filled in yet", not "no MAP". Every SKU with a published MAP in the
+ * 2026-10-31 main feed fits this (Lovense 50 of 50, Playground 7 of 7), and both
+ * MAP agreements are signed. Lovense Glint (98925) arrived blank and sold at
+ * $103.99 against a $129 MSRP because nothing held it. Doxy and SpareParts also
+ * have blank rows but publish MAPs that differ from MSRP, so MSRP cannot stand
+ * in for theirs and they stay out of this list.
+ */
+export const MAP_AT_MSRP_BRANDS: readonly string[] = ['Lovense', 'Playground', 'Hello Playground']
+
+/**
+ * The MAP to hold a listing to: the published MAP when there is one, MSRP for a
+ * MAP_AT_MSRP_BRANDS row with a blank MAP, otherwise 0 (no MAP).
+ */
+export function effectiveMap(
+  vendor: string | null | undefined,
+  mapPrice: number | null | undefined,
+  msrp: number | null | undefined,
+): number {
+  if (mapPrice != null && mapPrice > 0) return mapPrice
+  const v = norm(vendor)
+  if (v !== '' && inList(v, MAP_AT_MSRP_BRANDS) && msrp != null && msrp > 0) return msrp
+  return 0
+}
+
 export interface DropshipCheckInput {
   brand: string | null | undefined
   /** Every title the product goes by (feed title, display title). */

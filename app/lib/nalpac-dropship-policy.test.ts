@@ -1,6 +1,6 @@
 // The cases below are real rows from the Nalpac main feed (2026-10-09).
 import { describe, it, expect } from 'vitest'
-import { dropshipRestriction, isNalpacMapVerifiedBrand } from './nalpac-dropship-policy'
+import { dropshipRestriction, effectiveMap, isNalpacMapVerifiedBrand } from './nalpac-dropship-policy'
 
 const row = (brand: string, title: string, sub: string, sku = '1') =>
   ({ brand, titles: [title], subCategories: [sub], skus: [sku] })
@@ -55,5 +55,25 @@ describe('isNalpacMapVerifiedBrand', () => {
     expect(isNalpacMapVerifiedBrand('Blush')).toBe(false)
     expect(isNalpacMapVerifiedBrand('')).toBe(false)
     expect(isNalpacMapVerifiedBrand(null)).toBe(false)
+  })
+})
+
+describe('effectiveMap', () => {
+  it('uses the published MAP when there is one', () => {
+    expect(effectiveMap('Lovense', 119, 129)).toBe(119)
+    expect(effectiveMap('Doxy', 99, 149)).toBe(99)
+  })
+
+  it('falls back to MSRP for a blank Lovense or Playground MAP', () => {
+    expect(effectiveMap('Lovense', 0, 129)).toBe(129)
+    expect(effectiveMap(' lovense ', null, 129)).toBe(129)
+    expect(effectiveMap('Hello Playground', 0, 24)).toBe(24)
+  })
+
+  it('leaves every other blank MAP at 0', () => {
+    expect(effectiveMap('Doxy', 0, 149)).toBe(0)
+    expect(effectiveMap('SpareParts', 0, 40)).toBe(0)
+    expect(effectiveMap(null, 0, 40)).toBe(0)
+    expect(effectiveMap('Lovense', 0, 0)).toBe(0)
   })
 })

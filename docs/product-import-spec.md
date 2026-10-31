@@ -93,6 +93,7 @@ When a product has two variant axes (e.g. Size × Color), use both column pairs:
 The importer computes the deal price with this logic (`computeDealPrice()` in the parser):
 
 - `MAP == 0` → `dealPrice = max(Wholesale × 1.4, MSRP × 0.55)` (marketing copy will say "X% off today only")
+  - Exception: a blank MAP on Lovense or Playground is treated as MAP = MSRP, because their MAP is always MSRP. See `MAP_AT_MSRP_BRANDS` in `app/lib/nalpac-dropship-policy.ts`.
 - `0 < MAP < MSRP` → `dealPrice = MAP` (MAP is the floor we're allowed to advertise)
 - `MAP >= MSRP` → `dealPrice = MSRP` (no discount possible — product is a poor fit for a daily deal)
 
@@ -107,7 +108,7 @@ Some products can't be dropshipped through Nalpac, so every import path refuses 
 - **Elixir pheromone products.** Nalpac named 98510, the pheromone lip gloss, which the feed files under Body Care.
 - **Adam & Eve Fleshlight**, and any feed title that says "Restricted to".
 
-Nalpac checks listings from Lovense, Playground, Autoblow, Dame, Doxy, Gun Oil (Empowered Products), Shinesty, Snail Vibe (SVibe) and SpareParts for MAP compliance before it approves their sales. The Lovense and Playground MAP agreements are signed. The v2 pricing engine holds these brands at or above MAP, with no clearance exemption. For these brands it reads each SKU's MAP from `nalpac_price_history`, because the product-level `map_price` metafield can't hold different MAPs per size. `scripts/nalpac-dropship-sweep.ts` is the one-time cleanup for listings that were live before these rules. It archives restricted products, rejects queued candidates, and lifts existing prices to MAP. It is a dry run unless you pass `--apply`.
+Nalpac checks listings from Lovense, Playground, Autoblow, Dame, Doxy, Gun Oil (Empowered Products), Shinesty, Snail Vibe (SVibe) and SpareParts for MAP compliance before it approves their sales. The Lovense and Playground MAP agreements are signed. The v2 pricing engine holds these brands at or above MAP, with no clearance exemption. For these brands it reads each SKU's MAP from `nalpac_price_history`, because the product-level `map_price` metafield can't hold different MAPs per size. `scripts/nalpac-dropship-sweep.ts` is the one-time cleanup for listings that were live before these rules. It archives restricted products, rejects queued candidates, and lifts existing prices to MAP. It is a dry run unless you pass `--apply`. A blank feed MAP on Lovense or Playground binds at MSRP, in the importer and the engine both. Other verified brands publish MAPs that can differ from MSRP, so a blank row on those has no floor.
 
 ## 5. What NOT to include
 
