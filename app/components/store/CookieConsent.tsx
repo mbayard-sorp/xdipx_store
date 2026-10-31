@@ -92,8 +92,24 @@ export function CookieConsent() {
         <button
           ref={firstButtonRef}
           onClick={() => accept('all')}
+          /* Doctrine §2 assigns CTA text to DM Sans (`font-body`); Newsreader
+             is headlines, pull-quotes and italic emphasis. This button set its
+             label in the display serif while its own sibling two lines down,
+             and every other button on the page, uses body — so it inherits the
+             body family now and the override is gone (design-critic gate, run
+             1571, ticket #16878). The same finding was already fixed once on
+             the rail See-all in run 1162; this was the remaining CTA on the
+             storefront in the serif.
+
+             NOT changed here, and deliberately: the gate also found this
+             button's pure-white-on-ink fill is the highest-contrast element in
+             the first viewport, out-weighting the coral hero CTA. That one is
+             not a type-family slip with one right answer — "Accept all" solid
+             against "Essential only" translucent is the prominence asymmetry
+             regulators read as a consent dark pattern, so evening them out is a
+             legal/brand judgment reserved to the owner, not a design cycle's to
+             ship unilaterally. Raised for a ruling instead (run 1703). */
           className="flex-1 bg-white text-ink text-sm font-bold py-0.5 rounded-full hover:opacity-90 transition-opacity"
-          style={{ fontFamily: 'var(--font-display)' }}
         >
           Accept all
         </button>

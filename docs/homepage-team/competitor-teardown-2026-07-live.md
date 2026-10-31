@@ -2418,3 +2418,166 @@ Traffic is still far below the 300-sessions/week weighting threshold (GA4 report
 276 sessions over 28 days this run, about 69 a week, against a stated action
 floor of 1,000), so the imagery, proof and nav items above stay banked as design
 capital and this cycle spent only on the one certain fix.
+
+---
+
+## Delta, 2026-10-28 (Routine B run 1703)
+
+Four real captures, two refusals, all recorded as results. Fetched and read this
+run: `dame.com`, `www.smilemakerscollection.com`, `www.babeland.com`,
+`www.lioness.io`. Refused: `www.lovehoney.com` (403 on WebFetch),
+`www.unbound-babes.com` (DNS failure — this host is outside the cloud session's
+allowed network domains, which is a session setting rather than a property of
+the site, and is worth recording so a later cycle does not read it as "the site
+is gone"). `www.lioness.io` has never been reviewed in this doc before, which
+satisfies the mission brief §4 new-competitor line. Nothing below is quoted or
+inferred from memory.
+
+### The finding that matters: the field has turned the last week of October into a discount wall, and our own brief has just told us not to
+
+Three of the four captures lead with a promotion rather than a product, and two
+of the three are seasonal:
+
+- **Dame** runs a popup reading "It's Black Friday." then "Add products to your
+  cart to reveal **up to 60% off.**" Its actual hero is still a product.
+- **Smile Makers** puts the promotion IN the hero: the mobile hero reads "All
+  treat." over "Buy 2, Get 1 FREE on all vibrators & intimate care this
+  Halloween!", above a three-line promo bar ("SPECIAL OFFER: Buy 2, Get 1
+  FREE!" / free shipping over $65 / "Enjoy 15% off your first order").
+- **Babeland** opens on a promo bar ("15% off* orders $100+ with code HEYBOO")
+  and its first content block is "Kinktober! Get up to 50% off BDSM and Kink",
+  with per-card badges like "42% OFF".
+- **Lioness is the counter-example and it is the useful one.** Its hero is a
+  mechanism claim about a named product: "MOST VIBES JUST BUZZ. THIS ONE
+  LEARNS.", then "Lioness is the only vibrator that measures your pleasure and
+  shows you the results." No countdown, no seasonal banner, no percentage
+  anywhere above the fold. The only urgency string on the whole page is a merch
+  item labelled "Dog Toy (almost sold out!)".
+
+None of the four runs a countdown timer. That is worth saying plainly, because
+PinkCherry's live countdown in the 2026-10-21 delta made it look like the field
+norm, and on this week's evidence it is not — it is one site's choice.
+
+This matters this week specifically. The week-of-2026-10-26 strategy brief's
+homepage directive is "No countdown or urgency framing for Halloween, Black
+Friday or Cyber Monday. Dates only, charter CTAs. This is not negotiable in any
+week of the November calendar." So the divergence is already decided; what this
+delta adds is that it is a divergence from three of four live competitors
+simultaneously, in the highest-pressure trading window of the year, and the one
+site that is not doing it is the one with the clearest product story.
+
+### The second finding, and it unsticks a backlog item that has been parked for months
+
+**Only one of the four prints a review count, and the other three build proof
+without one.** Backlog item 8 (reviews slot) has been "hard-suppressed below
+threshold" for months on the correct grounds that we have five review invites
+and no corpus, and printing anything would be fabricated proof under doctrine
+§6. That reasoning is intact. What it never produced was an alternative. The
+field has three:
+
+- **Named expert attribution (Lioness).** An "Approved by Experts" section
+  carrying quotes attributed to Dr. Michael Krychman and Dee Hartmann, PT, DPT.
+  Proof by who is willing to be named, not by how many strangers rated it.
+- **Press logos (Babeland, Smile Makers).** Babeland runs Forbes, New Yorker,
+  Vogue, GQ and others with no quotes and **no review counts or star ratings
+  anywhere on the page** — a thirty-year-old retailer ("for over 30 years,
+  Babeland has been your go-to pleasure spot") choosing press over ratings.
+  Smile Makers runs Vogue, Glamour, Marie Claire, ELLE, PureWow, Allure with no
+  numeric claim attached.
+- **Attributed testimonials (Smile Makers).** First names or initials, with a
+  "Show more" link to a reviews page, and no aggregate number printed.
+
+Dame is the exception that shows the cost of the other road: it prints "10,000+
+5 Star Reviews" in a trust bar and "1,220 Reviews" on a card, which is only
+available to it because it has the corpus. The 2026-10-21 delta already caught
+Lovehoney printing two different numbers for the same claim in two strips on
+one page, which is what hand-maintained proof decays into.
+
+So the honest read for us: we have no review corpus AND no press placements AND
+no expert endorsements, so none of these three is shippable today either. But
+they change what "earn proof" means from one task to three, and two of them are
+already on the backlog in some form — item 20 (press logo slot, built empty,
+renders only when offsite/PR earns a real placement) is exactly the Babeland
+pattern, and `offsite-scout` is already chartered to earn those placements.
+
+### A cautionary detail worth stealing before we need it
+
+Smile Makers bills its quiz in four places with **two different labels**: the
+header and the body card say "Take our quiz", the footer says "Take the Vibe
+Finder quiz". Backlog item 11 (Compass to nav-level billing) is at the top of
+the shell queue after last week's 3-of-3 finding, and this is the mistake to
+avoid when it ships: one label for the Compass everywhere, or the nav entry and
+the Nº 09 closer start reading as two different features.
+
+The guided-selling nav finding from 2026-10-21 holds on fresh captures. Dame
+bills it three times (nav "Find Your Vibe", mega-menu card "Find Your Vibe
+(2-minute quiz)", mid-page "Not sure which toy is right for you?"). Smile Makers
+bills it in the header, the mobile menu, a body card and the footer. Babeland
+and Lioness bill no finder at all — Babeland's nearest equivalent is a content
+tile ("Start your journey right beginner-friendly sex toys + tips Get Started"),
+and Lioness's is "Which O Pattern are You?", which is editorial, not a selector.
+So two of four, not three of three; the pattern is real but it is not universal,
+and the previous delta's sample happened to be the half that does it.
+
+### Adopted
+
+1. **Hold the no-urgency line through the November window, and say in the run
+   summary that it is a deliberate divergence rather than an oversight.** The
+   brief already requires this; this delta supplies the field evidence, so a
+   future cycle reading back does not mistake it for a gap nobody noticed.
+2. **Backlog item 20 (press logo slot, built empty) is re-ranked up on the
+   strength of the Babeland capture**, as the one proof pattern a store with no
+   review corpus can legitimately reach. It stays `[shell-PR]` and stays unbuilt
+   until `offsite-scout` earns a real placement, because a press strip with
+   nothing in it is not a slot, it is a lie with a schedule.
+3. **One label for the Compass, fixed before item 11 ships.** Recorded against
+   item 11 so the decision is inherited rather than re-made.
+
+### Rejected, with reasons, so they are not re-proposed
+
+1. **Dame's "85% of women reported increased desire in 4 weeks" hero.** Proof-led
+   hero copy with a number is the strongest thing on any of the four pages, and
+   it is unavailable to us: doctrine §6 bans fabricated proof, and we have run no
+   study. Rejected on honesty, not on taste.
+2. **Every percentage-off treatment captured this week** — Babeland's "42% OFF"
+   card badges, Smile Makers' "Buy 2, Get 1 FREE" hero, Dame's "up to 60% off"
+   popup. Charter: no urgency theater. Our MAP rules already govern what we may
+   advertise, and a hero built on a discount is a hero that stops working the day
+   the discount ends.
+3. **Smile Makers' two promo sections headed "3 for 2 on all vibrators" and "3
+   for 2 on all intimate care" alongside a "Buy 2, Get 1 FREE" bar.** Same
+   mechanic, two namings, on one page. This is the merchandising twin of the
+   Lovehoney two-numbers-for-one-claim finding and the reason our own rail asides
+   keep having to be rewritten to match their lineups.
+4. **Lioness's single-product catalog shape.** It gets its clarity by selling one
+   device; we are a 5,900-product curated retailer. Admired, not adaptable.
+
+### The one thing we will do that none of them do
+
+**Ship a storefront whose primary mobile navigation is legible at 375.** This is
+a lower bar than it sounds, and this cycle found we were not clearing it: the
+bottom tab bar rendered "PleasurePlayBodyWearDiscoverSaleNotebook", seven labels
+butted together with inter-word gaps of 1-2px, and no gate had ever seen it
+because the consent banner hides that bar and no capture had ever stored a
+consent choice. None of the four sites captured this week has that defect. The
+thing we do that they do not is not the fix — it is that the fix came from
+pointing our own gate at the half of our own page it was structurally unable to
+see, and then writing down why it could not see it.
+
+### IA fence check
+
+This delta proposes no new section type, no Sanity schema change, and no new URL
+or route, so nothing goes to `tech-architect`. Adopted item 1 is a merchandising
+constraint for Routine A. Adopted item 2 re-ranks an existing `[shell-PR]`
+backlog item and ships nothing. Adopted item 3 is a label decision recorded
+against item 11, which itself still needs the IA ruling on which nav link it
+replaces under the two-link cap. The locked Nº 01 to Nº 11 shell is untouched:
+this cycle's code changes are a rail header row, a See-all glyph, a consent
+button's font family and the bottom tab bar, none of which is a band. The
+two-link `/discover` cap, ruled and closed in the 2026-10-21 delta, is
+unchanged and is now enforced by `storefront-discover-cap.test.ts`. The
+retired-route denylist is untouched.
+
+Traffic remains far below the 300-sessions/week weighting threshold, so the
+imagery, proof and nav items above stay banked as design capital and this cycle
+spent only on cheap, measured, certain fixes.
