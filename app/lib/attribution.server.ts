@@ -8,6 +8,8 @@ const FBC_COOKIE = '_fbc'
 const GCLID_COOKIE = '__xdipx_gclid'
 /** Microsoft Advertising click id (msclkid), namespaced the same way. */
 const MSCLKID_COOKIE = '__xdipx_msclkid'
+/** ExoClick click id, from the {conversions_tracking} macro on a banner link. */
+const EXOCLID_COOKIE = '__xdipx_exoclid'
 const THIRTY_DAYS = 60 * 60 * 24 * 30
 /** Meta's own _fbc lifetime. Matching it keeps our cookie and theirs in sync. */
 const NINETY_DAYS = 60 * 60 * 24 * 90
@@ -239,6 +241,43 @@ export function getStoredMicrosoftClickId(request: Request): MicrosoftClickId | 
     const parsed = JSON.parse(raw) as MicrosoftClickId
     return typeof parsed?.id === 'string' && parsed.id ? parsed : null
   } catch { return null }
+}
+
+/**
+ * The query param that carries ExoClick's {conversions_tracking} macro on a
+ * banner link. Our own name; ExoClick only needs the macro in the URL.
+ */
+export const EXOCLICK_CLICK_PARAM = 'exoclid'
+
+/** ExoClick documents 150 to 700 characters. Anything far past that is not theirs. */
+const EXOCLID_MAX_LENGTH = 1000
+
+/**
+ * ExoClick banner clicks arrive with `?exoclid=`. Checkout is off-domain and
+ * the conversion postback (exoclick-postback.server.ts) has to echo this exact
+ * id back, so a click not captured here can never report a sale. Last click
+ * wins. Writes nothing when the param is absent, so ordinary requests stay
+ * Set-Cookie free and edge-cacheable.
+ */
+export function captureExoClickId(request: Request): string[] {
+  let id: string | null
+  try { id = new URL(request.url).searchParams.get(EXOCLICK_CLICK_PARAM) } catch { return [] }
+  // An unexpanded macro means someone opened the raw link, not a real click.
+  if (!id || id.length > EXOCLID_MAX_LENGTH || id.includes('{')) return []
+
+  const domain = fbCookieDomain(request)
+  return [serializeCookie(EXOCLID_COOKIE, id, {
+    httpOnly: false, // same posture as __xdipx_gclid
+    path: '/',
+    sameSite: 'lax', // an ad click is a top-level cross-site navigation
+    maxAge: NINETY_DAYS, // ExoClick's longest conversion window is 90 days
+    ...(domain ? { domain } : {}),
+    ...(process.env['NODE_ENV'] === 'production' ? { secure: true } : {}),
+  })]
+}
+
+export function getStoredExoClickId(request: Request): string | null {
+  return parseCookie(request.headers.get('Cookie') ?? '')[EXOCLID_COOKIE] || null
 }
 
 export function getStoredUTM(request: Request): UTMData | null {

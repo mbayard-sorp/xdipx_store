@@ -17,6 +17,7 @@ import {
   getFbCookies,
   getGaClientId,
   getGaSessionId,
+  getStoredExoClickId,
   getStoredGoogleClickId,
   getStoredMicrosoftClickId,
   getStoredRefCode,
@@ -31,7 +32,7 @@ export interface CartAttr { key: string; value: string }
 
 /**
  * Attribution cart attributes from the request's cookies: `_fbp`, `_fbc`,
- * `_ga_cid`, `_ga_sid`, the `_gclid` and `_msclkid` sets, the `_utm_` set,
+ * `_ga_cid`, `_ga_sid`, the `_gclid` and `_msclkid` sets, `_exoclid`, the `_utm_` set,
  * `_ref_code`, `_xid`, `_em_h` and `_consent_state`. Only cookies that are
  * actually present produce an attribute, so this can return an empty array.
  */
@@ -68,6 +69,9 @@ export function attributionCartAttrs(request: Request): CartAttr[] {
     // going to gate on it, the same way the click id itself rides along.
     attrs.push({ key: '_marketing_consent', value: getMarketingConsent(request) ? 'true' : 'false' })
   }
+  // The ExoClick postback echoes this id; the webhook reads `_exoclid`.
+  const exoclid = getStoredExoClickId(request)
+  if (exoclid) attrs.push({ key: '_exoclid', value: exoclid })
   if (utm?.source)   attrs.push({ key: '_utm_source',   value: utm.source })
   if (utm?.medium)   attrs.push({ key: '_utm_medium',   value: utm.medium })
   if (utm?.campaign) attrs.push({ key: '_utm_campaign', value: utm.campaign })

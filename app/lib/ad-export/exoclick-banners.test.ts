@@ -123,6 +123,10 @@ describe('adult attribution and landing', () => {
     expect(adultLandingFor(adultIdea({ destinationUrl: null, products: [] }))).toBeNull()
     expect(isAdultLanding('https://xdipx.com/products/a-b')).toBe(true)
     expect(isAdultLanding('https://curious.xdipx.com/products/a-b')).toBe(false)
+    expect(isAdultLanding('https://curious.xdipx.com/gawk-gawk-3000')).toBe(true)
+    expect(isAdultLanding('http://curious.xdipx.com/gawk-gawk-3000')).toBe(false)
+    expect(adultLandingFor(adultIdea({ audience: { salesPage: 'Gawk-Gawk-3000' } }))).toBe('https://curious.xdipx.com/gawk-gawk-3000')
+    expect(adultLandingFor(adultIdea({ audience: { salesPage: '../evil' } }))).toBe('https://xdipx.com/products/we-vibe-sync-2')
     expect(isAdultLanding('https://xdipx.com/collections/vibrators')).toBe(false)
   })
 
@@ -181,5 +185,19 @@ describe('ExoClick banner zip', () => {
       creatives: [adultCreative(1, '300x250'), adultCreative(2, '300x250', { ideaId: 301 })],
       fetchBytes: async () => Buffer.from('p'), now,
     })).rejects.toThrow(/one adult network at a time/)
+  })
+})
+
+describe('ExoClick click macro on adult links', () => {
+  it('appends the macro unencoded on ExoClick links', () => {
+    const url = withUtms('https://curious.xdipx.com/gawk-gawk-3000', adultIdea(), 503, { format: 'banner_300x250' })
+    expect(url.endsWith('&exoclid={conversions_tracking}')).toBe(true)
+    expect(new URL(url).searchParams.get('utm_source')).toBe('exoclick')
+  })
+
+  it('leaves JuicyAds and every other lane alone', () => {
+    const juicy = adultIdea({ audience: { network: 'juicyads' } })
+    expect(withUtms('https://xdipx.com/products/a', juicy, 1, {})).not.toContain('exoclid')
+    expect(withUtms('https://xdipx.com/products/a', { ...adultIdea(), lane: 'google' }, 1, {})).not.toContain('exoclid')
   })
 })
