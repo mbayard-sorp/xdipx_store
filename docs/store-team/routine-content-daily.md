@@ -201,6 +201,26 @@ masturbation") that was in fact the brief's partnered-sex subsample, not its mas
 percentage with no stated denominator or subsample scope is exactly what makes a brief figure
 unsafe to draft from directly.
 
+**When the trace succeeds but the figure's LABEL and its MEASURE disagree (mandatory, ticket
+#18865).** Tracing can work perfectly and still leave a mismatch: the brief's label for a number
+(e.g. "sexual assault") does not match what the primary source actually measured under that label.
+Run 1724 hit exactly this (a podcastReviewBrief's "1 in 4 women, 1 in 6 men are survivors of sexual
+assault" traced to the CDC, whose own measures give neither figure under "sexual assault") and the
+DRAFTING of the correction, not the original claim, is where it went wrong twice: the voice gate
+BLOCKed a self-contradiction, then the accuracy gate BLOCKed the repaired version for asserting an
+origin ("this is really the CDC's technology-facilitated measure") the source never stated. Once a
+mismatch is found:
+1. Report only what the primary source itself states, measure by measure, naming each measure.
+2. Never assert that a cited figure is *wrong* — an unmatched label is not evidence of error, and a
+   term like "sexual assault" often spans several measures or none.
+3. Never assign a figure an origin, and never set it beside a different measure of the same source
+   that happens to share its numbers — adjacency reads as derivation even when no sentence claims
+   one.
+4. Say plainly that the source names no provenance when it does not, and let the direction of the
+   gap carry the point.
+The same resolution rule as elsewhere in this routine applies to the correction itself: narrow or
+delete, never hedge.
+
 ## Step 3.5: Intimacy-advisor brief (Real Talk days only)
 
 Before drafting a Real Talk post, hand the chosen §8B row (slug, problem, target query, † flag)
@@ -685,10 +705,11 @@ ingress-code conflicts, two FAQ-vs-body claim divergences, one source-attributio
 run of this scan alone caught only one of the five.
 
 Run the deterministic checker on the draft JSON FIRST, alongside the other four mandatory checkers
-above, and drive it to exit 0 before the manual pass below:
+above, and drive it to exit 0 before the manual pass below. Always pass `--slug <slug>` (the
+post's own slug, decided by Step 4) so the cross-post pass below runs:
 
 ```bash
-npx tsx scripts/check-self-consistency.ts <draft.json>
+npx tsx scripts/check-self-consistency.ts <draft.json> --slug <slug>
 ```
 
 The checker extracts every TOKEN the post defines or instructs on — an ingress/IP rating code
@@ -701,6 +722,16 @@ promise whose own inline list does not match the number it just stated. See
 `app/lib/self-consistency.ts` for the full definition. This is the mechanical slice only: it would
 have caught run 1239's two ingress-code conflicts, not its FAQ-vs-body claim divergences or its
 source-attribution gap, because those share no reusable token the checker can key on.
+
+**Cross-post pass (ticket #18045).** The in-document check above can only see a contradiction
+inside ONE document. Run 1666 drafted an IPX7 shower permission that directly contradicted the
+already-published `/notebook/what-is-a-gyroscope-sex-toy`, and all six deterministic checkers
+passed clean on it — the draft was internally consistent, and the contradiction was entirely
+cross-post, caught only by a human re-read prompted by the accuracy gate. With `--slug` passed,
+the checker also GROQs every published post for the same ingress codes the draft mentions and reds
+on a disagreement, naming and quoting both the draft site and the published site the same way the
+in-document check does. Resolve a hit by matching the house wording already live (see the IP-rating
+house wording a few paragraphs up), never by softening the published post.
 
 The manual re-read below still runs after the checker is clean, because it catches what the checker
 cannot: before submit, list every RULE or STANDARD the draft tells the reader to apply (read the

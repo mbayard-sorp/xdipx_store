@@ -78,6 +78,15 @@ curl -s -X POST "$BASE_URL/api/team/run" \
    for further confirmation. Skipping this step is exactly how the queue deadlocks: six already-read
    briefs sat `pending` for three straight weeks (2026-09-24) because nothing ever flipped their
    status, so the cap below could never fall and this routine could never file another brief.
+   **Publish the patch, not just the patch (mandatory, ticket #18876).** `researchBrief` is a
+   non-`liveEdit` type, so `mcp__Sanity__patch_documents` (and the equivalent
+   `sanity-content-cli.ts` patch path) edits the DRAFT even when given the bare published `_id` —
+   the published perspective, the one store-strategist's pending-brief query and this routine's own
+   pending-count both read, never updates on its own. Call `publish_documents` on the doc
+   immediately after the status flip, every time. Run 1725 (2026-10-29) found all 8 carried-forward
+   consumed `_id`s still reading `pending` on the published perspective for exactly this reason (2 of
+   them had never been published at all) and had to publish all 8 by hand before the pending count
+   could be trusted — at least the 3rd–4th consecutive week this silently stalled the queue.
 4. Existing briefs (Sanity GROQ): `*[_type=="researchBrief"]{topic, status, createdAt}`, read AFTER
    the consumed-marking above so the count reflects genuinely unread briefs only.
    **More than 5 already `pending` → stop honestly; the queue is ahead of the posting cadence.**

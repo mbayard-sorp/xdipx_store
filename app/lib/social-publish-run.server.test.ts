@@ -310,6 +310,14 @@ describe('the tick deps read the right valves', () => {
       monthSpendUsd: async () => 0,
       maxSpendUsd: async () => 15,
       productHandleFor: async () => null,
+      // Ticket #18013/#19042: this is the only case in this file that runs
+      // with platform 'x', so it is the only one that reaches the x-credits
+      // halt check. Left unstubbed, that check falls through to the real
+      // `isXPublishHalted`, which in an environment with live KV credentials
+      // reads the real, shared `x-publish:credits-halt` key instead of the
+      // in-memory fallback -- the same leak social-publish-job.server.test.ts
+      // already stubs out for every case in its own default deps.
+      isXPublishHalted: async () => false,
     })
     expect(r.attempts).toEqual([{ postId: 1, outcome: 'skipped_video_valve_off' }])
     expect(calls.claimed).toEqual([])

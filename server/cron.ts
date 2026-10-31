@@ -959,7 +959,20 @@ export function createCronRoutes() {
         res.json({ ok: true, skipped: 'no channel with a readable adapter and a valid token', channels })
         return
       }
-      res.json({ ok: true, channels })
+      // Ticket #18774: an ad the owner built directly on the platform has a
+      // mirror row above but no ad_creatives row, so it stays invisible to
+      // ad-metrics/the rules pass until one exists. Runs after a successful
+      // sync so the mirror it reads is current; a failure here never fails
+      // the entity sync itself, since the mirror it just wrote is still good.
+      let ownerBuiltCreatives: Awaited<ReturnType<typeof import('../app/lib/ads/owner-built-creatives.server.js').ensureOwnerBuiltCreatives>> | { error: string }
+      try {
+        const { ensureOwnerBuiltCreatives } = await import('../app/lib/ads/owner-built-creatives.server.js')
+        ownerBuiltCreatives = await ensureOwnerBuiltCreatives()
+      } catch (err) {
+        console.error('[cron/ads-sync-entities] ensureOwnerBuiltCreatives failed (ignored):', err)
+        ownerBuiltCreatives = { error: (err as Error).message }
+      }
+      res.json({ ok: true, channels, ownerBuiltCreatives })
     } catch (err) {
       console.error('[cron/ads-sync-entities] failed:', err)
       res.status(500).json({ ok: false, error: (err as Error).message })

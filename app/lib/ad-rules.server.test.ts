@@ -335,6 +335,41 @@ describe('R6 brake', () => {
 })
 
 // ---------------------------------------------------------------------------
+// revenueAttributed: false (ticket #18774 QA bounce) -- an owner-built ad
+// mirrored for spend/click visibility only reads a real, honest 0 for orders
+// and net revenue forever, not a loss. R1/R3/R6 must not read that 0 as a
+// hard kill or a brake until revenue attribution for these ads is wired.
+// ---------------------------------------------------------------------------
+describe('revenueAttributed: false (owner-built ads, no revenue wired yet)', () => {
+  it('R1 stays quiet on a non-attributed creative that would otherwise hard-kill', () => {
+    const base = creative({ days: run(6, 0, { spendCents: 500, impressions: 400, clicks: 8 }) })
+    expect(rulesOf(base)).toEqual(['R1']) // sanity: this shape fires R1 when attributed.
+    expect(rulesOf(creative({ ...base, revenueAttributed: false }))).toEqual([])
+  })
+
+  it('R3 stays quiet on a non-attributed creative that would otherwise fire unprofitable', () => {
+    const days = run(6, 0, { spendCents: 700, impressions: 500, clicks: 15 })
+    days[2] = { ...days[2]!, orders: 1, netRevenueCents: 1000 } // an order exists, so R1 does not also fire.
+    const base = creative({ days })
+    expect(rulesOf(base)).toEqual(['R3']) // sanity: same fixture as the R3 "fires" test above.
+    expect(rulesOf(creative({ ...base, revenueAttributed: false }))).toEqual([])
+  })
+
+  it('R6 stays quiet on a non-attributed creative that would otherwise brake', () => {
+    const d = run(6, 0, { spendCents: 600, impressions: 500, clicks: 15 })
+    d[1] = { ...d[1]!, orders: 1, netRevenueCents: 5000 }
+    const base = creative({ days: d })
+    expect(rulesOf(base)).toEqual(['R6']) // sanity: same fixture as the R6 "fires" test above.
+    expect(rulesOf(creative({ ...base, revenueAttributed: false }))).toEqual([])
+  })
+
+  it('R2 and R8 are unaffected: they do not depend on revenue attribution', () => {
+    const r2 = evalOne(creative({ days: [dp(0, { spendCents: 100, impressions: 2500, clicks: 5 })], revenueAttributed: false })).firings
+    expect(r2.map(f => f.ruleId)).toEqual(['R2'])
+  })
+})
+
+// ---------------------------------------------------------------------------
 // R7 account spend guard
 // ---------------------------------------------------------------------------
 describe('R7 spend guard', () => {
@@ -504,6 +539,25 @@ describe('runRulesDaily', () => {
     expect(mem.updates.filter(u => u.table === adCreatives)).toHaveLength(0)
     expect(applier).not.toHaveBeenCalled()
     expect(fileBlocker).not.toHaveBeenCalled()
+  })
+
+  it('loadRulesWindow reads exportPayload.ownerBuilt from the DB and R1 stays quiet for it (ticket #18774)', async () => {
+    mem.tables.set(adCreatives, [
+      { id: 1, creativeId: 1, pausedAt: null, launchedAt: null, budgetMultiplier: '1', lane: 'meta', externalAdId: 'ad-1', pauseReason: null, exportPayload: { ownerBuilt: true, adName: 'Advent26 ad' } },
+      { id: 2, creativeId: 2, pausedAt: null, launchedAt: null, budgetMultiplier: '1', lane: 'google', externalAdId: null, pauseReason: null },
+    ])
+    const metrics = await seedMetricsTable()
+    mem.tables.set(metrics, [
+      ...Array.from({ length: 7 }, (_, i) => metricRow(1, ago(6 - i), { spendCents: 500 })),
+      ...Array.from({ length: 7 }, (_, i) => metricRow(2, ago(6 - i), { spendCents: 500 })),
+    ])
+
+    const out = await runRulesDaily(NOW)
+
+    // Creative 2 (ordinary, no exportPayload) hits the same spend/0-orders shape and fires R1;
+    // creative 1 (owner-built) does not, because it is not revenue-attributed yet.
+    expect(out.fired.map(f => f.ruleId)).toEqual(['R1'])
+    expect(out.fired.map(f => f.creativeId)).toEqual([2])
   })
 
   it('auto-applies R7: records applied_by rule:R7, pauses every live creative, raises the alert once', async () => {

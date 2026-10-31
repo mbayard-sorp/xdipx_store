@@ -746,15 +746,6 @@ function ProductPage() {
     return seed
   })
   const [quantity,   setQuantity]   = useState(1)
-  const [activeImg,     setActiveImg]     = useState(0)
-  const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null)
-  const [showSticky,    setShowSticky]    = useState(false)
-  // Guided-selection feedback for the buy CTA. `openReqNonce` bumps to ask the
-  // target selector to open + scroll into view; `selectAlert` is the announced,
-  // visible message shown under the buy row after a premature tap.
-  const [openReqNonce, setOpenReqNonce] = useState(0)
-  const [selectAlert, setSelectAlert] = useState<string | null>(null)
-  const ctaRef = useRef<HTMLButtonElement>(null)
 
   // Build unified gallery: hero video (9:16) → first image → videos → remaining images
   const allMedia = useMemo<GalleryItem[]>(() => {
@@ -778,6 +769,24 @@ function ProductPage() {
     const base = first ? [first, ...videos, ...rest] : [...videos]
     return heroVideoItem ? [heroVideoItem, ...base] : base
   }, [deal.videos, deal.images, deal.heroVideo])
+
+  // Seed the gallery on the variant the URL pins (share-links, post-add-to-
+  // cart returns), instead of always landing on index 0 (ticket #18560).
+  const [activeImg, setActiveImg] = useState(() => {
+    if (urlVariant?.image) {
+      const idx = allMedia.findIndex(m => m.kind === 'image' && m.url === urlVariant.image!.url)
+      if (idx >= 0) return idx
+    }
+    return 0
+  })
+  const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null)
+  const [showSticky,    setShowSticky]    = useState(false)
+  // Guided-selection feedback for the buy CTA. `openReqNonce` bumps to ask the
+  // target selector to open + scroll into view; `selectAlert` is the announced,
+  // visible message shown under the buy row after a premature tap.
+  const [openReqNonce, setOpenReqNonce] = useState(0)
+  const [selectAlert, setSelectAlert] = useState<string | null>(null)
+  const ctaRef = useRef<HTMLButtonElement>(null)
 
   const optionNames = useMemo(() => options.map(o => o.name), [options])
 

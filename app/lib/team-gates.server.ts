@@ -58,6 +58,7 @@ import { socialPosts } from '../../db/schema'
 import { SONNET } from './models.server'
 import { EMMA_VOICE_SOCIAL, EMMA_VOICE_LINKEDIN } from './emma-voice.server'
 import { runDeterministicPublishChecks, type GatePlatform, type GateFinding } from './social-publish-gate.server'
+import { isRenderedCardAsset } from './social-media.server'
 import { stripUrlQuery } from './social-asset-library.server'
 import { getAssetAdjudication, type AssetAdjudicationRow } from './social-asset-adjudication.server'
 import { getSocialMixReport, formatSocialMixReportLines } from './social-mix-report.server'
@@ -195,6 +196,21 @@ REVISE for that same construction. If your reading would also condemn a given pr
 reading is miscalibrated and that check passes instead. This never loosens an actual hard-rule
 violation from the BLOCK list above; it only stops the register call itself from re-deriving a
 different answer each time with nothing new to go on.
+
+A New-in carousel caption (a batch of several newly-live products, pointing readers at /new) is a
+distinct, documented shape, not a regular single-product caption (docs/store-team/instagram-campaigns.md
+§3.3, routine-social-daily.md Step 2.9a, ticket #16978): "a two-line summary of the category or
+problem the batch addresses (product types, not a list of names...)". Naming the batch's product
+TYPES plainly (wands, lubes, wearables, and so on) is the documented correct shape for this format,
+never a "catalog sweep" or "no single subject" defect to REVISE for — a caption naming several
+product types in one post is not a violation when the post is itself a declared batch carousel.
+The opposite failure is just as real and is not the fix for the first: abstracting the batch into
+vague, unnamed feeling-language so no reader can tell what products or category the post covers is
+its own REVISE, not a safer rewrite. The only content this format actually bans is a sentence
+saying the batch exists, is available, or just arrived ("pick one", "it just landed", "in stock",
+"the restock covers X" — these read as a commerce-event announcement even with no price attached);
+REVISE for that specifically, never for naming product types plainly, and never by pushing the
+caption toward abstraction instead.
 
 Charter (core + addendum):
 `
@@ -514,6 +530,38 @@ export function describeAssetAdjudications(adjudications: readonly AssetAdjudica
 }
 
 /**
+ * Rendered-brand-card exemption grounding (ticket #18715). `isRenderedCardAsset`
+ * already tells the deterministic floor (`runDeterministicPublishChecks` in
+ * `social-publish-gate.server.ts`) to skip its own legible-text classification
+ * for a `social-card-*` asset, because its kicker/line/wordmark/slide-counter
+ * are real rendered typography the drafter supplied (`renderSocialCard`), never
+ * an AI model's own baked-in text — but this module's separate vision-LLM pass
+ * never saw that exemption and judged the same pixels fresh against its
+ * `baked-in text` check, which is written for a photographic generation. The
+ * New-in carousel format (`docs/store-team/instagram-campaigns.md` §3.4,
+ * `routine-social-daily.md` Step 2.9a) builds every product/hook/save-close
+ * slide via `op:'packshot-card'`/`op:'plate'`, so this BLOCKed every carousel
+ * built the documented way (ticket #18715). Named by url so the exemption is
+ * scoped to exactly the rendered slides and never a photographic companion
+ * image in the same post; anatomy/exposure checks still run on a rendered card
+ * like any other image, this only stands the text classification aside.
+ */
+export function describeRenderedCardExemption(mediaUrls: readonly string[]): string {
+  const cardUrls = mediaUrls.filter(isRenderedCardAsset)
+  if (cardUrls.length === 0) return ''
+  return (
+    'RENDERED BRAND CARD(S) — baked-in-text check stands aside for these exact images, named here:\n' +
+    cardUrls.map(u => `- ${u}`).join('\n') +
+    '\nEvery letter, digit, wordmark, and slide counter on these is real rendered typography the drafter ' +
+    'supplied (satori+resvg over a clean plate — docs/store-team/instagram-campaigns.md §3.4), never an AI ' +
+    "model's own baked-in or hallucinated text. Do not raise a `baked-in-text` (or similarly-named) finding " +
+    'against a card listed above for its own typography; still judge product identity/colour/proportion and ' +
+    'the anatomy/exposure checks on it exactly as you would any other image, and still raise baked-in-text ' +
+    'normally against any OTHER image in this post not listed above.'
+  )
+}
+
+/**
  * Labels the row's `imageBrief` (which, on a product post, should open with
  * a Writers Room STORY LINE block) and `subject` for the gate brief (ticket
  * #14110). `'' ` when neither is set, so the caller's optional-block pattern
@@ -562,7 +610,11 @@ Judge these, all BLOCK-class unless noted:
   match, per the general rule below on what you cannot judge with confidence.
 - Is the product's apparent size plausible against the hand/room in frame (not palm-sized rendered
   vase-sized or the reverse)?
-- Any letter, digit, wordmark, logo mark, or garbled glyph run baked into the image? (BLOCK) A solid
+- Any letter, digit, wordmark, logo mark, or garbled glyph run baked into the image? (BLOCK) **Unless
+  the user turn names this exact image as a RENDERED BRAND CARD** (a New-in carousel or similar
+  packshot-card/plate slide), in which case its own kicker/line/wordmark/counter typography is
+  licensed rendered type, not a finding — judge that named image's identity, proportion, and
+  anatomy/exposure as usual, just stand this one check aside for it. A solid
   colour band, stripe, or cap colour with no glyphs on it is the product's own packaging, never
   baked-in text on its own, however bold or high-contrast the colour. This still applies when the
   glyphs are mirrored, backwards, upside-down, or otherwise reversed: a flipped orientation does not
@@ -1031,6 +1083,7 @@ export async function preparePublishGate(
     packshotUrl,
     assetPrecedentBlock: describeAssetReusePrecedent(assetPrecedent),
     adjudicationBlock: describeAssetAdjudications(adjudications),
+    renderedCardBlock: describeRenderedCardExemption(media),
     storyLineBlock: describeImageBrief(post.imageBrief, post.subject),
     mixReportBlock,
   })
@@ -1319,6 +1372,8 @@ export function buildPublishGateUserContent(input: {
   assetPrecedentBlock?: string
   /** Owner-adjudication grounding block (ticket #10503), or '' when there is none on file. */
   adjudicationBlock?: string
+  /** Rendered-brand-card exemption block (ticket #18715), or '' when no media is a rendered card. */
+  renderedCardBlock?: string
   /**
    * The row's `imageBrief`/`subject`, labeled (ticket #14110), or '' when
    * neither is set. `social-publish-gate.md`'s `no-story` and
@@ -1358,6 +1413,7 @@ export function buildPublishGateUserContent(input: {
         `${packshotNote ? `${packshotNote}\n\n` : ''}` +
         `${input.assetPrecedentBlock ? `${input.assetPrecedentBlock}\n\n` : ''}` +
         `${input.adjudicationBlock ? `${input.adjudicationBlock}\n\n` : ''}` +
+        `${input.renderedCardBlock ? `${input.renderedCardBlock}\n\n` : ''}` +
         `${input.storyLineBlock ? `${input.storyLineBlock}\n\n` : ''}` +
         `${input.mixReportBlock ? `${input.mixReportBlock}\n\n` : ''}` +
         `${input.mediaUrls.length} generated candidate image(s) follow${input.packshotUrl ? ' after the packshot' : ''}.`,
