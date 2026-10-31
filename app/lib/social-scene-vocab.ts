@@ -187,6 +187,39 @@ export function isRetiredBodyZone(v: unknown): boolean {
   return typeof v === 'string' && RETIRED_BODY_ZONES.includes(v)
 }
 
+/**
+ * Handles whose printed label has already been generated close and failed
+ * (ticket #19171, social run 1750, 2026-10-30). The `macro`/`close` crop
+ * scales hold a labeled bottle or tin large enough in frame for the model to
+ * attempt the printed text, and on every one of these SKUs that attempt came
+ * back "partially legible"/garbled and BLOCKed at the publish gate's
+ * deterministic `vision-legible-text` check (`classifyLegibleText`,
+ * `team-gates.server.ts`) — 4 of 7 BLOCKs in that run alone, 2 of them on the
+ * same je-joue candle three separate times. This is the SAME generation-
+ * capability ceiling `docs/homepage-team/image-prompt-library.md` already
+ * documents for the Notebook composite path ("Label lesson, now costing four
+ * generation rounds across two runs... Do not attempt this label again"),
+ * now evidenced on the social path too.
+ *
+ * Deliberately a short, evidence-based list rather than a heuristic over
+ * product_type/vendor: not every labeled bottle fails (a bold wordmark with
+ * no fine print can render cleanly), and guessing which ones will costs a
+ * billed generation to find out. Add a handle here only once it has actually
+ * failed this way, mirroring how the image-prompt-library records a label
+ * lesson per-SKU rather than per-category.
+ */
+export const LABEL_HEAVY_SKU_HANDLES: readonly string[] = [
+  'je-joue-luxury-massage-candle-jasmine-lily',
+  'je-joue-purple-vanilla-candle-160g',
+  'je-joue-luxury-leather-candle-160g',
+  'eye-of-love-pheromone-matchmaker-black-diamond-attract-him-perfume-oil-20-ml',
+  'eye-of-love-pheromone-parfum-set-0-34-oz-roll-on-sunny-daze-lilac-dream',
+]
+
+export function isLabelHeavySku(handle: string | null | undefined): boolean {
+  return typeof handle === 'string' && LABEL_HEAVY_SKU_HANDLES.includes(handle)
+}
+
 /** The five axes, as one optional bag. Every field is independently optional. */
 export interface SceneAxes {
   bodyZone?: string | undefined
@@ -292,7 +325,10 @@ export function parseSceneAxes(raw: Record<string, unknown>, prefix = ''): Scene
  * routine-social-daily.md §5.0a), and a wide or medium crop legitimately has
  * neither a zone nor a contact mode to report.
  */
-export function requireSceneAxesForGeneration(axes: SceneAxes): { ok: true } | { ok: false; error: string } {
+export function requireSceneAxesForGeneration(
+  axes: SceneAxes,
+  handle?: string | null,
+): { ok: true } | { ok: false; error: string } {
   if (!axes.sceneLocation) {
     return { ok: false, error: 'sceneLocation is required on every social image generation' }
   }
@@ -310,6 +346,21 @@ export function requireSceneAxesForGeneration(axes: SceneAxes): { ok: true } | {
         'bodyZone "forearm" is retired for on-skin bodyscape briefs (imagery-owner-notes.md entry 3: ' +
         'owner said forearm concept shots "almost always don\'t make sense"). Use a different ' +
         '§3.2a/§3.2b mid-tier zone instead (inner-wrist, nape, behind-knee).',
+    }
+  }
+  // Ticket #19171: a macro/close crop of a known label-heavy SKU has already
+  // been attempted and BLOCKed at the publish gate's legible-text check,
+  // repeatedly, for the exact same handle. Refusing here is pre-spend (one
+  // retry) instead of billing another generation that the evidence says will
+  // BLOCK the same way.
+  if ((axes.cropScale === 'macro' || axes.cropScale === 'close') && isLabelHeavySku(handle)) {
+    return {
+      ok: false,
+      error:
+        `handle "${handle}" is a known label-heavy SKU (see LABEL_HEAVY_SKU_HANDLES in social-scene-vocab.ts): ` +
+        `a macro/close crop of its printed label has already BLOCKed at the publish gate's vision-legible-text ` +
+        `check. Use cropScale "medium" or "wide" instead, or turn the label away from camera per the ` +
+        `image-prompt-library's label lesson.`,
     }
   }
   return { ok: true }

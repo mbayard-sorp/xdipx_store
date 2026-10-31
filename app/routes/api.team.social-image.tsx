@@ -362,7 +362,7 @@ export async function action({ request }: ActionFunctionArgs) {
     // untagged the same way the routine's Step 5 template did before this
     // ticket. Refusing here is pre-spend (before `gate()` below) and costs
     // exactly one retry.
-    const axesRequired = requireSceneAxesForGeneration(sceneAxes)
+    const axesRequired = requireSceneAxesForGeneration(sceneAxes, handle)
     if (!axesRequired.ok) return new Response(`Bad Request: ${axesRequired.error}`, { status: 400 })
 
     // Ticket #10560: captured once and reused below for the run-event sink,
