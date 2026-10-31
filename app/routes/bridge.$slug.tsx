@@ -28,6 +28,7 @@ import { getLaneSubset } from '~/lib/ad-lane-subset.server'
 import { LeadFunnelView } from '~/components/funnel/LeadFunnelView'
 import { AdventSalesView, type AdventShopifyData } from '~/components/funnel/AdventSalesView'
 import { SalesPageView, type SalesShopifyData } from '~/components/funnel/SalesPageView'
+import { SalesAddOnView } from '~/components/funnel/SalesAddOnView'
 import {
   ADVENT_CALENDARS,
   ADVENT_DEFAULT,
@@ -40,8 +41,9 @@ import {
 import { applyAttributionAttrs } from '~/lib/attribution-cart.server'
 import { getLeadFunnelPage, type FunnelUtm } from '~/lib/lead-funnel'
 import { mapAllowsDiscountDisplay } from '~/lib/discount-badge'
-import type { SalesPage } from '~/lib/sales-page'
-import { getSalesPage } from '~/lib/sales-page.server'
+import { nextAddOnStep, parseAddOnStep, type SalesPage } from '~/lib/sales-page'
+import { getSalesCartId, getSalesPage, setSalesCartCookie } from '~/lib/sales-page.server'
+import type { Product } from '~/types'
 import { isLeadSmsOptinEnabled } from '~/lib/lead-sms-optin.server'
 import { LEAD_OFFER } from '~/lib/lead-interests'
 import { getStoredUTM } from '~/lib/attribution.server'
@@ -49,7 +51,7 @@ import { trackCtaClick } from '~/lib/analytics.client'
 import { isBridgeHost, isBridgeHostRequest, requestHost, BRIDGE_HOST } from '~/lib/bridge-host.server'
 import { sanityImageUrl } from '~/lib/sanity-image'
 import { getSiteSettings, isPreviewRequest } from '~/lib/sanity.server'
-import { createCartWithLines, getProductByHandle } from '~/lib/shopify.server'
+import { addLinesToCart, createCartWithLines, getCart, getProductByHandle } from '~/lib/shopify.server'
 import { shopifyImageUrl } from '~/lib/shopify-image'
 import { useAgeVerified } from '~/lib/use-age-verified'
 
@@ -180,14 +182,9 @@ async function adventLoaderData(request: Request) {
   }
 }
 
-/** Shopify data for a sales page's one product. A product that fails to load is a 404, never faked. */
-async function salesLoaderData(request: Request, page: SalesPage, preview: boolean) {
-  const [product, settings] = await Promise.all([
-    getProductByHandle(page.productHandle).catch(() => null),
-    getSiteSettings().catch(() => null),
-  ])
-  if (!product || product.variants.length === 0) throw data(BRIDGE_404, { status: 404 })
-  const shop: SalesShopifyData = {
+/** The view's shape for one Shopify product (the page's product or an add-on). */
+function salesShopData(product: Product): SalesShopifyData {
+  return {
     productId: product.id,
     title: product.title,
     brand: product.brand ?? '',
@@ -203,16 +200,94 @@ async function salesLoaderData(request: Request, page: SalesPage, preview: boole
     // Same MAP gate as the discovery cards: a MAP at or above compare-at hides the struck price.
     showCompareAt: mapAllowsDiscountDisplay(product.mapPrice, product.compareAtPrice),
   }
+}
+
+/** The page's add-on products, in order. One that fails to load is null and gets skipped. */
+function loadAddOns(page: SalesPage): Promise<(Product | null)[]> {
+  return Promise.all(page.addOns.map(a => getProductByHandle(a.productHandle).catch(() => null)))
+}
+
+const buyable = (p: Product | null) => !!p && p.variants.some(v => v.availableForSale)
+
+/** Add-on screens depend on the visitor's cart, so the CDN must never keep them. */
+const NO_STORE = { 'Cache-Control': 'private, no-store' }
+
+/** This page's URL with `addon=<step>`, keeping UTMs and the dev host override. */
+function addOnStepUrl(request: Request, step: number): string {
+  const url = new URL(request.url)
+  url.searchParams.set('addon', String(step))
+  return `${url.pathname}${url.search}`
+}
+
+function pageUrl(request: Request): string {
+  const url = new URL(request.url)
+  url.searchParams.delete('addon')
+  return `${url.pathname}${url.search}`
+}
+
+/** Shopify data for a sales page's one product. A product that fails to load is a 404, never faked. */
+async function salesLoaderData(request: Request, page: SalesPage, preview: boolean) {
+  const step = parseAddOnStep(new URL(request.url).searchParams.get('addon'), page.addOns.length)
+  if (step !== null) return salesAddOnLoaderData(request, page, step, preview)
+
+  const [product, settings] = await Promise.all([
+    getProductByHandle(page.productHandle).catch(() => null),
+    getSiteSettings().catch(() => null),
+  ])
+  if (!product || product.variants.length === 0) throw data(BRIDGE_404, { status: 404 })
+  const shop = salesShopData(product)
   const onHost = isBridgeHost(requestHost(request.headers))
   const origin = onHost ? `https://${BRIDGE_HOST}` : new URL(request.url).origin
   return {
     kind: 'sales' as const,
     page,
     shop,
+    hasAddOns: page.addOns.length > 0,
     preview,
     logo: settings?.logoUrl ? { src: settings.logoUrl, alt: settings.logoAlt || 'xdipx' } : null,
     canonical: `${origin}/${page.slug}`,
   }
+}
+
+/**
+ * One add-on screen. It needs the visitor's sales cart; without one (cookie
+ * expired, link shared) the visitor goes back to the page. A sold-out add-on
+ * is skipped, and past the last one the visitor goes to checkout.
+ */
+async function salesAddOnLoaderData(request: Request, page: SalesPage, step: number, preview: boolean) {
+  const cartId = getSalesCartId(request)
+  if (!cartId) throw redirect(pageUrl(request), { headers: NO_STORE })
+  const [cart, addOns, settings] = await Promise.all([
+    getCart(cartId).catch(() => null),
+    loadAddOns(page),
+    getSiteSettings().catch(() => null),
+  ])
+  if (!cart) throw redirect(pageUrl(request), { headers: NO_STORE })
+  const available = addOns.map(buyable)
+  const product = addOns[step - 1]
+  if (!product || !available[step - 1]) {
+    const next = nextAddOnStep(available, step)
+    throw redirect(next ? addOnStepUrl(request, next) : cart.checkoutUrl, { headers: NO_STORE })
+  }
+  return data(
+    {
+      kind: 'salesAddOn' as const,
+      slug: page.slug,
+      step,
+      total: available.filter(Boolean).length,
+      position: available.slice(0, step).filter(Boolean).length,
+      isLast: nextAddOnStep(available, step) === null,
+      addOn: page.addOns[step - 1]!,
+      shop: salesShopData(product),
+      cart: {
+        items: cart.lines.map(l => ({ title: l.merchandise.product.title, image: l.merchandise.product.images[0]?.url ?? null })),
+        subtotal: parseFloat(cart.cost.subtotalAmount.amount),
+      },
+      logo: settings?.logoUrl ? { src: settings.logoUrl, alt: settings.logoAlt || 'xdipx' } : null,
+      preview,
+    },
+    { headers: NO_STORE },
+  )
 }
 
 /**
@@ -242,10 +317,25 @@ export async function action({ request, params }: ActionFunctionArgs) {
   }
 }
 
+/** Pick the variant a form asked for, only if it belongs to `product` and is in stock. */
+function pickVariant(product: Product | null, wanted: string) {
+  return wanted
+    ? product?.variants.find(v => v.id === wanted && v.availableForSale)
+    : product?.variants.find(v => v.availableForSale)
+}
+
 /**
- * A sales page's buy buttons post here. Build a one-line cart for the chosen
- * variant of the page's own product (any other variant id is refused), stamp
- * attribution, and send the visitor to Shopify checkout.
+ * A sales page's forms post here.
+ *
+ * The buy buttons (no intent) build a one-line cart for the chosen variant of
+ * the page's own product (any other variant id is refused) and stamp
+ * attribution. With buyable add-ons the visitor goes to the first add-on
+ * screen, the cart id riding in a short host-only cookie; without, straight
+ * to Shopify checkout.
+ *
+ * An add-on screen posts intent=addon with its step and take=1 or take=0.
+ * Taking it adds the chosen variant of that step's product to the same cart.
+ * Either way the visitor moves to the next buyable add-on, then to checkout.
  */
 async function salesAction(request: Request, slug: string) {
   const preview = isPreviewRequest(request)
@@ -254,14 +344,37 @@ async function salesAction(request: Request, slug: string) {
 
   const form = await request.formData()
   const wanted = String(form.get('variantId') ?? '')
+
+  if (form.get('intent') === 'addon') {
+    const step = parseAddOnStep(String(form.get('step') ?? ''), page.addOns.length)
+    const cartId = getSalesCartId(request)
+    if (step === null || !cartId) return redirect(pageUrl(request))
+    try {
+      const addOns = await loadAddOns(page)
+      let cart = null
+      if (form.get('take') === '1') {
+        const variant = pickVariant(addOns[step - 1] ?? null, wanted)
+        if (!variant) return { error: 'That one just sold out. You can skip it and keep going.' }
+        cart = await addLinesToCart(cartId, [{ variantId: variant.id, quantity: 1 }])
+      }
+      const next = nextAddOnStep(addOns.map(buyable), step)
+      if (next) return redirect(addOnStepUrl(request, next))
+      cart ??= await getCart(cartId)
+      return redirect(cart ? cart.checkoutUrl : pageUrl(request))
+    } catch (err) {
+      console.error('[sales-page] add-on failed', slug, step, err)
+      return { error: 'That did not go through on our side. Give it another tap.' }
+    }
+  }
+
   try {
-    const product = await getProductByHandle(page.productHandle)
-    const variant = wanted
-      ? product?.variants.find(v => v.id === wanted && v.availableForSale)
-      : product?.variants.find(v => v.availableForSale)
+    const [product, addOns] = await Promise.all([getProductByHandle(page.productHandle), loadAddOns(page)])
+    const variant = pickVariant(product, wanted)
     if (!variant) return { error: 'That one just sold out. Pick another option above, or check back soon.' }
     const cart = await createCartWithLines([{ variantId: variant.id, quantity: 1 }])
     await applyAttributionAttrs(cart.id, request, [{ key: '_landing', value: `curious/${page.slug}` }])
+    const next = nextAddOnStep(addOns.map(buyable), 0)
+    if (next) return redirect(addOnStepUrl(request, next), { headers: { 'Set-Cookie': setSalesCartCookie(cart.id) } })
     return redirect(cart.checkoutUrl)
   } catch (err) {
     console.error('[sales-page] checkout failed', slug, err)
@@ -271,6 +384,9 @@ async function salesAction(request: Request, slug: string) {
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
   if (!data) return [{ title: 'Not found' }, { name: 'robots', content: 'noindex' }]
+  if (data.kind === 'salesAddOn') {
+    return [{ title: `${data.shop.title} | xdipx` }, { name: 'robots', content: 'noindex' }]
+  }
   if (data.kind === 'sales') {
     return [
       { title: `${data.page.seoTitle || plainHeadline(data.page.headline)} | xdipx` },
@@ -332,7 +448,10 @@ export function ErrorBoundary() {
   )
 }
 
-export function headers() {
+export function headers({ loaderHeaders }: { loaderHeaders: Headers }) {
+  // Add-on screens set their own no-store; everything else is the same for every visitor.
+  const own = loaderHeaders.get('Cache-Control')
+  if (own) return { 'Cache-Control': own, 'X-Robots-Tag': 'noindex' }
   return {
     'Cache-Control': 'public, max-age=0, s-maxage=60, stale-while-revalidate=300',
     'X-Robots-Tag': 'noindex',
@@ -410,7 +529,7 @@ export default function BridgeRoute() {
       {/* The advent and long-form sales pages run without the age gate (owner
           direction 2026-10-26 and 2026-10-29: the adult networks that send this
           traffic already gate 18+). */}
-      {d.kind !== 'advent' && d.kind !== 'sales' ? (
+      {d.kind !== 'advent' && d.kind !== 'sales' && d.kind !== 'salesAddOn' ? (
         <>
           <style dangerouslySetInnerHTML={{ __html: GATE_CSS }} />
           <script dangerouslySetInnerHTML={{ __html: AGE_PRECHECK }} />
@@ -419,13 +538,15 @@ export default function BridgeRoute() {
       {d.kind === 'funnel' ? (
         <LeadFunnelView page={d.page} utm={d.utm} terms={d.terms} smsOptin={d.smsOptin} />
       ) : d.kind === 'sales' ? (
-        <SalesPageView d={{ page: d.page, shop: d.shop, logo: d.logo, preview: d.preview, error: actionData?.error ?? null }} />
+        <SalesPageView d={{ page: d.page, shop: d.shop, hasAddOns: d.hasAddOns, logo: d.logo, preview: d.preview, error: actionData?.error ?? null }} />
+      ) : d.kind === 'salesAddOn' ? (
+        <SalesAddOnView d={{ ...d, error: actionData?.error ?? null }} />
       ) : d.kind === 'advent' ? (
         <AdventSalesView d={{ initial: d.initial, products: d.products, query: d.query, logo: d.logo, error: actionData?.error ?? null }} />
       ) : (
         <BridgeView d={d} />
       )}
-      {d.kind !== 'advent' && d.kind !== 'sales' ? <AgeGate /> : null}
+      {d.kind !== 'advent' && d.kind !== 'sales' && d.kind !== 'salesAddOn' ? <AgeGate /> : null}
       <CookieConsent />
       <Analytics ga4Id={ga4Id} />
     </main>

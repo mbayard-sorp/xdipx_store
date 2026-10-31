@@ -79,6 +79,7 @@ export default {
     { name: 'hero', title: 'Hero' },
     { name: 'body', title: 'Sections' },
     { name: 'close', title: 'Close' },
+    { name: 'addons', title: 'Add-ons' },
   ],
   fields: [
     {
@@ -362,6 +363,41 @@ export default {
       group: 'close',
       description: 'One line under the closing headline. The price is added automatically.',
       validation: Rule => Rule.max(240).custom(noDashes),
+    },
+
+    // Add-ons
+    {
+      name: 'addOns',
+      title: 'Add-ons',
+      type: 'array',
+      group: 'addons',
+      description:
+        'Up to two accessories offered one at a time after a buy button, before checkout. Each screen offers one product with a take-it button and a no-thanks link. A sold-out add-on is skipped. Leave empty to go straight to checkout.',
+      of: [
+        {
+          type: 'object',
+          fields: [
+            {
+              name: 'productHandle',
+              title: 'Product handle',
+              type: 'string',
+              validation: Rule =>
+                Rule.required().custom(v => (/^[a-z0-9][a-z0-9-]*$/.test(v ?? '') ? true : 'Bare handle only: lowercase letters, digits, hyphens')),
+            },
+            { ...heading, name: 'headline', title: 'Headline', description: 'For example: Add the *lube* it was made for.' },
+            {
+              name: 'pitch',
+              title: 'Pitch',
+              type: 'text',
+              rows: 3,
+              description: 'One to three sentences on why this goes with the main product.',
+              validation: Rule => Rule.required().max(300).custom(noDashes),
+            },
+          ],
+          preview: { select: { title: 'headline', subtitle: 'productHandle' }, prepare: ({ title, subtitle }) => ({ title: (title ?? '').replace(/\*/g, ''), subtitle }) },
+        },
+      ],
+      validation: Rule => Rule.max(2),
     },
   ],
   preview: {
