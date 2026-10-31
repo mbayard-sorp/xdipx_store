@@ -29,6 +29,8 @@ import { LeadFunnelView } from '~/components/funnel/LeadFunnelView'
 import { AdventSalesView, type AdventShopifyData } from '~/components/funnel/AdventSalesView'
 import { SalesPageView, type SalesShopifyData } from '~/components/funnel/SalesPageView'
 import { SalesAddOnView } from '~/components/funnel/SalesAddOnView'
+import { GawkSalesView } from '~/components/funnel/GawkSalesView'
+import { GAWK_SALES_SLUG } from '~/lib/gawk-sales-page'
 import {
   ADVENT_CALENDARS,
   ADVENT_DEFAULT,
@@ -559,7 +561,11 @@ export default function BridgeRoute() {
       {d.kind === 'funnel' ? (
         <LeadFunnelView page={d.page} utm={d.utm} terms={d.terms} smsOptin={d.smsOptin} />
       ) : d.kind === 'sales' ? (
-        <SalesPageView d={{ page: d.page, shop: d.shop, hasAddOns: d.hasAddOns, logo: d.logo, preview: d.preview, error: actionData?.error ?? null }} />
+        d.page.slug === GAWK_SALES_SLUG ? (
+          <GawkSalesView d={{ page: d.page, shop: d.shop, hasAddOns: d.hasAddOns, logo: d.logo, preview: d.preview, error: actionData?.error ?? null }} />
+        ) : (
+          <SalesPageView d={{ page: d.page, shop: d.shop, hasAddOns: d.hasAddOns, logo: d.logo, preview: d.preview, error: actionData?.error ?? null }} />
+        )
       ) : d.kind === 'salesAddOn' ? (
         <SalesAddOnView d={{ ...d, error: actionData?.error ?? null }} />
       ) : d.kind === 'advent' ? (
