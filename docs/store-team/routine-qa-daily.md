@@ -358,6 +358,15 @@ order landed in the last 24h, it has a resolved ledger row; (3) `POST /cron/purc
 not a failure on a day with zero orders; this check is orders-versus-reported, never an absolute
 count.
 
+**Known limitation: sub-check (3) is blocked outright in this cloud QA sandbox.** `POST
+/cron/purchase-reconcile` with `dryRun:true` is denied by the auto-mode tool classifier (reason:
+"Modify Shared Resources") before the request ever reaches xdipx.com, even with `dryRun:true` set.
+This is distinct from the `preview-fetch` POST-only-route gap documented below: that one is a
+missing capability, this one is an active deny. Recorded unverified on run 1745 (2026-10-30 16:30
+pass) rather than attempted as a workaround. Record `unverified: purchase-reconcile dry-run denied
+by sandbox tool classifier` for sub-check (3) and move on, rather than re-discovering the same
+denial each pass, unless the owner has since allowlisted this specific dry-run call.
+
 Sub-check (1) **is reachable now** (route shipped 2026-08-19, ticket #4177 / PR #773). Call the
 authenticated route instead of recording `unverified`:
 
