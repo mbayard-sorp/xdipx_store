@@ -42,6 +42,7 @@
 import { UNLISTED_COLLECTION_HANDLES } from '~/lib/collection-taxonomy'
 import { neon } from '@neondatabase/serverless'
 import { getBlogPostsForSitemap, getBlogCategories, getAllBlogSeries, getPageList, getProductHandlesForSitemap, getComparisonsForSitemap, getEditoriallyLinkedHandles } from '~/lib/sanity.server'
+import { getPseoCombosForSitemap } from '~/lib/pseo-combos.server'
 import { getProductImagesForSitemap, getCollectionsForSitemap, getMainMenu, getIndexableProductHandles, type SitemapProductImages, type SitemapCollection } from '~/lib/shopify.server'
 import { db } from '~/lib/db.server'
 import { DEAD_VERDICT_STATES } from '~/lib/gsc-index.server'
@@ -305,7 +306,7 @@ async function assembleSegments(): Promise<SitemapSegment[]> {
       return fallback
     })
 
-  const [blogPosts, categories, blogSeries, pages, products, productImages, collections, liveDealRows, mainMenu, health, indexableHandles, newDropLastmod, comparisons, candidates, protectedHandles] = await Promise.all([
+  const [blogPosts, categories, blogSeries, pages, products, productImages, collections, liveDealRows, mainMenu, health, indexableHandles, newDropLastmod, comparisons, candidates, protectedHandles, pseoCombos] = await Promise.all([
     guard(getBlogPostsForSitemap(), [], 'getBlogPostsForSitemap'),
     guard(getBlogCategories(), [], 'getBlogCategories'),
     guard(getAllBlogSeries(), [], 'getAllBlogSeries'),
@@ -321,6 +322,7 @@ async function assembleSegments(): Promise<SitemapSegment[]> {
     guard(getComparisonsForSitemap(), [], 'getComparisonsForSitemap'),
     getSitemapProductCandidates(),
     getProtectedProductHandles(),
+    guard(getPseoCombosForSitemap(), [], 'getPseoCombosForSitemap'),
   ])
 
   const liveDealDate = liveDealRows[0]?.dealDate ? new Date(liveDealRows[0]!.dealDate) : null
@@ -444,6 +446,18 @@ async function assembleSegments(): Promise<SitemapSegment[]> {
     priority: '0.7',
   }))
 
+  // ── shop (pSEO pilot): /shop/$tag/$type ───────────────────────────────────
+  // Capped at PSEO_SITEMAP_LIMIT (app/lib/pseo-combos.server.ts) combinations,
+  // ranked by live product count, until the GSC canonical-mismatch count
+  // stops rising (tracker p2-1-pseo, ticket #18009). The .md twins are not
+  // listed, matching the compare/notebook precedent above.
+  const shopUrls: SitemapUrl[] = pseoCombos.map(c => ({
+    loc: `${BASE}/shop/${c.tagSlug}/${c.typeSlug}`,
+    lastmod: today,
+    changefreq: 'weekly',
+    priority: '0.5',
+  }))
+
   // ── collections: /collections/$handle ────────────────────────────────────
   // Helps xdipx rank for category queries (e.g. "wand vibrators"). Skip the
   // Shopify `frontpage` default, any handle that duplicates a clean URL, any
@@ -544,6 +558,7 @@ async function assembleSegments(): Promise<SitemapSegment[]> {
   push('collections', collectionUrls)
   push('notebook', notebookUrls)
   push('compare', compareUrls)
+  push('shop', shopUrls)
 
   segments.push(...chunkSegments('products', clean(productUrls), PRODUCTS_PER_SEGMENT))
 

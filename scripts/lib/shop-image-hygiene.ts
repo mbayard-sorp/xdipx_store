@@ -43,6 +43,39 @@ export function chunk<T>(items: T[], size: number): T[][] {
   return out
 }
 
+/**
+ * Comparable stem for an image URL: basename, minus query and extension, minus
+ * Shopify's collision suffix, uppercased. A UUID suffix is always stripped
+ * (`88373_203ad456-...` -> `88373`); a shorter suffix only after a
+ * digit-then-letter token (`77791B_1` -> `77791B`), so a plain `wand_black`
+ * name is left whole.
+ */
+export function imageStem(url: string): string {
+  const base = decodeURIComponent(url.split('?')[0]!.split('/').pop() ?? '')
+  const noExt = base.replace(/\.[a-z0-9]+$/i, '')
+  const noUuid = noExt.replace(/_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, '')
+  const m = /^(.*\d[a-z])_[a-z0-9-]+$/i.exec(noUuid)
+  return (m ? m[1]! : noUuid).toUpperCase()
+}
+
+/**
+ * Feed image URLs a product does not have yet, in feed order, matched by stem
+ * so an image Shopify renamed on upload still counts as present. Duplicate
+ * stems within the feed collapse to the first URL.
+ */
+export function missingFeedImages(feedUrls: string[], productUrls: string[]): string[] {
+  const have = new Set(productUrls.map(imageStem))
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const url of feedUrls) {
+    const stem = imageStem(url)
+    if (have.has(stem) || seen.has(stem)) continue
+    seen.add(stem)
+    out.push(url)
+  }
+  return out
+}
+
 /** The Nalpac main feed's "Image 1" column for a zero-media product's SKU, or null. */
 export function nalpacImageOneUrl(mainRow: Record<string, string> | undefined): string | null {
   return mainRow?.['Image 1']?.trim() || null

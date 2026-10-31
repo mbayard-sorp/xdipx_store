@@ -15,6 +15,7 @@ import {
   describeAssetAdjudications,
   describeAssetReusePrecedent,
   describeImageBrief,
+  describeRenderedCardExemption,
   formatProductIdentityLogLine,
   isImageLevelFinding,
   parsePublishGateModelOutput,
@@ -105,6 +106,17 @@ describe('VOICE_GATE_SYSTEM_PREFIX register-call calibration (ticket #13890)', (
     expect(VOICE_GATE_SYSTEM_PREFIX).toContain('mechanism-on-body narration')
     expect(VOICE_GATE_SYSTEM_PREFIX).toContain('REVISE-class')
     expect(VOICE_GATE_SYSTEM_PREFIX).toContain('miscalibrated')
+  })
+})
+
+describe('VOICE_GATE_SYSTEM_PREFIX New-in carousel calibration (ticket #18715)', () => {
+  it('licenses naming product types plainly and bans the opposite "abstract into vague feeling-language" fix', async () => {
+    const { VOICE_GATE_SYSTEM_PREFIX } = await import('./team-gates.server')
+    expect(VOICE_GATE_SYSTEM_PREFIX).toContain('New-in carousel')
+    expect(VOICE_GATE_SYSTEM_PREFIX).toContain('catalog sweep')
+    expect(VOICE_GATE_SYSTEM_PREFIX).toContain('product types plainly')
+    expect(VOICE_GATE_SYSTEM_PREFIX).toContain('vague, unnamed feeling-language')
+    expect(VOICE_GATE_SYSTEM_PREFIX).toContain('just arrived')
   })
 })
 
@@ -475,6 +487,42 @@ describe('buildPublishGateUserContent (ticket #8823, product-identity hallucinat
 
     const withoutMixReport = buildPublishGateUserContent({ ...base, featuresProduct: true, packshotUrl: null })
     expect((withoutMixReport[0] as { text: string }).text).not.toContain('MIX_REPORT_BLOCK')
+  })
+
+  it('includes the rendered-card exemption block (ticket #18715) when supplied, omits it entirely when not', () => {
+    const withRenderedCard = buildPublishGateUserContent({
+      ...base,
+      featuresProduct: true,
+      packshotUrl: null,
+      renderedCardBlock: 'RENDERED_CARD_BLOCK',
+    })
+    expect((withRenderedCard[0] as { text: string }).text).toContain('RENDERED_CARD_BLOCK')
+
+    const withoutRenderedCard = buildPublishGateUserContent({ ...base, featuresProduct: true, packshotUrl: null })
+    expect((withoutRenderedCard[0] as { text: string }).text).not.toContain('RENDERED_CARD_BLOCK')
+  })
+})
+
+describe('describeRenderedCardExemption (ticket #18715)', () => {
+  it('returns "" when no media url is a rendered card, so the caller omits the block cleanly', () => {
+    expect(describeRenderedCardExemption([])).toBe('')
+    expect(describeRenderedCardExemption([
+      'https://cdn.shopify.com/s/files/1/social-pom-cast-warm-20261028.jpg',
+      'https://cdn.shopify.com/s/files/1/77292A.jpg',
+    ])).toBe('')
+  })
+
+  it('names every rendered-card url (packshot-card/plate op output) and exempts only the baked-in-text check', () => {
+    const block = describeRenderedCardExemption([
+      'https://cdn.shopify.com/s/files/1/social-card-plate-20261028-1-ab12cd.jpg',
+      'https://cdn.shopify.com/s/files/1/social-card-womanizer-beauty-20261028-2-ef34gh.jpg',
+      'https://cdn.shopify.com/s/files/1/social-pom-cast-warm-20261028.jpg',
+    ])
+    expect(block).toContain('social-card-plate-20261028-1-ab12cd.jpg')
+    expect(block).toContain('social-card-womanizer-beauty-20261028-2-ef34gh.jpg')
+    expect(block).not.toContain('social-pom-cast-warm-20261028.jpg')
+    expect(block).toContain('baked-in-text')
+    expect(block).toContain('still judge product identity')
   })
 })
 

@@ -82,6 +82,15 @@ const tick = (
     // the real owner-blocker writer against the live database.
     fileDeadRowTicket: async () => {},
     fileOwnerApprovedBounceBlocker: async () => {},
+    // Ticket #18013: same reasoning again. The real functions fall back to
+    // an in-memory KV store rather than throwing when KV is unconfigured, so
+    // they would not fail here, but that store lives on `globalThis` and
+    // would leak a halt flag set by one test into the next one in this file.
+    // Never-halted-and-no-op-by-default keeps every case below isolated
+    // unless it explicitly cares about the halt.
+    isXPublishHalted: async () => false,
+    setXPublishHalt: async () => {},
+    clearXPublishHalt: async () => {},
     ...opts,
     // Ticket #11453: default the media-reachability check to "always
     // reachable" (fake CDN urls throughout this file), the same way every
@@ -750,7 +759,13 @@ describe('X failures only the owner can fix (ticket #16995)', () => {
     expect(blockers).toHaveLength(0)
   })
 
-  it('does not fire on a first (non-terminal) credits-depleted failure', async () => {
+  // Ticket #18013 supersedes this: a credits-depleted failure is account-wide,
+  // not a per-post condition, so the blocker now fires on the FIRST occurrence
+  // rather than waiting for a second strike. Six posts independently reaching
+  // their own second strike during the 2026-10-22 outage is exactly the six
+  // duplicate per-post tickets #18013 exists to stop. See the dedicated
+  // 'X account-wide credits halt' suite below for the halt-flag behavior.
+  it('fires on the first credits-depleted failure too (ticket #18013)', async () => {
     const blockers: unknown[] = []
     const { repo } = fakeRepo([post({ platform: 'x', errorMessage: null })])
     await tick({
@@ -758,7 +773,87 @@ describe('X failures only the owner can fix (ticket #16995)', () => {
       publish: async () => ({ ok: false, detail: CREDITS_DETAIL }),
       fileOwnerApprovedBounceBlocker: async (input) => { blockers.push(input) },
     })
-    expect(blockers).toHaveLength(0)
+    expect(blockers).toHaveLength(1)
+  })
+})
+
+describe('X account-wide credits halt (ticket #18013)', () => {
+  const CREDITS_DETAIL =
+    'X API POST https://api.x.com/2/tweets → 402: {"detail":"credits depleted"}. ' +
+    'X API credits are depleted. Add credits at developer.x.com; posting stays blocked until you do.'
+
+  it('leaves the rest of the queue untouched in the same tick once one post hits 402 credits-depleted', async () => {
+    const { repo, calls } = fakeRepo([
+      post({ id: 1, errorMessage: null }),
+      post({ id: 2, errorMessage: null }),
+    ])
+    const blockers: unknown[] = []
+    const r = await tick({
+      platform: 'x', isEnabled: enabled, maxPerDay: cap(3), repo,
+      publish: async () => ({ ok: false, detail: CREDITS_DETAIL }),
+      fileOwnerApprovedBounceBlocker: async (input) => { blockers.push(input) },
+    })
+
+    // Only post 1 was ever attempted; post 2 was never claimed, failed, or
+    // reported on.
+    expect(r.attempts).toEqual([{ postId: 1, outcome: 'x_credits_halt', detail: CREDITS_DETAIL }])
+    expect(calls.failed).toHaveLength(0)
+    expect(calls.posted).toHaveLength(0)
+    expect(blockers).toHaveLength(1)
+  })
+
+  it('skips the whole queue, without even reading it, when the halt flag is already set', async () => {
+    let listEligibleCalled = false
+    const { repo } = fakeRepo([post({ id: 1 })], {
+      listEligible: async (_limit) => { listEligibleCalled = true; return [] },
+    })
+    const publish = vi.fn()
+    const r = await tick({
+      platform: 'x', isEnabled: enabled, maxPerDay: cap(3), repo,
+      publish,
+      isXPublishHalted: async () => true,
+    })
+
+    expect(r.skipped).toBe('x_credits_halt')
+    expect(r.attempts).toEqual([])
+    expect(listEligibleCalled).toBe(false)
+    expect(publish).not.toHaveBeenCalled()
+  })
+
+  it('clears the halt flag on the next successful publish', async () => {
+    let cleared = false
+    const { repo } = fakeRepo([post({ id: 1 })])
+    await tick({
+      platform: 'x', isEnabled: enabled, maxPerDay: cap(3), repo,
+      publish: async () => ({ ok: true, externalPostId: 'x_1' }),
+      clearXPublishHalt: async () => { cleared = true },
+    })
+
+    expect(cleared).toBe(true)
+  })
+
+  it('does not touch the halt flag on an Instagram tick', async () => {
+    let called = false
+    const { repo } = fakeRepo([post({ id: 1, platform: 'instagram' })])
+    await tick({
+      platform: 'instagram', isEnabled: enabled, maxPerDay: cap(3), repo,
+      publish: async () => ({ ok: true, externalPostId: 'ig_1' }),
+      isXPublishHalted: async () => { called = true; return false },
+      clearXPublishHalt: async () => { called = true },
+    })
+
+    expect(called).toBe(false)
+  })
+
+  it('a non-402 terminal X failure still fails per-post as before, not as an account-wide halt', async () => {
+    const { repo, calls } = fakeRepo([post({ errorMessage: 'first attempt also failed' })])
+    const r = await tick({
+      platform: 'x', isEnabled: enabled, maxPerDay: cap(3), repo,
+      publish: async () => ({ ok: false, detail: 'X API POST ... → 500: internal error' }),
+    })
+
+    expect(calls.failed).toEqual([{ id: 1, terminal: true }])
+    expect(r.attempts[0]?.outcome).toBe('failed')
   })
 })
 

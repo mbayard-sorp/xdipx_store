@@ -19,10 +19,11 @@ import {
   ADVENT_EMMA_PHOTO,
   ADVENT_FAQ,
   ADVENT_ORDER,
-  ADVENT_SALE_ENDS_AT,
   ADVENT_SHIP_BY,
   ADVENT_SOLO_IDEAS,
+  ADVENT_STEP_UP_TO,
   adventRitual,
+  adventStepUp,
   money,
   type AdventCalendar,
   type AdventIdea,
@@ -48,7 +49,6 @@ export interface AdventShopifyData {
 export interface AdventViewData {
   initial: AdventKey
   products: Partial<Record<AdventKey, AdventShopifyData>>
-  nowMs: number
   /** The page's other query params (UTMs, preview flags) without `c`, kept on lineup links. */
   query: string
   /** The store wordmark from Sanity site settings; null renders the text wordmark. */
@@ -131,49 +131,8 @@ function Snow() {
   )
 }
 
-function useCountdown(initialNow: number) {
-  const [now, setNow] = useState(initialNow)
-  useEffect(() => {
-    setNow(Date.now())
-    const t = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(t)
-  }, [])
-  const end = new Date(ADVENT_SALE_ENDS_AT).getTime()
-  const ms = Math.max(0, end - now)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  const d = Math.floor(ms / 864e5)
-  const h = Math.floor(ms / 36e5) % 24
-  const m = Math.floor(ms / 6e4) % 60
-  const s = Math.floor(ms / 1e3) % 60
-  return {
-    live: ms > 0,
-    units: [
-      { v: pad(d), l: 'days' },
-      { v: pad(h), l: 'hrs' },
-      { v: pad(m), l: 'min' },
-      { v: pad(s), l: 'sec' },
-    ],
-    short: `${d}d ${pad(h)}h ${pad(m)}m`,
-    endLabel: new Date(end).toLocaleDateString('en-US', { month: 'long', day: 'numeric', timeZone: 'America/Los_Angeles' }),
-  }
-}
-
-function Timer({ units, big = false }: { units: { v: string; l: string }[]; big?: boolean }) {
-  return (
-    <div className="flex gap-1.5" role="timer" aria-label="Time left at the advent price">
-      {units.map(u => (
-        <div
-          key={u.l}
-          className={
-            'rounded-[10px] bg-ink text-center text-paper-3 ' + (big ? 'min-w-16 px-2 pb-2 pt-2.5' : 'min-w-[52px] px-1.5 pb-1.5 pt-[7px]')
-          }
-        >
-          <div className={'font-mono font-medium leading-[1.1] ' + (big ? 'text-2xl' : 'text-lg')}>{u.v}</div>
-          <div className="font-mono text-[9px] uppercase tracking-[0.14em] text-[#C9BCC4]">{u.l}</div>
-        </div>
-      ))}
-    </div>
-  )
+function listJoin(xs: string[]) {
+  return xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`
 }
 
 /**
@@ -274,7 +233,6 @@ function IdeaCard({ idea, dark, packshot }: { idea: AdventIdea; dark: boolean; p
 export function AdventSalesView({ d }: { d: AdventViewData }) {
   const [key, setKey] = useState<AdventKey>(d.initial)
   const [img, setImg] = useState(0)
-  const timer = useCountdown(d.nowMs)
 
   const p = ADVENT_CALENDARS[key]
   const shop = d.products[key]
@@ -288,16 +246,22 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
   const stock = shop?.stock ?? null
   const stockLine = shop?.available && stock !== null && stock > 0 ? stock : null
 
+  const stepUpShop = d.products[ADVENT_STEP_UP_TO]
+  const prices: Partial<Record<AdventKey, number>> = {}
+  for (const k of ADVENT_ORDER) if (d.products[k]) prices[k] = d.products[k]!.price
+  const stepUp = stepUpShop?.available ? adventStepUp(key, prices) : null
+
   useEffect(() => {
     if (shop) trackFbViewContent({ content_ids: [shop.productId], value: shop.price, currency: 'USD' })
   }, [shop])
 
   const lineupHref = (k: AdventKey) => `?${d.query ? d.query + '&' : ''}c=${k}`
 
-  function pick(k: AdventKey) {
+  // The step-up card logs which calendar the visitor left; the lineup logs the one they picked.
+  function pick(k: AdventKey, source: 'advent_lineup' | 'advent_upsell' = 'advent_lineup') {
     setKey(k)
     setImg(0)
-    trackCtaClick('advent_lineup', k)
+    trackCtaClick(source, source === 'advent_upsell' ? key : k)
     const url = new URL(window.location.href)
     url.searchParams.set('c', k)
     window.history.replaceState(window.history.state, '', url)
@@ -419,17 +383,9 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
             <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-plum">{valuePct}% less</span>
           </div>
 
-          {timer.live || stockLine !== null ? (
-            <div className="flex flex-col gap-3.5 rounded-[18px] border border-coral/30 px-5 py-[18px]">
-              {timer.live ? (
-                <div className="flex flex-wrap items-center justify-between gap-x-[18px] gap-y-2.5">
-                  <div className="text-sm font-semibold">Advent pricing ends in</div>
-                  <Timer units={timer.units} />
-                </div>
-              ) : null}
-              {stockLine !== null ? (
-                <div className="text-[13.5px] font-semibold text-coral">Only {stockLine} left at this price</div>
-              ) : null}
+          {stockLine !== null ? (
+            <div className="rounded-[18px] border border-coral/30 px-5 py-[18px]">
+              <div className="text-[13.5px] font-semibold text-coral">Only {stockLine} left at this price</div>
             </div>
           ) : null}
 
@@ -438,6 +394,38 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
               {cta}
             </BuyForm>
           </div>
+
+          {stepUp && stepUpShop ? (
+            <a
+              data-step-up
+              href={lineupHref(stepUp.to)}
+              onClick={e => {
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return
+                e.preventDefault()
+                pick(stepUp.to, 'advent_upsell')
+              }}
+              className="grid grid-cols-[64px_minmax(0,1fr)_auto] items-center gap-4 rounded-[18px] border border-plum/25 bg-paper px-4 py-4 text-left transition hover:border-plum/50 sm:gap-[18px]"
+            >
+              <div className="h-16 w-16 overflow-hidden rounded-[12px] bg-paper-3">
+                {stepUpShop.images[0] ? <img src={shopifyImageUrl(stepUpShop.images[0], 160)} alt="" loading="lazy" className="block h-full w-full object-cover" /> : null}
+              </div>
+              <div className="min-w-0">
+                <div className="mb-1 font-mono text-[10.5px] uppercase tracking-[0.14em] text-plum">Or go all in</div>
+                <div className="font-display text-[1.15rem] leading-[1.25]">
+                  {ADVENT_CALENDARS[stepUp.to].short} · <span className="whitespace-nowrap">{ADVENT_CALENDARS[stepUp.to].days}-day</span>
+                </div>
+                <div className="mt-1 text-[13.5px] leading-snug text-ink-3">
+                  <strong className="font-semibold text-ink">{money(stepUp.extraValue)} more in the box</strong> for {money(stepUp.extraPrice)} more.
+                  {' '}Adds {listJoin(stepUp.addedBrands)}
+                  {stepUp.extraDoors > 0 ? `, plus ${stepUp.extraDoors} more doors` : ''}.
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-base font-semibold">{money(stepUpShop.price)}</div>
+                <div className="mt-1 whitespace-nowrap text-[13px] font-medium text-coral">Take a peek →</div>
+              </div>
+            </a>
+          ) : null}
 
           <div className="flex flex-col gap-2.5 border-t border-line pt-5 text-sm text-ink-3">
             <div className="flex gap-[9px]"><span className="text-sage">♥</span> Plain box, plain label, no product names. Your statement reads XDIPX</div>
@@ -692,11 +680,10 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
             </h2>
             <p className="max-w-[52ch] text-[16.5px] leading-[1.6]">
               These are 2026 holiday editions, and stock is limited.
-              {timer.live ? ` ${priceStr} is the advent price, and it ends ${timer.endLabel}.` : ''} Order by {ADVENT_SHIP_BY} and door one is ready on December 1.
+              {' '}{priceStr} is the advent price through November 24. Order by {ADVENT_SHIP_BY} and door one is ready on December 1.
             </p>
           </div>
           <div className="flex flex-[0_1_auto] flex-col items-start gap-3.5">
-            {timer.live ? <Timer units={timer.units} big /> : null}
             <BuyForm cal={p} shop={shop} className="rounded-full bg-ink px-8 py-[17px] text-base font-medium text-white transition hover:-translate-y-0.5">
               {cta}
             </BuyForm>
@@ -753,11 +740,7 @@ export function AdventSalesView({ d }: { d: AdventViewData }) {
                   {priceStr} <span className="font-normal text-plum">· {valueStr} value</span>
                   <FreeShippingBadge size="sm" className="ml-2 align-middle" />
                 </div>
-                {timer.live || stockLine !== null ? (
-                  <div className="text-[12.5px] font-semibold text-coral">
-                    {[timer.live ? `Ends in ${timer.short}` : null, stockLine !== null ? `${stockLine} left` : null].filter(Boolean).join(' · ')}
-                  </div>
-                ) : null}
+                {stockLine !== null ? <div className="text-[12.5px] font-semibold text-coral">{stockLine} left</div> : null}
               </div>
             </div>
             <BuyForm cal={p} shop={shop} className="whitespace-nowrap rounded-full bg-coral px-5 py-[13px] text-[15px] font-medium text-white sm:px-[26px]">

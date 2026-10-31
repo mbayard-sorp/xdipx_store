@@ -2,8 +2,11 @@
  * Paid-lane bridge page (Ad Studio v2 PR-D). Served at
  * https://curious.xdipx.com/<slug> and, for previews, /bridge/<slug>?bridgeHost=1.
  *
- * One screen: a photograph, one headline, one claim, one button to the PDP on
- * the main host. Same page for every visitor, no cloaking, no redirect, no
+ * Four page kinds share the slug space: the lead funnel's two-door pages and
+ * the advents26 sales page (both defined in code), long-form `salesPage`
+ * documents for adult ad networks (Sanity, app/lib/sales-page.ts), and the
+ * one-screen `adBridgePage`: a photograph, one headline, one claim, one
+ * button to the PDP on the main host. Same page for every visitor, no cloaking, no redirect, no
  * shortener (docs/ads-policy.md M1). This route lives outside `_layout`, so it
  * has no store nav, footer or trust bar. It is host-gated: on any other host
  * it is a plain 404, which means adding `curious.xdipx.com` to the Vercel
@@ -24,6 +27,7 @@ import { buildBridgeDestination, getAdBridgePage, pickBridgePackshot } from '~/l
 import { getLaneSubset } from '~/lib/ad-lane-subset.server'
 import { LeadFunnelView } from '~/components/funnel/LeadFunnelView'
 import { AdventSalesView, type AdventShopifyData } from '~/components/funnel/AdventSalesView'
+import { SalesPageView, type SalesShopifyData } from '~/components/funnel/SalesPageView'
 import {
   ADVENT_CALENDARS,
   ADVENT_DEFAULT,
@@ -35,6 +39,9 @@ import {
 } from '~/lib/advent-sales-page'
 import { applyAttributionAttrs } from '~/lib/attribution-cart.server'
 import { getLeadFunnelPage, type FunnelUtm } from '~/lib/lead-funnel'
+import { mapAllowsDiscountDisplay } from '~/lib/discount-badge'
+import type { SalesPage } from '~/lib/sales-page'
+import { getSalesPage } from '~/lib/sales-page.server'
 import { isLeadSmsOptinEnabled } from '~/lib/lead-sms-optin.server'
 import { LEAD_OFFER } from '~/lib/lead-interests'
 import { getStoredUTM } from '~/lib/attribution.server'
@@ -84,7 +91,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   if (isAdventSalesSlug(slug)) return adventLoaderData(request)
 
   const preview = isPreviewRequest(request)
-  const page = await getAdBridgePage(slug, preview)
+  const [page, sales] = await Promise.all([getAdBridgePage(slug, preview), getSalesPage(slug, preview)])
+  if (!page && sales && (sales.live || preview)) return salesLoaderData(request, sales, preview)
   if (!page || (!page.live && !preview)) throw data(BRIDGE_404, { status: 404 })
 
   // The lane subset supplies a display title with no category word, used as the
@@ -162,7 +170,6 @@ async function adventLoaderData(request: Request) {
     kind: 'advent' as const,
     initial,
     products,
-    nowMs: Date.now(),
     query: (() => {
       const q = new URLSearchParams(url.search)
       q.delete('c')
@@ -173,6 +180,41 @@ async function adventLoaderData(request: Request) {
   }
 }
 
+/** Shopify data for a sales page's one product. A product that fails to load is a 404, never faked. */
+async function salesLoaderData(request: Request, page: SalesPage, preview: boolean) {
+  const [product, settings] = await Promise.all([
+    getProductByHandle(page.productHandle).catch(() => null),
+    getSiteSettings().catch(() => null),
+  ])
+  if (!product || product.variants.length === 0) throw data(BRIDGE_404, { status: 404 })
+  const shop: SalesShopifyData = {
+    productId: product.id,
+    title: product.title,
+    brand: product.brand ?? '',
+    variants: product.variants.map(v => ({
+      id: v.id,
+      title: v.title,
+      price: parseFloat(v.price),
+      compareAtPrice: v.compareAtPrice ? parseFloat(v.compareAtPrice) : null,
+      available: v.availableForSale,
+    })),
+    images: product.images.map(i => ({ url: i.url, alt: i.altText ?? '' })),
+    stock: product.totalInventory ?? null,
+    // Same MAP gate as the discovery cards: a MAP at or above compare-at hides the struck price.
+    showCompareAt: mapAllowsDiscountDisplay(product.mapPrice, product.compareAtPrice),
+  }
+  const onHost = isBridgeHost(requestHost(request.headers))
+  const origin = onHost ? `https://${BRIDGE_HOST}` : new URL(request.url).origin
+  return {
+    kind: 'sales' as const,
+    page,
+    shop,
+    preview,
+    logo: settings?.logoUrl ? { src: settings.logoUrl, alt: settings.logoAlt || 'xdipx' } : null,
+    canonical: `${origin}/${page.slug}`,
+  }
+}
+
 /**
  * The advent page's buy buttons post here. Build a one-line cart for the
  * calendar, stamp attribution, and send the visitor straight to Shopify
@@ -180,7 +222,8 @@ async function adventLoaderData(request: Request) {
  */
 export async function action({ request, params }: ActionFunctionArgs) {
   if (!isBridgeHostRequest(request)) throw data(STOREFRONT_404, { status: 404 })
-  if (!isAdventSalesSlug(params['slug'] ?? '')) throw data(BRIDGE_404, { status: 404 })
+  const slug = (params['slug'] ?? '').toLowerCase()
+  if (!isAdventSalesSlug(slug)) return salesAction(request, slug)
 
   const form = await request.formData()
   const cal = adventByHandle(String(form.get('handle') ?? ''))
@@ -199,8 +242,43 @@ export async function action({ request, params }: ActionFunctionArgs) {
   }
 }
 
+/**
+ * A sales page's buy buttons post here. Build a one-line cart for the chosen
+ * variant of the page's own product (any other variant id is refused), stamp
+ * attribution, and send the visitor to Shopify checkout.
+ */
+async function salesAction(request: Request, slug: string) {
+  const preview = isPreviewRequest(request)
+  const page = await getSalesPage(slug, preview)
+  if (!page || (!page.live && !preview)) throw data(BRIDGE_404, { status: 404 })
+
+  const form = await request.formData()
+  const wanted = String(form.get('variantId') ?? '')
+  try {
+    const product = await getProductByHandle(page.productHandle)
+    const variant = wanted
+      ? product?.variants.find(v => v.id === wanted && v.availableForSale)
+      : product?.variants.find(v => v.availableForSale)
+    if (!variant) return { error: 'That one just sold out. Pick another option above, or check back soon.' }
+    const cart = await createCartWithLines([{ variantId: variant.id, quantity: 1 }])
+    await applyAttributionAttrs(cart.id, request, [{ key: '_landing', value: `curious/${page.slug}` }])
+    return redirect(cart.checkoutUrl)
+  } catch (err) {
+    console.error('[sales-page] checkout failed', slug, err)
+    return { error: 'Checkout did not open on our side. Give it another tap.' }
+  }
+}
+
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
   if (!data) return [{ title: 'Not found' }, { name: 'robots', content: 'noindex' }]
+  if (data.kind === 'sales') {
+    return [
+      { title: `${data.page.seoTitle || plainHeadline(data.page.headline)} | xdipx` },
+      { name: 'description', content: data.page.subhead },
+      { name: 'robots', content: 'noindex' },
+      { tagName: 'link', rel: 'canonical', href: data.canonical },
+    ]
+  }
   if (data.kind === 'advent') {
     return [
       { title: 'Advent calendars 2026 | xdipx' },
@@ -329,8 +407,10 @@ export default function BridgeRoute() {
 
   return (
     <main className="min-h-[100svh] bg-paper text-ink">
-      {/* The advent sales page runs without the age gate (owner direction 2026-10-26). */}
-      {d.kind !== 'advent' ? (
+      {/* The advent and long-form sales pages run without the age gate (owner
+          direction 2026-10-26 and 2026-10-29: the adult networks that send this
+          traffic already gate 18+). */}
+      {d.kind !== 'advent' && d.kind !== 'sales' ? (
         <>
           <style dangerouslySetInnerHTML={{ __html: GATE_CSS }} />
           <script dangerouslySetInnerHTML={{ __html: AGE_PRECHECK }} />
@@ -338,12 +418,14 @@ export default function BridgeRoute() {
       ) : null}
       {d.kind === 'funnel' ? (
         <LeadFunnelView page={d.page} utm={d.utm} terms={d.terms} smsOptin={d.smsOptin} />
+      ) : d.kind === 'sales' ? (
+        <SalesPageView d={{ page: d.page, shop: d.shop, logo: d.logo, preview: d.preview, error: actionData?.error ?? null }} />
       ) : d.kind === 'advent' ? (
-        <AdventSalesView d={{ initial: d.initial, products: d.products, nowMs: d.nowMs, query: d.query, logo: d.logo, error: actionData?.error ?? null }} />
+        <AdventSalesView d={{ initial: d.initial, products: d.products, query: d.query, logo: d.logo, error: actionData?.error ?? null }} />
       ) : (
         <BridgeView d={d} />
       )}
-      {d.kind !== 'advent' ? <AgeGate /> : null}
+      {d.kind !== 'advent' && d.kind !== 'sales' ? <AgeGate /> : null}
       <CookieConsent />
       <Analytics ga4Id={ga4Id} />
     </main>

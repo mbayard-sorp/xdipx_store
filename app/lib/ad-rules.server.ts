@@ -41,6 +41,11 @@ import type { DailyPoint } from '~/lib/ad-metrics-core'
 export * from '~/lib/ad-rules-core'
 export * from '~/lib/ad-rules-lead-core'
 
+/** True for a creative's `exportPayload.ownerBuilt` marker (ticket #18774's owner-built-creatives.server.ts). */
+function isOwnerBuilt(exportPayload: unknown): boolean {
+  return !!(exportPayload && typeof exportPayload === 'object' && (exportPayload as Record<string, unknown>)['ownerBuilt'] === true)
+}
+
 /** How far back the Klaviyo read goes: L7 needs cohorts at least 30 days old. */
 const LEAD_READ_DAYS = 90
 
@@ -178,6 +183,7 @@ export async function loadRulesWindow(now: Date): Promise<LoadedWindow> {
       days: foldDays(rows),
       events: history.get(c.id) ?? [],
       ...(o.objective === 'leads' ? { objective: 'leads' as const, adsetExternalId: o.adsetExternalId } : {}),
+      ...(isOwnerBuilt(c.exportPayload) ? { revenueAttributed: false } : {}),
     })
   }
 

@@ -4,6 +4,8 @@ import {
   chunk,
   isApparelTitle,
   nalpacImageOneUrl,
+  imageStem,
+  missingFeedImages,
   hexToRgb,
   computeGroundPlacement,
   contactShadowSvg,
@@ -117,5 +119,39 @@ describe('contactShadowSvg', () => {
     expect(svg).toContain('<svg width="1200" height="1200"')
     expect(svg).toContain('cx="600"')
     expect(svg).toMatch(/fill-opacity="0\.22"/)
+  })
+})
+
+describe('imageStem', () => {
+  it('drops the query, extension, and Shopify collision suffix', () => {
+    expect(imageStem('https://cdn.shopify.com/s/files/1/x/files/92272A_a9496b8c-66b8-4919-85ec-df0d0ae3a732.jpg?v=1')).toBe('92272A')
+    expect(imageStem('https://cdn.shopify.com/s/files/1/x/files/92272b.jpg?v=2')).toBe('92272B')
+  })
+
+  it('drops a UUID collision suffix on a bare numeric stem', () => {
+    expect(imageStem('https://cdn.shopify.com/s/files/1/x/files/88373_203ad456-329d-422c-bbca-b459242b5f3f.jpg?v=3')).toBe('88373')
+  })
+
+  it('keeps a plain underscored name whole', () => {
+    expect(imageStem('https://cdn.example.com/wand_black.png')).toBe('WAND_BLACK')
+  })
+})
+
+describe('missingFeedImages', () => {
+  const feed = (n: string) => `https://cdn.shopify.com/s/files/1/0602/8132/3620/files/${n}?v=1786635679`
+  const ours = (n: string) => `https://cdn.shopify.com/s/files/1/0761/6872/4651/files/${n}?v=1776029314`
+
+  it('returns feed images the product lacks, in feed order', () => {
+    const feedUrls = [feed('92272A_a9496b8c-66b8-4919-85ec-df0d0ae3a732.jpg'), feed('92272B.jpg'), feed('92272C.jpg')]
+    const productUrls = [ours('92272A_a9496b8c-66b8-4919-85ec-df0d0ae3a732.jpg')]
+    expect(missingFeedImages(feedUrls, productUrls)).toEqual([feed('92272B.jpg'), feed('92272C.jpg')])
+  })
+
+  it('treats a renamed upload as present', () => {
+    expect(missingFeedImages([feed('77791B.jpg')], [ours('77791B_1.jpg')])).toEqual([])
+  })
+
+  it('collapses duplicate stems in the feed', () => {
+    expect(missingFeedImages([feed('1A.jpg'), feed('1A_ab12.jpg')], [])).toEqual([feed('1A.jpg')])
   })
 })

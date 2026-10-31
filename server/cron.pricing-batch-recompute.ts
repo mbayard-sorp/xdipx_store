@@ -52,6 +52,15 @@ const MAX_CONTINUATIONS_PER_DAY = 8
  */
 const RECOMPUTE_LOCK_TTL_SECONDS = 295
 
+/**
+ * Bound on how long `kickContinuation` waits for its outbound request to
+ * actually leave this process, not for the next slice to finish running.
+ * Sized well under the ~60s margin this handler has left after
+ * RECOMPUTE_BUDGET_MS (240s) against the 300s vercel.json maxDuration, so
+ * confirming dispatch never risks this invocation itself overrunning.
+ */
+const KICK_DISPATCH_TIMEOUT_MS = 10_000
+
 export async function handlePricingBatchRecompute(req: Request, res: Response): Promise<void> {
   const body = (req.body ?? {}) as { trigger?: unknown }
   const asked = String(body.trigger ?? req.query['trigger'] ?? '')
@@ -156,13 +165,22 @@ export async function handlePricingBatchRecompute(req: Request, res: Response): 
 }
 
 /**
- * Fire-and-forget kick for the next slice.
+ * Kick for the next slice, awaited just long enough to confirm the request
+ * was actually dispatched (`KICK_DISPATCH_TIMEOUT_MS`), not to the next
+ * slice's completion.
+ *
+ * A bare `void fetch(...)` used to return instantly here, so the serverless
+ * instance could freeze or be reclaimed before the request ever left the
+ * process: the self-continuation chain would just die with nothing to catch
+ * it until the watchdog's next stale check, 20 minutes away. Awaiting with a
+ * bound closes that gap without making this invocation wait out the next
+ * slice's own budget.
  *
  * Preferred over extra vercel.json entries at fixed offsets: those would race
  * this invocation while it still holds its own budget, and they add two more
  * scheduled surfaces that can silently go missing, which is the original bug.
  */
-async function kickContinuation(): Promise<boolean> {
+export async function kickContinuation(): Promise<boolean> {
   const origin = process.env['APP_URL'] ?? process.env['VERCEL_URL']
   const secret = process.env['CRON_SECRET']
   if (!origin || !secret) {
@@ -170,18 +188,26 @@ async function kickContinuation(): Promise<boolean> {
     return false
   }
   const base = origin.startsWith('http') ? origin : `https://${origin}`
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), KICK_DISPATCH_TIMEOUT_MS)
   try {
-    // Deliberately not awaited to completion: we only need the request to be
-    // accepted. The next invocation takes the lock this one is about to drop.
-    void fetch(`${base}/cron/pricing-batch-recompute`, {
+    await fetch(`${base}/cron/pricing-batch-recompute`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-cron-secret': secret },
       body: JSON.stringify({ trigger: 'batch_continuation' }),
-    }).catch(e => console.warn('[cron:pricing-batch-recompute] continuation kick failed:', e))
+      signal: controller.signal,
+    })
     return true
   } catch (e) {
-    console.warn('[cron:pricing-batch-recompute] continuation kick threw:', e)
+    // Hitting our own timeout still means the request was sent -- the next
+    // slice runs under its own lock whether or not we stayed to see its
+    // response. Any other failure (DNS, connection refused, etc.) means the
+    // request never went out at all.
+    if (e instanceof Error && e.name === 'AbortError') return true
+    console.warn('[cron:pricing-batch-recompute] continuation kick failed:', e)
     return false
+  } finally {
+    clearTimeout(timer)
   }
 }
 
@@ -197,21 +223,26 @@ async function kickContinuation(): Promise<boolean> {
 const WATCHDOG_STALL_MS = 20 * 60 * 1000
 
 /**
- * Backstop for the self-continuation chain above: `kickContinuation` fires
- * its next slice with an un-awaited `fetch` from a function that returns
- * immediately after, so the serverless instance can freeze before the
- * request is ever dispatched, silently dropping the rest of the day's walk
- * with nothing to catch it (2026-09-26: 4 continuations ran cleanly, then
- * nothing, for 7+ hours until pricing-ops manually caught it up).
+ * Backstop for the self-continuation chain above. `kickContinuation` used to
+ * fire its next slice with an un-awaited `fetch` from a function that
+ * returned immediately after, so the serverless instance could freeze before
+ * the request was ever dispatched, silently dropping the rest of the day's
+ * walk with nothing to catch it (2026-09-26: 4 continuations ran cleanly,
+ * then nothing, for 7+ hours until pricing-ops manually caught it up).
+ * `kickContinuation` now awaits a bounded dispatch confirmation
+ * (`KICK_DISPATCH_TIMEOUT_MS`), which closes that specific gap, but
+ * confirming the request left the process is not the same as confirming the
+ * next slice actually ran: a dispatched request can still be dropped by
+ * Vercel routing, hit a cold-start timeout, or crash before it ever acquires
+ * the lock.
  *
- * Rather than trying to make that fire-and-forget kick itself provably
- * reliable, this runs on its own schedule (registered separately in
+ * So this still runs on its own schedule (registered separately in
  * vercel.json), reads the same durable checkpoint the chain writes, and when
  * it finds today's walk undone and stale, alerts the owner the same way
  * `alertPricingFailure` does AND resumes the walk itself with a normally
- * awaited call — nothing fire-and-forget in this path, because this
- * invocation is not itself already deep into its own budget the way the
- * handler above is when it fires its kick.
+ * awaited call, run to completion — this invocation is not itself already
+ * deep into its own budget the way the handler above is when it fires its
+ * kick.
  */
 export async function handlePricingBatchWatchdog(_req: Request, res: Response): Promise<void> {
   try {

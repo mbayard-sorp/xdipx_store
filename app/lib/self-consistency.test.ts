@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { analyzeDraft, analyzeParagraphs } from './self-consistency'
+import { analyzeDraft, analyzeParagraphs, findCrossPostIngressConflicts } from './self-consistency'
 
 function block(style: string, text: string) {
   return { _type: 'block', style, children: [{ _type: 'span', text }] }
@@ -178,6 +178,69 @@ describe('criterion-phrase divergence (run 1475 shape)', () => {
       { section: 'Body', text: 'You want controls built into the handle.' },
     ])
     expect(report.findings.some(f => f.kind === 'criterion-divergence')).toBe(false)
+  })
+})
+
+describe('findCrossPostIngressConflicts (run 1666 shape, ticket #18045)', () => {
+  // Run 1666: a draft IPX7 shower permission directly contradicted the
+  // published /notebook/what-is-a-gyroscope-sex-toy, and every in-document
+  // checker stayed green because the contradiction is entirely cross-post.
+  it('flags a draft instruction that disagrees with an already-published post', () => {
+    const draftParagraphs = [
+      {
+        section: 'Care',
+        text: "This toy's IPX7 rating means you can use it right in the shower.",
+      },
+    ]
+    const priors = [
+      {
+        slug: 'what-is-a-gyroscope-sex-toy',
+        paragraphs: [
+          {
+            section: 'Water ratings',
+            text: 'IPX7 covers immersion only, so never run it under a shower or a direct tap.',
+          },
+        ],
+      },
+    ]
+
+    const conflicts = findCrossPostIngressConflicts(draftParagraphs, priors)
+    expect(conflicts).toHaveLength(1)
+    expect(conflicts[0]?.token).toBe('IPX7')
+    expect(conflicts[0]?.priorSlug).toBe('what-is-a-gyroscope-sex-toy')
+    expect(conflicts[0]?.draftPolarity).toBe('allow')
+    expect(conflicts[0]?.priorPolarity).toBe('forbid')
+  })
+
+  it('does not flag a draft instruction that agrees with the published post', () => {
+    // Same sentence on both sides, so whatever polarity this scans as, it
+    // scans the same way on both sides and never conflicts with itself.
+    const sentence = 'IPX7 covers immersion only, so never run it under a shower or a direct tap.'
+    const draftParagraphs = [{ section: 'Care', text: sentence }]
+    const priors = [
+      {
+        slug: 'what-is-a-gyroscope-sex-toy',
+        paragraphs: [{ section: 'Water ratings', text: sentence }],
+      },
+    ]
+
+    expect(findCrossPostIngressConflicts(draftParagraphs, priors)).toHaveLength(0)
+  })
+
+  it('does not flag a different code mentioned in the published post', () => {
+    const draftParagraphs = [
+      { section: 'Care', text: "This toy's IPX7 rating means you can use it right in the shower." },
+    ]
+    const priors = [
+      {
+        slug: 'other-post',
+        paragraphs: [
+          { section: 'Water ratings', text: 'Never run an IPX4 toy under a shower or a direct tap.' },
+        ],
+      },
+    ]
+
+    expect(findCrossPostIngressConflicts(draftParagraphs, priors)).toHaveLength(0)
   })
 })
 

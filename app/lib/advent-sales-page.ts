@@ -7,10 +7,10 @@
  * price, compare-at, images, stock and the variant to buy come from Shopify
  * at request time (app/routes/bridge.$slug.tsx).
  *
- * Owner decisions 2026-10-26: keep the advent-price countdown and the stock
- * line, keep the contents values (Lovehoney's published figures). The stock
- * line shows Shopify's tracked inventory, never a fixed number. The couples
- * and solo story cards are written as unattributed ideas: no names, cities
+ * Owner decisions: no countdown (removed 2026-10-28); keep the stock line and
+ * the contents values (Lovehoney's published figures). The stock line shows
+ * Shopify's tracked inventory, never a fixed number. The couples and solo
+ * story cards are written as unattributed ideas: no names, cities
  * or years, because none of these 2026 calendars has a past customer to
  * quote (design doctrine §6, never fabricate proof).
  *
@@ -19,8 +19,6 @@
 
 export const ADVENT_SLUG = 'advents26'
 
-/** One moment for every visitor: end of Nov 24, Pacific. */
-export const ADVENT_SALE_ENDS_AT = '2026-11-24T23:59:00-08:00'
 export const ADVENT_SHIP_BY = 'Nov 24'
 /** Emma's holiday portrait (fal Kontext from singleton.editor's photo, 2026-10-26). Not the canonical likeness. */
 export const ADVENT_EMMA_PHOTO = 'https://cdn.sanity.io/images/0nlwk8cf/production/36b67652ec0054a5df56f25d206d567d485d7275-1024x1024.jpg'
@@ -318,3 +316,39 @@ export function adventRitual(days: number) {
 }
 
 export const money = (n: number) => '$' + (Number.isInteger(n) ? String(n) : n.toFixed(2))
+
+/** The calendar the hero offers as a step up from every other one. */
+export const ADVENT_STEP_UP_TO: AdventKey = 'luxury-24'
+
+export interface AdventStepUp {
+  to: AdventKey
+  extraPrice: number
+  extraValue: number
+  extraDoors: number
+  addedBrands: string[]
+}
+
+/**
+ * The honest math for stepping up to Luxury from the calendar on screen, using
+ * live Shopify prices. Null when there's nothing to pitch: already on Luxury, a
+ * price is missing, or the extra value in the box doesn't beat the extra spend.
+ */
+export function adventStepUp(from: AdventKey, prices: Partial<Record<AdventKey, number>>): AdventStepUp | null {
+  const to = ADVENT_STEP_UP_TO
+  if (from === to) return null
+  const fromPrice = prices[from]
+  const toPrice = prices[to]
+  if (!fromPrice || !toPrice) return null
+  const a = ADVENT_CALENDARS[from]
+  const b = ADVENT_CALENDARS[to]
+  const extraPrice = Math.round((toPrice - fromPrice) * 100) / 100
+  const extraValue = Math.round((b.value - a.value) * 100) / 100
+  if (extraPrice <= 0 || extraValue <= extraPrice) return null
+  return {
+    to,
+    extraPrice,
+    extraValue,
+    extraDoors: Math.max(0, b.days - a.days),
+    addedBrands: b.brands.filter(x => !a.brands.includes(x)),
+  }
+}
