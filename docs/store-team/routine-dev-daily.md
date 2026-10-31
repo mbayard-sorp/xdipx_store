@@ -431,6 +431,16 @@ git fetch origin main >/dev/null && git grep -n "<file/flag/symbol from the tick
 3. Make the smallest diff that does the job. No scope creep, no drive-by refactors, no style
    rewrites. If you disagree with the ticket, implement it faithfully and say so in the PR body.
 
+3a. **Check open owner-blocker rows before reusing a cited pattern (ticket #19048).** When a diff's
+   own docstring or comment cites an existing component as the model for a new one, that citation is
+   exactly the moment to check `GET /api/team/blocker` for an open item about the pattern being
+   copied, before shipping it to a second surface, not after. Ticket #18903/PR #1830 shipped a
+   stock-scarcity line ("Only N left") explicitly modeled on `AdventSalesView` per its own docstring,
+   without noticing that `AdventSalesView`'s identical pattern was already the live subject of open
+   owner blocker #2020, asking the owner to confirm or reverse it against the `docs/emma-voice.md`
+   no-urgency-theater Hard Rule. QA caught it and bounced it; the fix was dropping the line. Checking
+   the blocker list at the moment you cite the model avoids writing the copy at all.
+
 3b. **z-index fixes grep the whole repo first.** Before picking a new z-index value, grep every
    fixed/sticky `z-[N]` usage across the codebase (`grep -rn "z-\[" app/components app/routes`) and
    treat the z-index scale comment in `app/app.css` as the single source of truth. Update that
