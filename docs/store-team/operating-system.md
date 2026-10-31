@@ -229,6 +229,14 @@ the row text and its links are the only carriers, so the conventions are the con
    where tracking a draft PR costs a claim to un-draft and link (#2418, PR #598) and tracking an
    already-merged PR is pure phantom rework (#1683, PR #527, merged days earlier); both burned
    claims on run 255 that a `pr_open`+link row would have sent straight to QA.
+   **Check for an existing tracking row before filing a new one.** (#18486) Before self-filing a
+   PR-tracking ticket, check whether any existing suggestion row already carries this PR number as
+   a `pr`-kind link, in any status, not only `approved`; if one does, do not file a second row — let
+   the existing one carry it. R-QA run 1692 (2026-10-27) found two pairs of duplicate tracking
+   tickets this way (#18441/#18273, #18442/#18358), each already correctly cross-linked with a
+   duplicate-of note by the time QA reached them, but each still cost a full review cycle. This is
+   the same pre-filing check rule 8 already requires for `code` rows against a target file; this
+   rule is PR-tracking's own version of it.
 5. **A code row split from an owner-gated external change names a code-checkable completion signal.**
    (#4239) The conjunctive split in rule 1 sends the code half to R-DEV, but the release engine gates
    only on `PROTECTED_GLOBS` file matching, so a non-protected code PR sails to auto-merge even when
