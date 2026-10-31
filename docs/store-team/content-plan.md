@@ -251,7 +251,7 @@ Format rules added 2026-07-21 (owner-approved):
   if…" line even when the row is not marked †. Write it in on the first draft; do not spend a
   shared rewrite cycle adding it later.
 
-Topic bank (30; work top to bottom within the Tue/Fri rhythm, reorder to serve the theme week,
+Topic bank (31; work top to bottom within the Tue/Fri rhythm, reorder to serve the theme week,
 extend freely — additions need a slug, problem, and target query):
 
 | # | Slug | Problem | Target query |
@@ -286,8 +286,38 @@ extend freely — additions need a slug, problem, and target query):
 | 28 | how-do-you-choose-toys-when-mobility-is-limited | Grip, reach, and mobility limits | "sex toys that work with arthritis or limited mobility" |
 | 29 | how-do-you-keep-toys-private-in-a-shared-home | Privacy with roommates or kids in the house **COVERED, do not write as-is** | "how do I keep sex toys private at home" |
 | 30 | can-you-travel-with-a-sex-toy | Travel worry: security lines, packing, batteries | "can you bring a sex toy on a plane" |
+| 31 | when-should-you-throw-away-a-sex-toy | Knowing when a toy is past its usable life, not just when it smells | "how do you know when to throw away a sex toy" |
+| 32 | how-often-do-couples-have-sex | Frequency comparison anxiety: doing arithmetic on your own sex life against a number you half-heard, and managing the count instead of the sex | "how often do couples have sex" |
 
 † = health-adjacent; the "worth seeing a clinician if…" line is mandatory.
+
+**When no writable row remains (added 2026-10-28, #18359).** The bank ran fully dry on 2026-10-27:
+26 of 30 rows had published posts and the other four (15, 25, 26, 29) each carry a standing COVERED
+note, so a Tue/Fri run reading top to bottom found nothing left to write. This had already happened
+piecemeal three times before (runs 760, 1416, 1613 each reordered past one COVERED row) without the
+plan ever saying what to do once the whole bank is spent. A Tue/Fri run that finds no writable row
+uses the bank's own extend-freely licence from the heading above: author a new row in place (slug,
+problem, target query, dagger flag if health-adjacent) targeting a query this bank does not already
+cover, and append it to this table in the same run so the next run inherits it rather than
+rediscovering the gap. Row 31 above is the worked example (authored by run 1684, 2026-10-27,
+published clean). Row 32 is the second (authored by run 1742, 2026-10-30, serving calendar row 28's
+"Aftercare Is Not Optional" window from the "Questions Nobody Asks Out Loud" pillar). A COVERED row (15, 25, 26, 29) is not a permanent dead entry: retire it by
+striking it from the working rotation once a genuinely distinct angle is found or the cluster is
+judged fully held by its sibling post, rather than leaving every future run to re-read and
+re-reject the same four rows indefinitely.
+
+**Rows 25, 26 and 29 are now RETIRED from the working rotation (content run 1742, 2026-10-30),
+under the sentence immediately above.** Each one's own note already concluded that a published
+sibling post carries its whole resolution, down to the FAQ wording: row 25 by
+`/notebook/how-do-you-get-out-of-your-head-during-sex`, row 26 by
+`/notebook/how-to-get-more-confident-in-bed`, row 29 by
+`/notebook/how-do-you-store-sex-toys-discreetly` plus
+`/notebook/when-vibration-feels-like-too-much-noise`. Three separate runs (1416, 1613, 1742) have
+now each paid to re-read and re-reject the same rows, which is the tax this rule exists to stop.
+A Tue/Fri run skips 25, 26 and 29 without re-deriving the reason and authors a new row instead.
+**Row 15 stays in the rotation deliberately**, because its own note argues the opposite: the target
+query "how to last longer in bed" is high volume and still worth owning, so that row is waiting on
+a distinct angle rather than retired.
 
 **Row 15 is already covered and needs a new angle before anyone writes it (content run 760, 2026-09-08).**
 The published podcast-notes post `/notebook/what-counts-as-premature-ejaculation` ("How Long Should It

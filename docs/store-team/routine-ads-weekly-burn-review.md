@@ -86,7 +86,9 @@ Also read: `GET team/status` for `ads_media_daily_cap_cents`, `ads_media_monthly
 `ads_gross_margin_pct` (45), `ads_lead_cpl_ceiling_cents` (800); `team/ad-action {op:'list'}` for
 what the owner approved, rejected or let expire this week; the Sunday memo (the newest `campaign`
 suggestion from `paid-media-buyer` targeted at `strategy`); and `team/ad-health-snapshot
-{op:'latest'}` for the doctor's newest pixel, errors and activity readings.
+{op:'latest'}` for the doctor's newest pixel, errors and activity readings; and
+`docs/store-team/ads-live-campaigns.md`, so every owner-built campaign there gets a line in the
+review even before it has `ad_creatives` rows.
 
 There is no team-token read of the per-channel insights table (`ad_platform_insights_daily`) yet.
 Where a channel's spend lives only there, it is `unread`. File the gap once, with this exact key, so

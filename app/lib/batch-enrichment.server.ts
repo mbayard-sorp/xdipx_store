@@ -178,6 +178,11 @@ export async function runBatchEmmaTake(
       failures.push({ productId: input.productId, error: 'empty response' })
       continue
     }
+    const violations = findLivedExperienceClaims(html)
+    if (violations.length > 0) {
+      failures.push({ productId: input.productId, error: `rejected: lived-experience claim(s) detected (${violations.join(', ')}) — Emma is an AI guide with no lived experience` })
+      continue
+    }
     results.set(input.productId, html)
   }
 
@@ -225,6 +230,41 @@ Return ONLY the HTML — no markdown, no fences, no preamble.`
 
 function stripFences(raw: string): string {
   return raw.replace(/^```(?:html|json)?\n?/i, '').replace(/\n?```$/i, '').trim()
+}
+
+// ─── Voice gate: reject lived-experience claims before they reach Shopify ───
+//
+// Emma is an AI guide with no lived experience (docs/emma-voice.md); she can
+// never claim to have tried, tested, or owned a product. Ticket #19117: live
+// PDPs shipped "Pro tip from my testing" and similar because nothing checked
+// batch-enrichment output for this before it was written. This mirrors the
+// pattern set in scripts/sweep-lived-experience.ts, scoped to the phrases
+// that ticket named.
+const LIVED_EXPERIENCE_PATTERNS: Array<{ name: string; re: RegExp }> = [
+  { name: 'my-testing', re: /\bmy testing\b/i },
+  { name: 'i-tested',   re: /\bI(?:'|’)?ve tested\b|\bI tested\b/i },
+  { name: 'i-tried',    re: /\bI(?:'|’)?ve tried\b|\bI tried\b/i },
+]
+
+/** Scan one string (HTML tags stripped first) for lived-experience claims. */
+export function findLivedExperienceClaims(text: string): string[] {
+  const plain = text.replace(/<[^>]+>/g, ' ')
+  return LIVED_EXPERIENCE_PATTERNS.filter(({ re }) => re.test(plain)).map(({ name }) => name)
+}
+
+function collectStrings(value: unknown, out: string[]): void {
+  if (typeof value === 'string') { out.push(value); return }
+  if (Array.isArray(value)) { for (const v of value) collectStrings(v, out); return }
+  if (value && typeof value === 'object') { for (const v of Object.values(value)) collectStrings(v, out) }
+}
+
+/** Scan every string field of a ProductWrites payload for lived-experience claims. */
+export function findLivedExperienceClaimsInWrites(writes: ProductWrites): string[] {
+  const strings: string[] = []
+  collectStrings(writes, strings)
+  const hits = new Set<string>()
+  for (const s of strings) for (const h of findLivedExperienceClaims(s)) hits.add(h)
+  return [...hits]
 }
 
 // Re-export model constants so callers can build their own request bodies for
@@ -512,7 +552,12 @@ function parseFullEnrichmentEntry(
   const cleaned = stripFences(block.text).trim()
   if (!cleaned) return { error: 'empty response', usage }
   try {
-    return { writes: JSON.parse(cleaned) as ProductWrites, usage }
+    const writes = JSON.parse(cleaned) as ProductWrites
+    const violations = findLivedExperienceClaimsInWrites(writes)
+    if (violations.length > 0) {
+      return { error: `rejected: lived-experience claim(s) detected (${violations.join(', ')}) — Emma is an AI guide with no lived experience`, usage }
+    }
+    return { writes, usage }
   } catch (err) {
     const preview = cleaned.slice(0, 200).replace(/\n/g, ' ')
     return { error: `JSON parse failed: ${err instanceof Error ? err.message : String(err)} | preview: ${preview}`, usage }

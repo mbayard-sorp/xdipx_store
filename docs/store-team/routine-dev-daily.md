@@ -591,6 +591,19 @@ git add server/vercel-entry.mjs && git commit -m "chore: rebuild vercel entry ar
    supported". The correct form drops `namespace` entirely and prefixes each key
    (`keys: ["xdipx.nalpac_sku", ...]`), confirmed working live.
 
+4e. **Inside a GraphQL template literal, comments are `#`, never `//`.** (#18880) GraphQL has no
+   `//` comment syntax — only `#`, which `app/lib/shopify.server.ts` already uses correctly
+   elsewhere (e.g. the Admin API comment block near line 8698). A `//` line written inside one of
+   this file's inline query/fragment template literals (`PRODUCT_CORE_FRAGMENT` and the others) is
+   not a JS comment either, because the whole literal is one string sent verbatim to Shopify's API —
+   it becomes invalid characters inside the query body. On PR #1819 (ticket #18560), two `//` lines
+   added inside `PRODUCT_CORE_FRAGMENT` passed typecheck, the full vitest suite, and the build clean,
+   because nothing in the test suite sends that fragment to a real or mocked GraphQL parser; the
+   break only showed up live, and only for products whose KV cache entry was cold. A JS-level
+   typecheck/build/test pass cannot catch this class of defect — treat any edit inside a
+   `shopify.server.ts` GraphQL template literal as schema-sensitive source, not JS, and use `#` for
+   every comment inside one.
+
 5. Open the PR against `main`, titled `agents: ticket #<id>: <summary>`. Body: what the ticket
    asked for, what you changed and why, the local verification output, and anything the reviewer
    should look at first. **Never merge it. Never push to `main`.**

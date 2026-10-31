@@ -2,6 +2,20 @@
 // #11487). Report-only: never blocks, but distinguishes "checked and it
 // matched" from "checked and it drifted" from "could not check".
 import { describe, expect, it, vi } from 'vitest'
+
+// Ticket #18146: `buildDefaultDeps`'s real Anthropic-calling `callVision`
+// (unreachable from every other test in this file, which all inject a fake
+// `callVision`) is exercised directly with the SDK mocked, to prove the
+// cache-breakpoint placement itself, the same idiom as
+// social-vision-gate.server.test.ts's "forced tool call" describe block.
+const h = vi.hoisted(() => ({ mockCreate: vi.fn() }))
+vi.mock('@anthropic-ai/sdk', () => ({
+  default: class MockAnthropic {
+    messages = { create: h.mockCreate }
+  },
+}))
+vi.mock('./token-log.server', () => ({ logMessageUsage: vi.fn() }))
+
 import {
   FIDELITY_DIMENSIONS,
   LABEL_TOLERANT_FIDELITY_SYSTEM_PROMPT,
@@ -285,5 +299,50 @@ describe('runProductFidelityCheck', () => {
     )
     expect(verdict.checkCompleted).toBe(false)
     expect(verdict.notes).toContain('404')
+  })
+})
+
+describe('buildDefaultDeps.callVision — cache breakpoint placement (ticket #18146)', () => {
+  it('puts the reference image first, with the cache_control breakpoint on it, and the generated image/final instruction after', async () => {
+    h.mockCreate.mockReset()
+    h.mockCreate.mockResolvedValue({
+      content: [{ type: 'text', text: JSON.stringify(CLEAN_RESPONSE) }],
+      usage: { input_tokens: 10, output_tokens: 5 },
+    })
+
+    // No deps passed: exercises the real, Anthropic-calling callVision.
+    await runProductFidelityCheckOnImages(
+      { data: 'rendered-base64', mediaType: 'image/jpeg' },
+      { data: 'reference-base64', mediaType: 'image/jpeg' },
+    )
+
+    expect(h.mockCreate).toHaveBeenCalledTimes(1)
+    const callArgs = h.mockCreate.mock.calls[0]?.[0] as {
+      messages: { content: Array<Record<string, unknown>> }[]
+    }
+    const content = callArgs.messages[0]!.content
+
+    // Reference image is first and carries the breakpoint.
+    expect(content[0]).toMatchObject({ type: 'text', text: expect.stringContaining('REFERENCE') })
+    expect(content[1]).toMatchObject({
+      type: 'image',
+      source: { data: 'reference-base64' },
+      cache_control: { type: 'ephemeral' },
+    })
+
+    // Generated image and the final instruction come after, uncached.
+    expect(content[2]).toMatchObject({ type: 'text', text: expect.stringContaining('GENERATED') })
+    expect(content[3]).toMatchObject({ type: 'image', source: { data: 'rendered-base64' } })
+    expect((content[3] as { cache_control?: unknown })['cache_control']).toBeUndefined()
+    expect(content[4]).toMatchObject({ type: 'text', text: expect.stringContaining('Return the JSON verdict now') })
+  })
+
+  it('states the image order in both system prompts consistently with the runtime message order (reference first, generated second)', async () => {
+    const { PRODUCT_FIDELITY_SYSTEM_PROMPT, LABEL_TOLERANT_FIDELITY_SYSTEM_PROMPT } = await import('./social-product-fidelity.server')
+    for (const prompt of [PRODUCT_FIDELITY_SYSTEM_PROMPT, LABEL_TOLERANT_FIDELITY_SYSTEM_PROMPT]) {
+      expect(prompt).toContain('first, the REAL BARE PRODUCT REFERENCE photo')
+      expect(prompt).toContain('second, a GENERATED photo')
+      expect(prompt).toContain('AS RENDERED in the second image against the real product in the first image')
+    }
   })
 })
