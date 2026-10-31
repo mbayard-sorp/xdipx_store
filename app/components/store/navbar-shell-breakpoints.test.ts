@@ -81,6 +81,7 @@ describe('Navbar shell breakpoints — #11083 item B (fourth non-doctrine contai
 describe('Nav typography — every nav entry inherits font-body (#12612 defect 1)', () => {
   const mega = read('./MegaMenu.tsx')
   const navbar = read('./Navbar.tsx')
+  const tabBar = read('./MobileExploreMenu.tsx')
 
   it('leaves no inline display-font override anywhere in MegaMenu', () => {
     expect(mega).not.toContain("fontFamily: 'var(--font-display)'")
@@ -115,6 +116,60 @@ describe('Nav typography — every nav entry inherits font-body (#12612 defect 1
       // i.e. in the ~400 characters before the label text.
       expect(navbar.slice(Math.max(0, at - 400), at)).not.toContain('var(--font-display)')
     }
+  })
+
+  /**
+   * Run 1703: the same lesson again, one file further out. Run 1298's fix
+   * spanned MegaMenu.tsx and Navbar.tsx because those were the two files it
+   * had looked at. The nav SURFACE is three files: MobileExploreMenu.tsx
+   * renders the bottom tab bar, which is the primary navigation on the
+   * mobile-first surface, and it kept the inline serif for another five weeks
+   * because this guard could not see it.
+   *
+   * It went unnoticed rather than unfixed. app.css hides
+   * `nav[aria-label="Browse categories"]` via `:has()` while the cookie-consent
+   * dialog is in the DOM (#15385), and the capture CLI seeded only the age
+   * gate, so every design-critic capture ever taken rendered this bar
+   * `display: none`. The gate was structurally blind to it. `--consent` on
+   * scripts/design-snapshots.ts is what made it visible.
+   */
+  it('leaves no inline display-font override on the mobile tab bar', () => {
+    expect(
+      tabBar,
+      'doctrine §2 gives DM Sans "Body copy, nav, labels, CTA text". The bottom tab bar is nav, and it is the PRIMARY nav on mobile.',
+    ).not.toContain("fontFamily: 'var(--font-display)'")
+    expect(tabBar).toContain("fontFamily: 'var(--font-body)'")
+  })
+
+  it('lets each tab label keep its natural width instead of an equal slice', () => {
+    // Seven published menu items on `flex-1` each got a slice narrower than
+    // their own label at 375, so the labels butted together into one glyph run
+    // (measured run 1703: x=25-304, inter-word gaps of 1-2px, identical to the
+    // gaps between letters inside a word). shrink-0 + padding + a scrolling
+    // row is the fix; flex-1 anywhere on these tabs is the regression.
+    const tab = tabBar.match(/className="relative[^"]*"/)
+    expect(tab, 'the tab button className was not found — this guard would assert nothing').not.toBeNull()
+    expect(tab![0], '#16879-class defect: equal-width tabs are narrower than their labels at 375').not.toMatch(
+      /(^|\s)flex-1(\s|")/,
+    )
+    // The PAIR is the point, so pin both halves. `shrink-0` alone fixes the
+    // overlap but leaves the tabs bunched at the left whenever the Sanity menu
+    // is short enough to fit; `grow` alone re-admits the 0%-basis squeeze this
+    // whole guard exists to stop. Neither half is correct without the other.
+    expect(tab![0], 'shrink-0 stops the squeeze').toContain('shrink-0')
+    expect(tab![0], 'grow keeps the tabs spread when the menu is short enough to fit').toContain('grow')
+    // The scroller must stay INSIDE the nav and must not swallow the account
+    // tab, which is pinned to the right edge. If the account Link ever moves
+    // inside the overflow container it scrolls away, which is a worse defect
+    // than the one being fixed here.
+    expect(tabBar).toContain('flex min-w-0 flex-1 items-stretch overflow-x-auto')
+    const scrollerAt = tabBar.indexOf('overflow-x-auto [scrollbar-width:none]')
+    const accountAt = tabBar.indexOf('aria-label="My account"')
+    const closeAt = tabBar.indexOf('</div>\n\n        {/* My account')
+    expect(scrollerAt, 'scroller not found').toBeGreaterThan(-1)
+    expect(accountAt, 'account tab not found').toBeGreaterThan(-1)
+    expect(closeAt, 'the scroller must close before the account tab').toBeGreaterThan(scrollerAt)
+    expect(accountAt).toBeGreaterThan(closeAt)
   })
 
   it('keeps the display font on the wordmark and the account heading, deliberately', () => {

@@ -12,7 +12,9 @@ import {
   applyNonSkinAxisDefaults,
   hasAllSceneAxes,
   hasStoryLine,
+  isLabelHeavySku,
   isRetiredBodyZone,
+  LABEL_HEAVY_SKU_HANDLES,
   mergeSceneAxes,
   parseSceneAxes,
   parseSceneAxisTags,
@@ -237,6 +239,67 @@ describe('requireSceneAxesForGeneration', () => {
     expect(requireSceneAxesForGeneration({
       sceneLocation: 'bedroom-loft', cropScale: 'close', bodyZone: 'inner-wrist', contactMode: 'resting',
     })).toEqual({ ok: true })
+  })
+
+  // Ticket #19171: a macro/close crop of a known label-heavy SKU has already
+  // BLOCKed at the publish gate's legible-text check for the same handle.
+  describe('label-heavy SKU guard', () => {
+    const labelHeavyHandle = LABEL_HEAVY_SKU_HANDLES[0]!
+
+    it('refuses a close crop of a known label-heavy handle', () => {
+      const result = requireSceneAxesForGeneration(
+        { sceneLocation: 'bedroom-loft', cropScale: 'close', bodyZone: 'inner-wrist', contactMode: 'resting' },
+        labelHeavyHandle,
+      )
+      expect(result.ok).toBe(false)
+      if (!result.ok) {
+        expect(result.error).toContain(labelHeavyHandle)
+        expect(result.error).toContain('vision-legible-text')
+      }
+    })
+
+    it('refuses a macro crop of a known label-heavy handle the same way', () => {
+      const result = requireSceneAxesForGeneration(
+        { sceneLocation: 'bedroom-loft', cropScale: 'macro', bodyZone: 'inner-wrist', contactMode: 'resting' },
+        labelHeavyHandle,
+      )
+      expect(result.ok).toBe(false)
+    })
+
+    it('passes a medium/wide crop of a known label-heavy handle', () => {
+      expect(requireSceneAxesForGeneration(
+        { sceneLocation: 'bedroom-loft', cropScale: 'medium' },
+        labelHeavyHandle,
+      )).toEqual({ ok: true })
+      expect(requireSceneAxesForGeneration(
+        { sceneLocation: 'bedroom-loft', cropScale: 'wide' },
+        labelHeavyHandle,
+      )).toEqual({ ok: true })
+    })
+
+    it('passes a close crop of a handle that is not label-heavy', () => {
+      expect(requireSceneAxesForGeneration(
+        { sceneLocation: 'bedroom-loft', cropScale: 'close', bodyZone: 'inner-wrist', contactMode: 'resting' },
+        'we-vibe-chorus-couples-vibrator',
+      )).toEqual({ ok: true })
+    })
+
+    it('passes a close crop with no handle at all (handle optional)', () => {
+      expect(requireSceneAxesForGeneration(
+        { sceneLocation: 'bedroom-loft', cropScale: 'close', bodyZone: 'inner-wrist', contactMode: 'resting' },
+      )).toEqual({ ok: true })
+    })
+  })
+})
+
+describe('isLabelHeavySku', () => {
+  it('flags every handle in LABEL_HEAVY_SKU_HANDLES and nothing else', () => {
+    for (const handle of LABEL_HEAVY_SKU_HANDLES) {
+      expect(isLabelHeavySku(handle)).toBe(true)
+    }
+    expect(isLabelHeavySku('we-vibe-chorus-couples-vibrator')).toBe(false)
+    expect(isLabelHeavySku(undefined)).toBe(false)
+    expect(isLabelHeavySku(null)).toBe(false)
   })
 })
 

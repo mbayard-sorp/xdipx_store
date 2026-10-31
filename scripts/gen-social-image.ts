@@ -208,7 +208,7 @@ async function main() {
   // an already-billed image. The rule itself lives in social-scene-vocab.ts
   // (requireSceneAxesForGeneration), shared with api.team.social-image.tsx
   // so the two surfaces cannot drift.
-  const axesRequired = requireSceneAxesForGeneration(sceneAxes)
+  const axesRequired = requireSceneAxesForGeneration(sceneAxes, handle)
   if (!axesRequired.ok) {
     console.error(`${axesRequired.error}. See app/lib/social-scene-vocab.ts.`)
     process.exit(1)
