@@ -32,6 +32,10 @@ Always. The more they buy, the better the discount. The add-on screen shows the 
 
 The owner has approved raising a lube's price toward MSRP to clear the margin bar. Pick a product that already clears it first. A price edited by hand in Shopify does not hold on its own, because the daily pricing batch (`/cron/pricing-batch-recompute`) recomputes every variant from its cost and pricing rules. A raise that has to last needs a pricing rule change in `/admin/pricing`, which is the owner's call.
 
+## Showing a toy in use
+
+When a page or banner shows a product used on another toy, the other toy is a real product we sell, so the demo can be filmed or photographed for real. For strokers the prop is the Camtoyz Cody (`camtoyz-ultra-realistic-squirting-dildo-cody`), chosen 2026-10-31 by owner request: realistic, has balls and a suction base, and it actually squirts. Check it fits the stroker's cup before a shoot; the catalog does not list the cup's inner size.
+
 ## Publishing a page
 
 1. Draft the copy against the charter, then run it through `emma-empathy-reviewer`.
