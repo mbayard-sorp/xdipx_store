@@ -25,6 +25,11 @@
  *
  * { op: 'backfill', fromDay: 'YYYY-MM-DD' }
  *   Roll every day with metrics since fromDay up into ad_spend.
+ *
+ * { op: 'channel', platform: string, sinceDay: 'YYYY-MM-DD' }
+ *   Read only. The mirror's entities and spend for one channel, so a routine
+ *   can watch a channel without holding its key.
+ *   -> { platform, sinceDay, entities, insights: { level, totals, byExternalId } }
  */
 import type { ActionFunctionArgs } from 'react-router'
 import { assertTeamAuth } from '~/lib/team.server'
@@ -33,6 +38,7 @@ import {
   AdMetricsError, backfillAdSpend, creativeSummaries, importGoogleAdsCsv, importShopCampaignsCsv, runDailyMetrics,
 } from '~/lib/ad-metrics.server'
 import { runRulesDaily } from '~/lib/ad-rules.server'
+import { readChannelMirror } from '~/lib/ads/channel-read.server'
 
 const MAX_FILE_BYTES = 8 * 1024 * 1024
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/
@@ -93,8 +99,16 @@ export async function action({ request }: ActionFunctionArgs) {
       return Response.json(await backfillAdSpend(from))
     }
 
+    if (op === 'channel') {
+      const platform = b['platform']
+      const since = b['sinceDay']
+      if (typeof platform !== 'string' || !platform) return bad('platform required')
+      if (typeof since !== 'string' || !DAY_RE.test(since)) return bad('sinceDay must be YYYY-MM-DD')
+      return Response.json(await readChannelMirror(platform, since))
+    }
+
     if (op === 'import-preview' || op === 'import-commit') return bad('imports are multipart/form-data with file and source')
-    return bad('op must be daily, import-preview, import-commit, summary or backfill')
+    return bad('op must be daily, import-preview, import-commit, summary, backfill or channel')
   } catch (err) {
     if (err instanceof AdMetricsError) return bad(err.message, err.code === 'not_configured' ? 501 : 400)
     return apiError('team-ad-metrics', err, 'ad-metrics op failed')
