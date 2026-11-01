@@ -1980,6 +1980,15 @@ background coffee mug (publish-gate REVISE, design-doctrine §4.1) and deferred 
 rework whose reused asset carried a legible wrong-brand `LELO` wordmark at 4x (an automatic
 publish-gate BLOCK), both defects that these checks catch a run earlier when run on the reused frame.
 
+**Before reusing an asset, check what has already happened to any draft that used it (ticket
+#19277).** A `social_media_assets` row carrying only a vision-gate PASS is unverified against the
+deterministic publish gate, not pre-cleared, if no draft using it has ever reached
+`approved`/`posted`. Run 1760 (2026-10-31) lost four drafting attempts reusing a 2026-10-30 batch
+whose own original drafts (rows 535-541) had already been rejected by the same deterministic
+checks (`vision-legible-text`, `product-identity`) the day before — a single list call checking
+`review_status` on rows already using the asset id would have caught this before drafting instead
+of after four failed draft-plus-gate round trips.
+
 1. **High-zoom wordmark check.** Mandatory on EVERY cast-composite candidate whose real packshot
    shows ANY printed text or box art, not only the SKUs named on the known-risk list below (ticket
    #16118): that list is where a defect gets added after it has already burned a slot, so a SKU not
