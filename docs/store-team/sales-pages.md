@@ -63,6 +63,16 @@ Always. The more they buy, the better the discount. The add-on screen shows the 
 
 The owner has approved raising a lube's price toward MSRP to clear the margin bar. Pick a product that already clears it first. A price edited by hand in Shopify does not hold on its own, because the daily pricing batch (`/cron/pricing-batch-recompute`) recomputes every variant from its cost and pricing rules. A raise that has to last needs a pricing rule change in `/admin/pricing`, which is the owner's call.
 
+## The exit offer (owner direction 2026-11-01)
+
+`gawk-gawk-3000` asks a leaving visitor for an email and phone number in exchange for a code. The form is `app/components/funnel/ExitOffer.tsx` and the offer is `app/lib/exit-offer.server.ts`. It shows once a week per browser, and never after a buy button was pressed. On desktop the trigger is the cursor leaving through the top of the window. On touch it is a hard flick up the page or coming back to the tab. There is no back-button trap.
+
+- **The code is `GAWK10`**: 10% off the Gawk only, one use per customer, $63.00 at $69.99. `CURIOUS15` is the wrong code here because it does not combine with the automatic Free Shipping discount. The owner allowed Free Shipping to combine with product discounts for this. The code is not limited to first-time buyers, so a past buyer can use it once. `CURIOUS15` is set up the same way. `GLIDE10` and `GLIDE15` combine with it (owner, 2026-11-01), so the add-on screen's bulk price holds on the same cart: a Gawk and two 8 oz bottles came to $122.40.
+- **No percent or price shows before signup**, on the owner's call, because the Gawk's price equals its MAP. The code and terms live server-side and arrive only in the `/api/lead` response. A code still sells below MAP, and the owner accepted that risk with The Male Rose.
+- **Signups go on their own Klaviyo list** (`TVq6Jz`), so they skip the `CURIOUS15` welcome series. The flow "Exit offer: Gawk code" sends the code. `scripts/klaviyo-exit-offer-setup.ts` created it as a draft, and the owner had it set live on 2026-11-01.
+- **The phone is required, but consent to texts is its own unticked box.** An unticked number gets no texts. With `lead_sms_optin_enabled` off, the form asks for email alone.
+- **The cookie does the applying.** `/api/lead` sets `xdipx_exit_code` for 30 days, and any buy button for the page's own product puts the code on the cart. Upgrades to the other Roses do not get it.
+
 ## Showing a toy in use
 
 When a page or banner shows a product used on another toy, the other toy is a real product we sell, so the demo can be filmed or photographed for real. For strokers the prop is the Camtoyz Cody (`camtoyz-ultra-realistic-squirting-dildo-cody`), chosen 2026-10-31 by owner request: realistic, has balls and a suction base, and it actually squirts. Check it fits the stroker's cup before a shoot; the catalog does not list the cup's inner size.

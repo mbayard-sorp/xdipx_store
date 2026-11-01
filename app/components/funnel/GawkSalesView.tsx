@@ -34,6 +34,7 @@ import { trackCtaClick } from '~/lib/analytics.client'
 import { trackFbViewContent } from '~/lib/meta-pixel.client'
 import { sanityImageSrcSet, sanityImageUrl } from '~/lib/sanity-image'
 import { shopifyImageUrl } from '~/lib/shopify-image'
+import { ExitOffer } from './ExitOffer'
 import { BuyForm, money, type SalesShopifyData, type SalesViewData } from './SalesPageView'
 
 const COL = 'mx-auto max-w-[1160px]'
@@ -90,7 +91,7 @@ function Fill({ src, alt = '', pos, contain, eager, sizes = '(min-width: 768px) 
   )
 }
 
-export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: string; shop: SalesShopifyData }[] } }) {
+export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: string; shop: SalesShopifyData }[]; smsOptin: boolean } }) {
   const { page, shop } = d
   const variant = shop.variants.find(v => v.available) ?? shop.variants[0]
   const price = variant?.price ?? 0
@@ -788,6 +789,18 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
           </BuyForm>
         </div>
       </div>
+
+      {variant?.available ? (
+        <ExitOffer
+          slug={page.slug}
+          smsOptin={d.smsOptin}
+          buy={
+            <BuyForm spot="exit-offer" shop={shop} variant={variant} beginCheckout={!d.hasAddOns} formClassName="w-full" className="flex min-h-[52px] w-full cursor-pointer items-center justify-center border-0 bg-coral px-6 text-[18px] font-bold text-white hover:bg-plum">
+              I'll take it ♥
+            </BuyForm>
+          }
+        />
+      ) : null}
     </div>
   )
 }

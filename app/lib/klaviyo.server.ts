@@ -95,8 +95,10 @@ export async function subscribeLead(opts: {
   firstName?: string
   phone?: string | null
   properties: Record<string, unknown>
+  /** A list other than paid leads, whose welcome series offers CURIOUS15. */
+  listId?: string
 }): Promise<string | null> {
-  let listId = process.env['KLAVIYO_LIST_ID_PAID_LEADS']
+  let listId = opts.listId ?? process.env['KLAVIYO_LIST_ID_PAID_LEADS']
   if (!listId) {
     console.warn('[klaviyo.subscribeLead] KLAVIYO_LIST_ID_PAID_LEADS unset, using the daily-deal list')
     listId = process.env['KLAVIYO_LIST_ID_DAILY_DEAL']!

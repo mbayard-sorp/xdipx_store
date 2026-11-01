@@ -192,3 +192,46 @@ describe('lead SMS opt-in switch defaults', () => {
     }
   })
 })
+
+describe('/api/lead for a sales page exit offer', () => {
+  const exit = { email: 'ann@example.com', phone: '555 000 1111', slug: 'gawk-gawk-3000' }
+
+  beforeEach(() => mocks.isLeadSmsOptinEnabled.mockResolvedValue(true))
+
+  it('gives the page code on its own list, with no first name, and sets the buy-button cookie', async () => {
+    const res = await post(exit)
+    const body = await res.json()
+    expect(res.status).toBe(200)
+    expect(body.code).toBe('GAWK10')
+    expect(mocks.subscribeLead.mock.calls[0]![0]).toMatchObject({ listId: 'TVq6Jz', phone: PHONE })
+    expect(res.headers.get('set-cookie')).toContain('xdipx_exit_code=GAWK10')
+  })
+
+  it('requires the phone while the SMS switch is on', async () => {
+    const res = await post({ ...exit, phone: '' })
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toBe('phone_required')
+    expect(mocks.subscribeLead).not.toHaveBeenCalled()
+  })
+
+  it('does not require a phone with the switch off, since the form does not ask', async () => {
+    mocks.isLeadSmsOptinEnabled.mockResolvedValue(false)
+    const res = await post({ email: exit.email, slug: exit.slug })
+    expect(res.status).toBe(200)
+    expect((await res.json()).code).toBe('GAWK10')
+  })
+
+  it('does not enroll a number for texts unless the box was ticked', async () => {
+    await post(exit)
+    expect(mocks.enrollLeadSms).not.toHaveBeenCalled()
+    await post({ ...exit, smsConsent: true })
+    expect(mocks.enrollLeadSms).toHaveBeenCalledOnce()
+  })
+
+  it('leaves the two-door page on CURIOUS15 and its required first name', async () => {
+    const res = await post(lead)
+    expect((await res.json()).code).toBe('CURIOUS15')
+    expect(res.headers.get('set-cookie') ?? '').not.toContain('xdipx_exit_code')
+    expect((await post({ ...lead, firstName: '' })).status).toBe(400)
+  })
+})

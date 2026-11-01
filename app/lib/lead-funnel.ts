@@ -113,8 +113,14 @@ export interface LeadInput {
 
 export type LeadValidation = { ok: true; value: LeadInput } | { ok: false; error: string }
 
+/** A sales page's exit offer asks for email and phone, not a name. */
+export interface LeadRules {
+  firstNameOptional?: boolean
+  phoneRequired?: boolean
+}
+
 /** Shape and bounds checks. Phone normalisation happens server-side. */
-export function validateLeadInput(raw: Record<string, unknown>): LeadValidation {
+export function validateLeadInput(raw: Record<string, unknown>, rules: LeadRules = {}): LeadValidation {
   const str = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '')
   const firstName = str(raw['firstName'], 60)
   const email = str(raw['email'], 254).toLowerCase()
@@ -123,8 +129,9 @@ export function validateLeadInput(raw: Record<string, unknown>): LeadValidation 
   const interestRaw = str(raw['interest'], 32)
   const slug = str(raw['slug'], 60) || 'hello'
 
-  if (!firstName) return { ok: false, error: 'first_name_required' }
+  if (!firstName && !rules.firstNameOptional) return { ok: false, error: 'first_name_required' }
   if (!EMAIL_RE.test(email)) return { ok: false, error: 'invalid_email' }
+  if (rules.phoneRequired && !phone) return { ok: false, error: 'phone_required' }
   if (smsConsent && !phone) return { ok: false, error: 'phone_required_for_sms' }
   const interest = getLeadInterest(interestRaw)?.slug ?? null
   return { ok: true, value: { firstName, email, phone, smsConsent, interest, slug } }
