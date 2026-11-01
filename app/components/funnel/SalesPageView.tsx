@@ -12,7 +12,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Form } from 'react-router'
 import { splitHeadline } from '~/lib/ad-bridge-copy'
-import { trackAddToCart, trackBeginCheckout } from '~/lib/analytics.client'
+import { trackAddToCart, trackBeginCheckout, trackCtaClick } from '~/lib/analytics.client'
 import { showDiscountBadge } from '~/lib/discount-badge'
 import { trackFbViewContent } from '~/lib/meta-pixel.client'
 import { sanityImageUrl } from '~/lib/sanity-image'
@@ -107,6 +107,7 @@ function sanityImg(img: SalesImage, w: number) {
  * server's 302 is followed by the browser directly.
  */
 export function BuyForm({
+  spot,
   shop,
   variant,
   beginCheckout,
@@ -114,6 +115,8 @@ export function BuyForm({
   formClassName,
   children,
 }: {
+  /** Which button on the page this is. It lands on the Shopify order as `_sales_cta`. */
+  spot: string
   shop: SalesShopifyData
   variant: SalesVariant | undefined
   beginCheckout: boolean
@@ -128,6 +131,7 @@ export function BuyForm({
       reloadDocument
       className={formClassName}
       onSubmit={() => {
+        trackCtaClick('sales_buy', spot)
         if (!variant) return
         const item = { item_id: shop.productId, item_name: shop.title, item_brand: shop.brand, item_variant: variant.title, price: variant.price, quantity: 1 }
         trackAddToCart(item)
@@ -135,6 +139,7 @@ export function BuyForm({
       }}
     >
       <input type="hidden" name="variantId" value={variant?.id ?? ''} />
+      <input type="hidden" name="spot" value={spot} />
       <button type="submit" data-sales-cta disabled={!canBuy} className={className + (canBuy ? '' : ' cursor-not-allowed opacity-50')}>
         {canBuy ? children : 'Sold out'}
       </button>
@@ -282,7 +287,7 @@ export function SalesPageView({ d }: { d: SalesViewData }) {
             </fieldset>
           ) : null}
 
-          <BuyForm shop={shop} variant={variant} beginCheckout={!d.hasAddOns} className={buyBtn + ' w-full sm:w-auto'}>{cta}</BuyForm>
+          <BuyForm spot="hero" shop={shop} variant={variant} beginCheckout={!d.hasAddOns} className={buyBtn + ' w-full sm:w-auto'}>{cta}</BuyForm>
 
           <div className="flex flex-col gap-2.5 border-t border-line pt-5 text-sm text-ink-3">
             {page.heroPoints.map(pt => (
@@ -302,7 +307,7 @@ export function SalesPageView({ d }: { d: SalesViewData }) {
           key={s.key}
           s={s}
           renderBuy={className => (
-            <BuyForm shop={shop} variant={variant} beginCheckout={!d.hasAddOns} className={className}>
+            <BuyForm spot={`section-${s.key}`} shop={shop} variant={variant} beginCheckout={!d.hasAddOns} className={className}>
               {cta} · {priceStr}
             </BuyForm>
           )}
@@ -318,7 +323,7 @@ export function SalesPageView({ d }: { d: SalesViewData }) {
             className="mx-auto mb-[34px] max-w-[20ch] font-display text-[clamp(2.1rem,5vw,3.6rem)] font-normal leading-[1.12] tracking-[-0.01em]"
           />
           <div className="flex justify-center">
-            <BuyForm shop={shop} variant={variant} beginCheckout={!d.hasAddOns} className={buyBtn}>
+            <BuyForm spot="final" shop={shop} variant={variant} beginCheckout={!d.hasAddOns} className={buyBtn}>
               {cta} · {priceStr}
             </BuyForm>
           </div>
@@ -340,7 +345,7 @@ export function SalesPageView({ d }: { d: SalesViewData }) {
               </div>
             </div>
           </div>
-          <BuyForm shop={shop} variant={variant} beginCheckout={!d.hasAddOns} className="whitespace-nowrap rounded-full bg-coral px-5 py-[13px] text-[15px] font-medium text-white sm:px-[26px]">{cta}</BuyForm>
+          <BuyForm spot="pinned-bar" shop={shop} variant={variant} beginCheckout={!d.hasAddOns} className="whitespace-nowrap rounded-full bg-coral px-5 py-[13px] text-[15px] font-medium text-white sm:px-[26px]">{cta}</BuyForm>
         </div>
       </div>
 

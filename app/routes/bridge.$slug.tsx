@@ -43,7 +43,7 @@ import {
 import { applyAttributionAttrs } from '~/lib/attribution-cart.server'
 import { getLeadFunnelPage, type FunnelUtm } from '~/lib/lead-funnel'
 import { mapAllowsDiscountDisplay } from '~/lib/discount-badge'
-import { addOnHandles, nextAddOnStep, parseAddOnStep, type SalesPage } from '~/lib/sales-page'
+import { addOnHandles, nextAddOnStep, parseAddOnStep, salesCtaAttr, type SalesPage } from '~/lib/sales-page'
 import { getSalesCartId, getSalesPage, setSalesCartCookie } from '~/lib/sales-page.server'
 import type { Product } from '~/types'
 import { isLeadSmsOptinEnabled } from '~/lib/lead-sms-optin.server'
@@ -356,7 +356,7 @@ function pickVariant(product: Product | null, wanted: string) {
  *
  * The buy buttons (no intent) build a one-line cart for the chosen variant of
  * the page's own product (any other variant id is refused) and stamp
- * attribution. With buyable add-ons the visitor goes to the first add-on
+ * attribution, including which button was clicked. With buyable add-ons the visitor goes to the first add-on
  * screen, the cart id riding in a short host-only cookie; without, straight
  * to Shopify checkout.
  *
@@ -408,7 +408,7 @@ async function salesAction(request: Request, slug: string) {
     const variant = [product, ...upgrades].map(p => pickVariant(p, wanted)).find(Boolean)
     if (!variant) return { error: 'That one just sold out. Pick another option above, or check back soon.' }
     const cart = await createCartWithLines([{ variantId: variant.id, quantity: 1 }])
-    await applyAttributionAttrs(cart.id, request, [{ key: '_landing', value: `curious/${page.slug}` }])
+    await applyAttributionAttrs(cart.id, request, [{ key: '_landing', value: `curious/${page.slug}` }, ...salesCtaAttr(form.get('spot'))])
     const next = nextAddOnStep(addOns.map(screenBuyable), 0)
     if (next) return redirect(addOnStepUrl(request, next), { headers: { 'Set-Cookie': setSalesCartCookie(cart.id) } })
     return redirect(cart.checkoutUrl)
@@ -490,6 +490,8 @@ export function headers({ loaderHeaders }: { loaderHeaders: Headers }) {
   if (own) return { 'Cache-Control': own, 'X-Robots-Tag': 'noindex' }
   return {
     'Cache-Control': 'public, max-age=0, s-maxage=60, stale-while-revalidate=300',
+    // The inline GA4 default differs for US visitors (analytics-default.ts).
+    Vary: 'X-Vercel-IP-Country',
     'X-Robots-Tag': 'noindex',
   }
 }
