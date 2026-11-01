@@ -29,10 +29,10 @@ const html = `<!DOCTYPE html>
 <tr><td style="padding:20px 28px 0 28px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" style="border:2px dashed #C2350F;padding:14px;font-family:Menlo,Consolas,monospace;font-size:28px;letter-spacing:2px;color:#1A1616;">${CODE}</td></tr></table></td></tr>
 <tr><td style="padding:12px 28px 0 28px;font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:21px;color:#3E3732;">${TERMS} Enter the code at checkout.</td></tr>
 <tr><td align="center" style="padding:24px 28px 8px 28px;"><a href="${URL}" style="display:block;background-color:#C2350F;color:#FFFFFF;font-family:Arial,Helvetica,sans-serif;font-size:18px;font-weight:bold;line-height:24px;padding:15px 24px;text-decoration:none;">I'll take it ♥</a></td></tr>
-<tr><td style="padding:16px 28px 28px 28px;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:18px;color:#5E5650;">Plain box. Your statement reads XDIPX. For adults, 18 and over.<br>{{ organization.name }}, {{ organization.full_address }}<br>{% unsubscribe 'Unsubscribe' %}</td></tr>
+<tr><td style="padding:16px 28px 28px 28px;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:18px;color:#5E5650;">Plain box. Your statement reads XDIPX. For adults, 18 and over.<br>xdipx, {{ organization.full_address }}<br>{% unsubscribe 'Unsubscribe' %}</td></tr>
 </table></td></tr></table></body></html>`
 
-const text = `Here's your code: ${CODE}\n\n${TERMS} Enter the code at checkout.\n\n${URL}\n\nPlain box. Your statement reads XDIPX. For adults, 18 and over.\n{{ organization.name }}, {{ organization.full_address }}\nUnsubscribe: {% unsubscribe_url %}`
+const text = `Here's your code: ${CODE}\n\n${TERMS} Enter the code at checkout.\n\n${URL}\n\nPlain box. Your statement reads XDIPX. For adults, 18 and over.\nxdipx, {{ organization.full_address }}\n{% unsubscribe 'Unsubscribe' %}`
 
 async function main() {
   const flow = (await listFlows()).find(f => f.name === NAME)
