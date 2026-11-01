@@ -25,6 +25,8 @@ export function Analytics({ ga4Id }: AnalyticsProps) {
   // ── Check existing consent on mount ─────────────────────────────────────
   useEffect(() => {
     if (!ga4Id) return
+    // Started on by the inline default, so accepting the banner must not repeat the page_view.
+    if ((window as unknown as { __xdipxAnalyticsOn?: boolean }).__xdipxAnalyticsOn) consentGranted.current = true
     try {
       const stored = localStorage.getItem(CONSENT_KEY)
       if (stored) {

@@ -12,7 +12,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Form } from 'react-router'
 import { splitHeadline } from '~/lib/ad-bridge-copy'
-import { trackAddToCart, trackBeginCheckout } from '~/lib/analytics.client'
+import { trackAddToCart, trackBeginCheckout, trackCtaClick } from '~/lib/analytics.client'
 import { showDiscountBadge } from '~/lib/discount-badge'
 import { trackFbViewContent } from '~/lib/meta-pixel.client'
 import { sanityImageUrl } from '~/lib/sanity-image'
@@ -131,6 +131,7 @@ export function BuyForm({
       reloadDocument
       className={formClassName}
       onSubmit={() => {
+        trackCtaClick('sales_buy', spot)
         if (!variant) return
         const item = { item_id: shop.productId, item_name: shop.title, item_brand: shop.brand, item_variant: variant.title, price: variant.price, quantity: 1 }
         trackAddToCart(item)

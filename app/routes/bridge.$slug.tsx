@@ -490,6 +490,8 @@ export function headers({ loaderHeaders }: { loaderHeaders: Headers }) {
   if (own) return { 'Cache-Control': own, 'X-Robots-Tag': 'noindex' }
   return {
     'Cache-Control': 'public, max-age=0, s-maxage=60, stale-while-revalidate=300',
+    // The inline GA4 default differs for US visitors (analytics-default.ts).
+    Vary: 'X-Vercel-IP-Country',
     'X-Robots-Tag': 'noindex',
   }
 }
