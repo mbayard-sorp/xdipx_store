@@ -6,6 +6,27 @@ Long-form product pages at `curious.xdipx.com/<slug>`, built for adult ad networ
 
 The page runs at 9, the owned-channel target. The voice charter (`docs/emma-voice.md`) allows 10 only on banners and copy exported to the networks, and says a 10 line never reaches the site. Changing that takes the owner's codify, not a page edit.
 
+## Hand-designed pages
+
+`gawk-gawk-3000` runs the owner's Claude Design file instead of the Sanity section layout. Words and photos are in `app/lib/gawk-sales-page.ts`, the layout is `app/components/funnel/GawkSalesView.tsx`, and the route picks it by slug. The Sanity document still controls `live`, the SEO fields and the add-on screens. Its section and headline fields no longer render on this page.
+
+Owner decisions for this page, 2026-10-31:
+
+- **Photos ship as designed**, including the three where a nipple shows through sheer fabric (hero, Head on demand, P.S.). Owner's words: "Do not change any photos." This is above the charter's nudity ceiling, and the charter has not been edited because no codify was given.
+- **The design's explicit copy and its CTAs ship as designed**, which also runs above the register 9 and the CTA whitelist set out above and in the charter. Same status: a decision for this page, not a charter change.
+- **No invented discount.** The design's "51% OFF, was $142.99" came off because Shopify holds no such price: compare-at and MAP were both $69.99 when this was built. A struck price and a percent badge appear on their own if Shopify holds a real compare-at, through the same MAP gate and 10% floor as the store's cards (`gawkOffer`).
+- **No sold-out or scarcity claims.** "The viral stroker" stays, on the owner's word. Sold out for weeks, waitlists, resellers, limited offer and "when this batch is gone" came out: the history could not be verified, stock was 1,406, and the charter bans urgency.
+
+Free shipping on this page is real, and no code gives it: the automatic "Free Shipping" discount covers orders of $59.99 and up on rates under $10, so Standard US is free at this product's price (checked at checkout 2026-10-31). Hawaii, Alaska and Puerto Rico ($14.99) and international are not covered, and the FAQ says so for HI, AK and PR. If that automatic discount ends (it is set to expire 2027-04-14) or the price drops below $59.99, this page's free shipping claim goes false.
+
+Returns on this page state the store policy: unopened within 30 days, hygiene rules once used (`app/lib/faq-content.ts`).
+
+### Upgrades on this page (owner direction 2026-10-31)
+
+The page also sells up to the other Male Roses, the way `advents26` steps up to Luxury. A card under the hero buy button pitches the Rose 3 and scrolls to an upgrade section before the Offer: Pro, Rose 3 and Rose 2 with their own buy buttons, a side-by-side, and a way back to the Gawk. Clicks on the card log `cta_click` as `gawk_upsell`. The sales action accepts only these three products beyond the page's own, and they go through the same lube add-on screen. Words and specs are in `GAWK_UPGRADES`, written from each product's `custom.original_description`; the shorter Shopify description on the Pro wrongly says suction. The dollar gap comes from live prices, and a Rose that is sold out or not priced above the Gawk drops off.
+
+All three sit at MAP since 2026-10-31, when the owner had them moved up from $71.99, $71.99 and $80.99: Pro and Rose 2 at $79.99 (cost $39.99, 50.0%, $40 a unit), Rose 3 at $89.99 (cost $45, 49.99%, $44.99 a unit), against the Gawk at $69.99 (cost $34.99, 50.0%, $35). The Male Rose is in `pricing_map_brands`, so the daily batch should hold these. The add-on screen's words were made generic the same day, because the Rose 2 has no rotation.
+
 ## Choosing add-ons (owner direction 2026-10-31)
 
 An add-on screen offers one thing, or a good, better, best choice of up to three products. A page has at most two screens. Every product on a screen must clear all of these at the price the store is charging when the page goes live:

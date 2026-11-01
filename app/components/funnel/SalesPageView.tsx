@@ -106,17 +106,19 @@ function sanityImg(img: SalesImage, w: number) {
  * The buy button. A native POST form, so it works before hydration and the
  * server's 302 is followed by the browser directly.
  */
-function BuyForm({
+export function BuyForm({
   shop,
   variant,
   beginCheckout,
   className,
+  formClassName,
   children,
 }: {
   shop: SalesShopifyData
   variant: SalesVariant | undefined
   beginCheckout: boolean
   className: string
+  formClassName?: string
   children: ReactNode
 }) {
   const canBuy = !!variant?.available
@@ -124,6 +126,7 @@ function BuyForm({
     <Form
       method="post"
       reloadDocument
+      className={formClassName}
       onSubmit={() => {
         if (!variant) return
         const item = { item_id: shop.productId, item_name: shop.title, item_brand: shop.brand, item_variant: variant.title, price: variant.price, quantity: 1 }
