@@ -168,7 +168,8 @@ export const CONCEPTS: Readonly<Record<string, ConceptSpec>> = {
   },
   'for-him-plainly': {
     slug: 'for-him-plainly', kicker: 'For him, plainly', layout: 'plain-plate', typographicOnly: false,
-    subject: 'An adult man, bare chest, forearm or lower back, the product in hand or resting on the back.',
+    // Owner direction 2026-10-31: men's products are sold to men by women, never by other men.
+    subject: 'An adult woman in barely-there lingerie, holding the product and offering it to the camera.',
     lens: '85mm, f/2.2, morning side light',
     skin: 'always', handOk: false,
     skinAxes: { cropScale: 'close', bodyZone: 'forearm', contactMode: 'self-held', sceneLocation: 'bedroom-loft' },

@@ -229,6 +229,8 @@ dial and the marketing addendum), checked on every string before filing:
 - No "sexy" or "sex" as a branding adjective. CTAs from the whitelist only. No em-dashes. No
   countdowns or urgency. Emma has no lived experience. No fabricated proof: no counts, reviews or
   quotes.
+- Every person in an adult banner is an adult woman, scantily dressed, offering the product to the
+  viewer, on men's products too. Never cast a man (`docs/store-team/ad-owner-notes.md`).
 - Imagery is capped by the nudity definition: no visible female nipples, labia, penis or anus. Male
   nipples are not nudity. Everything else the charter and `docs/design-doctrine.md` allow is allowed.
   The product stays the hero of the frame.
