@@ -23,7 +23,7 @@ import dmSansLatinWoff2 from '@fontsource-variable/dm-sans/files/dm-sans-latin-w
 import { BRAND_TITLE, BRAND_DESCRIPTION } from '~/lib/brand'
 import { SITE_ORIGIN } from '~/lib/social-meta'
 import { MetaPageViews } from '~/components/store/MetaPageViews'
-import { captureUTM, captureFbClickId, captureGoogleClickId, captureMicrosoftClickId } from '~/lib/attribution.server'
+import { captureUTM, captureExoClickId, captureFbClickId, captureGoogleClickId, captureMicrosoftClickId } from '~/lib/attribution.server'
 import { resolveGa4 } from '~/lib/ga4-config.server'
 import { isQaAgeBypassRequest } from '~/lib/qa-preview.server'
 import { isPermanentlyUnindexableStatus } from '~/lib/seo'
@@ -161,6 +161,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const gclidCookies = captureGoogleClickId(request)
   // Microsoft Advertising clicks carry ?msclkid=. Same reasoning as gclid.
   const msclkidCookies = captureMicrosoftClickId(request)
+  // ExoClick banner clicks carry ?exoclid=, which the conversion postback echoes.
+  const exoclidCookies = captureExoClickId(request)
 
   const ga4 = await resolveGa4()
 
@@ -168,6 +170,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   for (const cookie of utmCookies) headers.append('Set-Cookie', cookie)
   for (const cookie of fbcCookies) headers.append('Set-Cookie', cookie)
   for (const cookie of gclidCookies) headers.append('Set-Cookie', cookie)
+  for (const cookie of exoclidCookies) headers.append('Set-Cookie', cookie)
   for (const cookie of msclkidCookies) headers.append('Set-Cookie', cookie)
 
   return data({

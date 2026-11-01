@@ -116,9 +116,14 @@ The 160x600 takes a tall plate (the `story` bucket), so an adult idea now genera
 
 ### Landing rule
 
-- Every adult banner lands on the canonical product page, `https://xdipx.com/products/{slug}`, with `utm_source`, `utm_medium`, `utm_campaign` and `utm_content`. No bridge page, no collection, no homepage.
-- The export resolves the landing itself (`adultLandingFor` in `app/lib/ad-export/common.ts`). It keeps the idea's destination when that is already an xdipx.com product page, otherwise it uses the idea's first product handle, and it drops any other query string. An adult idea with no product refuses to export.
+- Every adult banner lands on the canonical product page, `https://xdipx.com/products/{slug}`, with `utm_source`, `utm_medium`, `utm_campaign` and `utm_content`. No bridge page, no collection, no homepage. One exception (owner decision 2026-10-29): an idea whose `audience.salesPage` names a sales page lands on `https://curious.xdipx.com/{slug}`. A curious.xdipx.com destination alone does not count, because the Meta bridge pages live on that host too.
+- ExoClick links also end in `exoclid={conversions_tracking}`. ExoClick swaps the macro for its click id, and the order webhook echoes that id back as a conversion (`app/lib/exoclick-postback.server.ts`). Paste the link whole.
+- The export resolves the landing itself (`adultLandingFor` in `app/lib/ad-export/common.ts`). It uses `audience.salesPage` when set, then keeps the idea's destination when that is already an xdipx.com product page, otherwise it uses the idea's first product handle, and it drops any other query string. An adult idea with no product refuses to export.
 - ExoClick's docs allow a product page as the landing page. The banner and the page must load for review, the product must not be on ExoClick's banned list, the URL must be https, and back-button redirects or entry and exit prompts on the page earn blocking labels. Our PDPs do none of that. Models who look young need a visible 18 U.S.C. 2257 disclaimer on the banner or the page; we cast adults only.
+
+### Conversion goal setup
+
+The postback stays off until `EXOCLICK_GOAL_ID` is set in Vercel. In ExoClick, under Campaigns > Conversion Tracking, create one goal for Purchase: tracking method Conversion Tracking API (S2S), dynamic value, one conversion per click, and a conversion window of 7 days. Put its ID in `EXOCLICK_GOAL_ID`, then add the goal to the campaign. The value sent is the order after discounts, before tax and shipping. No postback fires for a shopper who declined marketing cookies.
 
 ### Next formats (not built)
 

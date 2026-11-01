@@ -28,7 +28,7 @@ export const LANE_RULES: Readonly<Record<string, LaneRules>> = {
     label: 'Adult ad network',
     register: 'Copy runs at register 10, the vetted adult ad network register (codified 2026-10-03, docs/ads-policy.md). Explicit and act-anchored, never porn-copy.',
     ceiling: 'The nudity definition is the only imagery ceiling: no visible female nipples, labia, penis or anus. Every banner passed the vision gate against that stop list.',
-    handoff: 'Upload each image in the network dashboard and paste its destination URL exactly as given in copy.txt. Every URL lands on the product page itself (no bridge). The utm_content on each URL is the attribution key.',
+    handoff: 'Upload each image in the network dashboard and paste its destination URL exactly as given in copy.txt. Every URL lands on the product page, or on the sales page the idea names. Paste each URL whole, including exoclid={conversions_tracking}, which reports sales back to ExoClick. The utm_content on each URL is the attribution key.',
   },
   newsletter: {
     label: 'Newsletter sponsor',
@@ -113,7 +113,7 @@ export async function buildBannerZip(input: ZipBuildInput): Promise<ExportBuild>
     const base = adult ? adultLandingFor(idea) : idea.destinationUrl
     if (!base || !/^https?:\/\//.test(base)) {
       issues.push(adult
-        ? `Creative #${c.id}: idea #${idea.id} has no product to land on (adult banners land on https://xdipx.com/products/{slug}).`
+        ? `Creative #${c.id}: idea #${idea.id} has no product to land on and names no sales page.`
         : `Creative #${c.id}: idea #${idea.id} has no destination URL.`)
       continue
     }

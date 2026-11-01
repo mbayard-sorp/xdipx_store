@@ -156,31 +156,50 @@ export function utmParamsFor(idea: UtmIdea, creativeId: number | null, opts: { f
   }
 }
 
+/**
+ * ExoClick swaps this macro for its click id, which the conversion postback
+ * echoes back (app/lib/exoclick-postback.server.ts). Appended raw: URL encoding
+ * would break the braces and ExoClick would pass the macro through unexpanded.
+ */
+const EXOCLICK_CLICK_MACRO = 'exoclid={conversions_tracking}'
+
 /** The idea's destination with the lane's four UTMs, replacing any utm_* it carried. */
 export function withUtms(destination: string, idea: UtmIdea, creativeId: number | null, opts: { format?: string | null } = {}): string {
   const u = new URL(destination)
   for (const k of [...u.searchParams.keys()]) if (k.startsWith('utm_')) u.searchParams.delete(k)
   for (const [k, v] of Object.entries(utmParamsFor(idea, creativeId, opts))) u.searchParams.set(k, v)
-  return u.toString()
+  const url = u.toString()
+  return idea.lane === 'adult' && adultNetworkFor(idea) === 'exoclick' ? `${url}&${EXOCLICK_CLICK_MACRO}` : url
 }
 
 // ---------------------------------------------------------------------------
 // Adult-lane landing rule (owner decision 2026-10-20): every adult banner lands
 // directly on the canonical product page, https://xdipx.com/products/{slug},
-// with the four UTMs. No bridge page, no collection, no homepage.
+// with the four UTMs. No bridge page, no collection, no homepage. One exception
+// (owner decision 2026-10-29): an idea may point at a long-form sales page,
+// https://curious.xdipx.com/{slug}. See docs/ads-policy.md.
 // ---------------------------------------------------------------------------
 
 export const CANONICAL_ORIGIN = 'https://xdipx.com'
 
 const PRODUCT_PATH = /^\/products\/([a-z0-9][a-z0-9-]*)\/?$/i
+const SALES_PAGE_ORIGIN = 'https://curious.xdipx.com'
+const SALES_PAGE_PATH = /^\/[a-z0-9][a-z0-9-]{0,59}\/?$/i
 
 /**
- * The canonical PDP an adult banner lands on, without UTMs. Uses the idea's
- * destination when it already is an xdipx.com /products/{slug} page (so an idea
- * can point at its second product), otherwise the first product's handle. Any
- * other query string is dropped. Null when neither gives a product.
+ * The page an adult banner lands on, without UTMs. A sales page has to be named
+ * in `audience.salesPage`: a curious.xdipx.com destination alone is not enough,
+ * because the paid-lane bridge pages live on that host too and an adult banner
+ * must never land on one. Otherwise it uses the idea's destination when that is
+ * an xdipx.com /products/{slug} page (so an idea can point at its second
+ * product), then the first product's handle. Any other query string is dropped.
+ * Null when none of those gives a page.
  */
-export function adultLandingFor(idea: Pick<ExportIdea, 'destinationUrl' | 'products'>): string | null {
+export function adultLandingFor(
+  idea: Pick<ExportIdea, 'destinationUrl' | 'products'> & { audience?: Record<string, unknown> | null },
+): string | null {
+  const salesPage = idea.audience?.['salesPage']
+  if (typeof salesPage === 'string' && SALES_PAGE_PATH.test(`/${salesPage}`)) return `${SALES_PAGE_ORIGIN}/${salesPage.toLowerCase()}`
   if (idea.destinationUrl) {
     try {
       const u = new URL(idea.destinationUrl)
@@ -192,11 +211,13 @@ export function adultLandingFor(idea: Pick<ExportIdea, 'destinationUrl' | 'produ
   return handle ? `${CANONICAL_ORIGIN}/products/${handle.toLowerCase()}` : null
 }
 
-/** True when a URL is the canonical xdipx.com PDP an adult banner must land on. */
+/** True when a URL is a page an adult banner may land on: a canonical PDP or a sales page. */
 export function isAdultLanding(url: string): boolean {
   try {
     const u = new URL(url)
-    return u.protocol === 'https:' && u.hostname === 'xdipx.com' && PRODUCT_PATH.test(u.pathname)
+    if (u.protocol !== 'https:') return false
+    if (u.hostname === 'curious.xdipx.com') return SALES_PAGE_PATH.test(u.pathname)
+    return u.hostname === 'xdipx.com' && PRODUCT_PATH.test(u.pathname)
   } catch {
     return false
   }

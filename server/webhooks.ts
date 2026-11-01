@@ -88,6 +88,8 @@ interface ShopifyOrder {
   /** Present on some payloads when `email` is empty (e.g. phone checkouts). */
   contact_email?: string | null
   total_price: string
+  /** After discounts, before tax and shipping. */
+  subtotal_price?: string
   currency?: string
   created_at?: string
   line_items: ShopifyLineItem[]
@@ -155,12 +157,13 @@ export const PAID_CLICK_ID_ATTRIBUTES: readonly string[] = [
   '_fbc', '_fbclid', 'fbclid',
   '_gclid', 'gclid', '_wbraid', 'wbraid', '_gbraid', 'gbraid',
   '_msclkid', 'msclkid',
+  '_exoclid',
 ]
 
 /** Meta click ids. Meta also appends fbclid to organic links, so an explicit organic medium outranks it. */
 const META_CLICK_ID_ATTRIBUTES = new Set(['_fbc', '_fbclid', 'fbclid'])
 
-export type ClickIdSignal = 'meta' | 'google' | 'microsoft'
+export type ClickIdSignal = 'meta' | 'google' | 'microsoft' | 'exoclick'
 
 /** Which ad-click ids an order carries, read from its note_attributes. */
 export function clickIdsFromNoteAttributes(
@@ -171,6 +174,7 @@ export function clickIdsFromNoteAttributes(
     if (!a?.value || !PAID_CLICK_ID_ATTRIBUTES.includes(a.name)) continue
     if (META_CLICK_ID_ATTRIBUTES.has(a.name)) found.add('meta')
     else if (a.name.endsWith('msclkid')) found.add('microsoft')
+    else if (a.name === '_exoclid') found.add('exoclick')
     else found.add('google')
   }
   return [...found]
@@ -302,7 +306,19 @@ export function orderAttributionRow(order: Pick<ShopifyOrder,
 async function handlePurchaseSignals(order: ShopifyOrder): Promise<void> {
   // The two destinations are independent, so run them concurrently: serially
   // they stack latency against the pre-response ceiling for no reason.
-  await Promise.allSettled([sendMetaPurchase(order), sendGa4Purchase_(order)])
+  await Promise.allSettled([sendMetaPurchase(order), sendGa4Purchase_(order), sendExoClickConversion_(order)])
+}
+
+async function sendExoClickConversion_(order: ShopifyOrder): Promise<void> {
+  // Tells ExoClick which banner click became a sale, so it can optimize toward
+  // sales. Most orders carry no ExoClick click and return without a request.
+  try {
+    const { sendExoClickConversion } = await import('../app/lib/exoclick-postback.server.js')
+    const result = await sendExoClickConversion(order)
+    if (!result.ok) console.error('[webhook:order-created] ExoClick postback not delivered:', order.id, result.error)
+  } catch (err) {
+    console.error('[webhook:order-created] ExoClick postback block error:', err)
+  }
 }
 
 async function sendMetaPurchase(order: ShopifyOrder): Promise<void> {
