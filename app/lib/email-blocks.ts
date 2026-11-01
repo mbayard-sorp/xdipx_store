@@ -314,6 +314,10 @@ export interface GoodBetterBestTier {
   price: string
   imageUrl: string
   line: string
+  /** When set, used verbatim instead of the plain `/products/{handle}` URL
+   *  this block would otherwise build — this is how the daily assembler
+   *  (ticket #14999) wires in its own UTM-tagged href per the comment above. */
+  hrefOverride?: string
 }
 
 export interface GoodBetterBestBlockOpts {
@@ -333,7 +337,7 @@ export interface GoodBetterBestBlockOpts {
 export function goodBetterBestBlock(opts: GoodBetterBestBlockOpts): string {
   const colWidth = 173
   const cards = opts.tiers.slice(0, 3).map((t) => {
-    const href = `https://xdipx.com/products/${t.handle}`
+    const href = t.hrefOverride ?? `https://xdipx.com/products/${t.handle}`
     const lux = t.tier === 'best'
     const imgWidth = lux ? colWidth - 28 : colWidth
     return `<td width="${colWidth}" valign="top" class="x-stack" style="padding:0 6px;">
