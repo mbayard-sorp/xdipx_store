@@ -109,8 +109,11 @@ rebase or merge before it can land, whatever the diff itself looks like. Catchin
 call is cheaper than discovering it after a full diff read and a worktree setup. Concrete instance:
 ticket #8696 / PR #1156 (2026-09-11) was `mergeableState:dirty` because it diverged before an
 adjacent PR merged an entry to the same append-only file; the conflict was only found after reading
-the full 197-line diff. Note the state in your review; a dirty PR is a bounce (ask for a rebase),
-not a Step 6 verdict call.
+the full 197-line diff. Note the state in your review; a dirty PR is a bounce (ask for a rebase or
+merge), not a Step 6 verdict call. Whoever picks it up: `git push --force-with-lease`/`--force` is
+denied outright by this cloud sandbox's own auto-mode classifier, so a rebase-then-force-push is
+not available here — point them at the non-destructive merge method in `routine-dev-daily.md`'s
+"dirty/stale branch" section instead.
 
 Pull the branch and read it locally. Git works in a cloud session; the GitHub API does not, because
 egress is restricted to xdipx.com.
@@ -358,14 +361,15 @@ order landed in the last 24h, it has a resolved ledger row; (3) `POST /cron/purc
 not a failure on a day with zero orders; this check is orders-versus-reported, never an absolute
 count.
 
-**Known limitation: sub-check (3) is blocked outright in this cloud QA sandbox.** `POST
-/cron/purchase-reconcile` with `dryRun:true` is denied by the auto-mode tool classifier (reason:
-"Modify Shared Resources") before the request ever reaches xdipx.com, even with `dryRun:true` set.
-This is distinct from the `preview-fetch` POST-only-route gap documented below: that one is a
-missing capability, this one is an active deny. Recorded unverified on run 1745 (2026-10-30 16:30
-pass) rather than attempted as a workaround. Record `unverified: purchase-reconcile dry-run denied
-by sandbox tool classifier` for sub-check (3) and move on, rather than re-discovering the same
-denial each pass, unless the owner has since allowlisted this specific dry-run call.
+**Known limitation: sub-check (3) is intermittently denied in this cloud QA sandbox, not blocked
+outright.** `POST /cron/purchase-reconcile` with `dryRun:true` was denied by the auto-mode tool
+classifier (reason: "Modify Shared Resources") on run 1745 (2026-10-30 16:30 pass), but the
+identical route with the identical body succeeded cleanly on run 1757 (2026-10-31 11:30 pass, no
+classifier denial at all). So the deny is not deterministic — it is at minimum intermittent,
+possibly tied to request framing or classifier state rather than the route itself. **Attempt the
+call first on every pass**, and only fall back to `unverified: purchase-reconcile dry-run denied by
+sandbox tool classifier` for sub-check (3) on an actual denial this run, rather than skipping the
+attempt on the strength of a prior run's denial.
 
 Sub-check (1) **is reachable now** (route shipped 2026-08-19, ticket #4177 / PR #773). Call the
 authenticated route instead of recording `unverified`:

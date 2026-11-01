@@ -166,6 +166,25 @@ A bounced ticket counts against this pass's limit of 5 like any other. A ticket 
 three attempts is blocked and escalated by the release engine within the hour, so if you see one at
 `attempt_count` 3 still assigned to you, leave it: the owner has it now.
 
+**A dirty/stale branch needs a merge, not a rebase-then-force-push, in this cloud sandbox.**
+`git push --force-with-lease` (and `--force`) is denied outright by the session's own auto-mode
+permission classifier here (reason: Git Destructive), with no override available to the agent —
+confirmed on tickets #19140, #19141, #19142 (2026-10-31 pass), all three bounced for
+`mergeableState:dirty`. The non-destructive fix that actually works in this sandbox:
+
+```bash
+git checkout -B <branch> origin/<branch>   # reset local to the current remote tip
+git merge origin/main --no-edit            # not rebase — a merge commit needs no force flag
+# resolve conflicts (usually identical in content to what a rebase would show; for an add/add
+# conflict from a squash-merged predecessor PR, diff against a scratch cherry-pick of just the
+# real feature commit if it's unclear which side is noise)
+# run full local verification (typecheck/test/build) on the merged branch
+git push origin <branch>                   # ordinary push, no force — it's a fast-forward
+```
+
+Keep rebase-then-force-push as the method only for a session that actually has that permission;
+default to the merge path above here.
+
 ## Step 2 — Protected paths: author, never merge
 
 **Changed 2026-08-19 by owner direction ("I'm not the bottleneck; the team triages, reacts, and
