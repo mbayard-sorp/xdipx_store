@@ -27,6 +27,16 @@ The page also sells up to the other Male Roses, the way `advents26` steps up to 
 
 All three sit at MAP since 2026-10-31, when the owner had them moved up from $71.99, $71.99 and $80.99: Pro and Rose 2 at $79.99 (cost $39.99, 50.0%, $40 a unit), Rose 3 at $89.99 (cost $45, 49.99%, $44.99 a unit), against the Gawk at $69.99 (cost $34.99, 50.0%, $35). The Male Rose is in `pricing_map_brands`, so the daily batch should hold these. The add-on screen's words were made generic the same day, because the Rose 2 has no rotation.
 
+## Which button sold it
+
+Every buy button on a `sales` page carries a label (`spot` on `BuyForm`), and the route saves it on the cart as `_sales_cta`. Shopify copies it to the order, so the order's Additional details name the button that started the purchase: `hero`, `do-the-math`, `pinned-bar` and so on. On the Gawk page the labels follow its sections, `cta-05`, `cta-12` and `cta-16` being the three CTA-only sections. `upgrade-card` covers all three Roses, and the order's line item says which one. Nothing depends on GA4 or consent. The advent pages have their own form and do not carry it.
+
+GA4 gets the same label on every click, buyer or not, as `cta_click` with `cta_name` `sales_buy` and `cta_location` set to the label.
+
+## GA4 on curious.xdipx.com (owner direction 2026-11-01)
+
+US visitors on this host start with GA4 analytics storage on, because with it denied GA4 kept almost none of the paid traffic. Ad storage stays denied and the Meta pixel still waits for "Accept all". The cookie banner still shows. "Essential only", or a browser sending Global Privacy Control, leaves GA4 off. Every other country and the main store keep the denied default. The country comes from Vercel's `x-vercel-ip-country`, and the page sends `Vary: X-Vercel-IP-Country` so the 60 second cache keeps US and non-US copies apart. Code: `app/lib/analytics-default.ts`.
+
 ## Choosing add-ons (owner direction 2026-10-31)
 
 An add-on screen offers one thing, or a good, better, best choice of up to three products. A page has at most two screens. Every product on a screen must clear all of these at the price the store is charging when the page goes live:

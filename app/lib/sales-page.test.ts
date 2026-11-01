@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { addOnHandles, bulkUnitPrice, nextAddOnStep, normalizeBulkOffers, normalizeSalesPage, normalizeSection, parseAddOnStep } from './sales-page'
+import { addOnHandles, bulkUnitPrice, nextAddOnStep, normalizeBulkOffers, normalizeSalesPage, normalizeSection, parseAddOnStep, salesCtaAttr } from './sales-page'
 
 const base = {
   slug: 'quiet-pulse',
@@ -169,5 +169,18 @@ describe('bulk offers', () => {
     expect(bulkUnitPrice(32.99, 15)).toBe(28.05)
     expect(bulkUnitPrice(41.49, 15)).toBe(35.27)
     expect(bulkUnitPrice(21.99, 0)).toBe(21.99)
+  })
+})
+
+describe('salesCtaAttr', () => {
+  it('names the button on the cart', () => {
+    expect(salesCtaAttr('do-the-math')).toEqual([{ key: '_sales_cta', value: 'do-the-math' }])
+  })
+
+  it('drops anything that is not one of our labels', () => {
+    expect(salesCtaAttr(null)).toEqual([])
+    expect(salesCtaAttr('')).toEqual([])
+    expect(salesCtaAttr('<script>')).toEqual([])
+    expect(salesCtaAttr('x'.repeat(41))).toEqual([])
   })
 })

@@ -25,6 +25,8 @@ import { SITE_ORIGIN } from '~/lib/social-meta'
 import { MetaPageViews } from '~/components/store/MetaPageViews'
 import { captureUTM, captureExoClickId, captureFbClickId, captureGoogleClickId, captureMicrosoftClickId } from '~/lib/attribution.server'
 import { resolveGa4 } from '~/lib/ga4-config.server'
+import { analyticsOnByDefault, consentDefaultScript } from '~/lib/analytics-default'
+import { isBridgeHost, requestHost } from '~/lib/bridge-host.server'
 import { isQaAgeBypassRequest } from '~/lib/qa-preview.server'
 import { isPermanentlyUnindexableStatus } from '~/lib/seo'
 
@@ -186,6 +188,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       GA4_ID:            ga4.id,
       GA4_SOURCE:        ga4.source,
       GTM_ID:            process.env['GTM_CONTAINER_ID']   ?? '',
+      ANALYTICS_ON:      analyticsOnByDefault(isBridgeHost(requestHost(request.headers)), request.headers.get('x-vercel-ip-country')),
       AGE_GATE_LEVEL:    process.env['AGE_GATE_LEVEL']     ?? 'click_through',
       SENTRY_DSN:        process.env['SENTRY_DSN']         ?? '',
       EMMA_TEXT_NUMBER:  process.env['EMMA_TEXT_NUMBER']   ?? '',
@@ -203,7 +206,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
   // during SSR. The process.env fallback covers the error-boundary path where
   // loader data may be absent.
   const rootData = useRouteLoaderData('root') as
-    | { ENV?: { GA4_ID?: string; GTM_ID?: string; META_PIXEL_ID?: string } }
+    | { ENV?: { GA4_ID?: string; GTM_ID?: string; META_PIXEL_ID?: string; ANALYTICS_ON?: boolean } }
     | undefined
   const ga4Id = typeof document !== 'undefined'
     ? (window as unknown as { ENV?: { GA4_ID?: string } }).ENV?.GA4_ID ?? ''
@@ -211,12 +214,16 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const gtmId = typeof document !== 'undefined'
     ? (window as unknown as { ENV?: { GTM_ID?: string } }).ENV?.GTM_ID ?? ''
     : rootData?.ENV?.GTM_ID ?? (process.env['GTM_CONTAINER_ID'] ?? '')
+  const analyticsOn = typeof document !== 'undefined'
+    ? (window as unknown as { ENV?: { ANALYTICS_ON?: boolean } }).ENV?.ANALYTICS_ON ?? false
+    : rootData?.ENV?.ANALYTICS_ON ?? false
   const pixelId = typeof document !== 'undefined'
     ? (window as unknown as { ENV?: { META_PIXEL_ID?: string } }).ENV?.META_PIXEL_ID ?? ''
     : rootData?.ENV?.META_PIXEL_ID ?? (process.env['META_PIXEL_ID'] ?? '')
 
   // Analytics loads in two stages. The bootstrap runs inline before first
-  // paint: consent-mode defaults (denied until the banner grants) plus the
+  // paint: consent-mode defaults (denied until the banner grants, except
+  // analytics for US visitors on curious.xdipx.com, see analytics-default.ts) plus the
   // gtag and fbq queue stubs, so every event or consent update fired from app
   // code is queued from the start. The heavy third-party payloads (gtm.js /
   // gtag.js / fbevents.js, ~265KB combined) load only on first interaction or
@@ -233,7 +240,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
   // token is server-only and never appears here or in window.ENV.
   const analyticsBootstrap = [
     (ga4Id || gtmId)
-      ? `window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('consent','default',{analytics_storage:'denied',ad_storage:'denied',ad_user_data:'denied',ad_personalization:'denied'});`
+      ? `window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}${consentDefaultScript(analyticsOn)}`
       : '',
     // Mint _fbp ourselves before the fbq stub. fbevents.js is the only other
     // writer and it boots consent-revoked and deferred behind first
