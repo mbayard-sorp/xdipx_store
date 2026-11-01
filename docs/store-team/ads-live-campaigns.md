@@ -27,29 +27,74 @@ in this file.
 4. Put each campaign in the Sunday memo with spend, orders, contribution and a keep, cut or change
    verdict.
 
-## All Meta ads are paused
+## Meta status: three lead ads on, everything else paused
 
 The owner paused every Meta ad by 2026-10-31: "I paused all of my meta ads, it was getting too
-expensive and we didn't see any sales." That covers Advent26 and both Curious lead funnel campaigns.
-The Meta spend from 2026-10-24 through 2026-10-30 was $101.46, and 2026-10-31 had none at the time of
-this read.
+expensive and we didn't see any sales." The Meta spend from 2026-10-24 through 2026-10-30 was $101.46.
 
-The pause is at the ad level, so the campaigns and ad sets still read `ACTIVE`, with delivery showing
-no active ads. Two paused ads read `WITH_ISSUES` (womanizer-24 Connection `120249883184860056` and the
-lead funnel's `120249792444390056`). None of that means an ad is running. Judge by the ad's own
-`status` and by spend.
+On 2026-11-01 the owner restarted three Curious lead funnel ads to keep collecting email leads. They
+are listed below. Advent26, the Shopify-managed Advantage+ campaign, the HOLD campaign and every other
+lead funnel ad stay paused.
 
-While the pause holds:
+Judge by the ad's own `status` and by spend. Ad sets under a paused campaign read `ACTIVE` with
+`CAMPAIGN_PAUSED` delivery. Two paused ads read `WITH_ISSUES` (womanizer-24 Connection
+`120249883184860056` and the lead funnel's `120249792444390056`), and neither is running.
 
-- Only the owner restarts Meta. Do not propose a restart, a budget, or new creative for these
-  campaigns, and do not count Meta as an open channel when planning.
-- Any Meta spend after 2026-10-31 goes at the top of the run report, because it means an ad came back
-  on.
-- The Sunday memo carries one line for Meta: paused, with its final numbers.
+- Only the owner restarts a paused Meta ad. Do not propose a restart or new creative for one.
+- Spend on any Meta ad outside the three below goes at the top of the run report, because it means
+  that ad came back on.
+- The Sunday memo gives the lead funnel its own line and one line for the rest of Meta: paused, with
+  final numbers.
+
+## Curious lead funnel (Meta)
+
+**Three ads live since 2026-11-01, restarted by the owner.** The owner asked for at most three, chosen
+by clicks, and these are the most-clicked ads that collect email and still show their original
+creative.
+
+| | |
+|---|---|
+| Account | `920738511029316` |
+| Landing | `curious.xdipx.com/hello`, UTM-tagged with `utm_content=img<n>` |
+| Optimizes for | Lead on pixel `1619122322498289` |
+| Targeting | US, ages 25 to 65, Facebook and Instagram, the four M8 exclusion audiences |
+
+| Ad | Ad id | Campaign | Budget |
+|---|---|---|---|
+| img30 "needs met", Proven | `120249775570910056` | `120249775564700056`, ad set `120249775568300056` | $7/day, no spend cap |
+| img31 "easy to start" | `120249792500680056` | `120249748010640056`, ad set `120249748011930056` | Shares $10/day with img45 |
+| img45 "comfort first sessions" | `120249824045940056` | `120249748010640056`, ad set `120249748011930056` | Shares $10/day with img31 |
+
+Campaign `120249748010640056` has a $100 spend cap and had spent $69.96 at restart, so img31 and img45
+stop after about three days. Raising the cap is the owner's call.
+
+**Numbers before the restart, read 2026-11-01.**
+
+| Ad | Spent | Link clicks | Cost per click | Leads on the Klaviyo list |
+|---|---|---|---|---|
+| img30 Proven | $42.98 | 41 | $1.05 | 15, shared with the two paused img30 ads |
+| img31 | $15.86 | 16 | $0.99 | 1 |
+| img45 | $19.21 | 15 | $1.28 | 7 |
+
+Across the funnel: $112.94 spent and 28 ad-tagged leads, about $4.03 each. The break-even CPL in the
+2026-10-18 audit was $0.48 to $0.75. CURIOUS15 had 0 redemptions.
+
+Rules for this campaign:
+
+1. **Count leads from Klaviyo.** Use the "Paid leads" list `UHiJc9`, grouped by the `utm_content`
+   profile property. The pixel recorded 1 Lead from 2026-10-10 to 2026-11-01 against those 28, and
+   Meta's lead column is empty (#17642). Do not read an empty column as no leads.
+2. **Count sales from Shopify.** Use CURIOUS15 redemptions and orders.
+3. **Do not reuse img30 `120249750018570056`.** Its 41 clicks at $0.27 came with a catalog creative
+   swapped in by the 2026-10-21 Ads Manager edit (headline `{{product.name}}`, Shop Now).
+4. **Leave the staged Test ad set alone.** A $3/day "Test" ad set, `120249775569340056`, sits
+   unpublished under the Proven campaign.
+5. **img45's copy says "your first order", and CURIOUS15 works for any customer.** That fails M8. The
+   owner knows and restarted it anyway, because changing the copy sends it back through Meta review.
 
 ## Advent26 (Meta)
 
-**Paused by the owner.** Ran 2026-10-28 to 2026-10-30.
+**Paused by the owner.** Ran 2026-10-28 to 2026-10-30. The campaign itself was also paused on 2026-10-31.
 
 | | |
 |---|---|
