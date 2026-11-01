@@ -1099,6 +1099,18 @@ curl -s -X POST "$BASE_URL/api/revalidate/blog" \
   -d '{"slug":"<slug>"}'
 ```
 
+   **A `comparison` doc (Step 4's Sunday quota) calls `/api/revalidate/compare` instead, never
+   `/api/revalidate/blog`** (ticket #19398; second occurrence, comparison-air-pulse-toy-vs-vibrator
+   on run 1648 and comparison-penis-sleeve-vs-extender on run 1780 both got no cache flush and no
+   IndexNow ping because `/api/revalidate/blog` only reaches the `blogPost` caches and pings
+   `/notebook` paths that do not exist for a comparison slug):
+
+```bash
+curl -s -X POST "$BASE_URL/api/revalidate/compare" \
+  -H "x-team-secret: $TEAM_TOKEN" -H "content-type: application/json" \
+  -d '{"slug":"<slug>"}'
+```
+
 3. If the topic came from a brief: patch the brief `status` → `'published'` and set
    `publishedPost` to a reference to the blogPost doc. A `podcastReviewBrief` gets
    `status` → `'published'` and `blogPostRef` set to the post's slug. **Then `publish_documents` on
