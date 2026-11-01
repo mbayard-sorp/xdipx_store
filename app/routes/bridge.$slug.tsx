@@ -44,6 +44,7 @@ import { applyAttributionAttrs } from '~/lib/attribution-cart.server'
 import { getLeadFunnelPage, type FunnelUtm } from '~/lib/lead-funnel'
 import { mapAllowsDiscountDisplay } from '~/lib/discount-badge'
 import { addOnHandles, nextAddOnStep, parseAddOnStep, type SalesPage } from '~/lib/sales-page'
+import { claimedExitCode, getExitOffer } from '~/lib/exit-offer.server'
 import { getSalesCartId, getSalesPage, setSalesCartCookie } from '~/lib/sales-page.server'
 import type { Product } from '~/types'
 import { isLeadSmsOptinEnabled } from '~/lib/lead-sms-optin.server'
@@ -248,10 +249,11 @@ async function salesLoaderData(request: Request, page: SalesPage, preview: boole
   const step = parseAddOnStep(new URL(request.url).searchParams.get('addon'), page.addOns.length)
   if (step !== null) return salesAddOnLoaderData(request, page, step, preview)
 
-  const [product, settings, upgrades] = await Promise.all([
+  const [product, settings, upgrades, smsOptin] = await Promise.all([
     getProductByHandle(page.productHandle).catch(() => null),
     getSiteSettings().catch(() => null),
     loadUpgrades(page),
+    getExitOffer(page.slug) ? isLeadSmsOptinEnabled() : false,
   ])
   if (!product || product.variants.length === 0) throw data(BRIDGE_404, { status: 404 })
   const shop = salesShopData(product)
@@ -262,6 +264,7 @@ async function salesLoaderData(request: Request, page: SalesPage, preview: boole
     page,
     shop,
     hasAddOns: page.addOns.length > 0,
+    smsOptin,
     upgrades: upgrades.flatMap(p => (p ? [{ handle: p.handle, shop: salesShopData(p) }] : [])),
     preview,
     logo: settings?.logoUrl ? { src: settings.logoUrl, alt: settings.logoAlt || 'xdipx' } : null,
@@ -409,6 +412,12 @@ async function salesAction(request: Request, slug: string) {
     if (!variant) return { error: 'That one just sold out. Pick another option above, or check back soon.' }
     const cart = await createCartWithLines([{ variantId: variant.id, quantity: 1 }])
     await applyAttributionAttrs(cart.id, request, [{ key: '_landing', value: `curious/${page.slug}` }])
+    // A claimed exit code goes on the cart here. It covers this page's own product only.
+    const exitCode = claimedExitCode(request, page.slug)
+    if (exitCode && variant === pickVariant(product, wanted) && !(await addCartDiscountCode(cart.id, exitCode))) {
+      // The form promised this price, so a dead code has to reach Sentry.
+      console.error('[sales-page] exit code did not apply', slug, exitCode)
+    }
     const next = nextAddOnStep(addOns.map(screenBuyable), 0)
     if (next) return redirect(addOnStepUrl(request, next), { headers: { 'Set-Cookie': setSalesCartCookie(cart.id) } })
     return redirect(cart.checkoutUrl)
@@ -575,7 +584,7 @@ export default function BridgeRoute() {
         <LeadFunnelView page={d.page} utm={d.utm} terms={d.terms} smsOptin={d.smsOptin} />
       ) : d.kind === 'sales' ? (
         d.page.slug === GAWK_SALES_SLUG ? (
-          <GawkSalesView d={{ page: d.page, shop: d.shop, upgrades: d.upgrades, hasAddOns: d.hasAddOns, logo: d.logo, preview: d.preview, error: actionData?.error ?? null }} />
+          <GawkSalesView d={{ page: d.page, shop: d.shop, upgrades: d.upgrades, smsOptin: d.smsOptin, hasAddOns: d.hasAddOns, logo: d.logo, preview: d.preview, error: actionData?.error ?? null }} />
         ) : (
           <SalesPageView d={{ page: d.page, shop: d.shop, hasAddOns: d.hasAddOns, logo: d.logo, preview: d.preview, error: actionData?.error ?? null }} />
         )

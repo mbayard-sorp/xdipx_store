@@ -210,6 +210,8 @@ describe('copy budget', () => {
     expect(welcomeSms('Ann 🙂', 'wands')).toContain('Hi Ann,')
     expect(welcomeSms('😀', 'wands')).toContain('Hi there,')
     expect(welcomeSms("O'Neil", 'wands')).toContain("Hi O'Neil,")
+    expect(welcomeSms('', null, 'curious-gawk-gawk-3000')).toMatch(/^xdipx: Hi there, your code GAWK10 /)
+    expect(welcomeSms('', null, 'curious-hello')).toContain('CURIOUS15')
   })
 
   it('confirmation texts fit two segments, carry the carrier closers, and name the funnel', () => {

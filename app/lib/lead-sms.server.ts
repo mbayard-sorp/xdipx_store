@@ -33,6 +33,7 @@ import { desc, eq } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
 import { leadSmsSubscriptions, smsOptouts } from '../../db/schema'
 import { buildShopUrl } from '~/lib/lead-funnel'
+import { exitOfferFromSource } from '~/lib/exit-offer.server'
 import { getLeadInterest, LEAD_OFFER, type LeadInterestSlug } from '~/lib/lead-interests'
 import { isLeadSmsOptinEnabled } from '~/lib/lead-sms-optin.server'
 import { START_WORDS, STOP_WORDS, complianceKeyword } from '~/lib/sms-processor.server'
@@ -76,7 +77,10 @@ export function greetingName(firstName: string): string {
 }
 
 /** The one welcome text, sent once on YES or START. Two GSM-7 segments at most for every interest and name. */
-export function welcomeSms(firstName: string, interest: LeadInterestSlug | null): string {
+export function welcomeSms(firstName: string, interest: LeadInterestSlug | null, source?: string | null): string {
+  // A sales page's exit offer signed up for that page's code, never CURIOUS15.
+  const exitOffer = exitOfferFromSource(source)
+  if (exitOffer) return `xdipx: Hi ${greetingName(firstName)}, ${exitOffer.smsLine} Reply HELP for help, STOP to cancel.`
   const url = buildShopUrl(getLeadInterest(interest)?.slug ?? null, WELCOME_UTM, WELCOME_SLUG)
   return (
     `xdipx: Hi ${greetingName(firstName)}, your code ${LEAD_OFFER.code} takes ${LEAD_OFFER.percentOff}% off $${LEAD_OFFER.minimumSubtotal}+ orders, ` +
@@ -202,7 +206,7 @@ export async function handleLeadSmsInbound(from: string, body: string, inboundSi
         // Latch first so a webhook retry cannot send the welcome twice.
         await db.update(leadSmsSubscriptions).set({ welcomeSentAt: now }).where(eq(leadSmsSubscriptions.id, row.id))
         try {
-          const sid = await sendSms(from, welcomeSms(row.firstName, getLeadInterest(row.interest)?.slug ?? null))
+          const sid = await sendSms(from, welcomeSms(row.firstName, getLeadInterest(row.interest)?.slug ?? null, row.source))
           await db.update(leadSmsSubscriptions).set({ welcomeMessageSid: sid }).where(eq(leadSmsSubscriptions.id, row.id))
         } catch (err) {
           console.error(`[lead-sms] welcome send failed for row ${row.id} (inbound ${inboundSid ?? 'n/a'}):`, err)

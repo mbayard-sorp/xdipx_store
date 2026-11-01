@@ -29,6 +29,11 @@
  * Klaviyo failure is the only hard failure: without the subscribe there is no
  * lead. SMS enrollment, consent log and CAPI failures are logged and never
  * cost the visitor their code.
+ *
+ * A slug with an exit offer (app/lib/exit-offer.server.ts, the sales page's
+ * "don't go yet" form) gets that page's own code and Klaviyo list instead. It
+ * needs no first name, needs a phone while the SMS switch is on, and sets a
+ * cookie the page's buy buttons read. Consent to texts is still its own box.
  */
 
 import type { ActionFunctionArgs } from 'react-router'
@@ -36,6 +41,7 @@ import { recordLeadPostEvent } from '~/lib/ads/health.server'
 import { getStoredUTM } from '~/lib/attribution.server'
 import { rejectIfBot } from '~/lib/botid.server'
 import { logConsent } from '~/lib/consent.server'
+import { getExitOffer, setExitOfferCookie } from '~/lib/exit-offer.server'
 import { subscribeLead } from '~/lib/klaviyo.server'
 import { LEAD_OFFER } from '~/lib/lead-interests'
 import { buildShopUrl, validateLeadInput, type FunnelUtm } from '~/lib/lead-funnel'
@@ -94,12 +100,14 @@ export async function action({ request }: ActionFunctionArgs) {
     delete body['phone']
     delete body['smsConsent']
   }
-  const parsed = validateLeadInput(body)
+  const exitOffer = getExitOffer(typeof body['slug'] === 'string' ? body['slug'] : '')
+  const offer = exitOffer ?? LEAD_OFFER
+  const parsed = validateLeadInput(body, exitOffer ? { firstNameOptional: true, phoneRequired: smsOptin } : {})
 
   // Honeypot: look successful, do nothing.
   if (typeof body['company'] === 'string' && body['company'].trim() !== '') {
     const slug = parsed.ok ? parsed.value.slug : 'hello'
-    return Response.json({ ok: true, code: LEAD_OFFER.code, terms: LEAD_OFFER.terms, shopUrl: buildShopUrl(null, utm, slug), eventId: null, smsPending: false })
+    return Response.json({ ok: true, code: offer.code, terms: offer.terms, shopUrl: buildShopUrl(null, utm, slug), eventId: null, smsPending: false })
   }
   if (!parsed.ok) return Response.json({ error: parsed.error }, { status: 400 })
   const lead = parsed.value
@@ -113,7 +121,7 @@ export async function action({ request }: ActionFunctionArgs) {
   const now = new Date()
   const properties: Record<string, unknown> = {
     lead_source: `curious-${lead.slug}`,
-    lead_offer_code: LEAD_OFFER.code,
+    lead_offer_code: offer.code,
     lead_captured_at: now.toISOString(),
     ...(lead.interest ? { interest: lead.interest } : {}),
     ...(utm.source ? { utm_source: utm.source } : {}),
@@ -123,7 +131,7 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   try {
-    await subscribeLead({ email: lead.email, firstName: lead.firstName, phone, properties })
+    await subscribeLead({ email: lead.email, firstName: lead.firstName, phone, properties, ...(exitOffer ? { listId: exitOffer.listId } : {}) })
   } catch (err) {
     console.error('[api.lead] Klaviyo subscribe failed:', err)
     return Response.json({ error: 'subscribe_failed' }, { status: 502 })
@@ -171,11 +179,12 @@ export async function action({ request }: ActionFunctionArgs) {
   const headers = new Headers()
   const emailHash = leadEmailHashCookie(request, lead.email)
   if (emailHash) headers.append('Set-Cookie', emailHash)
+  if (exitOffer) headers.append('Set-Cookie', setExitOfferCookie(exitOffer.code))
 
   return Response.json({
     ok: true,
-    code: LEAD_OFFER.code,
-    terms: LEAD_OFFER.terms,
+    code: offer.code,
+    terms: offer.terms,
     shopUrl: buildShopUrl(lead.interest, utm, lead.slug),
     eventId,
     smsPending,
