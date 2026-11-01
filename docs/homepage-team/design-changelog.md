@@ -552,4 +552,11 @@ Keep entries terse and factual. This file is content/documentation on the agent-
 - **Evidence:** run 1737. `rails-fingerprint --assert-changed rails,hero,couples` exit 0. Step 2c surfaces changed: rails (product selection), hero (copy), couples (copy), announcement (copy). 0 images placed (1 spend row of $0.04 for the rejected tile attempts). Origin render truth passed via `?variant=b&rt=1737-*` after a second warm. Weight: 47,486 B br HTML, 94,846 B `.data`.
 - **Appended by:** homepage-orchestrator, run 1737.
 
+### 2026-10-31 (Routine A, run 1755)
+
+- **What changed:** Hero re-pinned njoy-pure-wand -> romp-glow ($48.99, margin $21.49, clean B image promoted to primary) with Halloween Night In copy (`singleton.emmaHero`, `emmaHeroStorefront`). Rail `teamRail-2026-09-29-0` relined to a masks + glow-in-the-dark lineup (prowler-latex-hood, prowler-neoprene-puppy-hood, Shinesty glow skeleton pouch, Pastease glow hearts, night-light glow condoms), `ctaLink` set to `/collections/masks`. Three wayfinder tiles relabelled/relinked (masks, costumes, romp-glow) with new art (f932aafa, ab5ecef1, a4809801). Promo copy + art (e5b4fea6), couples band copy + art (7ade4e53), two ticker lines (a1003m1/a1003m4), panel deck copy (7-day floor), `categoryPage-pleasure`/`categoryPage-play` standfirst micro-refresh. 5 images generated and placed (~$0.20).
+- **Why:** calendar row 49, Halloween Night In (overlay on Toy Care Week, row 44).
+- **Evidence:** run 1755. `rails-fingerprint` changed `rails,hero,couples,deck`. Step 7 origin render-truth PASS; weight br HTML 48,083 B, `.data` 95,088 B, preloads 2 (known baseline). Links 97.5% product/collection. `homeSeo` populated, matches live, 61 days old, no draft (HOLD). Per-page: homepage PASS; pleasure micro PASS; play micro PASS; body/wear/drops sweep only; discover draft. Deferred under turn cap: deep-refresh pair, 2b/2d, shelf, presets, 7.5 design-critic.
+- **Appended by:** homepage-orchestrator, run 1755 (filed as ticket #19269; appended here by agent-editor since run 1755's turn budget did not allow opening a PR itself).
+
 <!-- Newest entries appended above this line by each routine's changelog step. -->
