@@ -164,11 +164,21 @@ a coverage gap to close by minting real-talk/podcast briefs here — an essay-sh
 answer-shaped and does not take a guides/comparisons/care/wellness-basics brief. Do not read the
 7-day posting rhythm as a 7-brief target.
 
-Slots, from `docs/store-team/content-plan.md`: Mon guide (theme-synced to the active
-`marketing_calendar` theme when one applies), Wed guide, Sat wellness-basics, Sun comparison.
-`plannedFor` is assigned only to Mon, Wed, Sat, and Sun. Tue and Fri are real-talk slots and Thu is
-podcast-notes per the content plan, and none of those slots can take a guides/comparisons/care/
-wellness-basics brief, so the week's briefs are spread across Mon/Wed/Sat/Sun only.
+**Plan against the weekday slot map, not a flat count (ticket #19280, second occurrence).** Slots,
+from `docs/store-team/content-plan.md` §2: Mon guide (theme-synced to the active
+`marketing_calendar` theme when one applies), Wed guide, Sat **care**, Sun comparisons (alternate
+wellness-basics when the comparisons queue is thin, or an overflow guide when the theme needs a
+second angle). `plannedFor` is assigned only to Mon, Wed, Sat, and Sun. Tue and Fri are real-talk
+slots and Thu is podcast-notes per the content plan, and none of those slots can take a
+guides/comparisons/care/wellness-basics brief, so the week's briefs are spread across Mon/Wed/Sat/Sun
+only — plan one brief per slot, not seven briefs as an undifferentiated count. A brief queue that is
+heavy in one category (e.g. four wellness-basics rows) while the Saturday **care** slot sits at zero
+is not "7 briefs planned," it is three slots over-served and one slot starved: run 1762 hit exactly
+this, with 7 queued rows (4 wellness-basics, 2 guides, 1 comparisons, 0 care) and the Saturday writer
+falling through to the content-plan backlog floor for a category the queue should have covered.
+State per-slot coverage (Mon/Wed/Sat/Sun: filled or unfilled, and with which category) in the Step 5
+planning event, so a slot left uncovered is visible before the writer reaches it rather than only
+discoverable after the fact.
 
 **Structured comparison-doc quota (content-plan §2, #3892): while fewer than 3-5 `_type:comparison`
 docs exist, seed one per week.** The Sunday comparison is normally a `blogCategory:comparisons`
@@ -223,7 +233,9 @@ verified in stock via the Storefront data, or leave empty), `internalLinks` (rel
 `createdBy: 'seo-curator run <RUN_ID>'`.
 
 A slot with no eligible cluster stays unfilled (the writer falls back to the static content-plan
-backlog); say so in the event. One `step` event (`phase:'planning'`) listing slugs + categories.
+backlog); say so in the event. One `step` event (`phase:'planning'`) listing slugs + categories,
+plus per-slot coverage (Mon/Wed/Sat/Sun: filled with which category, or unfilled) per the weekday
+slot map above.
 
 ## Step 6: Report + finish
 
