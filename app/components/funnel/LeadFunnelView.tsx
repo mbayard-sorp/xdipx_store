@@ -89,7 +89,7 @@ export function LeadFunnelView({
         smsConsent: smsOptin && smsConsent,
         interest,
         slug: page.slug,
-        company: String(form.get('company') ?? ''),
+        company: String(form.get('xdx_hp') ?? ''),
       },
       { method: 'post', action: '/api/lead', encType: 'application/json' },
     )
@@ -156,11 +156,15 @@ export function LeadFunnelView({
             </h2>
             <p className="mt-1 font-body text-sm text-ink-2">{terms}</p>
 
-            {/* Honeypot: hidden from people, filled by naive bots. */}
+            {/* Honeypot: hidden from people, filled by naive bots. Chrome and iOS
+                Safari ignore autoComplete="off" here and read "company" as an
+                organization field, so a saved address or contact would fill it and a
+                real lead would be dropped as a bot. Keep the name and label free of
+                address words. */}
             <div aria-hidden="true" className="absolute -left-[9999px] h-px w-px overflow-hidden">
               <label>
-                Company
-                <input name="company" type="text" tabIndex={-1} autoComplete="off" />
+                Leave this empty
+                <input name="xdx_hp" type="text" tabIndex={-1} autoComplete="off" />
               </label>
             </div>
 
