@@ -1,6 +1,33 @@
 import { readFileSync } from 'node:fs'
 import { describe, it, expect } from 'vitest'
-import { gawkOffer } from './gawk-sales-page'
+import { GAWK_COMPARE_COLUMNS, GAWK_COMPARE_ROWS, GAWK_UPGRADES, gawkOffer, gawkUpgradeGap } from './gawk-sales-page'
+
+describe('gawkUpgradeGap', () => {
+  it('is the live price difference', () => {
+    expect(gawkUpgradeGap(69.99, 89.99)).toBe(20)
+    expect(gawkUpgradeGap(69.99, 79.99)).toBe(10)
+  })
+
+  it('shows nothing when the upgrade is not actually more, or a price is missing', () => {
+    expect(gawkUpgradeGap(69.99, 69.99)).toBeNull()
+    expect(gawkUpgradeGap(79.99, 71.99)).toBeNull()
+    expect(gawkUpgradeGap(69.99, null)).toBeNull()
+    expect(gawkUpgradeGap(0, 89.99)).toBeNull()
+  })
+})
+
+describe('GAWK_UPGRADES', () => {
+  it('has exactly one featured Rose, for the hero card', () => {
+    expect(GAWK_UPGRADES.filter(u => u.featured).map(u => u.name)).toEqual(['Male Rose 3'])
+  })
+
+  it('never hardcodes a price or a dash, and the compare grid has a cell per column', () => {
+    const words = GAWK_UPGRADES.flatMap(u => [u.headline, u.pitch, u.cta, ...u.adds]).join(' ')
+    expect(words).not.toMatch(/\$\d/)
+    expect(words).not.toContain('\u2014')
+    for (const r of GAWK_COMPARE_ROWS) expect(r.has).toHaveLength(GAWK_COMPARE_COLUMNS.length)
+  })
+})
 
 describe('gawkOffer', () => {
   it('has no offer without a compare-at price', () => {

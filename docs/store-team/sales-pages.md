@@ -21,6 +21,12 @@ Free shipping on this page is real, and no code gives it: the automatic "Free Sh
 
 Returns on this page state the store policy: unopened within 30 days, hygiene rules once used (`app/lib/faq-content.ts`).
 
+### Upgrades on this page (owner direction 2026-10-31)
+
+The page also sells up to the other Male Roses, the way `advents26` steps up to Luxury. A card under the hero buy button pitches the Rose 3 and scrolls to an upgrade section before the Offer: Pro, Rose 3 and Rose 2 with their own buy buttons, a side-by-side, and a way back to the Gawk. Clicks on the card log `cta_click` as `gawk_upsell`. The sales action accepts only these three products beyond the page's own, and they go through the same lube add-on screen. Words and specs are in `GAWK_UPGRADES`, written from each product's `custom.original_description`; the shorter Shopify description on the Pro wrongly says suction. The dollar gap comes from live prices, and a Rose that is sold out or not priced above the Gawk drops off.
+
+All three sit at MAP since 2026-10-31, when the owner had them moved up from $71.99, $71.99 and $80.99: Pro and Rose 2 at $79.99 (cost $39.99, 50.0%, $40 a unit), Rose 3 at $89.99 (cost $45, 49.99%, $44.99 a unit), against the Gawk at $69.99 (cost $34.99, 50.0%, $35). The Male Rose is in `pricing_map_brands`, so the daily batch should hold these. The add-on screen's words were made generic the same day, because the Rose 2 has no rotation.
+
 ## Choosing add-ons (owner direction 2026-10-31)
 
 An add-on screen offers one thing, or a good, better, best choice of up to three products. A page has at most two screens. Every product on a screen must clear all of these at the price the store is charging when the page goes live:

@@ -30,7 +30,7 @@ import { AdventSalesView, type AdventShopifyData } from '~/components/funnel/Adv
 import { SalesPageView, type SalesShopifyData } from '~/components/funnel/SalesPageView'
 import { SalesAddOnView } from '~/components/funnel/SalesAddOnView'
 import { GawkSalesView } from '~/components/funnel/GawkSalesView'
-import { GAWK_SALES_SLUG } from '~/lib/gawk-sales-page'
+import { GAWK_SALES_SLUG, GAWK_UPGRADE_HANDLES } from '~/lib/gawk-sales-page'
 import {
   ADVENT_CALENDARS,
   ADVENT_DEFAULT,
@@ -233,14 +233,25 @@ function pageUrl(request: Request): string {
   return `${url.pathname}${url.search}`
 }
 
+/**
+ * The products a page's buy buttons may sell besides its own. Only the Gawk page
+ * has any: the other Male Roses it steps up to. A product that fails to load is
+ * null and gets skipped.
+ */
+function loadUpgrades(page: SalesPage): Promise<(Product | null)[]> {
+  if (page.slug !== GAWK_SALES_SLUG) return Promise.resolve([])
+  return Promise.all(GAWK_UPGRADE_HANDLES.map(h => getProductByHandle(h).catch(() => null)))
+}
+
 /** Shopify data for a sales page's one product. A product that fails to load is a 404, never faked. */
 async function salesLoaderData(request: Request, page: SalesPage, preview: boolean) {
   const step = parseAddOnStep(new URL(request.url).searchParams.get('addon'), page.addOns.length)
   if (step !== null) return salesAddOnLoaderData(request, page, step, preview)
 
-  const [product, settings] = await Promise.all([
+  const [product, settings, upgrades] = await Promise.all([
     getProductByHandle(page.productHandle).catch(() => null),
     getSiteSettings().catch(() => null),
+    loadUpgrades(page),
   ])
   if (!product || product.variants.length === 0) throw data(BRIDGE_404, { status: 404 })
   const shop = salesShopData(product)
@@ -251,6 +262,7 @@ async function salesLoaderData(request: Request, page: SalesPage, preview: boole
     page,
     shop,
     hasAddOns: page.addOns.length > 0,
+    upgrades: upgrades.flatMap(p => (p ? [{ handle: p.handle, shop: salesShopData(p) }] : [])),
     preview,
     logo: settings?.logoUrl ? { src: settings.logoUrl, alt: settings.logoAlt || 'xdipx' } : null,
     canonical: `${origin}/${page.slug}`,
@@ -391,8 +403,9 @@ async function salesAction(request: Request, slug: string) {
   }
 
   try {
-    const [product, addOns] = await Promise.all([getProductByHandle(page.productHandle), loadAddOns(page)])
-    const variant = pickVariant(product, wanted)
+    const [product, addOns, upgrades] = await Promise.all([getProductByHandle(page.productHandle), loadAddOns(page), loadUpgrades(page)])
+    // The variant must belong to this page's product or one it steps up to.
+    const variant = [product, ...upgrades].map(p => pickVariant(p, wanted)).find(Boolean)
     if (!variant) return { error: 'That one just sold out. Pick another option above, or check back soon.' }
     const cart = await createCartWithLines([{ variantId: variant.id, quantity: 1 }])
     await applyAttributionAttrs(cart.id, request, [{ key: '_landing', value: `curious/${page.slug}` }])
@@ -562,7 +575,7 @@ export default function BridgeRoute() {
         <LeadFunnelView page={d.page} utm={d.utm} terms={d.terms} smsOptin={d.smsOptin} />
       ) : d.kind === 'sales' ? (
         d.page.slug === GAWK_SALES_SLUG ? (
-          <GawkSalesView d={{ page: d.page, shop: d.shop, hasAddOns: d.hasAddOns, logo: d.logo, preview: d.preview, error: actionData?.error ?? null }} />
+          <GawkSalesView d={{ page: d.page, shop: d.shop, upgrades: d.upgrades, hasAddOns: d.hasAddOns, logo: d.logo, preview: d.preview, error: actionData?.error ?? null }} />
         ) : (
           <SalesPageView d={{ page: d.page, shop: d.shop, hasAddOns: d.hasAddOns, logo: d.logo, preview: d.preview, error: actionData?.error ?? null }} />
         )

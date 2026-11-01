@@ -15,6 +15,8 @@ import {
   GAWK_ANATOMY,
   GAWK_BEATS,
   GAWK_BOX,
+  GAWK_COMPARE_COLUMNS,
+  GAWK_COMPARE_ROWS,
   GAWK_FAQS,
   GAWK_IMAGES as IMG,
   GAWK_PATH,
@@ -23,12 +25,16 @@ import {
   GAWK_STATS,
   GAWK_STEPS,
   GAWK_TICKER,
+  GAWK_UPGRADES,
   GAWK_VERSUS,
   gawkOffer,
+  gawkUpgradeGap,
 } from '~/lib/gawk-sales-page'
+import { trackCtaClick } from '~/lib/analytics.client'
 import { trackFbViewContent } from '~/lib/meta-pixel.client'
 import { sanityImageSrcSet, sanityImageUrl } from '~/lib/sanity-image'
-import { BuyForm, money, type SalesViewData } from './SalesPageView'
+import { shopifyImageUrl } from '~/lib/shopify-image'
+import { BuyForm, money, type SalesShopifyData, type SalesViewData } from './SalesPageView'
 
 const COL = 'mx-auto max-w-[1160px]'
 const SECTION = 'px-5 py-20'
@@ -84,13 +90,22 @@ function Fill({ src, alt = '', pos, contain, eager, sizes = '(min-width: 768px) 
   )
 }
 
-export function GawkSalesView({ d }: { d: SalesViewData }) {
+export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: string; shop: SalesShopifyData }[] } }) {
   const { page, shop } = d
   const variant = shop.variants.find(v => v.available) ?? shop.variants[0]
   const price = variant?.price ?? 0
   const offer = gawkOffer(price, shop.showCompareAt ? (variant?.compareAtPrice ?? null) : null)
   const p = money(price)
   const getIt = offer ? `Get it ${offer.label} →` : 'Get it →'
+
+  // Only what's in stock and really costs more shows, so a sold-out Rose just drops off.
+  const upgrades = GAWK_UPGRADES.flatMap(u => {
+    const up = d.upgrades.find(x => x.handle === u.handle)?.shop
+    const v = up?.variants.find(x => x.available)
+    const gap = gawkUpgradeGap(price, v?.price)
+    return up && v && gap ? [{ ...u, shop: up, variant: v, gap }] : []
+  })
+  const heroUpgrade = upgrades.find(u => u.featured) ?? upgrades[0]
 
   useEffect(() => {
     trackFbViewContent({ content_ids: [shop.productId], value: price, currency: 'USD' })
@@ -191,6 +206,27 @@ export function GawkSalesView({ d }: { d: SalesViewData }) {
             <div className={TRUST_LINE}>
               <span>✓ Discreet plain box</span><span>✓ Billed as XDIPX</span><span>✓ 30-day returns</span>
             </div>
+            {heroUpgrade ? (
+              <a
+                data-gawk-step-up
+                href="#rose-upgrade"
+                onClick={() => trackCtaClick('gawk_upsell', 'hero')}
+                className="group block max-w-[480px] border-2 border-[#1A1616] bg-[#1A1616] text-white no-underline transition-colors hover:border-plum hover:bg-plum"
+              >
+                <div className="grid grid-cols-[84px_minmax(0,1fr)] items-stretch">
+                  <div className="relative bg-white">
+                    {heroUpgrade.shop.images[0] ? (
+                      <img src={shopifyImageUrl(heroUpgrade.shop.images[0].url, 240)} alt={heroUpgrade.name} loading="lazy" className="absolute inset-0 block h-full w-full object-contain p-1.5" />
+                    ) : null}
+                  </div>
+                  <div className="flex flex-col gap-1 px-4 py-3">
+                    <span className="font-mono text-[11px] uppercase tracking-[0.1em] text-[#E9A58F]">Or go all in · {money(heroUpgrade.gap)} more</span>
+                    <span className="font-display text-[22px] leading-[1.15]">{heroUpgrade.name}: it <em>thrusts</em> too.</span>
+                    <span className="text-[14px] leading-snug text-[#DDD6CF]">Everything the Gawk does, and it strokes you on its own. See the upgrades <span className="whitespace-nowrap font-semibold text-white">↓</span></span>
+                  </div>
+                </div>
+              </a>
+            ) : null}
           </div>
         </div>
       </section>
@@ -578,6 +614,83 @@ export function GawkSalesView({ d }: { d: SalesViewData }) {
           </div>
         </div>
       </section>
+
+      {/* Upgrades: the other Male Roses. Not in the owner's design file; added on his direction 2026-10-31. */}
+      {upgrades.length ? (
+        <section id="rose-upgrade" data-screen-label="Upgrade" className="scroll-mt-4 bg-[#1A1616] px-5 py-20 text-white">
+          <div className={COL + ' flex flex-col gap-10'}>
+            <div className="flex max-w-[760px] flex-col gap-4">
+              <Kicker light>The rest of the Roses</Kicker>
+              <h2 className={H2}>The Gawk gives you the swirl. Step up and get the <Em light>bob</Em>.</h2>
+              <p className="m-0 text-[18px] leading-[1.6] text-[#DDD6CF] [text-wrap:pretty]">
+                The Gawk spins and vibrates. The two above it also slide up and down on their own, so your hand can finally let go.
+              </p>
+            </div>
+
+            <div data-rose-cards className="grid grid-cols-1 items-stretch gap-5 md:grid-cols-3">
+              {upgrades.map(u => (
+                <article
+                  key={u.handle}
+                  className={'relative flex flex-col bg-white text-[#1A1616] ' + (u.featured ? 'order-first border-[3px] border-coral md:order-none md:-my-4' : 'border-[3px] border-transparent')}
+                >
+                  <div className={'px-4 py-2 font-mono text-[12px] uppercase tracking-[0.1em] ' + (u.featured ? 'bg-coral text-white' : 'bg-[#F2EFEB] text-[#3E3732]')}>{u.tag}</div>
+                  <div className="relative aspect-square bg-white">
+                    {u.shop.images[0] ? (
+                      <img src={shopifyImageUrl(u.shop.images[0].url, 640)} alt={u.name} loading="lazy" className="absolute inset-0 block h-full w-full object-contain p-4" />
+                    ) : null}
+                    <span className="absolute bottom-3 right-3 bg-plum px-2.5 py-1 text-[15px] font-bold text-white">{money(u.gap)} more</span>
+                  </div>
+                  <div className="flex flex-1 flex-col gap-3.5 p-5">
+                    <h3 className="m-0 font-mono text-[12px] font-normal uppercase tracking-[0.1em] text-coral">{u.name}</h3>
+                    <div className="font-display text-[27px] font-medium leading-[1.1] [text-wrap:balance]">{u.headline}</div>
+                    <p className="m-0 text-[16px] leading-[1.5] text-[#3E3732] [text-wrap:pretty]">{u.pitch}</p>
+                    <ul className="m-0 flex list-none flex-col gap-2 p-0 text-[15px] leading-snug">
+                      {u.adds.map(a => (
+                        <li key={a} className="grid grid-cols-[18px_minmax(0,1fr)] gap-1.5"><span className="font-bold text-plum">✓</span><span>{a}</span></li>
+                      ))}
+                    </ul>
+                    <div className="mt-auto flex flex-col gap-3 pt-2">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <span className="font-display text-[34px] leading-none">{money(u.variant.price)}</span>
+                        <FreeBadge />
+                      </div>
+                      <BuyForm
+                        shop={u.shop}
+                        variant={u.variant}
+                        beginCheckout={!d.hasAddOns}
+                        formClassName="w-full"
+                        className={'flex w-full cursor-pointer justify-center border-0 px-6 py-[15px] text-[18px] font-bold text-white ' + (u.featured ? 'bg-coral hover:bg-plum' : 'bg-[#1A1616] hover:bg-plum')}
+                      >
+                        {u.cta}
+                      </BuyForm>
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </div>
+
+            <div data-rose-compare className="bg-white text-[#1A1616]">
+              <div className="grid grid-cols-[minmax(0,1.5fr)_repeat(4,minmax(0,1fr))] items-center border-b-[3px] border-coral text-center text-[13px] font-bold sm:text-[15px]">
+                <div />
+                {GAWK_COMPARE_COLUMNS.map(c => <div key={c} className="px-0.5 py-3">{c}</div>)}
+              </div>
+              {GAWK_COMPARE_ROWS.map(r => (
+                <div key={r.label} className="grid grid-cols-[minmax(0,1.5fr)_repeat(4,minmax(0,1fr))] items-center border-b border-[#DDD6CF] text-center text-[14px] sm:text-[16px]">
+                  <div className="py-2.5 pl-3 text-left leading-tight sm:pl-5">{r.label}</div>
+                  {r.has.map((yes, i) => (
+                    <div key={GAWK_COMPARE_COLUMNS[i]} aria-label={yes ? 'Yes' : 'No'} className={yes ? 'font-bold text-plum' : 'text-[#B5ACA5]'}>{yes ? '✓' : '·'}</div>
+                  ))}
+                </div>
+              ))}
+            </div>
+
+            <div className="flex flex-col items-center gap-3 text-center">
+              <p className="m-0 text-[17px] text-[#DDD6CF]">All of them ship free, in the same plain box, billed as XDIPX. Happy with the one that went viral?</p>
+              <Cta width="max-w-[440px]" tone="bg-transparent border-2 border-solid border-white hover:bg-white hover:text-[#1A1616]">{`Keep the Gawk, ${p} →`}</Cta>
+            </div>
+          </div>
+        </section>
+      ) : null}
 
       {/* 22 Offer */}
       <section data-screen-label="22 Offer" className="bg-plum px-5 py-[72px] text-white">

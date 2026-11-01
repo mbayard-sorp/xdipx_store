@@ -54,6 +54,80 @@ export function gawkOffer(price: number, compareAt: number | null): GawkOffer | 
   return { label: `${pct}% OFF`, was: compareAt, save: Math.round((compareAt - price) * 100) / 100 }
 }
 
+/**
+ * The other Male Roses this page steps up to, in the order they show. Specs come
+ * from each product's `custom.original_description` metafield (the manufacturer's
+ * words). Rose 3's source gives both 7 and 10 vibration frequencies, so it carries
+ * no count. Price and photo come from Shopify in the loader.
+ */
+export interface GawkUpgrade {
+  handle: string
+  name: string
+  tag: string
+  /** Where the page leads: the top of the line gets the hero card and the loud frame. */
+  featured: boolean
+  headline: string
+  pitch: string
+  adds: string[]
+  cta: string
+}
+
+export const GAWK_UPGRADES: GawkUpgrade[] = [
+  {
+    handle: 'the-male-rose-pro-triple-action-combo-with-thrusting-rotating-and-vibrating',
+    name: 'Male Rose Pro',
+    tag: 'The step up',
+    featured: false,
+    headline: 'The swirl, plus the bob.',
+    pitch: 'It slides up and down your cock while it spins and hums. 94 nubs line the cup, so every stroke drags.',
+    adds: ['9 thrusting modes, on top of 9 spin and 9 vibration', '94 pleasure nubs inside a mouth-shaped opening', 'Digital display, so you can find your setting again', 'Cup pops off and works as a hand stroker too'],
+    cta: 'Give me the Pro →',
+  },
+  {
+    handle: 'the-male-rose-3',
+    name: 'Male Rose 3',
+    tag: 'Top of the line',
+    featured: true,
+    headline: 'Three motors. Nothing left for you to do.',
+    pitch: 'Three separate motors, so it spins, thrusts and vibrates all at once. The cup is clear, so you get to watch it take you.',
+    adds: ['Thrusts up and down and spins a full 360°', 'See-through cup, lips on the tip', 'Tongue-like ridges inside the canal', 'Whisper quiet at 40 dB, 50 minutes a charge'],
+    cta: 'Give me the 3 →',
+  },
+  {
+    handle: 'the-male-rose-2-dual-motor-10-vibration-modes-5-suction-patterns',
+    name: 'Male Rose 2',
+    tag: 'If you want suction',
+    featured: false,
+    headline: 'Trade the spin for the pull.',
+    pitch: "No rotation here, just a mouth that won't let go. Five suction patterns and ten vibrations, with one button that goes straight to the finish.",
+    adds: ['5 suction patterns, 10 vibration modes', 'Dual motors', 'One-button climax mode', 'Flushes clean without taking it apart'],
+    cta: 'Give me the 2 →',
+  },
+]
+
+export const GAWK_UPGRADE_HANDLES = GAWK_UPGRADES.map(u => u.handle)
+
+/** The side-by-side under the upgrade cards, columns in the order Gawk, Pro, 3, 2. */
+export const GAWK_COMPARE_COLUMNS = ['Gawk', 'Pro', 'Rose 3', 'Rose 2']
+export const GAWK_COMPARE_ROWS: { label: string; has: [boolean, boolean, boolean, boolean] }[] = [
+  { label: '360° spin', has: [true, true, true, false] },
+  { label: 'Thrusting', has: [false, true, true, false] },
+  { label: 'Vibration', has: [true, true, true, true] },
+  { label: 'Suction', has: [false, false, false, true] },
+  { label: 'Clear cup', has: [false, false, true, false] },
+  { label: 'Digital display', has: [false, true, false, false] },
+]
+
+/**
+ * What stepping up costs over the page's own product, from live Shopify prices.
+ * Null when there's nothing to pitch: it isn't actually more, or a price is
+ * missing. An upgrade with no gap doesn't show.
+ */
+export function gawkUpgradeGap(price: number, upgradePrice: number | null | undefined): number | null {
+  if (!price || !upgradePrice || upgradePrice <= price) return null
+  return Math.round((upgradePrice - price) * 100) / 100
+}
+
 export const GAWK_TICKER = [
   'Went viral',
   'Free shipping',
