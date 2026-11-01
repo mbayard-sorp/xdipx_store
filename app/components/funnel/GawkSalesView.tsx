@@ -113,8 +113,9 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shop.productId])
 
-  const Cta = ({ children, size = 19, width = 'max-w-[440px]', tone = 'bg-coral hover:bg-plum' }: { children: ReactNode; size?: 18 | 19 | 20; width?: string; tone?: string }) => (
+  const Cta = ({ spot, children, size = 19, width = 'max-w-[440px]', tone = 'bg-coral hover:bg-plum' }: { spot: string; children: ReactNode; size?: 18 | 19 | 20; width?: string; tone?: string }) => (
     <BuyForm
+      spot={spot}
       shop={shop}
       variant={variant}
       beginCheckout={!d.hasAddOns}
@@ -157,7 +158,7 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
         ) : (
           <div className="text-[22px] font-semibold tracking-[0.02em]">xdipx</div>
         )}
-        <BuyForm shop={shop} variant={variant} beginCheckout={!d.hasAddOns} className="cursor-pointer border-0 bg-coral px-3.5 py-[9px] text-[14px] font-semibold text-white hover:bg-plum">
+        <BuyForm spot="top-bar" shop={shop} variant={variant} beginCheckout={!d.hasAddOns} className="cursor-pointer border-0 bg-coral px-3.5 py-[9px] text-[14px] font-semibold text-white hover:bg-plum">
           {getIt}
         </BuyForm>
       </header>
@@ -202,7 +203,7 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
               ) : null}
               <FreeBadge />
             </div>
-            <Cta size={20} width="max-w-[480px]">{offer ? `See it spin, ${offer.label} →` : 'See it spin →'}</Cta>
+            <Cta spot="hero" size={20} width="max-w-[480px]">{offer ? `See it spin, ${offer.label} →` : 'See it spin →'}</Cta>
             <div className={TRUST_LINE}>
               <span>✓ Discreet plain box</span><span>✓ Billed as XDIPX</span><span>✓ 30-day returns</span>
             </div>
@@ -246,7 +247,7 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
             <p className={BODY}>Now picture soft lips sliding down over you. Slick, snug at the tip. Then they start to turn, slowly at first, a full circle around your cock, while a low vibration builds underneath.</p>
             <p className={BODY}>You don't have to do anything. Hold the handle. Speed it up. Slow it down. Switch the vibration. Edge as long as you can stand it.</p>
             <p className="m-0 font-display text-[26px] leading-[1.3]">That's the Gawk Gawk 3000. <Em>That's why it went viral.</Em></p>
-            <Cta>Give me that feeling →</Cta>
+            <Cta spot="picture-this">Give me that feeling →</Cta>
           </div>
         </div>
       </section>
@@ -281,7 +282,7 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
               <Kicker light>Fits in one hand</Kicker>
               <h2 className="m-0 font-display text-[clamp(34px,4.6vw,50px)] font-medium leading-[1.04] tracking-[-0.015em] [text-wrap:balance]">Grab it. Hold it. <Em light>Let it work.</Em></h2>
               <p className="m-0 text-[17px] leading-[1.55] text-[#D9D2CC] [text-wrap:pretty]">Long handle, solid grip, rose-gold buttons under your thumb. It's the only thing you'll need to hold tonight.</p>
-              <Cta size={18} width="">{getIt}</Cta>
+              <Cta spot="grab-it" size={18} width="">{getIt}</Cta>
             </div>
           </div>
         </div>
@@ -293,7 +294,7 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
           <span className="bg-plum px-2.5 py-1 text-[16px] font-bold">{offer ? offer.label : 'Free shipping'}</span>
           <h2 className={BIG}>It spins. <Em light>You cum.</Em></h2>
           <p className="m-0 max-w-[560px] text-[18px] leading-[1.5] text-[#D9D2CC] [text-wrap:pretty]">That's the whole pitch. {p}, shipped free{offer ? `, down from ${money(offer.was)}` : ''}.</p>
-          <Cta size={20} width="mx-auto max-w-[440px]">{getIt}</Cta>
+          <Cta spot="cta-05" size={20} width="mx-auto max-w-[440px]">{getIt}</Cta>
           <span className="text-[14px] text-[#BDB4AD]">Free shipping · Plain box · Billed as XDIPX · 30-day returns</span>
         </div>
       </section>
@@ -311,7 +312,7 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
               ))}
               <div className="bg-white px-[18px] py-4 text-[17px] font-semibold text-plum">✓ Just lips, spinning, until you cum</div>
             </div>
-            <Cta>Let it do the work →</Cta>
+            <Cta spot="keep-watching">Let it do the work →</Cta>
           </div>
           <div className={FRAME + ' aspect-[4/5]'}><Fill src={IMG.watching} pos="55% 30%" /></div>
         </div>
@@ -335,7 +336,7 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
                 </div>
               ))}
             </div>
-            <Cta width="">I want head on demand →</Cta>
+            <Cta spot="ten-ways" width="">I want head on demand →</Cta>
           </div>
         </div>
       </section>
@@ -349,7 +350,7 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
             <h2 className={H2 + ' text-white'}>It went viral for <Em light>one reason.</Em></h2>
             <p className="m-0 text-[18px] leading-[1.6] text-[#D9D2CC] [text-wrap:pretty]">The name gets the click. The feeling is the rest of it: soft lips turning around you, vibration underneath, your hand doing nothing but holding on. Put your cock in and find out why.</p>
             <PriceRow light />
-            <Cta>Find out why →</Cta>
+            <Cta spot="viral">Find out why →</Cta>
           </div>
         </div>
       </section>
@@ -371,7 +372,7 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
               </div>
             ))}
           </div>
-          <Cta>Grab one →</Cta>
+          <Cta spot="the-path">Grab one →</Cta>
         </div>
       </section>
 
@@ -424,7 +425,7 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
             {offer ? <span className="text-[18px] line-through">{money(offer.was)}</span> : null}
             <FreeBadge light />
           </div>
-          <Cta size={20} width="mx-auto max-w-[440px]" tone="bg-[#1A1616] hover:bg-plum">{getIt}</Cta>
+          <Cta spot="cta-12" size={20} width="mx-auto max-w-[440px]" tone="bg-[#1A1616] hover:bg-plum">{getIt}</Cta>
           <span className="text-[14px]">Plain box · Billed as XDIPX · 30-day returns</span>
         </div>
       </section>
@@ -450,7 +451,7 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
               </div>
             ))}
             <div className="col-span-full">
-              <Cta size={18} width="">{getIt}</Cta>
+              <Cta spot="believe-the-hype" size={18} width="">{getIt}</Cta>
             </div>
           </div>
         </div>
@@ -474,7 +475,7 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
             ))}
           </div>
           <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-center">
-            <div className="w-full sm:w-[440px]"><Cta>I want that →</Cta></div>
+            <div className="w-full sm:w-[440px]"><Cta spot="in-action">I want that →</Cta></div>
             <FreeBadge />
           </div>
         </div>
@@ -495,7 +496,7 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
                 </div>
               ))}
             </div>
-            <Cta>{getIt}</Cta>
+            <Cta spot="anatomy">{getIt}</Cta>
           </div>
         </div>
       </section>
@@ -511,7 +512,7 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
             </div>
             <h2 className="m-0 font-display text-[clamp(34px,4.4vw,48px)] font-medium leading-[1.04] tracking-[-0.015em] [text-wrap:balance]">Soft lips spin <Em>360°</Em> around your cock until you cum.</h2>
             <PriceRow />
-            <Cta width="">See it spin →</Cta>
+            <Cta spot="cta-16" width="">See it spin →</Cta>
           </div>
         </div>
       </section>
@@ -536,7 +537,7 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
                 </div>
               ))}
             </div>
-            <Cta>{offer ? `Lock in ${offer.label} →` : 'Lock it in →'}</Cta>
+            <Cta spot="do-the-math">{offer ? `Lock in ${offer.label} →` : 'Lock it in →'}</Cta>
           </div>
           <div className={FRAME + ' aspect-square'}>
             <Fill src={IMG.math} alt="Man holding the Gawk Gawk 3000" pos="32% 42%" extra="origin-[32%_42%] scale-[1.7]" />
@@ -582,7 +583,7 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
               ))}
             </div>
             <PriceRow />
-            <Cta>Send me one →</Cta>
+            <Cta spot="in-the-box">Send me one →</Cta>
           </div>
         </div>
       </section>
@@ -593,7 +594,7 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
           <Kicker>Nobody's business</Kicker>
           <h2 className={H2}>Nobody knows <Em>but you.</Em></h2>
           <p className="m-0 max-w-[620px] text-[18px] leading-[1.55] text-[#3E3732] [text-wrap:pretty]">It shows up looking like nothing. Your bank sees four letters. Your roommate, your wife, your mailman see a brown box.</p>
-          <Cta width="max-w-[420px]">Ship it discreetly →</Cta>
+          <Cta spot="discreet" width="max-w-[420px]">Ship it discreetly →</Cta>
         </div>
       </section>
 
@@ -655,6 +656,7 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
                         <FreeBadge />
                       </div>
                       <BuyForm
+                        spot="upgrade-card"
                         shop={u.shop}
                         variant={u.variant}
                         beginCheckout={!d.hasAddOns}
@@ -686,7 +688,7 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
 
             <div className="flex flex-col items-center gap-3 text-center">
               <p className="m-0 text-[17px] text-[#DDD6CF]">All of them ship free, in the same plain box, billed as XDIPX. Happy with the one that went viral?</p>
-              <Cta width="max-w-[440px]" tone="bg-transparent border-2 border-solid border-white hover:bg-white hover:text-[#1A1616]">{`Keep the Gawk, ${p} →`}</Cta>
+              <Cta spot="upgrade-keep-gawk" width="max-w-[440px]" tone="bg-transparent border-2 border-solid border-white hover:bg-white hover:text-[#1A1616]">{`Keep the Gawk, ${p} →`}</Cta>
             </div>
           </div>
         </section>
@@ -700,7 +702,7 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
           <p className="m-0 max-w-[560px] text-[20px] leading-[1.45] [text-wrap:pretty]">
             The viral Gawk Gawk 3000, shipped free, for <strong>{p}</strong>{offer ? ` instead of ${money(offer.was)}` : ''}. You're already in the mood. Don't waste it.
           </p>
-          <Cta size={20} width="mx-auto max-w-[440px]" tone="bg-coral hover:bg-[#1A1616]">{offer ? `Claim ${offer.label} →` : 'Claim yours →'}</Cta>
+          <Cta spot="offer" size={20} width="mx-auto max-w-[440px]" tone="bg-coral hover:bg-[#1A1616]">{offer ? `Claim ${offer.label} →` : 'Claim yours →'}</Cta>
           <div className="flex flex-wrap items-center justify-center gap-2.5 text-[14px]">
             <FreeBadge light /><span>Discreet · Billed as XDIPX · 30-day returns</span>
           </div>
@@ -720,7 +722,7 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
               <p className="m-0 text-[17px] leading-[1.55]"><strong>P.S.</strong> The rotation is intense. Start on the lowest speed. Seriously.</p>
               <p className="m-0 text-[17px] leading-[1.55]"><strong>P.P.S.</strong> Water-based lube only. You can add a bottle on the next screen, and two or more cost less each.</p>
             </div>
-            <Cta>Okay, I'm in →</Cta>
+            <Cta spot="ps">Okay, I'm in →</Cta>
           </div>
           <div className={FRAME + ' aspect-square'}><Fill src={IMG.ps} pos="50% 30%" /></div>
         </div>
@@ -736,7 +738,7 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
               <span className="font-display text-[44px]">{p}</span>
               {offer ? <span className="text-[20px] text-[#6B625C] line-through">{money(offer.was)}</span> : null}
             </div>
-            <Cta size={20} width="max-w-[480px]">{getIt}</Cta>
+            <Cta spot="final" size={20} width="max-w-[480px]">{getIt}</Cta>
             <div className={TRUST_LINE + ' items-center'}>
               <FreeBadge /><span>✓ Discreet plain box</span><span>✓ Billed as XDIPX</span><span>✓ 30-day returns</span>
             </div>
@@ -781,7 +783,7 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
               </span>
             </div>
           </div>
-          <BuyForm shop={shop} variant={variant} beginCheckout={!d.hasAddOns} className="flex min-h-11 flex-none cursor-pointer items-center border-0 bg-coral px-[18px] py-[13px] text-[16px] font-bold text-white hover:bg-plum">
+          <BuyForm spot="pinned-bar" shop={shop} variant={variant} beginCheckout={!d.hasAddOns} className="flex min-h-11 flex-none cursor-pointer items-center border-0 bg-coral px-[18px] py-[13px] text-[16px] font-bold text-white hover:bg-plum">
             {offer ? `${offer.label} →` : 'Get it →'}
           </BuyForm>
         </div>

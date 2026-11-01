@@ -272,3 +272,12 @@ export function parseAddOnStep(raw: string | null, count: number): number | null
   const n = Number(raw)
   return n >= 1 && n <= count ? n : null
 }
+
+/**
+ * The cart attribute naming the buy button that was clicked. The value comes
+ * from a form anyone can post, so anything that does not look like one of our
+ * labels gets no attribute.
+ */
+export function salesCtaAttr(raw: unknown): { key: string; value: string }[] {
+  return typeof raw === 'string' && /^[\w-]{1,40}$/.test(raw) ? [{ key: '_sales_cta', value: raw }] : []
+}
