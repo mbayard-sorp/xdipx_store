@@ -742,6 +742,21 @@ addition to, not instead of, the enumeration-consistency scan in Step 5 item 3, 
 to the rewrite cycle: this pre-flight catches it on first submit, before a gate cycle is spent on
 it.
 
+**A MATERIAL, PRODUCT-CLASS, or CONSTRUCTION-TYPE split the post introduces is also a "rule the
+post sets" (ticket #19278, second occurrence).** Run 1037 told readers to read the printed ingress
+code and never the adjective, then two sections later extended a running-water endorsement on the
+strength of the bare adjective. Run 1762 (`how-do-you-clean-a-stroker`) split by material mid-repair
+— the accuracy gate's cycle-2 REVISE asked for "find out what yours is made of, because the care
+splits by material" — and that reframe left four downstream mechanism claims (step 5 "thermoplastic
+softens with heat", a drying step, two FAQ answers) stated universally when they are only true of
+the porous TPE/TPR half; `check-self-consistency.ts` exits 0 on this shape because a material split
+shares no reusable TOKEN the checker keys on. Whenever a draft introduces a split by material,
+product class, or construction type, re-read every mechanism, heat, water, cleaning, and lifespan
+claim downstream of that split and confirm it is scoped to the side it is actually true of, BEFORE
+submit — and apply this with extra force when the split is itself introduced by a repair cycle
+rather than present in the first draft, since a repair's own reframe is exactly what can leave an
+already-written universal claim wrong without anything about that claim's own wording changing.
+
 **Humanizer pre-flight (mandatory, before Step 5; charter "Write like a person", owner direction
 2026-10-01):** once the draft is complete, read `.claude/skills/humanizer/SKILL.md` and run its full
 process on the body, the excerpt, and the FAQ answers: mark the tells, draft, check, final. Then
