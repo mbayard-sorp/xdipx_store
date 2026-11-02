@@ -302,7 +302,11 @@ export function contractualMapFor(
 
 /**
  * Pure predicate: does MAP enforcement apply to this vendor? Case-insensitive,
- * whitespace-trimmed exact match against the MAP-brand list. A null/blank
+ * whitespace-trimmed match against the MAP-brand list — either the whole
+ * vendor string matches an entry, or (ticket #19524) the vendor is itself
+ * comma-joined (a collab product's Shopify vendor field, e.g.
+ * "Arcwave,Womanizer") and at least one of its parts matches an entry. Never
+ * a substring match: "Play" still never matches "Playground". A null/blank
  * vendor never matches, so an unbranded product is priced off markup rules.
  * Exported for unit testing.
  */
@@ -313,7 +317,9 @@ export function mapAppliesToVendor(
   if (!vendor) return false
   const v = vendor.trim().toLowerCase()
   if (!v) return false
-  return mapBrands.some(b => b.trim().toLowerCase() === v)
+  const normalized = mapBrands.map(b => b.trim().toLowerCase())
+  if (normalized.includes(v)) return true
+  return v.includes(',') && v.split(',').some(part => normalized.includes(part.trim()))
 }
 
 /**

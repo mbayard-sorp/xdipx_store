@@ -220,6 +220,24 @@ describe('mapAppliesToVendor', () => {
     expect(mapAppliesToVendor('Play', brands)).toBe(false)
     expect(mapAppliesToVendor('Lovense Toys', brands)).toBe(false)
   })
+
+  it('matches a comma-joined collab vendor when any one part is on the brand list (#19524)', () => {
+    // Shopify vendor on arcwave-x-womanizer-pleasure-pair-ion-premium-2 is
+    // "Arcwave,Womanizer" — a single-brand list entry for either name must
+    // still catch it.
+    expect(mapAppliesToVendor('Arcwave,Womanizer', ['Womanizer'])).toBe(true)
+    expect(mapAppliesToVendor('Arcwave,Womanizer', ['Arcwave'])).toBe(true)
+    expect(mapAppliesToVendor('Arcwave,Womanizer,We-Vibe', ['We-Vibe'])).toBe(true)
+    // Case-insensitive and whitespace-tolerant on each split part too.
+    expect(mapAppliesToVendor('Arcwave, Womanizer', ['womanizer'])).toBe(true)
+    // None of the comma-joined parts are on the list: still no match.
+    expect(mapAppliesToVendor('Doc Johnson,Blush', brands)).toBe(false)
+  })
+
+  it('still matches a vendor against its own exact comma-joined brand-list entry (#19524)', () => {
+    expect(mapAppliesToVendor('Arcwave,Womanizer', ['Arcwave,Womanizer'])).toBe(true)
+    expect(mapAppliesToVendor('  Arcwave,Womanizer  ', ['arcwave,womanizer'])).toBe(true)
+  })
 })
 
 describe('decideStatus — autopilot (owner direction 2026-09-25)', () => {
