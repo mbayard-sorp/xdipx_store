@@ -63,6 +63,10 @@
       "schedule": "*/15 * * * *"
     },
     {
+      "path": "/cron/reprice-below-wholesale-scan",
+      "schedule": "10 8 * * 1"
+    },
+    {
       "path": "/cron/import-monitor",
       "schedule": "0 8 * * *"
     },
