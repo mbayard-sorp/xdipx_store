@@ -73,6 +73,18 @@ The owner has approved raising a lube's price toward MSRP to clear the margin ba
 - **The phone is required, but consent to texts is its own unticked box.** An unticked number gets no texts. With `lead_sms_optin_enabled` off, the form asks for email alone.
 - **The cookie does the applying.** `/api/lead` sets `xdipx_exit_code` for 30 days, and any buy button for the page's own product puts the code on the cart. Upgrades to the other Roses do not get it.
 
+## Reading a paid test (owner direction 2026-11-01)
+
+Owner's words: "Did I pick the wrong product? ... help me not waste money!" Dollars spent say nothing about a product. Check in this order, and stop at the first one that fails.
+
+1. **Traffic.** Compare the clicks the network bills with the visitors who arrive. Divide spend by arrivals to get cost per arrival, then divide that by profit per order. The answer is the conversion rate the page must reach to break even. Above 2%, fix the traffic and leave the product and page alone. A site or zone with thousands of impressions and no clicks gets blocked.
+2. **Page.** Look at the share of visitors who stay, scroll and press a buy button.
+3. **Product.** Call a product a failure only after 300 real arrivals with no order, which puts conversion under 1% with about 95% confidence. Switching earlier buys the same unreadable result on a new product.
+
+Count arrivals with the server-side counter once it ships. Until then use GA4 sessions from that source, and only for hours after 2026-11-01 16:50 UTC, because US visitors on this host were barely counted before that (`analytics-default.ts`). Vercel runtime logs cannot stand in: a known test hit on this page did not appear in them on 2026-11-01.
+
+First read, gawk-gawk-3000 on ExoClick, 2026-11-01: $26.64 billed, 353,691 impressions, 177 clicks, no orders. In the hours GA4 was counting, about $12 bought 15 sessions, so about $0.80 an arrival, against $23.67 profit per order. That needs about 3.4% conversion to break even, so the traffic step fails. 15 arrivals say nothing about the product. Half the spend ($13.65) went to sites with no clicks, $6.98 of it on m.youjizz.com, which is now blocked.
+
 ## Showing a toy in use
 
 When a page or banner shows a product used on another toy, the other toy is a real product we sell, so the demo can be filmed or photographed for real. For strokers the prop is the Camtoyz Cody (`camtoyz-ultra-realistic-squirting-dildo-cody`), chosen 2026-10-31 by owner request: realistic, has balls and a suction base, and it actually squirts. Check it fits the stroker's cup before a shoot; the catalog does not list the cup's inner size.

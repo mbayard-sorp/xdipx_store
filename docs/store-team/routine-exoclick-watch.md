@@ -25,6 +25,8 @@ Campaigns 8774050, 8774052, 8774054, 8774056, 8774058 and 8774060 in group 36750
 
 $23.67 is the profit per order before ads, at $69.99 with $9.00 fulfillment. The target is $17.50 or less per sale.
 
+A Results notice is a prompt to check traffic first, never a verdict on the product. The order of checks and the 300-arrival bar are in `sales-pages.md`, "Reading a paid test".
+
 ## How the owner hears
 
 Each new issue sends a phone push and files an `exoclick-watch-<issue>` owner blocker. Push is the alert that reaches him: `owner_queue_enabled` is on (owner, 2026-09-02), so the blocker email reports `suppressed`, as it did on the first test run. A clean run stays silent. The hourly ads pager also files rejected entities from the mirror.
