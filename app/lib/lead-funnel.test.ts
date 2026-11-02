@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildShopUrl, buildStartUrl, getLeadFunnelPage, isLeadFunnelSlug, SMS_PENDING_NOTICE, validateLeadInput } from './lead-funnel'
+import { buildAdventUrl, buildShopUrl, buildStartUrl, getLeadFunnelPage, isLeadFunnelSlug, SMS_PENDING_NOTICE, validateLeadInput } from './lead-funnel'
 import { LEAD_INTERESTS, LEAD_OFFER, getLeadInterest, isLeadInterest } from './lead-interests'
 import { safeRedirectPath } from '~/routes/discount.$code'
 import { bridgeSlugFromPath } from './bridge-host.server'
@@ -86,6 +86,12 @@ describe('funnel links', () => {
     expect(url.pathname).toBe('/start')
     expect(url.searchParams.get('interest')).toBe('for-two')
     expect(url.searchParams.get('utm_source')).toBe('meta')
+  })
+  it('keeps the advent link on this host with the UTMs', () => {
+    expect(buildAdventUrl(utm, 'hello')).toBe(
+      '/advents26?utm_source=meta&utm_medium=paid&utm_campaign=lead-test&utm_content=xdipx-2026-10-17-34',
+    )
+    expect(buildAdventUrl({}, 'hello')).toBe('/advents26?utm_source=curious&utm_medium=paid&utm_campaign=lead-hello')
   })
 })
 

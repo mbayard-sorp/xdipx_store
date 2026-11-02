@@ -1,7 +1,8 @@
 /**
  * The two-door page of the paid-lead funnel (curious.xdipx.com/<slug>).
- * One question, then Door A (the code, for a name and an email) or Door B
- * (just looking, on to /start). Rendered by app/routes/bridge.$slug.tsx,
+ * One question, then Door A (the code, for a name and an email, then on to
+ * /advents26) or Door B (just looking, on to /start), plus a direct link to
+ * the advent calendars. Rendered by app/routes/bridge.$slug.tsx,
  * which owns the age gate, consent banner and analytics shell.
  *
  * The phone input and the SMS consent box exist only while `smsOptin` is on
@@ -16,6 +17,7 @@ import { useFetcher } from 'react-router'
 import { splitHeadline } from '~/lib/ad-bridge-copy'
 import { trackCtaClick, trackGenerateLead } from '~/lib/analytics.client'
 import {
+  buildAdventUrl,
   buildStartUrl,
   EMAIL_CONSENT_TEXT,
   PRIVACY_URL,
@@ -68,6 +70,7 @@ export function LeadFunnelView({
   const success = result && 'ok' in result && result.ok ? result : null
   const error = result && !('ok' in result && result.ok) ? (result as { error: string }).error : null
   const busy = fetcher.state !== 'idle'
+  const adventUrl = buildAdventUrl(utm, page.slug)
 
   // Report the signup once it lands: browser pixel (deduped against the
   // server's CAPI Lead by event id) and GA4 generate_lead.
@@ -76,7 +79,12 @@ export function LeadFunnelView({
     tracked.current = true
     if (success.eventId) trackFbLead(`curious-${page.slug}`, success.eventId)
     trackGenerateLead('bridge')
-  }, [success, page.slug])
+    // Then on to the advent calendars (owner direction 2026-11-02). The short
+    // wait lets the pixel and GA4 hits leave before the page unloads; the code
+    // stays on screen meanwhile and goes out in the Klaviyo email.
+    const t = window.setTimeout(() => window.location.assign(adventUrl), 600)
+    return () => window.clearTimeout(t)
+  }, [success, page.slug, adventUrl])
 
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -227,6 +235,20 @@ export function LeadFunnelView({
           className="mt-3 flex min-h-12 w-full items-center justify-center rounded-full border border-ink/20 px-6 font-body text-base font-semibold text-ink md:w-auto md:inline-flex"
         >
           {page.doorBButton}
+        </a>
+      </section>
+
+      <section className="mt-4 rounded-[var(--radius-lg)] bg-plum-soft p-5" aria-labelledby="advent-title">
+        <h2 id="advent-title" className="font-display text-xl leading-snug text-ink">
+          Here for the <em className="em">advent calendars</em>?
+        </h2>
+        <p className="mt-1 font-body text-sm text-ink-2">Lovehoney, Womanizer, We-Vibe and Arcwave, 2026 editions.</p>
+        <a
+          href={adventUrl}
+          onClick={() => trackCtaClick('lead_advent', interest ?? 'none')}
+          className="mt-3 flex min-h-12 w-full items-center justify-center rounded-full bg-plum px-6 font-body text-base font-semibold text-paper md:w-auto md:inline-flex"
+        >
+          Take a peek →
         </a>
       </section>
 
