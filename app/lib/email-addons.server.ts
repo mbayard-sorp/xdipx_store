@@ -20,8 +20,12 @@
  *
  * No server imports in the pure functions below, so they are unit-tested in
  * isolation. The orchestrator (`syncAddonsForProfile`) and the metric picker
- * (`choosePlacedOrderMetricId`) take deps for the same reason.
+ * (`choosePlacedOrderMetricId`) take deps for the same reason. The
+ * production wiring at the bottom of this file (ticket #15002) is the one
+ * place that imports a live client.
  */
+import { updateProfileProperties } from './klaviyo.server'
+import { searchAdminProducts } from './shopify.server'
 
 export interface AddonCandidate {
   /** Product GID — the key `pairing_why` is authored against. */
@@ -235,4 +239,86 @@ export async function syncAddonsForProfile(
 
   await deps.updateProfileProperties(profile.email, buildAddonProfileProperties(slots, kind, deps.now()))
   return { kind, slotCount: slots.length }
+}
+
+// ─── Production wiring + audience-wide sync (ticket #15002) ────────────────
+// Everything above this line stays network-free by design (see the module
+// doc). This section is the first real caller: the daily email program,
+// syncing every recipient on the send's audience list before the draft push.
+
+function memoizedGenericCandidates(): () => Promise<AddonCandidate[]> {
+  let cached: Promise<AddonCandidate[]> | null = null
+  return () => {
+    // GENERIC_ADDON_QUERIES never changes mid-pass, so a list of N recipients
+    // costs 3 Admin searches total, not 3N — resolved once and reused.
+    cached ??= (async () => {
+      const seen = new Set<string>()
+      const out: AddonCandidate[] = []
+      for (const query of GENERIC_ADDON_QUERIES) {
+        const results = await searchAdminProducts(query, 5)
+        for (const r of results) {
+          if (seen.has(r.handle)) continue
+          seen.add(r.handle)
+          out.push({ id: r.id, handle: r.handle, title: r.title, imageUrl: r.image ?? '', inStock: r.inventoryQuantity > 0 })
+        }
+      }
+      return out
+    })()
+    return cached
+  }
+}
+
+/**
+ * Production deps for one sync pass. Purchase history ("owned" add-ons)
+ * is meant to read Klaviyo's own Shopify-sourced "Placed Order" event
+ * history (`choosePlacedOrderMetricId` above is the metric picker for
+ * exactly that read) — but that sync is currently broken in production
+ * (owner blocker `email:klaviyo-shopify-sync`,
+ * docs/store-team/routine-email-daily.md), so there is no live purchase
+ * history to read yet. `getPurchasedProducts`/`getPurchasedHandles` return
+ * empty until a follow-up ticket wires the Events-API read once that sync
+ * is repaired; every profile falls through to the generic category
+ * fallback in the meantime, which is the documented, honest behavior
+ * `routine-email-daily.md` describes for "Readers with no purchase
+ * history."
+ */
+export function defaultAddonSyncDeps(): AddonSyncDeps {
+  return {
+    getPurchasedProducts: async () => [],
+    getPurchasedHandles: async () => new Set<string>(),
+    getOwnedCatalog: async (purchasedProducts) => (purchasedProducts.length === 0 ? new Map() : new Map()),
+    getGenericCandidates: memoizedGenericCandidates(),
+    updateProfileProperties,
+    now: () => new Date().toISOString(),
+  }
+}
+
+export interface AudienceSyncResult {
+  attempted: number
+  succeeded: number
+  failed: number
+}
+
+/**
+ * Best-effort add-on sync across every profile on a Klaviyo list. One
+ * profile's failure (a transient Klaviyo error, a malformed profile) never
+ * aborts the pass or the caller's draft — reported in the result, not
+ * thrown.
+ */
+export async function syncAddonsForAudience(
+  profiles: readonly { id: string; email: string }[],
+  deps: AddonSyncDeps = defaultAddonSyncDeps(),
+): Promise<AudienceSyncResult> {
+  let succeeded = 0
+  let failed = 0
+  for (const profile of profiles) {
+    try {
+      await syncAddonsForProfile(profile, deps)
+      succeeded++
+    } catch (err) {
+      failed++
+      console.error('[email-addons] sync failed for', profile.email, err)
+    }
+  }
+  return { attempted: profiles.length, succeeded, failed }
 }

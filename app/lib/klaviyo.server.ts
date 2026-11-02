@@ -610,3 +610,35 @@ export async function syncWishlistProfileProperty(
     console.error('[klaviyo.syncWishlistProfileProperty] failed:', err)
   }
 }
+
+// ─── List membership ────────────────────────────────────────────────────────
+
+export interface KlaviyoListProfile {
+  id: string
+  email: string
+}
+
+interface KlaviyoListProfilesPage {
+  data?: { id: string; attributes?: { email?: string | null } }[]
+  links?: { next?: string | null }
+}
+
+/**
+ * Every profile on a Klaviyo list, with its email, paginated via the API's
+ * own `links.next`. Used by the daily email program (ticket #15002) to sync
+ * each recipient's add-on properties before a draft push. A profile with no
+ * email on file is skipped — there is nothing to key an add-on sync on.
+ */
+export async function listProfilesInList(listId: string): Promise<KlaviyoListProfile[]> {
+  const out: KlaviyoListProfile[] = []
+  let path: string | null = `/lists/${encodeURIComponent(listId)}/profiles/?fields[profile]=email&page[size]=100`
+  while (path) {
+    const json: KlaviyoListProfilesPage = await klaviyoFetch<KlaviyoListProfilesPage>(path, 'GET')
+    for (const p of json.data ?? []) {
+      if (p.attributes?.email) out.push({ id: p.id, email: p.attributes.email })
+    }
+    const next: string | null = json.links?.next ?? null
+    path = next ? next.replace(BASE, '') : null
+  }
+  return out
+}

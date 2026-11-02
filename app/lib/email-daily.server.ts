@@ -50,7 +50,10 @@ const SITE_ORIGIN = 'https://xdipx.com'
 // UTM
 // ---------------------------------------------------------------------------
 
-function campaignKey(date: string): string {
+/** `daily-YYYYMMDD` for a given send date. The one place this is computed,
+ *  so the assembler's UTMs and the ledger's `email_sends.campaign_key` can
+ *  never drift apart (ticket #15002). */
+export function campaignKey(date: string): string {
   return `daily-${date.replace(/-/g, '')}`
 }
 
