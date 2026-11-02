@@ -90,6 +90,15 @@ export function buildStartUrl(interest: LeadInterestSlug | null, utm: FunnelUtm,
 }
 
 /**
+ * The advent calendar sales page on this same host, carrying the ad's UTMs.
+ * Linked from the two-door page, and where a signup lands once the lead is in
+ * (owner direction 2026-11-02). The code still goes out in the Klaviyo email.
+ */
+export function buildAdventUrl(utm: FunnelUtm, slug: string): string {
+  return `/advents26?${utmQuery(utm, slug)}`
+}
+
+/**
  * After signup: the interest's destination on xdipx.com, routed through
  * /discount/<code> so the code is already on the cart. Without an interest
  * it lands on /start so the visitor still gets the tiles.
