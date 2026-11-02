@@ -996,6 +996,9 @@ function nodeToProduct(node: ShopifyProductNode): Product {
   const sensationDialV2 = normalizeSensationDialV2(parseMetafieldJSON<unknown>(mf, 'sensation_dial_v2', null))
     ?? projectLegacyDial(parseMetafieldJSON<SensationDial>(mf, 'sensation_dial', {}) as SensationDial | undefined)
   const mapPriceRaw = parseFloat(parseMetafield(mf, 'map_price') ?? '')
+  // Ticket #19550: the real regular/MSRP price, independent of Shopify
+  // compare-at (which is set manually per variant and can sit above it).
+  const originalPriceRaw = parseFloat(parseMetafield(mf, 'original_price') ?? '')
   const bareProductReference = parseMetafieldJSON<BareProductReferenceMetafield | null>(mf, 'bare_product_reference', null)
   // Card art's bare-frame pick (ticket #14190), same single conversion point
   // as the card_art_blocked gate just below. `pickBareProductImage` already
@@ -1030,6 +1033,7 @@ function nodeToProduct(node: ShopifyProductNode): Product {
     price: parseFloat(variant?.price.amount ?? '0'),
     ...(variant?.compareAtPrice ? { compareAtPrice: parseFloat(variant.compareAtPrice.amount) } : {}),
     ...(Number.isFinite(mapPriceRaw) && mapPriceRaw > 0 ? { mapPrice: mapPriceRaw } : {}),
+    ...(Number.isFinite(originalPriceRaw) && originalPriceRaw > 0 ? { originalPrice: originalPriceRaw } : {}),
     brand: node.vendor,
     tags: node.tags,
     totalInventory: node.totalInventory ?? null,
