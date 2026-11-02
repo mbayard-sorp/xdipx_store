@@ -1831,7 +1831,7 @@ occlude-only frame is found and logged in `social_media_assets`.
 For any SKU on this list, the `social-art-director` brief MUST
 either occlude or angle the marked region out of frame (hand-over-handle grip, band turned away,
 composite the real plate over the marked segment) OR the run prefers a clean-bodied product for that
-slot. Two standing pre-generation rules reach every cast composite, not only the listed SKUs:
+slot. Four standing pre-generation rules reach every cast composite, not only the listed SKUs:
 
 - **A molded compliance mark is treated exactly like a wordmark.** A CE/UKCA mark or a wordmark molded
   into the product body is a real third-party mark and garbles as a printed label does. Composite the
@@ -1856,6 +1856,14 @@ slot. Two standing pre-generation rules reach every cast composite, not only the
   rather than a blanket "occlude the product" negative that a generation pass can satisfy by hiding the
   band too. Run 725 (2026-09-06) took six prompt iterations to find this by trial and error before this
   rule existed (rows 193, 196 are the frames that finally cleared).
+- **A molded button, dial marking, or icon on the product body gets the same treatment as a
+  compliance mark (ticket #19397).** Most rechargeable toys carry one, and it reliably reads as
+  not-fully-legible text at the vision-legible-text check the same way a molded CE/UKCA band or a
+  printed wordmark does (rows 549/550, run 1778, SKU `me-you-us-signature-the-classic-bullet-purple`,
+  both BLOCKed this way). Give any such product an explicit brief instruction to occlude or angle
+  the marking out of frame by default, rather than discovering the failure per-SKU after it burns a
+  slot. The frame that cleared it: grip the product fully in a closed fist with only the smooth tip
+  visible, hiding the base and button entirely.
 
 **A cast member in a scene is MANDATORY on every Instagram product post (owner ruling 2026-08-19,
 spec §3.7).** The lead image is a person somewhere real, with the product. A product alone, however
