@@ -560,6 +560,36 @@ function AgeGate() {
 
 type LoaderData = Awaited<ReturnType<typeof loader>>
 type BridgeData = Extract<LoaderData, { kind: 'bridge' }>
+// `LoaderData` is the loader's raw return type, which includes the
+// `data(..., { headers })` wrapper the salesAddOn branch uses for its
+// no-store header; `useLoaderData` unwraps that at runtime, so the page-kind
+// union is read off its resolved return type instead, matching what `d.kind`
+// actually is below.
+export type BridgeKind = ReturnType<typeof useLoaderData<typeof loader>>['kind']
+
+/**
+ * Whether each bridge.$slug page kind renders the age gate. `Record<BridgeKind,
+ * boolean>` means a new kind added to the loader's union without an entry here
+ * is a `npm run typecheck` failure, not a silently gate-free page (ticket
+ * #19523) — the failure mode that let the `advent` exemption's bare inline
+ * boolean check quietly widen to cover `sales` and `salesAddOn` too when they
+ * shipped, with nothing to notice. An exemption here is never just a code
+ * comment: it is recorded, with the owner's decision and date, in
+ * `docs/ads-policy.md` ("Landing pages", the adult-ad-network sales-page
+ * carve-out) — update that doc in the same PR as any change here.
+ */
+export const AGE_GATE_SHOWN: Record<BridgeKind, boolean> = {
+  funnel: true,
+  bridge: true,
+  // Owner decision 2026-10-26 (advent) and 2026-10-29 (sales, salesAddOn):
+  // the adult ad networks that send this traffic already gate it 18+ before
+  // the click, so a second gate on the page itself is redundant. salesAddOn
+  // is the sales page's own in-funnel add-on screen, the same visitor on the
+  // same already-gated session as its parent `sales` page.
+  advent: false,
+  sales: false,
+  salesAddOn: false,
+}
 
 export default function BridgeRoute() {
   const d = useLoaderData<typeof loader>()
@@ -573,10 +603,7 @@ export default function BridgeRoute() {
 
   return (
     <main className="min-h-[100svh] bg-paper text-ink">
-      {/* The advent and long-form sales pages run without the age gate (owner
-          direction 2026-10-26 and 2026-10-29: the adult networks that send this
-          traffic already gate 18+). */}
-      {d.kind !== 'advent' && d.kind !== 'sales' && d.kind !== 'salesAddOn' ? (
+      {AGE_GATE_SHOWN[d.kind] ? (
         <>
           <style dangerouslySetInnerHTML={{ __html: GATE_CSS }} />
           <script dangerouslySetInnerHTML={{ __html: AGE_PRECHECK }} />
@@ -597,7 +624,7 @@ export default function BridgeRoute() {
       ) : (
         <BridgeView d={d} />
       )}
-      {d.kind !== 'advent' && d.kind !== 'sales' && d.kind !== 'salesAddOn' ? <AgeGate /> : null}
+      {AGE_GATE_SHOWN[d.kind] ? <AgeGate /> : null}
       <CookieConsent />
       <Analytics ga4Id={ga4Id} />
     </main>
