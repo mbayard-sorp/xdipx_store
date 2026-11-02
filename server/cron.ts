@@ -399,6 +399,23 @@ export function createCronRoutes() {
       const { getReviewSettings, getPendingReminderInvites, markReminderSent, getDueScheduledInvites, markInviteSent } = await import('../app/lib/reviews.server.js')
       const settings = await getReviewSettings()
 
+      // Phase 0: resolve orders whose fulfillment webhook arrived with its
+      // email redacted (Basic-plan PII redaction) via Klaviyo's own mirrored
+      // "Fulfilled Order" event, which still carries the buyer's email and
+      // line items (ticket #19525, app/lib/review-klaviyo-fallback.server.ts).
+      // A miss (the Klaviyo-Shopify sync can lag the webhook) is recorded and
+      // retried on the next KLAVIYO_MISS_MAX_ATTEMPTS-1 days' runs, then left alone.
+      let klaviyoInvited = 0
+      let klaviyoMissed = 0
+      try {
+        const { resolveMissingEmailInvites, defaultResolveDeps } = await import('../app/lib/review-klaviyo-fallback.server.js')
+        const klaviyoResult = await resolveMissingEmailInvites(defaultResolveDeps(settings.inviteDelayDays))
+        klaviyoInvited = klaviyoResult.invited
+        klaviyoMissed = klaviyoResult.missed
+      } catch (err) {
+        console.error('[cron:review-reminders] klaviyo email-resolution phase failed:', err)
+      }
+
       // Phase 1: send scheduled invites whose send_after has passed. The
       // orders/fulfilled webhook inserts these immediately (status
       // 'scheduled'); this is the only path that actually delivers them.
@@ -424,7 +441,7 @@ export function createCronRoutes() {
       }
 
       if (!settings.remindersEnabled) {
-        res.json({ ok: true, invitesDue: due.length, invitesSent, remindersSkipped: 'reminders disabled' })
+        res.json({ ok: true, invitesDue: due.length, invitesSent, klaviyoInvited, klaviyoMissed, remindersSkipped: 'reminders disabled' })
         return
       }
 
@@ -460,7 +477,8 @@ export function createCronRoutes() {
       })
 
       res.json({
-        ok: true, invitesDue: due.length, invitesSent, reminderTotal: invites.length, remindersSent: sent,
+        ok: true, invitesDue: due.length, invitesSent, klaviyoInvited, klaviyoMissed,
+        reminderTotal: invites.length, remindersSent: sent,
         ...(funnelCheck ? { funnelCheck } : {}),
       })
     } catch (err) {

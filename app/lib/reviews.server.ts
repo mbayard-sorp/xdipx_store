@@ -634,6 +634,57 @@ export async function countFulfillmentWebhookLogSince(days: number): Promise<num
   return Number(rows[0]?.['n'] ?? 0)
 }
 
+// ─── Klaviyo email-resolution fallback (ticket #19525) ─────────────────────
+// `order_fulfillment_webhook_log.outcome` is a fixed CHECK constraint
+// (migration 126) with no value for "Klaviyo had no matching event yet", and
+// adding one is a protected-path migration this fallback does not need: a
+// miss is recorded as the existing 'no_invite_created' outcome, with the
+// attempt count carried in the free-text `reason` column instead
+// (`klaviyo_miss_attempt_<n>_of_<max>`). `countKlaviyoMissAttempts` reads
+// that text back to decide whether to retry again tomorrow.
+
+/** Reason-text prefix for a Klaviyo-resolution miss; `n` is the attempt number. */
+export const KLAVIYO_MISS_REASON_PREFIX = 'klaviyo_miss_attempt_'
+
+/** Stop retrying an order through Klaviyo after this many misses. */
+export const KLAVIYO_MISS_MAX_ATTEMPTS = 3
+
+/** This order's prior Klaviyo-resolution misses, from `reason` text written by `recordOrderFulfillmentOutcome`. */
+export async function countKlaviyoMissAttempts(shopifyOrderId: string): Promise<number> {
+  const rows = await sql`
+    SELECT count(*)::int AS n FROM order_fulfillment_webhook_log
+    WHERE shopify_order_id = ${shopifyOrderId}
+      AND outcome = 'no_invite_created'
+      AND reason LIKE ${KLAVIYO_MISS_REASON_PREFIX + '%'}
+  `
+  return Number(rows[0]?.['n'] ?? 0)
+}
+
+/**
+ * Orders whose webhook died on PII redaction, have no review_invites row
+ * yet, and have not already exhausted `KLAVIYO_MISS_MAX_ATTEMPTS` Klaviyo
+ * lookup misses — the candidates for `resolveFulfilledOrderEmail`
+ * (app/lib/klaviyo-order-email.server.ts) on the daily review-reminders
+ * cron.
+ */
+export async function getPiiRedactedOrdersNeedingKlaviyoRetry(): Promise<string[]> {
+  const rows = await sql`
+    SELECT DISTINCT l.shopify_order_id AS shopify_order_id
+    FROM order_fulfillment_webhook_log l
+    WHERE l.outcome = 'no_email_pii_redacted'
+      AND NOT EXISTS (
+        SELECT 1 FROM review_invites ri WHERE ri.shopify_order_id = l.shopify_order_id
+      )
+      AND (
+        SELECT count(*) FROM order_fulfillment_webhook_log miss
+        WHERE miss.shopify_order_id = l.shopify_order_id
+          AND miss.outcome = 'no_invite_created'
+          AND miss.reason LIKE ${KLAVIYO_MISS_REASON_PREFIX + '%'}
+      ) < ${KLAVIYO_MISS_MAX_ATTEMPTS}
+  `
+  return rows.map((r) => r['shopify_order_id'] as string)
+}
+
 /**
  * `review_invites` rows touched in the last `days` days. The table has no
  * `created_at`: `sent_at` defaults to `now()` at INSERT time (createInvite
