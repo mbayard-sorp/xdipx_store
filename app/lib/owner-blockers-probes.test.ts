@@ -144,6 +144,67 @@ describe('endpoint_200 runner', () => {
     expect(await PROBES['endpoint_200']!.run('https://example.invalid/x')).toBeNull()
     fetchSpy.mockRestore()
   })
+
+  // Ticket #19526: blocker #1672's verifyArg is the relative cron path
+  // `/cron/release-engine`, which the plain-URL branch above has always
+  // rejected outright (it never matches `^https?://`), and even a corrected
+  // absolute URL would 401 forever against an unauthenticated GET since
+  // every cron route requires `x-cron-secret`. A `/cron/*` arg now reads
+  // cron_runs recency instead — read-only, no fetch, no triggered job.
+  describe('a /cron/* arg (ticket #19526)', () => {
+    afterEach(() => { vi.doUnmock('~/lib/cron-runs.server'); vi.resetModules() })
+
+    it('answers true when the route is live and not failing', async () => {
+      vi.doMock('~/lib/cron-runs.server', () => ({
+        readCronLiveness: vi.fn(async () => [
+          { route: '/cron/release-engine', breached: false, failing: false },
+        ]),
+      }))
+      const { PROBES } = await import('./owner-blockers.server')
+      expect(await PROBES['endpoint_200']!.run('/cron/release-engine')).toBe(true)
+    })
+
+    it('answers false when the route is breached (gone silent past its grace window)', async () => {
+      vi.doMock('~/lib/cron-runs.server', () => ({
+        readCronLiveness: vi.fn(async () => [
+          { route: '/cron/release-engine', breached: true, failing: false },
+        ]),
+      }))
+      const { PROBES } = await import('./owner-blockers.server')
+      expect(await PROBES['endpoint_200']!.run('/cron/release-engine')).toBe(false)
+    })
+
+    it('answers false when the route is alive but failing on consecutive runs', async () => {
+      vi.doMock('~/lib/cron-runs.server', () => ({
+        readCronLiveness: vi.fn(async () => [
+          { route: '/cron/release-engine', breached: false, failing: true },
+        ]),
+      }))
+      const { PROBES } = await import('./owner-blockers.server')
+      expect(await PROBES['endpoint_200']!.run('/cron/release-engine')).toBe(false)
+    })
+
+    it('answers null (could not ask), never false, for a route with no cron_expectations entry', async () => {
+      vi.doMock('~/lib/cron-runs.server', () => ({
+        readCronLiveness: vi.fn(async () => []),
+      }))
+      const { PROBES } = await import('./owner-blockers.server')
+      expect(await PROBES['endpoint_200']!.run('/cron/not-a-real-route')).toBeNull()
+    })
+
+    it('never makes an HTTP fetch for a /cron/* arg', async () => {
+      vi.doMock('~/lib/cron-runs.server', () => ({
+        readCronLiveness: vi.fn(async () => [
+          { route: '/cron/release-engine', breached: false, failing: false },
+        ]),
+      }))
+      const fetchSpy = vi.spyOn(globalThis, 'fetch')
+      const { PROBES } = await import('./owner-blockers.server')
+      await PROBES['endpoint_200']!.run('/cron/release-engine')
+      expect(fetchSpy).not.toHaveBeenCalled()
+      fetchSpy.mockRestore()
+    })
+  })
 })
 
 describe('migration_applied probe', () => {

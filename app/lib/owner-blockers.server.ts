@@ -252,11 +252,20 @@ async function checkGreen(arg: string): Promise<ProbeVerdict> {
   return conclusion === 'success'
 }
 
-/** Does this URL answer 2xx? */
+/**
+ * Does this URL answer 2xx? A `/cron/*` arg (ticket #19526 — blocker #1672's
+ * stored `verifyArg` is `/cron/release-engine`, a relative path, not a URL
+ * this function has ever accepted) is never fetched directly: every cron
+ * route requires `x-cron-secret`, so an unauthenticated GET 401s forever,
+ * and an authenticated one would make a health probe trigger a real cron
+ * invocation as its own side effect. `cronRouteHealthy` answers the same
+ * question read-only instead.
+ */
 async function endpoint200(arg: string): Promise<ProbeVerdict> {
-  const url = arg.trim()
-  if (!/^https?:\/\//i.test(url)) return null
-  const res = await fetch(url, {
+  const raw = arg.trim()
+  if (raw.startsWith('/cron/')) return cronRouteHealthy(raw)
+  if (!/^https?:\/\//i.test(raw)) return null
+  const res = await fetch(raw, {
     method: 'GET',
     redirect: 'follow',
     signal: AbortSignal.timeout(10_000),
@@ -265,6 +274,22 @@ async function endpoint200(arg: string): Promise<ProbeVerdict> {
   // timeout, egress rule) is a could-not-ask and guardedRun maps it to null —
   // an endpoint unreachable from THIS network is not proof it is down.
   return res.status >= 200 && res.status < 300
+}
+
+/**
+ * Healthy means "has recorded evidence of life within its own expected
+ * period plus grace" — `readCronLiveness()`'s existing breached/failing
+ * computation (app/lib/cron-runs.server.ts), reused rather than
+ * reinvented so this probe and the cron-health dashboard can never
+ * disagree about what "healthy" means for the same route. An unrecognized
+ * route (not in `cron_expectations`) is a could-not-ask, not a failure.
+ */
+async function cronRouteHealthy(route: string): Promise<ProbeVerdict> {
+  const { readCronLiveness } = await import('~/lib/cron-runs.server')
+  const liveness = await readCronLiveness()
+  const entry = liveness.find((l) => l.route === route)
+  if (!entry) return null
+  return !entry.breached && !entry.failing
 }
 
 /**
