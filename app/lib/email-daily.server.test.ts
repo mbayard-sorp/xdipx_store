@@ -161,6 +161,25 @@ describe('resolveSendOverride', () => {
     }
     expect(resolveSendOverride([row], '2026-11-27')).toBe(false)
   })
+
+  it('a sends-less row with a higher id does not suppress a listed send', () => {
+    // Row 59: a standing-blocks row with no sends array, id higher than row 58.
+    const ROW_59_NO_SENDS: MarketingCalendarCampaignRow = {
+      id: 59, eventDate: '2026-11-01',
+      assetsJson: { endDate: '2026-11-30' },
+    }
+    expect(resolveSendOverride([ROW_58, ROW_59_NO_SENDS], '2026-11-05')).toBe(true)
+  })
+
+  it('an IG row covering a non-send date still falls back to the Tue/Thu/Sat default', () => {
+    const IG_ROW: MarketingCalendarCampaignRow = {
+      id: 52, eventDate: '2026-11-01',
+      assetsJson: { endDate: '2026-11-30' },
+    }
+    // 2026-11-05 is a Thursday (default true); 2026-11-02 is a Monday (default false).
+    expect(resolveSendOverride([IG_ROW], '2026-11-05')).toBeNull()
+    expect(resolveSendOverride([IG_ROW], '2026-11-02')).toBeNull()
+  })
 })
 
 describe('isSendDay', () => {
