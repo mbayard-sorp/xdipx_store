@@ -48,6 +48,22 @@ If `ok:false`: post `{"op":"update","id":$RUN_ID,"update":{"status":"skipped","f
 
 ## Step 2 — Read (data only)
 
+**Read the result payload before reporting any cron state — success OR failure OR skip** (second
+occurrence of this lesson; the prior version of this rule only guarded against treating "the cron
+succeeded" as the state of the thing, and was silent on the failure/skip direction, which is exactly
+how it let an error through). When a failure count is high, sample the payloads and report the
+distinct causes and their counts, never the row count alone. Three worked examples from the run that
+found this the second time (2026-10-31/11-02): `/cron/release-engine` showed 359 failures in the
+7-day window, which reads as the release path down for a sixth day, until the payloads showed every
+sampled failure was `GitHub PUT /repos/.../pulls/1827/merge -> 405: Pull Request has merge
+conflicts` — one stuck PR, retried every ten minutes, while five other PRs merged and smoke-passed
+on 2026-10-31 alone; `/cron/blocker-list` skipped 15 of 15, and the result payload plus the code
+comment at `app/lib/owner-blockers.server.ts:930-947` say the suppression is the designed outcome of
+folding the list into the owner queue, not a broken cron; `/cron/pricing-batch-recompute` skipped 11
+times, every skip reading `{"skipped":"locked","trigger":"batch_continuation"}`, a benign
+concurrency lock, not a failure to recompute. All three read as outages on row-count alone and as
+non-events once the payload was opened.
+
 - Previous brief: `GET /api/team/brief`.
 - Search performance: the latest `gsc_snapshots` row (written Monday 06:00 UTC by
   `/cron/gsc-snapshot`; last-28-day totals, top queries, top pages, sitemap status). Report
@@ -375,6 +391,18 @@ sets the week's blog topic slate, category-mix tuning (guides/comparisons/care/w
 and campaign tie-ins with the marketing calendar; the daily content playbook
 (`docs/store-team/routine-content-daily.md`) tolerates a brief without a content section, so omit
 it honestly rather than padding.
+
+**A keep-as-is directive must carry the number and the re-read date, or it is not a directive.** A
+per-team directive telling a team to keep something exactly as it is must state (a) the measured
+value being preserved, (b) the threshold at which it stops being a win, and (c) the brief week that
+re-reads it. A directive without all three is rewritten before publish, because it otherwise reads
+as a standing order nobody will revisit. First occurrence, filed anyway rather than held for a
+second: the 2026-10-26 brief told the social lane "KEEP IT EXACTLY AS IT IS" about a 31% gate block
+rate, calling it "the cleanest instruction win this brief has shipped." On rows created 2026-10-26
+to 11-02 the rate was 68% (30 BLOCK / 13 PASS / 1 REVISE), worse than the 62% that prompted the
+original fix — the praise was accurate about the past and functioned as an instruction not to look
+again, and two separate mechanical regressions landed inside that window uncaught until the next
+weekly read.
 
 Include a **Campaign look** section, always, sourced from `docs/store-team/campaign-look.md` and
 never re-derived: the active treatment, the date the owner set it, the owner's own words for it in
