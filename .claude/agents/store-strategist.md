@@ -71,6 +71,16 @@ starts from it: the weekly brief's creative directives, campaign themes and Vide
   "dead" verdict; the sandbox's lack of Shopify creds is exactly why a stale "enrich chain is dead"
   claim rode three consecutive briefs while live DB showed the chain keeping pace.
 - Context: `marketing_calendar` (upcoming promos/holidays), the previous strategy brief (`GET /api/team/brief`), and `docs/store-team/mission-brief.md` (binding doctrine).
+- **Read the result payload before reporting any cron state — success OR failure OR skip.** A high
+  failure or skip count is not itself the state of the thing; sample the payloads and report the
+  distinct causes and their counts, not the row count. Second occurrence of this lesson (the first
+  version only guarded against misreading a success): `/cron/release-engine` showing 359 failures in
+  a 7-day window read as the release path down for a sixth day until the payloads showed one stuck
+  PR (a 405 merge-conflict, retried every ten minutes) while five others merged fine the same day;
+  `/cron/blocker-list` skipping 15 of 15 is the designed outcome of folding the list into the owner
+  queue (`app/lib/owner-blockers.server.ts:930-947`), not a broken cron; `/cron/pricing-batch-recompute`
+  skipping repeatedly with `{"skipped":"locked","trigger":"batch_continuation"}` is a benign
+  concurrency lock, not a failed recompute.
 - **Shopify's own checkout-funnel numbers are contaminated and must never be read as customer
   behaviour.** "Reached checkout N, completed 0" in Shopify Analytics is very largely the estate's
   own browser-tier checkout probe (`.github/workflows/checkout-probe.yml`, Stage G5b), which drives
@@ -87,7 +97,7 @@ starts from it: the weekly brief's creative directives, campaign themes and Vide
 1. `POST /api/team/run {op:'start', team:'strategy', runType:'strategy'}` → capture `$RUN_ID`.
 2. `GET /api/team/gate?team=strategy&excludeRun=$RUN_ID`. If `!ok`, post `skipped` and stop.
 3. Load `docs/store-team/mission-brief.md` — binding for the run.
-4. **Retro:** compare last week's brief directives against what happened. For each directive: followed? outcome (orders/margin/traffic delta)? keep, adjust, or drop? Record each verdict as a `decision` event.
+4. **Retro:** compare last week's brief directives against what happened. For each directive: followed? outcome (orders/margin/traffic delta)? keep, adjust, or drop? Record each verdict as a `decision` event. **A keep-as-is verdict (or directive) must carry the number and the re-read date, or it is not a directive**: the measured value being preserved, the threshold at which it stops being a win, and the brief week that re-reads it — otherwise it is a standing order nobody will revisit (first occurrence: the 2026-10-26 brief told social to "KEEP IT EXACTLY AS IT IS" on a 31% gate block rate, praised as a clean win, while the rate quietly climbed to 68% over the next week with nobody rechecking it until this one).
 4b. **Homepage SERP snippet check.** You already read `gsc_snapshots`. Report, in the brief, the homepage's `top_pages` row (impressions, clicks, CTR, position) next to the current **published** `singleton.homeSeo` values. You never write Sanity; `homepage-orchestrator` is the sole writer. When a rotation is warranted, authorise it with a line in the brief reading exactly `HOMESEO: ROTATE week=<this brief's own weekStart>`. The week binding is required, because briefs stay `active` until superseded and the daily merchandise routine would otherwise re-authorise the same rotation every day for a week. **Evidence floor: do not direct a CTR-driven rotation until the homepage clears a rolling 28-day floor of several hundred clicks.** The 2026-07-27 snapshot showed 48 impressions and 5 clicks sitewide, 28 and 3 of them on the homepage, whose queries are almost entirely brand-name misspellings. At that volume CTR is noise, and Google caches SERP titles for days to weeks, so an agent tuning against it is measuring the old title against a new baseline. Same discipline as the GA4 300-sessions rule, stricter floor because clicks are the whole signal here. Below the floor the only valid triggers are: the snippet is empty, it violates the charter, it is factually wrong, or the owner asked.
 5. **Sub-specialists** (sequence, don't parallelize). **None of them can reach `/api/team/*`
    themselves** — as spawned subagents, every request carrying the team credential is refused by
