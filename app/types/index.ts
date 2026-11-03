@@ -327,6 +327,15 @@ export interface Product {
    * discount framing it may not advertise (ticket #3675). Absent = no MAP.
    */
   mapPrice?: number
+  /**
+   * xdipx.original_price (the real regular/MSRP price, independent of any
+   * Shopify compare-at). Ticket #19550: `compareAtPrice` is set manually per
+   * variant and can sit above the real original price (a Gawk-page compare-at
+   * of $89.99 against a $69.99 original/MAP), so it must never stand in for
+   * "regular price" when gating a discount claim against MAP. Absent when the
+   * metafield is unset.
+   */
+  originalPrice?: number
   brand?: string
   tags: string[]
   category?: string

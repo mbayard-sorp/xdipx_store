@@ -186,7 +186,7 @@ async function adventLoaderData(request: Request) {
 }
 
 /** The view's shape for one Shopify product (the page's product or an add-on). */
-function salesShopData(product: Product): SalesShopifyData {
+export function salesShopData(product: Product): SalesShopifyData {
   return {
     productId: product.id,
     title: product.title,
@@ -200,8 +200,13 @@ function salesShopData(product: Product): SalesShopifyData {
     })),
     images: product.images.map(i => ({ url: i.url, alt: i.altText ?? '' })),
     stock: product.totalInventory ?? null,
-    // Same MAP gate as the discovery cards: a MAP at or above compare-at hides the struck price.
-    showCompareAt: mapAllowsDiscountDisplay(product.mapPrice, product.compareAtPrice),
+    // Ticket #19550: gated on the real regular/MSRP price (originalPrice), not
+    // compareAtPrice. compareAtPrice is set manually per variant and can sit
+    // above the real original price (the-male-rose-gawk-gawk-3000: $89.99
+    // compare-at vs a $69.99 original/MAP), which let a MAP==MSRP product pass
+    // the gate and advertise a false discount. Same MAP gate as the discovery
+    // cards, just pointed at the field that actually answers "regular price".
+    showCompareAt: mapAllowsDiscountDisplay(product.mapPrice, product.originalPrice),
   }
 }
 
