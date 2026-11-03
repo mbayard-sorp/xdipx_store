@@ -229,6 +229,7 @@ function toLeanCardProduct(p: Product): LeanCardProduct {
     images: p.images.length > 0 ? [p.images[0]!] : [],
   }
   if (p.compareAtPrice !== undefined) lean.compareAtPrice = p.compareAtPrice
+  if (p.originalPrice !== undefined) lean.originalPrice = p.originalPrice
   if (p.mapPrice !== undefined) lean.mapPrice = p.mapPrice
   if (p.brand !== undefined) lean.brand = p.brand
   if (p.videos && p.videos.length > 0) lean.videos = [p.videos[0]!]

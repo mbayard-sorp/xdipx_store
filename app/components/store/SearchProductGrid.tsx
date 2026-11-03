@@ -123,12 +123,15 @@ export function SearchTile({
 
   const price = product.price ? parseFloat(product.price) : null
   const compareAt = product.compareAtPrice ? parseFloat(product.compareAtPrice) : null
+  const originalPrice = product.originalPrice ? parseFloat(product.originalPrice) : null
   const mapPrice = product.mapPrice ? parseFloat(product.mapPrice) : null
   // Struck price + "% off" badge is advertised-discount framing, gated on the
-  // MAP rule so a MAP-locked product shows neither (ticket #3675).
+  // MAP rule so a MAP-locked product shows neither (ticket #3675). Ticket
+  // #19583: the MAP gate reads the real regular price (originalPrice), not
+  // compareAtPrice, which is set manually per variant and can sit above it.
   const canShowDiscount =
     price != null && compareAt != null && compareAt > price &&
-    mapAllowsDiscountDisplay(mapPrice, compareAt)
+    mapAllowsDiscountDisplay(mapPrice, originalPrice)
   const discount = canShowDiscount
     ? Math.round(((compareAt! - price!) / compareAt!) * 100)
     : 0

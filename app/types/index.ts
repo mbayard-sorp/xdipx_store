@@ -417,6 +417,14 @@ export interface LeanCardProduct {
   title: string
   price: number
   compareAtPrice?: number
+  /**
+   * xdipx.original_price (the real regular/MSRP price). Ticket #19583 (the
+   * #19550 anti-pattern repeated here): `compareAtPrice` is Shopify's native
+   * compare-at, set manually per variant, and can sit above the real original
+   * price, so it must never stand in for "regular price" when gating a
+   * discount claim against MAP. Absent when the metafield is unset.
+   */
+  originalPrice?: number
   /** xdipx.map_price — gates the carousel card's struck price on the MAP rule
    *  (ticket #3675). Absent = no MAP. */
   mapPrice?: number
