@@ -96,8 +96,19 @@ export async function processSmsMessage(input: ProcessSmsInput): Promise<Process
       .insert(smsOptouts)
       .values({ phone: from, reason: 'stop' })
       .onConflictDoNothing({ target: smsOptouts.phone })
+    // Decision (ticket #19761): do not attempt our own TwiML confirmation
+    // send here. The Messaging Service's Advanced Opt-Out feature adds the
+    // number to its own suppression list the instant it sees STOP, before
+    // our webhook response is processed, so a second outbound always fails
+    // with Twilio error 21610 ("attempt to send a message to an unsubscribed
+    // recipient") and the customer never receives it (confirmed on SIDs
+    // SMb4f41d01a985165bc5824d657e8fddd0 and SM2f03966e7956518f02feeef2238d9c72).
+    // Twilio's own Advanced Opt-Out auto-reply is what actually reaches the
+    // customer now. STOP_REPLY is still written to smsMessages for our own
+    // audit trail of what we intended to say, but it is never handed to the
+    // TwiML layer, so repliesTwiml() never builds a <Message> for it.
     await recordOutbound(from, STOP_REPLY, null, simulated)
-    return single(STOP_REPLY, 'stop')
+    return single(null, 'stop')
   }
 
   if (START_WORDS.has(keyword)) {
