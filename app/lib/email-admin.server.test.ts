@@ -8,6 +8,9 @@ const mem = vi.hoisted(() => ({
   emailSendsRows: [] as Array<Record<string, unknown>>,
   metricsRows: [] as Array<Record<string, unknown>>,
   ledgerRows: [] as Array<Record<string, unknown>>,
+  suggestionRows: [] as Array<Record<string, unknown>>,
+  suggestionLinkRows: [] as Array<Record<string, unknown>>,
+  pipelineSettingRows: [] as Array<Record<string, unknown>>,
 }))
 
 vi.mock('./db.server', async () => {
@@ -29,6 +32,9 @@ vi.mock('./db.server', async () => {
           if (table === schema.emailSends) return chain(() => mem.emailSendsRows)
           if (table === schema.emailCampaignMetrics) return chain(() => mem.metricsRows)
           if (table === schema.homepageTeamEvents) return chain(() => mem.ledgerRows)
+          if (table === schema.homepageTeamSuggestions) return chain(() => mem.suggestionRows)
+          if (table === schema.suggestionLinks) return chain(() => mem.suggestionLinkRows)
+          if (table === schema.pipelineSettings) return chain(() => mem.pipelineSettingRows)
           return chain(() => [])
         },
       }),
@@ -42,6 +48,9 @@ afterEach(() => {
   mem.emailSendsRows = []
   mem.metricsRows = []
   mem.ledgerRows = []
+  mem.suggestionRows = []
+  mem.suggestionLinkRows = []
+  mem.pipelineSettingRows = []
 })
 
 describe('getEmailAdminData', () => {
@@ -121,8 +130,29 @@ describe('getEmailAdminData', () => {
     expect(data.sent[0]!.metrics!.attributedOrders).toBe(10)
   })
 
+  it('marks an approved campaign brief already drafted when its note links a Klaviyo campaign edit URL, and reports the push valve', async () => {
+    mem.suggestionRows = [
+      { id: 42, suggestion: 'Subject: Wand week\nSegment: waitlist', createdAt: new Date('2026-10-20') },
+      { id: 43, suggestion: 'Subject: Air pulsation\nSegment: waitlist', createdAt: new Date('2026-10-21') },
+    ]
+    mem.suggestionLinkRows = [
+      { suggestionId: 42, ref: 'Klaviyo draft campaign created: https://www.klaviyo.com/campaign/abc/edit' },
+    ]
+    mem.pipelineSettingRows = [{ value: 'true' }]
+
+    const data = await getEmailAdminData()
+
+    expect(data.campaignPushValveOn).toBe(true)
+    expect(data.pendingCampaigns).toHaveLength(2)
+    expect(data.pendingCampaigns.find(r => r.id === 42)).toMatchObject({ alreadyDrafted: true })
+    expect(data.pendingCampaigns.find(r => r.id === 43)).toMatchObject({ alreadyDrafted: false })
+  })
+
   it('renders with an empty ledger and no sends at all', async () => {
     const data = await getEmailAdminData()
-    expect(data).toEqual({ upcoming: [], sent: [], ledger: [] })
+    expect(data).toEqual({
+      upcoming: [], sent: [], ledger: [],
+      pendingCampaigns: [], campaignPushValveOn: false,
+    })
   })
 })
