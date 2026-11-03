@@ -40,11 +40,13 @@ export function CategoryProductCard({
   onSelect?: () => void
 }) {
   // Struck price is advertised-discount framing, gated on the MAP rule so a
-  // MAP-locked product (map == compare-at) shows none (ticket #3675).
+  // MAP-locked product (map == compare-at) shows none (ticket #3675). Ticket
+  // #19583: the MAP gate reads the real regular price (originalPrice), not
+  // compareAtPrice, which is set manually per variant and can sit above it.
   const onSale =
     product.compareAtPrice != null &&
     product.compareAtPrice > product.price &&
-    mapAllowsDiscountDisplay(product.mapPrice, product.compareAtPrice)
+    mapAllowsDiscountDisplay(product.mapPrice, product.originalPrice)
 
   return (
     <Link

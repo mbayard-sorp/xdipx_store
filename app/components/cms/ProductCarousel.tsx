@@ -335,8 +335,10 @@ function ProductCard({
   const price   = product.price
   const compare = product.compareAtPrice
   // Struck price is advertised-discount framing, gated on the MAP rule so a
-  // MAP-locked product shows none (ticket #3675).
-  const onSale  = compare != null && compare > price && mapAllowsDiscountDisplay(product.mapPrice, compare)
+  // MAP-locked product shows none (ticket #3675). Ticket #19583: the MAP gate
+  // reads the real regular price (originalPrice), not compareAtPrice, which
+  // is set manually per variant and can sit above it.
+  const onSale  = compare != null && compare > price && mapAllowsDiscountDisplay(product.mapPrice, product.originalPrice)
   // Prefer the bare-product card-art pick (ticket #14190) over whichever
   // frame Shopify lists first.
   const firstImage = product.cardImage ?? product.images[0]

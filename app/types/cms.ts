@@ -882,6 +882,14 @@ export interface CategoryCardProduct {
   title: string
   price: number
   compareAtPrice: number | null
+  /**
+   * xdipx.original_price (the real regular/MSRP price). Ticket #19583 (the
+   * #19550 anti-pattern repeated here): `compareAtPrice` is Shopify's native
+   * compare-at, set manually per variant, and can sit above the real original
+   * price, so it must never stand in for "regular price" when gating a
+   * discount claim against MAP. Null when the metafield is unset.
+   */
+  originalPrice: number | null
   /** xdipx.map_price when set and positive, else null. Gates the card's struck
    *  price + badge on the MAP rule (ticket #3675); null = no MAP. */
   mapPrice: number | null

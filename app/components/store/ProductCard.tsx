@@ -12,6 +12,14 @@ interface ProductCardProps {
   brand?:     string
   price:      number
   compareAt?: number
+  /**
+   * xdipx.original_price (the real regular/MSRP price). Ticket #19583 (the
+   * #19550 anti-pattern repeated here): `compareAt` is Shopify's native
+   * compare-at, set manually per variant, and can sit above the real original
+   * price, so it must never stand in for "regular price" when gating a
+   * discount claim against MAP. Absent when the metafield is unset.
+   */
+  originalPrice?: number
   /** xdipx.map_price. Gates the struck price + badge on the MAP rule so a
    *  MAP-locked product advertises no discount (ticket #3675). Absent = no MAP. */
   mapPrice?:  number
@@ -22,12 +30,14 @@ interface ProductCardProps {
 }
 
 export function ProductCard({
-  id, handle, title, brand, price, compareAt, mapPrice, image, heroVideo, badge,
+  id, handle, title, brand, price, compareAt, originalPrice, mapPrice, image, heroVideo, badge,
 }: ProductCardProps) {
   // Advertised-discount framing (struck price + "% off") is gated on the MAP
-  // rule as well as on real savings (ticket #3675).
+  // rule as well as on real savings (ticket #3675). Ticket #19583: the MAP
+  // gate reads the real regular price (originalPrice), not compareAt, which
+  // is set manually per variant and can sit above it.
   const canShowDiscount =
-    compareAt != null && compareAt > price && mapAllowsDiscountDisplay(mapPrice, compareAt)
+    compareAt != null && compareAt > price && mapAllowsDiscountDisplay(mapPrice, originalPrice)
   const discount = canShowDiscount
     ? Math.round(((compareAt! - price) / compareAt!) * 100)
     : 0

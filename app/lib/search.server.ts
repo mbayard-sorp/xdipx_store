@@ -35,6 +35,15 @@ export interface SearchProductResult {
   // Hydrated from Shopify
   price: string | null
   compareAtPrice: string | null
+  /**
+   * xdipx.original_price (the real regular/MSRP price). Ticket #19583 (the
+   * #19550 anti-pattern repeated here): `compareAtPrice` is Shopify's native
+   * compare-at, set manually per variant, and can sit above the real original
+   * price, so it must never stand in for "regular price" when gating a
+   * discount claim against MAP. Absent/null when hydrated with no metafield,
+   * or on the fallback path, which hydrates no metafields at all.
+   */
+  originalPrice?: string | null
   /** xdipx.map_price when hydrated and positive, else null/absent. Gates the
    *  PLP tile's struck price + badge on the MAP rule (ticket #3675). Absent on
    *  the fallback path, which hydrates no metafields, and read as "no MAP". */
@@ -581,6 +590,7 @@ export async function searchAll(params: {
         previewImageUrl: sp.previewImageUrl ?? null,
         price: shopify ? String(shopify.price) : null,
         compareAtPrice: shopify?.compareAtPrice ? String(shopify.compareAtPrice) : null,
+        originalPrice: shopify?.originalPrice != null ? String(shopify.originalPrice) : null,
         mapPrice: shopify?.mapPrice != null ? String(shopify.mapPrice) : null,
         featuredImage: shopify?.images?.[0]
           ? { url: shopify.images[0].url, altText: shopify.images[0].altText ?? null }
@@ -1015,6 +1025,13 @@ async function shopifyFallback(params: {
     previewImageUrl: p.featuredImage?.url ?? null,
     price: p.priceRange.minVariantPrice.amount,
     compareAtPrice: p.compareAtPriceRange.maxVariantPrice?.amount ?? null,
+    // Fallback path hydrates no metafields, so the real xdipx.original_price
+    // is unknown here too; reuse compareAtPrice as the best-available regular-
+    // price proxy for the MAP gate (ticket #19583). Safe specifically because
+    // mapPrice is also unconditionally null on this path (MAP unknown), so
+    // mapAllowsDiscountDisplay short-circuits to true regardless of this value
+    // — unchanged pre-#3675 behavior on this rarely-hit path.
+    originalPrice: p.compareAtPriceRange.maxVariantPrice?.amount ?? null,
     // Fallback path hydrates no metafields, so MAP is unknown here; null reads
     // as "no MAP" (unchanged pre-#3675 behavior on this rarely-hit path).
     mapPrice: null,
