@@ -163,14 +163,24 @@ export function defaultDraftDeps(): DraftDeps {
   }
 }
 
-function buildDailyOwnerEmail(i: { date: string; subject: string; editUrl: string | null }): { subject: string; html: string } {
+/** `APP_URL`, falling back to the production domain the way other owner-facing links in this file do. */
+function appUrl(): string {
+  return process.env['APP_URL'] ?? 'https://xdipx.com'
+}
+
+function buildDailyOwnerEmail(i: { date: string; subject: string; editUrl: string | null; campaignKey: string }): { subject: string; html: string } {
   const link = i.editUrl
     ? `<p><a href="${escapeHtml(i.editUrl)}">Review and send in Klaviyo</a></p>`
     : `<p><em>No Klaviyo draft was created. Build it manually for ${escapeHtml(i.date)}.</em></p>`
+  // Ticket #17445: the owner review loop at /admin/email lives alongside the
+  // Klaviyo draft link, not instead of it — Klaviyo is still where the owner
+  // actually hits send.
+  const adminLink = `<p><a href="${escapeHtml(appUrl())}/admin/email#${escapeHtml(i.campaignKey)}">Review in xdipx admin</a></p>`
   const html = [
     `<h2>Daily email draft ready to review</h2>`,
     `<p>The ${escapeHtml(i.date)} send became a Klaviyo <strong>draft</strong>. Nothing was sent or scheduled.</p>`,
     `<ul><li><strong>Subject:</strong> ${escapeHtml(i.subject)}</li></ul>`,
+    adminLink,
     link,
   ].join('\n')
   return { subject: `Daily email draft ready: ${i.date}`, html }
@@ -247,13 +257,18 @@ export async function draftDailyEmail(raw: Record<string, unknown>, deps: DraftD
     subject: input.subject,
     previewText: input.previewText ?? null,
     featuredHandles: input.products ?? [],
+    // Ticket #17445: stored so /admin/email can re-render the HTML preview
+    // (via assembleDailyEmail) without re-sending the draft request, and so
+    // the review loop's Approve action can push a Klaviyo draft later if it
+    // was not pushed at draft time.
+    blocks: input.sections,
     hypothesis: input.hypothesis ?? null,
     runId: input.runId ?? null,
     status: 'drafted',
   })
 
   const editUrl = pushResult.campaignId ? klaviyoCampaignEditUrl(pushResult.campaignId) : null
-  const ownerMail = buildDailyOwnerEmail({ date: input.date, subject: input.subject, editUrl })
+  const ownerMail = buildDailyOwnerEmail({ date: input.date, subject: input.subject, editUrl, campaignKey: key })
   await deps.sendOwnerEmail(ownerMail.subject, ownerMail.html, { escalation: 'owner-decision', fromName: 'xdipx email' })
 
   return { campaignKey: key, pushed: true, reason: 'ok', row, ...(addonSync ? { addonSync } : {}) }
@@ -305,4 +320,33 @@ export async function getEmailLedger(since?: string): Promise<LedgerRow[]> {
     featuredHandles: s.featuredHandles,
     metrics: latestByKey.get(s.campaignKey) ?? null,
   }))
+}
+
+// ─── Revisions (ticket #17445) ─────────────────────────────────────────────
+
+export interface RevisionRow {
+  campaignKey: string
+  sendDate: string | null
+  subject: string | null
+  reviewNotes: { at: string; note: string }[]
+}
+
+/**
+ * `email_sends` rows the owner sent back for changes via /admin/email's
+ * "Request changes" action, so `routine-email-daily.md` Step 0.5 can revise
+ * them before anything else. Ordered oldest-first: the longest-waiting
+ * revision gets picked up first.
+ */
+export async function getEmailRevisions(): Promise<RevisionRow[]> {
+  const rows = await db
+    .select({
+      campaignKey:  emailSends.campaignKey,
+      sendDate:     emailSends.sendDate,
+      subject:      emailSends.subject,
+      reviewNotes:  emailSends.reviewNotes,
+    })
+    .from(emailSends)
+    .where(eq(emailSends.reviewStatus, 'changes_requested'))
+    .orderBy(emailSends.createdAt)
+  return rows.map((r) => ({ ...r, reviewNotes: r.reviewNotes ?? [] }))
 }

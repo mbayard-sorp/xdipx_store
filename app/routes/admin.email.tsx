@@ -6,8 +6,11 @@
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from 'react-router'
 import { useFetcher, useLoaderData } from 'react-router'
-import { requireAdmin } from '~/lib/session.server'
-import { getEmailAdminData, type EmailSendRow, type PendingCampaignRow } from '~/lib/email-admin.server'
+import { requireAdmin, getAdminUser } from '~/lib/session.server'
+import {
+  getEmailAdminData, approveEmailSend, requestEmailSendChanges,
+  type EmailSendRow, type PendingCampaignRow,
+} from '~/lib/email-admin.server'
 import { ResponsiveTable } from '~/components/admin/ResponsiveTable'
 import { pushApprovedCampaign, defaultCampaignPushDeps } from '~/lib/klaviyo-campaigns.server'
 
@@ -19,13 +22,28 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 /**
- * Ticket #19543: the owner-session action that turns an approved `kind:campaign`
- * brief into a Klaviyo draft, the admin-UI counterpart to
+ * Ticket #19543: `push-campaign` turns an approved `kind:campaign` brief
+ * into a Klaviyo draft, the admin-UI counterpart to
  * `scripts/push-approved-campaigns.ts`. `pushApprovedCampaign` is itself
- * valve-gated on `email_campaign_push_enabled` (default off) and draft-only; this
- * action adds no gate of its own beyond `requireAdmin`.
+ * valve-gated on `email_campaign_push_enabled` (default off) and draft-only;
+ * this action adds no gate of its own beyond `requireAdmin`.
+ *
+ * Ticket #17445: the owner review loop. `approve-send` marks a drafted row
+ * approved, pushing a Klaviyo draft from its stored blocks if one was not
+ * pushed at draft time (valve-gated the same way). `request-changes` sends
+ * a row back with a note, which `POST /api/team/email {op:'revisions'}`
+ * surfaces to the daily routine. All three intents return the same shape so
+ * one `useFetcher<typeof action>()` type covers every form on this page.
  */
-export async function action({ request }: ActionFunctionArgs) {
+export interface AdminEmailActionResult {
+  ok: boolean
+  error?: string
+  result?: Awaited<ReturnType<typeof pushApprovedCampaign>>
+  approved?: Awaited<ReturnType<typeof approveEmailSend>>
+  revised?: Awaited<ReturnType<typeof requestEmailSendChanges>>
+}
+
+export async function action({ request }: ActionFunctionArgs): Promise<AdminEmailActionResult> {
   await requireAdmin(request)
   const form = await request.formData()
   const intent = String(form.get('intent') ?? '')
@@ -34,13 +52,33 @@ export async function action({ request }: ActionFunctionArgs) {
     const id = Number(form.get('id'))
     const suggestion = String(form.get('suggestion') ?? '')
     if (!Number.isFinite(id) || id <= 0 || !suggestion) {
-      return { ok: false as const, error: 'bad request', result: undefined }
+      return { ok: false, error: 'bad request' }
     }
     const result = await pushApprovedCampaign({ id, suggestion }, defaultCampaignPushDeps())
-    return { ok: result.pushed, error: undefined, result }
+    return { ok: result.pushed, result }
   }
 
-  return { ok: false as const, error: 'unknown intent', result: undefined }
+  if (intent === 'approve-send') {
+    const id = Number(form.get('id'))
+    if (!Number.isFinite(id) || id <= 0) {
+      return { ok: false, error: 'bad request' }
+    }
+    const adminUser = await getAdminUser(request)
+    const approved = await approveEmailSend(id, adminUser?.email ?? 'admin')
+    return approved.ok ? { ok: true, approved } : { ok: false, error: approved.error }
+  }
+
+  if (intent === 'request-changes') {
+    const id = Number(form.get('id'))
+    const note = String(form.get('note') ?? '')
+    if (!Number.isFinite(id) || id <= 0 || !note.trim()) {
+      return { ok: false, error: 'bad request' }
+    }
+    const revised = await requestEmailSendChanges(id, note)
+    return revised.ok ? { ok: true, revised } : { ok: false, error: revised.error }
+  }
+
+  return { ok: false, error: 'unknown intent' }
 }
 
 function pct(n: number | null): string {
@@ -103,6 +141,123 @@ function UpcomingTable({ rows }: { rows: EmailSendRow[] }) {
         </tbody>
       </table>
     </ResponsiveTable>
+  )
+}
+
+function ReviewStatusBadge({ reviewStatus }: { reviewStatus: string }) {
+  const label = reviewStatus === 'changes_requested' ? 'Changes requested'
+    : reviewStatus === 'approved' ? 'Approved'
+    : 'Needs review'
+  const cls = reviewStatus === 'changes_requested' ? 'bg-coral-soft text-coral'
+    : reviewStatus === 'approved' ? 'bg-sage/15 text-sage'
+    : 'bg-plum-soft text-plum'
+  return <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${cls}`}>{label}</span>
+}
+
+/**
+ * Ticket #17445: one drafted send, full review loop. The HTML preview renders
+ * in a sandboxed iframe (no scripts, no same-origin access to the admin
+ * session) at 375px and desktop width so the owner sees the mobile read
+ * before the wide one. A row drafted before this shipped has no stored
+ * `blocks`, so `previewHtml` is null and the card says so plainly instead of
+ * rendering an empty iframe.
+ */
+function ReviewCard({ row }: { row: EmailSendRow }) {
+  const approveFetcher = useFetcher<typeof action>()
+  const changesFetcher = useFetcher<typeof action>()
+  const approving = approveFetcher.state !== 'idle'
+  const requestingChanges = changesFetcher.state !== 'idle'
+  const approved = row.reviewStatus === 'approved' || approveFetcher.data?.ok === true
+
+  return (
+    <li id={row.campaignKey} className="rounded-2xl border border-line bg-paper p-4 space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="kicker">{row.sendDate ?? row.campaignKey} · #{row.id}</p>
+        <ReviewStatusBadge reviewStatus={approved ? 'approved' : row.reviewStatus} />
+      </div>
+      <p className="text-sm font-medium text-ink">{row.subject ?? '—'}</p>
+
+      {row.previewHtml ? (
+        <div className="flex flex-col gap-3 md:flex-row md:items-start">
+          <iframe
+            title={`${row.campaignKey} preview, mobile width`}
+            srcDoc={row.previewHtml}
+            sandbox=""
+            className="h-[500px] w-[375px] shrink-0 rounded-xl border border-line"
+          />
+          <iframe
+            title={`${row.campaignKey} preview, desktop width`}
+            srcDoc={row.previewHtml}
+            sandbox=""
+            className="h-[500px] w-full rounded-xl border border-line"
+          />
+        </div>
+      ) : (
+        <p className="text-xs text-ink-3">No stored preview for this send (drafted before the review loop shipped).</p>
+      )}
+
+      {row.reviewNotes.length > 0 && (
+        <ul className="space-y-1 rounded-xl bg-paper-2 p-3">
+          {row.reviewNotes.map((n, i) => (
+            <li key={i} className="text-xs text-ink-2">
+              <span className="text-ink-4">{n.at.slice(0, 10)}:</span> {n.note}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div className="flex flex-col gap-2 md:flex-row md:items-center">
+        <approveFetcher.Form method="post">
+          <input type="hidden" name="intent" value="approve-send" />
+          <input type="hidden" name="id" value={row.id} />
+          <button
+            type="submit"
+            disabled={approved || approving}
+            className="rounded-full border border-line px-4 py-2 text-sm text-ink disabled:opacity-50"
+          >
+            {approved ? 'Approved' : approving ? 'Approving…' : 'Approve'}
+          </button>
+        </approveFetcher.Form>
+        {approveFetcher.data && !approveFetcher.data.ok && (
+          <span className="text-xs text-coral">{approveFetcher.data.error}</span>
+        )}
+        {approveFetcher.data?.approved?.ok && (
+          <span className="text-xs text-ink-3">{approveFetcher.data.approved.message}</span>
+        )}
+      </div>
+
+      <changesFetcher.Form method="post" className="flex flex-col gap-2 md:flex-row md:items-start">
+        <input type="hidden" name="intent" value="request-changes" />
+        <input type="hidden" name="id" value={row.id} />
+        <textarea
+          name="note"
+          placeholder="What should change?"
+          rows={2}
+          className="w-full rounded-xl border border-line bg-paper p-2 text-sm text-ink md:flex-1"
+        />
+        <button
+          type="submit"
+          disabled={requestingChanges}
+          className="rounded-full border border-line px-4 py-2 text-sm text-ink disabled:opacity-50"
+        >
+          {requestingChanges ? 'Sending…' : 'Request changes'}
+        </button>
+      </changesFetcher.Form>
+      {changesFetcher.data && !changesFetcher.data.ok && (
+        <span className="text-xs text-coral">{changesFetcher.data.error}</span>
+      )}
+    </li>
+  )
+}
+
+function ReviewSection({ rows }: { rows: EmailSendRow[] }) {
+  if (rows.length === 0) {
+    return <p className="text-sm text-ink-3">No drafted sends waiting on review.</p>
+  }
+  return (
+    <ul className="space-y-4">
+      {rows.map(r => <ReviewCard key={r.id} row={r} />)}
+    </ul>
   )
 }
 
@@ -258,6 +413,11 @@ export default function AdminEmail() {
       <section className="space-y-3">
         <h2 className="font-display text-lg text-ink">Approved campaign briefs</h2>
         <PendingCampaignsSection rows={pendingCampaigns} valveOn={campaignPushValveOn} />
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="font-display text-lg text-ink">Needs your review</h2>
+        <ReviewSection rows={upcoming} />
       </section>
 
       <section className="space-y-3">

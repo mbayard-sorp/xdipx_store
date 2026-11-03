@@ -3,12 +3,29 @@
  * Klaviyo/DB/list-membership side effects are injected deps, so this file
  * touches no network and no database.
  */
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('~/lib/db.server', () => ({ db: {} }))
+// draftDailyEmail/previewDailyEmail never touch `db` directly (every DB call
+// is an injected dep), so the bare object was enough for them. getEmailRevisions
+// (ticket #17445) does read `db` directly, the same way getEmailLedger does, so
+// this now carries a minimal configurable select chain too.
+const mem = vi.hoisted(() => ({ emailSendsRows: [] as Array<Record<string, unknown>> }))
+
+vi.mock('~/lib/db.server', () => ({
+  db: {
+    select: (_proj?: unknown) => ({
+      from: () => ({
+        where: () => ({
+          orderBy: () => Promise.resolve(mem.emailSendsRows),
+        }),
+      }),
+    }),
+  },
+}))
 
 import {
   draftDailyEmail,
+  getEmailRevisions,
   previewDailyEmail,
   type DraftDeps,
 } from './email-daily-draft.server'
@@ -57,6 +74,10 @@ function fakeDeps(overrides: Partial<DraftDeps> = {}): DraftDeps & {
   }
   return { ...deps, calls }
 }
+
+afterEach(() => {
+  mem.emailSendsRows = []
+})
 
 describe('previewDailyEmail', () => {
   it('renders HTML/text with no DB or Klaviyo calls', () => {
@@ -135,5 +156,55 @@ describe('draftDailyEmail', () => {
     const result = await draftDailyEmail(BASE_INPUT, deps)
     expect(result.pushed).toBe(true)
     expect(result.addonSync).toBeUndefined()
+  })
+
+  it('stores the sections as blocks on the inserted row, so /admin/email can re-render the preview (ticket #17445)', async () => {
+    let insertedValues: Record<string, unknown> | undefined
+    const deps = fakeDeps({
+      insertSend: async (values) => {
+        insertedValues = values
+        return { id: 1, createdAt: new Date(), sentAt: null, approvedBy: null, ...values } as never
+      },
+    })
+    await draftDailyEmail(BASE_INPUT, deps)
+    expect(insertedValues?.['blocks']).toEqual(SECTIONS)
+  })
+
+  it('links the owner review email to /admin/email#<campaignKey> alongside the Klaviyo draft link (ticket #17445)', async () => {
+    let ownerEmailHtml = ''
+    const deps = fakeDeps({
+      sendOwnerEmail: (async (_subject: string, html: string) => {
+        ownerEmailHtml = html
+        return { sent: true }
+      }) as DraftDeps['sendOwnerEmail'],
+    })
+    await draftDailyEmail(BASE_INPUT, deps)
+    expect(ownerEmailHtml).toContain('/admin/email#daily-20261103')
+    expect(ownerEmailHtml).toContain('Review and send in Klaviyo')
+  })
+})
+
+describe('getEmailRevisions (ticket #17445)', () => {
+  it('returns rows the owner sent back for changes, with their notes', async () => {
+    mem.emailSendsRows = [{
+      campaignKey: 'daily-20261105', sendDate: '2026-11-05', subject: 'Night in',
+      reviewNotes: [{ at: '2026-11-04T10:00:00.000Z', note: 'swap the hero product' }],
+    }]
+    const revisions = await getEmailRevisions()
+    expect(revisions).toEqual([{
+      campaignKey: 'daily-20261105', sendDate: '2026-11-05', subject: 'Night in',
+      reviewNotes: [{ at: '2026-11-04T10:00:00.000Z', note: 'swap the hero product' }],
+    }])
+  })
+
+  it('defaults reviewNotes to an empty array when the column reads null', async () => {
+    mem.emailSendsRows = [{ campaignKey: 'daily-20261106', sendDate: '2026-11-06', subject: 'x', reviewNotes: null }]
+    const revisions = await getEmailRevisions()
+    expect(revisions[0]!.reviewNotes).toEqual([])
+  })
+
+  it('returns an empty array when nothing is in changes_requested', async () => {
+    mem.emailSendsRows = []
+    expect(await getEmailRevisions()).toEqual([])
   })
 })
