@@ -71,7 +71,19 @@ to establish a demand baseline before concluding anything about our own tables.
 - **Upstream shows no inbound traffic** → the channel simply had no traffic. Note it in one line
   in the day's summary; this is never a ticket and never an escalation.
 - **Upstream shows inbound traffic that `sms_turns` lacks** → that is a real P1: file it
-  `kind:'code'` per Step 4, citing the specific upstream SID(s) missing from `sms_turns`.
+  `kind:'code'` per Step 4, citing the specific upstream SID(s) missing from `sms_turns`. **Carve-out,
+  checked before filing (second occurrence: run #1708 2026-10-28, run #1799 2026-11-02, ticket
+  #10494):** a bare `YES`/`START`/`STOP` reply from a phone number carrying a pending/confirmed
+  `lead_sms_subscriptions` row is, by design, intercepted by `handleLeadSmsInbound()` in
+  `app/lib/lead-sms.server.ts` (called from `app/routes/api.twilio.sms.tsx` before
+  `pickPipelineVersion`/`processSmsMessage` ever run) and returns `EMPTY_TWIML` without ever writing
+  an `sms_turns` row. So Twilio's `Messages.json` correctly showing inbound traffic in-window while
+  `sms_turns` has zero rows for that number is expected, already-shipped behavior (PR #1695, tested
+  in `app/lib/lead-sms.server.test.ts`), not the ingestion-gap P1 above. Before filing, check
+  `lead_sms_subscriptions` for a matching row by phone; a bare `YES`/`START`/`STOP` resolving to a
+  `confirmed`/`opted_out` row there is never a missing-turn bug — cite dedupeKey
+  `channel-silence-lead-sms-confirmation-carveout` in the note instead of re-deriving it from the
+  route source a third time.
 - **Every run that reports voice/SMS silence cites the upstream inbound count** in its output,
   whichever branch above it took, so the finding (or the note) is checkable rather than asserted.
 - **Exclude test fixtures from any "distinct phones" count**, on any channel: `+1555555xxxx`,
