@@ -2889,6 +2889,15 @@ export const emailSends = pgTable('email_sends', {
   approvedBy:         text('approved_by'),
   sentAt:             timestamp('sent_at', { withTimezone: true }),
   createdAt:          timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  /**
+   * The owner's review workflow state (ticket #17445, migration 138),
+   * separate from `status` above (the Klaviyo send lifecycle): a row can be
+   * `status='drafted'` and `review_status='changes_requested'` at the same
+   * time. pending_review|changes_requested|approved.
+   */
+  reviewStatus:       text('review_status').notNull().default('pending_review'),
+  /** Append-only {at, note}[] from "Request changes" clicks in /admin/email. */
+  reviewNotes:        jsonb('review_notes').$type<{ at: string; note: string }[]>().notNull().default([]),
 })
 
 // Klaviyo performance pulls for a campaign_key (migration 121). Append-only:

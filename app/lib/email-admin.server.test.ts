@@ -11,6 +11,12 @@ const mem = vi.hoisted(() => ({
   suggestionRows: [] as Array<Record<string, unknown>>,
   suggestionLinkRows: [] as Array<Record<string, unknown>>,
   pipelineSettingRows: [] as Array<Record<string, unknown>>,
+  // Ticket #17445: records every `db.update(emailSends).set(values)` call so
+  // approveEmailSend/requestEmailSendChanges tests can assert on it, and
+  // applies the patch to the single matching emailSendsRows entry (every
+  // test in this file keeps at most one row in play at a time) so a
+  // following `getEmailAdminData`-shaped read sees the update too.
+  updateCalls: [] as Array<{ values: Record<string, unknown> }>,
 }))
 
 vi.mock('./db.server', async () => {
@@ -38,11 +44,22 @@ vi.mock('./db.server', async () => {
           return chain(() => [])
         },
       }),
+      update: (table: unknown) => ({
+        set: (values: Record<string, unknown>) => ({
+          where: () => {
+            mem.updateCalls.push({ values })
+            if (table === schema.emailSends && mem.emailSendsRows.length === 1) {
+              Object.assign(mem.emailSendsRows[0]!, values)
+            }
+            return Promise.resolve([])
+          },
+        }),
+      }),
     },
   }
 })
 
-import { getEmailAdminData } from './email-admin.server'
+import { getEmailAdminData, approveEmailSend, requestEmailSendChanges } from './email-admin.server'
 
 afterEach(() => {
   mem.emailSendsRows = []
@@ -51,6 +68,7 @@ afterEach(() => {
   mem.suggestionRows = []
   mem.suggestionLinkRows = []
   mem.pipelineSettingRows = []
+  mem.updateCalls = []
 })
 
 describe('getEmailAdminData', () => {
@@ -154,5 +172,119 @@ describe('getEmailAdminData', () => {
       upcoming: [], sent: [], ledger: [],
       pendingCampaigns: [], campaignPushValveOn: false,
     })
+  })
+
+  it('re-renders a drafted row\'s stored blocks into an HTML preview (ticket #17445), and carries its review state through', async () => {
+    mem.emailSendsRows = [{
+      id: 9, campaignKey: 'daily-20261105', sendDate: '2026-11-05', subject: 'Night in',
+      audience: 'all', hypothesis: null, status: 'drafted', klaviyoCampaignId: null, sentAt: null,
+      createdAt: new Date('2026-11-04'),
+      reviewStatus: 'changes_requested',
+      reviewNotes: [{ at: '2026-11-04T10:00:00.000Z', note: 'swap the hero product' }],
+      blocks: [{ kind: 'emmaNote', note: 'Start slow.' }],
+    }]
+
+    const data = await getEmailAdminData()
+    const row = data.upcoming[0]!
+    expect(row.reviewStatus).toBe('changes_requested')
+    expect(row.reviewNotes).toEqual([{ at: '2026-11-04T10:00:00.000Z', note: 'swap the hero product' }])
+    expect(row.previewHtml).toContain('Start slow.')
+  })
+
+  it('shows no preview for a row with no stored blocks, rather than throwing', async () => {
+    mem.emailSendsRows = [{
+      id: 10, campaignKey: 'daily-20261001', sendDate: '2026-10-01', subject: 'Old draft',
+      audience: 'all', hypothesis: null, status: 'drafted', klaviyoCampaignId: null, sentAt: null,
+      createdAt: new Date('2026-10-01'), reviewStatus: 'pending_review', reviewNotes: [], blocks: null,
+    }]
+    const data = await getEmailAdminData()
+    expect(data.upcoming[0]!.previewHtml).toBeNull()
+  })
+})
+
+describe('approveEmailSend (ticket #17445)', () => {
+  it('marks a row already drafted in Klaviyo approved without pushing again', async () => {
+    mem.emailSendsRows = [{
+      id: 1, campaignKey: 'daily-20261105', sendDate: '2026-11-05', subject: 'x', audience: 'all',
+      klaviyoCampaignId: 'kv-already', reviewStatus: 'pending_review', reviewNotes: [], blocks: null,
+    }]
+    const result = await approveEmailSend(1, 'mike@xdipx.com')
+    expect(result).toMatchObject({ ok: true, klaviyoCampaignId: 'kv-already', pushedNow: false })
+    expect(mem.updateCalls[0]!.values).toMatchObject({ reviewStatus: 'approved', approvedBy: 'mike@xdipx.com' })
+  })
+
+  it('pushes a Klaviyo draft from stored blocks and records the campaign id when the valve is on', async () => {
+    mem.emailSendsRows = [{
+      id: 2, campaignKey: 'daily-20261106', sendDate: '2026-11-06', subject: 'Featured brand', audience: 'list-1',
+      previewText: null, klaviyoCampaignId: null, reviewStatus: 'pending_review', reviewNotes: [],
+      blocks: [{ kind: 'emmaNote', note: 'Start slow.' }],
+    }]
+    const pushCampaign = vi.fn().mockResolvedValue({ pushed: true, reason: 'ok', campaignId: 'kv-new', templateId: 'tpl-1' })
+    const result = await approveEmailSend(2, 'mike@xdipx.com', { pushCampaign, pushDeps: {} as never })
+    expect(result).toMatchObject({ ok: true, klaviyoCampaignId: 'kv-new', pushedNow: true })
+    expect(pushCampaign).toHaveBeenCalledWith(
+      expect.objectContaining({ dateKey: '2026-11-06', subject: 'Featured brand', listId: 'list-1' }),
+      {},
+    )
+    expect(mem.updateCalls[0]!.values).toMatchObject({
+      reviewStatus: 'approved', approvedBy: 'mike@xdipx.com', klaviyoCampaignId: 'kv-new', klaviyoTemplateId: 'tpl-1',
+    })
+  })
+
+  it('approves with a clear valve-off message and no campaign id when the push valve is off', async () => {
+    mem.emailSendsRows = [{
+      id: 3, campaignKey: 'daily-20261107', sendDate: '2026-11-07', subject: 'x', audience: 'list-1',
+      previewText: null, klaviyoCampaignId: null, reviewStatus: 'pending_review', reviewNotes: [],
+      blocks: [{ kind: 'emmaNote', note: 'Start slow.' }],
+    }]
+    const pushCampaign = vi.fn().mockResolvedValue({ pushed: false, reason: 'valve-off' })
+    const result = await approveEmailSend(3, 'mike@xdipx.com', { pushCampaign, pushDeps: {} as never })
+    expect(result.ok).toBe(true)
+    expect(result).toMatchObject({ klaviyoCampaignId: null, pushedNow: false })
+    if (result.ok) expect(result.message).toMatch(/email_campaign_push_enabled is off/)
+    expect(mem.updateCalls[0]!.values).toMatchObject({ reviewStatus: 'approved' })
+  })
+
+  it('approves a row with no stored blocks with a clear message instead of attempting to push', async () => {
+    mem.emailSendsRows = [{
+      id: 4, campaignKey: 'daily-20260901', sendDate: '2026-09-01', subject: 'x', audience: 'list-1',
+      klaviyoCampaignId: null, reviewStatus: 'pending_review', reviewNotes: [], blocks: null,
+    }]
+    const result = await approveEmailSend(4, 'mike@xdipx.com')
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.message).toMatch(/no stored content to push/)
+  })
+
+  it('returns ok:false for a row that does not exist', async () => {
+    const result = await approveEmailSend(999, 'mike@xdipx.com')
+    expect(result).toEqual({ ok: false, error: 'email_sends row 999 not found' })
+  })
+})
+
+describe('requestEmailSendChanges (ticket #17445)', () => {
+  it('moves the row to changes_requested and appends the note to the existing array', async () => {
+    mem.emailSendsRows = [{
+      id: 5, campaignKey: 'daily-20261108', reviewStatus: 'pending_review',
+      reviewNotes: [{ at: '2026-11-01T00:00:00.000Z', note: 'earlier note' }],
+    }]
+    const result = await requestEmailSendChanges(5, 'swap the hero product')
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.reviewNotes).toHaveLength(2)
+      expect(result.reviewNotes[1]!.note).toBe('swap the hero product')
+    }
+    expect(mem.updateCalls[0]!.values).toMatchObject({ reviewStatus: 'changes_requested' })
+  })
+
+  it('refuses an empty note', async () => {
+    mem.emailSendsRows = [{ id: 6, campaignKey: 'daily-20261109', reviewStatus: 'pending_review', reviewNotes: [] }]
+    const result = await requestEmailSendChanges(6, '   ')
+    expect(result).toEqual({ ok: false, error: 'note is required' })
+    expect(mem.updateCalls).toHaveLength(0)
+  })
+
+  it('returns ok:false for a row that does not exist', async () => {
+    const result = await requestEmailSendChanges(999, 'a note')
+    expect(result).toEqual({ ok: false, error: 'email_sends row 999 not found' })
   })
 })

@@ -15,11 +15,15 @@
  *
  *   { op: 'ledger', since? } -> { sends: LedgerRow[] }. email_sends joined
  *     to each row's latest email_campaign_metrics pull.
+ *
+ *   { op: 'revisions' } -> { sends: RevisionRow[] }. email_sends rows the
+ *     owner sent back for changes via /admin/email's "Request changes"
+ *     action (ticket #17445), oldest first.
  */
 import type { ActionFunctionArgs } from 'react-router'
 import { assertTeamAuth } from '~/lib/team.server'
 import { apiError } from '~/lib/api-error.server'
-import { DailyDraftError, draftDailyEmail, getEmailLedger, previewDailyEmail } from '~/lib/email-daily-draft.server'
+import { DailyDraftError, draftDailyEmail, getEmailLedger, getEmailRevisions, previewDailyEmail } from '~/lib/email-daily-draft.server'
 
 export async function action({ request }: ActionFunctionArgs) {
   assertTeamAuth(request)
@@ -38,7 +42,10 @@ export async function action({ request }: ActionFunctionArgs) {
       const since = typeof body['since'] === 'string' ? body['since'] : undefined
       return Response.json({ sends: await getEmailLedger(since) })
     }
-    return new Response("Bad Request: op must be 'draft', 'preview', or 'ledger'", { status: 400 })
+    if (body['op'] === 'revisions') {
+      return Response.json({ sends: await getEmailRevisions() })
+    }
+    return new Response("Bad Request: op must be 'draft', 'preview', 'ledger', or 'revisions'", { status: 400 })
   } catch (err) {
     if (err instanceof DailyDraftError) {
       return Response.json({ error: err.message }, { status: err.status })
