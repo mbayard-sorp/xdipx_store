@@ -214,6 +214,19 @@ per PR, so a full 15-PR run is ~30 minutes of Max.
    Never leave two open PRs racing to apply the same suggestion: whichever merges first conflicts
    the other on the same file, and the loser then sits parked as an invisible `skip / conflict` that
    nothing surfaces (`docs/store-team/operating-system.md` §10, "three ways a PR can be stuck").
+
+   **Check the open owner-blocker list before applying a suggestion that cites owner direction or a
+   named doc as authority for a rule touching a Hard Rule** (ticket #19519, after #19401/#19404/#19406
+   bounced on PR #1865 for encoding "MAP applies only to Lovense and Playground" as settled policy
+   while open blocker `431` says that exact pricing-audit doc conflicts with the Hard Rule in
+   `docs/store-team/mission-brief.md`, "MAP rules are law... not in an email", and asks the owner to
+   pick a side, unresolved). Before opening a PR whose suggestion text cites owner direction or a
+   named doc as authority for a rule touching anything `docs/emma-voice.md` Hard Rules,
+   `mission-brief.md` "MAP rules are law", or `operating-system.md` §7 would otherwise govern: `GET
+   /api/team/blocker` and grep for an open row about the same doc/rule. If one exists and is still
+   open, do not apply that clause — note the conflict on the suggestion (and in the PR body, for any
+   sibling clause of the same row you do apply) and leave it for owner resolution instead of shipping
+   one side of it.
 2. Branch `agents/suggestion-<id>` from the default branch.
 3. Minimal diff, allowlisted files only: **`.claude/agents/*.md`, `docs/store-team/*.md`,
    `docs/homepage-team/*.md`, and nothing else.** That is the literal regex in
