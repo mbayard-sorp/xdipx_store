@@ -390,6 +390,14 @@ function rowCoversDate(row: MarketingCalendarCampaignRow, date: string): boolean
   return row.eventDate <= date && date <= end
 }
 
+/** A row with no `sends` list (an Instagram/homepage-theme row, or a
+ *  standing-blocks row) names no email send dates at all, so it must not
+ *  win the override and silently turn off every date it covers. */
+function hasSendsList(row: MarketingCalendarCampaignRow): boolean {
+  const assets = row.assetsJson as { sends?: unknown } | null
+  return !!assets && Array.isArray(assets.sends) && assets.sends.length > 0
+}
+
 /** `null` means no covering row was found; fall back to the Tue/Thu/Sat default. */
 export function resolveSendOverride(rows: readonly MarketingCalendarCampaignRow[], date: string): boolean | null {
   const superseded = new Set<number>()
@@ -397,7 +405,7 @@ export function resolveSendOverride(rows: readonly MarketingCalendarCampaignRow[
     const assets = row.assetsJson as { supersedes?: unknown } | null
     if (assets && typeof assets.supersedes === 'number') superseded.add(assets.supersedes)
   }
-  const covering = rows.filter((r) => !superseded.has(r.id) && rowCoversDate(r, date))
+  const covering = rows.filter((r) => !superseded.has(r.id) && hasSendsList(r) && rowCoversDate(r, date))
   if (covering.length === 0) return null
   // Highest id wins on an unresolved overlap (the newer row), consistent with
   // `supersedes` already preferring the replacement over what it replaces.
