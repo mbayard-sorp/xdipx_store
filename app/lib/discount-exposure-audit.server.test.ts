@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import {
   isUnboundedExposure,
   computeExposureCounts,
+  scopeVariantsToItems,
   codeAppearsInPromoRows,
   runDiscountExposureAudit,
   type CatalogVariant,
@@ -34,10 +35,10 @@ describe('isUnboundedExposure', () => {
 })
 
 const VARIANTS: CatalogVariant[] = [
-  { sku: 'A1', vendor: 'Dame', price: 100, availableForSale: true },   // contractual brand, in stock
-  { sku: 'A2', vendor: 'Generic Brand', price: 20, availableForSale: true },  // below cost at deep discount
-  { sku: 'A3', vendor: 'Generic Brand', price: 50, availableForSale: false }, // would be below cost, but out of stock
-  { sku: 'A4', vendor: 'Generic Brand', price: 80, availableForSale: true },  // no price-floor row at all
+  { sku: 'A1', vendor: 'Dame', price: 100, availableForSale: true, productId: 'gid://shopify/Product/1' },   // contractual brand, in stock
+  { sku: 'A2', vendor: 'Generic Brand', price: 20, availableForSale: true, productId: 'gid://shopify/Product/2' },  // below cost at deep discount
+  { sku: 'A3', vendor: 'Generic Brand', price: 50, availableForSale: false, productId: 'gid://shopify/Product/3' }, // would be below cost, but out of stock
+  { sku: 'A4', vendor: 'Generic Brand', price: 80, availableForSale: true, productId: 'gid://shopify/Product/4' },  // no price-floor row at all
 ]
 
 const FLOORS = new Map<string, PriceFloorRow>([
@@ -70,6 +71,22 @@ describe('computeExposureCounts', () => {
   })
 })
 
+describe('scopeVariantsToItems', () => {
+  it('returns every variant unchanged for an "all" scope', () => {
+    expect(scopeVariantsToItems({ type: 'all' }, VARIANTS)).toEqual(VARIANTS)
+  })
+  it('restricts to only the variants whose product is in the scoped id set', () => {
+    const scoped = scopeVariantsToItems(
+      { type: 'products', productIds: ['gid://shopify/Product/1', 'gid://shopify/Product/3'] },
+      VARIANTS,
+    )
+    expect(scoped.map(v => v.sku)).toEqual(['A1', 'A3'])
+  })
+  it('returns nothing when the scoped product set reaches no catalog variant', () => {
+    expect(scopeVariantsToItems({ type: 'products', productIds: ['gid://shopify/Product/999'] }, VARIANTS)).toEqual([])
+  })
+})
+
 describe('codeAppearsInPromoRows', () => {
   it('matches case-insensitively', () => {
     expect(codeAppearsInPromoRows('bf20', ['Code: BF20\nDepth: 20%'])).toBe(true)
@@ -92,7 +109,16 @@ function makeDeps(overrides: Partial<DiscountExposureDeps> = {}): DiscountExposu
   }
 }
 
-const X25XPOFF: ExposedDiscount = { code: 'X25XPOFF', discountId: 'gid://shopify/DiscountCodeNode/1', percentage: 0.25, endsAt: null, usageLimit: null }
+const X25XPOFF: ExposedDiscount = {
+  code: 'X25XPOFF',
+  discountId: 'gid://shopify/DiscountCodeNode/1',
+  percentage: 0.25,
+  endsAt: null,
+  usageLimit: null,
+  itemsScope: { type: 'all' },
+  customerAll: true,
+  minimumRequirementSummary: null,
+}
 
 describe('runDiscountExposureAudit', () => {
   it('does nothing when no ACTIVE code discount is unbounded', async () => {
@@ -112,16 +138,72 @@ describe('runDiscountExposureAudit', () => {
     expect(res.exposed).toBe(1)
     expect(res.findings).toEqual([{
       code: 'X25XPOFF', belowCostCount: 1, mapEqualsMsrpCount: 1, contractualBrandVariantCount: 1,
-      covered: false, blockerFiled: true,
+      covered: false, blockerFiled: true, singleCustomer: false,
     }])
     expect(deps.fileBlocker).toHaveBeenCalledOnce()
     const call = (deps.fileBlocker as any).mock.calls[0][0]
     expect(call.dedupeKey).toBe('discount-exposure:x25xpoff')
+    expect(call.priority).toBe(1)
     expect(call.detail).toContain('1 in-stock variant(s) would sell below wholesale cost at 25% off')
     expect(call.detail).toContain('1 product(s) have MAP equal to MSRP')
     expect(call.detail).toContain('1 variant(s) belong to a Nalpac MAP-verified')
     expect(call.detail).toContain('no end date')
     expect(call.detail).toContain('no usage limit')
+  })
+
+  it('restricts the exposure count to 3 scoped products out of a large catalog', async () => {
+    // GLIDE10/GLIDE15 (blockers #2894/#2895): scoped to three System JO lube
+    // products, in a much larger catalog, where the real below-cost count is
+    // 0. The rest of the (large) catalog is full of variants that WOULD
+    // count as exposed if the scope were ignored, same as the live bug.
+    const jo1 = { sku: 'JO-1', vendor: 'System JO', price: 30, availableForSale: true, productId: 'gid://shopify/Product/jo1' }
+    const jo2 = { sku: 'JO-2', vendor: 'System JO', price: 25, availableForSale: true, productId: 'gid://shopify/Product/jo2' }
+    const jo3 = { sku: 'JO-3', vendor: 'System JO', price: 20, availableForSale: true, productId: 'gid://shopify/Product/jo3' }
+    const restOfCatalog = Array.from({ length: 50 }, (_, i) => ({
+      sku: `BULK-${i}`, vendor: 'Dame', price: 10, availableForSale: true, productId: `gid://shopify/Product/bulk${i}`,
+    }))
+    const largeCatalog: CatalogVariant[] = [jo1, jo2, jo3, ...restOfCatalog]
+    const largeFloors = new Map<string, PriceFloorRow>([
+      ['JO-1', { wholesale: 15, msrp: 32, mapPrice: 30 }],
+      ['JO-2', { wholesale: 12, msrp: 27, mapPrice: 25 }],
+      ['JO-3', { wholesale: 10, msrp: 22, mapPrice: 20 }],
+      // Every BULK-* SKU is a Dame (contractual brand) variant priced to go
+      // below its own wholesale cost at 10% off -- real exposure, but not for
+      // a code scoped to the three JO products.
+      ...restOfCatalog.map(v => [v.sku, { wholesale: 9.5, msrp: 15, mapPrice: 15 }] as const),
+    ])
+    const scoped: ExposedDiscount = {
+      ...X25XPOFF,
+      code: 'GLIDE10',
+      percentage: 0.10,
+      itemsScope: { type: 'products', productIds: [jo1.productId, jo2.productId, jo3.productId] },
+    }
+    const deps = makeDeps({
+      listExposedDiscounts: vi.fn(async () => [scoped]),
+      listCatalogVariants: vi.fn(async () => largeCatalog),
+      getPriceFloors: vi.fn(async () => largeFloors),
+    })
+    const res = await runDiscountExposureAudit(deps)
+    expect(res.findings[0]).toMatchObject({ belowCostCount: 0, mapEqualsMsrpCount: 0, contractualBrandVariantCount: 0 })
+  })
+
+  it('reports a code scoped away from DiscountCustomerAll as single-customer and caps it at P2', async () => {
+    const singleCustomer: ExposedDiscount = { ...X25XPOFF, code: 'VIP25', customerAll: false }
+    const deps = makeDeps({ listExposedDiscounts: vi.fn(async () => [singleCustomer]) })
+    const res = await runDiscountExposureAudit(deps)
+    expect(res.findings[0]).toMatchObject({ singleCustomer: true })
+    const call = (deps.fileBlocker as any).mock.calls[0][0]
+    expect(call.priority).toBe(2)
+    expect(call.detail).toContain('single-customer code')
+  })
+
+  it('surfaces the minimum requirement in the blocker detail without changing priority', async () => {
+    const withMin: ExposedDiscount = { ...X25XPOFF, code: 'BIGCART20', minimumRequirementSummary: 'minimum subtotal $75.00' }
+    const deps = makeDeps({ listExposedDiscounts: vi.fn(async () => [withMin]) })
+    await runDiscountExposureAudit(deps)
+    const call = (deps.fileBlocker as any).mock.calls[0][0]
+    expect(call.detail).toContain('minimum subtotal $75.00')
+    expect(call.priority).toBe(1)
   })
 
   it('does not file a blocker when an open promo row already covers the code', async () => {

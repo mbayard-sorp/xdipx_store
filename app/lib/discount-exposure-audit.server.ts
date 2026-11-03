@@ -51,6 +51,32 @@ export interface CatalogVariant {
   vendor: string
   price: number
   availableForSale: boolean
+  productId: string
+}
+
+/**
+ * What a discount's `customerGets.items` actually restricts it to. `all`
+ * means catalog-wide (or a shape we could not fully resolve -- see
+ * `resolveItemsScope`, which conservatively falls back to `all` rather than
+ * under-restricting and hiding real exposure).
+ */
+export type ItemsScope =
+  | { type: 'all' }
+  | { type: 'products'; productIds: readonly string[] }
+
+/**
+ * Restricts the catalog-wide variant list to the ones a code can actually
+ * reach. Ticket #19551: GLIDE10/GLIDE15 are scoped to three specific products
+ * but were being checked against the whole catalog, reporting 305/326
+ * below-cost variants that do not belong to either code at all.
+ */
+export function scopeVariantsToItems(
+  scope: ItemsScope,
+  variants: readonly CatalogVariant[],
+): CatalogVariant[] {
+  if (scope.type === 'all') return [...variants]
+  const ids = new Set(scope.productIds)
+  return variants.filter(v => ids.has(v.productId))
 }
 
 export interface PriceFloorRow {
@@ -104,6 +130,12 @@ export interface ExposedDiscount {
   percentage: number
   endsAt: string | null
   usageLimit: number | null
+  /** What products/collections (if any) `customerGets.items` restricts this to. */
+  itemsScope: ItemsScope
+  /** True when `context.__typename` is `DiscountBuyerSelectionAll` -- every customer, not a segment or a named list. */
+  customerAll: boolean
+  /** Human summary of `minimumRequirement`, surfaced to the owner; never gates filing. */
+  minimumRequirementSummary: string | null
 }
 
 export interface DiscountExposureDeps {
@@ -149,7 +181,7 @@ async function getPriceFloorsLive(skus: readonly string[]): Promise<Map<string, 
  * `items: all` discount is scoped to the whole catalog.
  */
 async function listCatalogVariantsLive(): Promise<CatalogVariant[]> {
-  type Node = { vendor: string; variants: { nodes: { sku: string | null; price: string; availableForSale: boolean }[] } }
+  type Node = { id: string; vendor: string; variants: { nodes: { sku: string | null; price: string; availableForSale: boolean }[] } }
   const out: CatalogVariant[] = []
   let after: string | null = null
   for (;;) {
@@ -158,6 +190,7 @@ async function listCatalogVariantsLive(): Promise<CatalogVariant[]> {
         query DiscountExposureCatalogVariants($after: String) {
           products(first: 50, after: $after, query: "status:active") {
             nodes {
+              id
               vendor
               variants(first: 100) { nodes { sku price availableForSale } }
             }
@@ -168,13 +201,62 @@ async function listCatalogVariantsLive(): Promise<CatalogVariant[]> {
     for (const p of data.products.nodes) {
       for (const v of p.variants.nodes) {
         if (!v.sku) continue
-        out.push({ sku: v.sku, vendor: p.vendor, price: Number(v.price), availableForSale: v.availableForSale })
+        out.push({ sku: v.sku, vendor: p.vendor, price: Number(v.price), availableForSale: v.availableForSale, productId: p.id })
       }
     }
     if (!data.products.pageInfo.hasNextPage) break
     after = data.products.pageInfo.endCursor
   }
   return out
+}
+
+/**
+ * Resolves `customerGets.items` to the exact set of product ids a code
+ * reaches, or `all` when it is genuinely catalog-wide (`AllDiscountItems`)
+ * or when a nested connection was too large to fully page in one call.
+ * Falling back to `all` on truncation is deliberate: under-restricting
+ * silently hides real exposure (the GLIDE10/15 bug this ticket fixes),
+ * over-restricting-to-all only makes the audit report more than it should,
+ * which is the safe direction for a blocker-filing tool.
+ */
+function resolveItemsScope(items: {
+  __typename: string
+  products?: { nodes: { id: string }[]; pageInfo: { hasNextPage: boolean } }
+  collections?: {
+    nodes: { id: string; products: { nodes: { id: string }[]; pageInfo: { hasNextPage: boolean } } }[]
+    pageInfo: { hasNextPage: boolean }
+  }
+}): ItemsScope {
+  if (items.__typename === 'DiscountProducts') {
+    if (!items.products || items.products.pageInfo.hasNextPage) return { type: 'all' }
+    return { type: 'products', productIds: items.products.nodes.map(n => n.id) }
+  }
+  if (items.__typename === 'DiscountCollections') {
+    if (!items.collections || items.collections.pageInfo.hasNextPage) return { type: 'all' }
+    const productIds: string[] = []
+    for (const c of items.collections.nodes) {
+      if (c.products.pageInfo.hasNextPage) return { type: 'all' }
+      productIds.push(...c.products.nodes.map(p => p.id))
+    }
+    return { type: 'products', productIds }
+  }
+  // AllDiscountItems, or a future items shape this audit does not know yet.
+  return { type: 'all' }
+}
+
+function summarizeMinimumRequirement(req: {
+  __typename: string
+  greaterThanOrEqualToQuantity?: string
+  greaterThanOrEqualToSubtotal?: { amount: string }
+} | null | undefined): string | null {
+  if (!req) return null
+  if (req.__typename === 'DiscountMinimumQuantity' && req.greaterThanOrEqualToQuantity != null) {
+    return `minimum quantity ${req.greaterThanOrEqualToQuantity}`
+  }
+  if (req.__typename === 'DiscountMinimumSubtotal' && req.greaterThanOrEqualToSubtotal != null) {
+    return `minimum subtotal $${req.greaterThanOrEqualToSubtotal.amount}`
+  }
+  return null
 }
 
 /**
@@ -186,6 +268,15 @@ async function listCatalogVariantsLive(): Promise<CatalogVariant[]> {
  * `DiscountCustomerGetsValue` is read the same way for `DiscountPercentage`.
  */
 async function listExposedDiscountsLive(): Promise<ExposedDiscount[]> {
+  type ItemsNode = {
+    __typename: string
+    products?: { nodes: { id: string }[]; pageInfo: { hasNextPage: boolean } }
+    collections?: {
+      nodes: { id: string; products: { nodes: { id: string }[]; pageInfo: { hasNextPage: boolean } } }[]
+      pageInfo: { hasNextPage: boolean }
+    }
+  }
+  type MinReqNode = { __typename: string; greaterThanOrEqualToQuantity?: string; greaterThanOrEqualToSubtotal?: { amount: string } }
   type Node = {
     id: string
     discount: {
@@ -194,7 +285,8 @@ async function listExposedDiscountsLive(): Promise<ExposedDiscount[]> {
       endsAt?: string | null
       usageLimit?: number | null
       context?: { __typename: string }
-      customerGets?: { items: { __typename: string }; value: { __typename: string; percentage?: number } }
+      minimumRequirement?: MinReqNode | null
+      customerGets?: { items: ItemsNode; value: { __typename: string; percentage?: number } }
     }
   }
   const out: ExposedDiscount[] = []
@@ -213,8 +305,24 @@ async function listExposedDiscountsLive(): Promise<ExposedDiscount[]> {
                   endsAt
                   usageLimit
                   context { __typename }
+                  minimumRequirement {
+                    __typename
+                    ... on DiscountMinimumQuantity { greaterThanOrEqualToQuantity }
+                    ... on DiscountMinimumSubtotal { greaterThanOrEqualToSubtotal { amount } }
+                  }
                   customerGets {
-                    items { __typename }
+                    items {
+                      __typename
+                      ... on DiscountProducts {
+                        products(first: 250) { nodes { id } pageInfo { hasNextPage } }
+                      }
+                      ... on DiscountCollections {
+                        collections(first: 50) {
+                          nodes { id products(first: 250) { nodes { id } pageInfo { hasNextPage } } }
+                          pageInfo { hasNextPage }
+                        }
+                      }
+                    }
                     value { __typename ... on DiscountPercentage { percentage } }
                   }
                 }
@@ -235,7 +343,17 @@ async function listExposedDiscountsLive(): Promise<ExposedDiscount[]> {
       const usageLimit = d.usageLimit ?? null
       if (!isUnboundedExposure({ itemsAll, contextAll, endsAt, usageLimit })) continue
       const percentage = d.customerGets?.value.__typename === 'DiscountPercentage' ? (d.customerGets.value.percentage ?? 0) : 0
-      out.push({ code, discountId: n.id, percentage, endsAt, usageLimit })
+      const itemsScope = d.customerGets ? resolveItemsScope(d.customerGets.items) : { type: 'all' as const }
+      out.push({
+        code,
+        discountId: n.id,
+        percentage,
+        endsAt,
+        usageLimit,
+        itemsScope,
+        customerAll: contextAll,
+        minimumRequirementSummary: summarizeMinimumRequirement(d.minimumRequirement),
+      })
     }
     if (!data.discountNodes.pageInfo.hasNextPage) break
     after = data.discountNodes.pageInfo.endCursor
@@ -259,6 +377,8 @@ export interface ExposureFinding extends ExposureCounts {
   code: string
   covered: boolean
   blockerFiled: boolean
+  /** True when the code's `context` is not `DiscountBuyerSelectionAll` -- scoped to a segment or named customers, never filed at P1. */
+  singleCustomer: boolean
 }
 
 export interface DiscountExposureAuditResult {
@@ -266,7 +386,11 @@ export interface DiscountExposureAuditResult {
   findings: ExposureFinding[]
 }
 
-function blockerDetail(code: string, d: Pick<ExposedDiscount, 'endsAt' | 'usageLimit' | 'percentage'>, counts: ExposureCounts): string {
+function blockerDetail(
+  code: string,
+  d: Pick<ExposedDiscount, 'endsAt' | 'usageLimit' | 'percentage' | 'customerAll' | 'minimumRequirementSummary'>,
+  counts: ExposureCounts,
+): string {
   const pct = Math.round(d.percentage * 100)
   const bits = [
     `${counts.belowCostCount} in-stock variant(s) would sell below wholesale cost at ${pct}% off`,
@@ -275,6 +399,8 @@ function blockerDetail(code: string, d: Pick<ExposedDiscount, 'endsAt' | 'usageL
   ]
   if (d.endsAt == null) bits.push('no end date')
   if (d.usageLimit == null) bits.push('no usage limit')
+  if (!d.customerAll) bits.push('single-customer code (not available to all customers)')
+  if (d.minimumRequirementSummary) bits.push(d.minimumRequirementSummary)
   return `Code ${code}: ${bits.join('; ')}.`
 }
 
@@ -297,8 +423,14 @@ export async function runDiscountExposureAudit(
 
   const findings: ExposureFinding[] = []
   for (const d of exposed) {
-    const counts = computeExposureCounts(d.percentage, variants, floors)
+    const reachable = scopeVariantsToItems(d.itemsScope, variants)
+    const counts = computeExposureCounts(d.percentage, reachable, floors)
     const covered = await deps.isCoveredByOpenPromo(d.code)
+    const singleCustomer = !d.customerAll
+    // A single-customer/segment-scoped code reaches far fewer carts than a
+    // catalog-wide one, so it never earns the owner's most urgent P1, even
+    // when the raw counts look identical to a catalog-wide code's.
+    const highRisk = counts.belowCostCount > 0 || counts.contractualBrandVariantCount > 0
     let blockerFiled = false
     if (!covered) {
       await deps.fileBlocker({
@@ -306,14 +438,14 @@ export async function runDiscountExposureAudit(
         title: `Discount code ${d.code} is live with no promo row covering it`,
         detail: blockerDetail(d.code, d, counts),
         category: 'decision',
-        priority: counts.belowCostCount > 0 || counts.contractualBrandVariantCount > 0 ? 1 : 2,
+        priority: highRisk && !singleCustomer ? 1 : 2,
         source: 'sweep',
         sourceRef: d.discountId,
-        evidence: `discountNodes (status:active method:code) + ${variants.length} live catalog variants + nalpac_price_history, read ${new Date().toISOString().slice(0, 10)}`,
+        evidence: `discountNodes (status:active method:code) + ${reachable.length} reachable of ${variants.length} live catalog variants + nalpac_price_history, read ${new Date().toISOString().slice(0, 10)}`,
       })
       blockerFiled = true
     }
-    findings.push({ code: d.code, ...counts, covered, blockerFiled })
+    findings.push({ code: d.code, ...counts, covered, blockerFiled, singleCustomer })
   }
 
   return { exposed: exposed.length, findings }
