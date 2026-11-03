@@ -211,7 +211,20 @@ approve/reject/watch executed (and any skipped due to cap or kill switch), price
 downstream health, top opportunities with the numbers. **Reject-rate math uses `reviewed_at`, never
 `updated_at`**: a discovery run that still sees an already-rejected row in-feed bumps `updated_at`
 with no new review (`import-monitor.server.ts`'s "never reopen" behavior), so an `updated_at`-based
-count inflates the reject rate. Log spend
+count inflates the reject rate.
+
+**Report lifetime imported-SKU sell-through, every day (ticket #19547).** This brief carried "zero
+orders from newly imported SKUs" for five consecutive weeks while the true lifetime figure was not
+zero — $250.90 on 9 `order_line_items` lines across 8 of 46 orders, about 0.5% of 1,902 imports,
+last sale 2026-10-19, measured the run this rule was added. Having the number stops both the false
+zero and the volume-led importing it failed to discourage. Each daily summary reports: lifetime
+`order_line_items` revenue on imported SKUs (join `sku`/`variant_skus` to `import_candidates` where
+`status='imported'`) and days since the last imported-SKU order. While that figure exceeds 14 days,
+weight approvals toward consumables, giftables, and under-covered collections (read from the
+current demand signals — e.g. couples/wands/anal/suction view counts), and reject on a specific
+named defect only, never on volume alone.
+
+Log spend
 (`POST /api/homepage-team/spend {"kind":"tokens","source":"agent-sdk","feature":"product-daily",...}`
 — the `product-` prefix is required or the budget gate reads 0), then finish:
 

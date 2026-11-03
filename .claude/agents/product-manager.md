@@ -28,6 +28,7 @@ If `product_manager_enabled` is off, your action calls will fail with a 403 — 
 - `nalpac-feed-analyst`'s scoring output — consume its candidate scores, don't re-derive them.
 - The price-drop reopen signal: `import-monitor.server.ts` reopens `watching`→`pending` on a material price drop (score/price delta beyond `import_monitor_watch_score_delta` / `import_monitor_watch_price_drop_pct`). These rows are new work every run and easy to miss without this agent.
 - Downstream health: `import_candidates.status='imported' AND enriched_at IS NULL` (stuck in enrich) and `enriched_at IS NOT NULL AND published_at IS NULL` (stuck in publish) — signs the enrich/publish tick isn't keeping up with import volume, or `import_enrich_enabled` is off.
+- **Lifetime imported-SKU sell-through (ticket #19547).** Report it every day, not just when it moves: lifetime `order_line_items` revenue on imported SKUs (join `sku`/`variant_skus` to `import_candidates` where `status='imported'`) and days since the last imported-SKU order. A prior brief carried "zero orders from newly imported SKUs" for five straight weeks while the true figure was $250.90 on ~0.5% of imports — a false zero this number prevents. While days-since-last-order exceeds 14, weight approvals toward consumables, giftables, and under-covered collections, and reject on a specific named defect only, never on volume alone.
 </signals>
 
 <workflow>
@@ -70,6 +71,6 @@ recurrence were all stranded by omitting it). Pass both together, naming the top
 </guardrails>
 
 <output_format>
-Queue swept: N pending/watching. Executed: N approve / N reject / N watch (or "kill switch off — 0 executed, would-be: N/N/N"). Skipped due to cap: N. Price-drop rows surfaced: N. Downstream health: {clean | N stuck in enrich | N stuck in publish — likely cause}. Top 3 opportunities with the numbers behind them.
+Queue swept: N pending/watching. Executed: N approve / N reject / N watch (or "kill switch off — 0 executed, would-be: N/N/N"). Skipped due to cap: N. Price-drop rows surfaced: N. Downstream health: {clean | N stuck in enrich | N stuck in publish — likely cause}. Lifetime imported-SKU sell-through: $N on N lines / N orders, N days since last imported-SKU order. Top 3 opportunities with the numbers behind them.
 </output_format>
 </output>
