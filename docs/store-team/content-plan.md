@@ -251,7 +251,7 @@ Format rules added 2026-07-21 (owner-approved):
   if…" line even when the row is not marked †. Write it in on the first draft; do not spend a
   shared rewrite cycle adding it later.
 
-Topic bank (31; work top to bottom within the Tue/Fri rhythm, reorder to serve the theme week,
+Topic bank (33; work top to bottom within the Tue/Fri rhythm, reorder to serve the theme week,
 extend freely — additions need a slug, problem, and target query):
 
 | # | Slug | Problem | Target query |
@@ -288,6 +288,7 @@ extend freely — additions need a slug, problem, and target query):
 | 30 | can-you-travel-with-a-sex-toy | Travel worry: security lines, packing, batteries | "can you bring a sex toy on a plane" |
 | 31 | when-should-you-throw-away-a-sex-toy | Knowing when a toy is past its usable life, not just when it smells | "how do you know when to throw away a sex toy" |
 | 32 | how-often-do-couples-have-sex | Frequency comparison anxiety: doing arithmetic on your own sex life against a number you half-heard, and managing the count instead of the sex | "how often do couples have sex" |
+| 33 | we-bought-a-sex-toy-and-never-used-it | A toy both partners agreed to buy went badly or just awkwardly on the first try and now sits unused, with neither partner raising it again because raising it means reopening the moment it went wrong | "we bought a sex toy and never used it again" |
 
 † = health-adjacent; the "worth seeing a clinician if…" line is mandatory.
 
@@ -301,7 +302,17 @@ problem, target query, dagger flag if health-adjacent) targeting a query this ba
 cover, and append it to this table in the same run so the next run inherits it rather than
 rediscovering the gap. Row 31 above is the worked example (authored by run 1684, 2026-10-27,
 published clean). Row 32 is the second (authored by run 1742, 2026-10-30, serving calendar row 28's
-"Aftercare Is Not Optional" window from the "Questions Nobody Asks Out Loud" pillar). A COVERED row (15, 25, 26, 29) is not a permanent dead entry: retire it by
+"Aftercare Is Not Optional" window from the "Questions Nobody Asks Out Loud" pillar). Row 33 is the
+third (authored by content run 1817, 2026-11-03). By that run the bank was fully spent for the
+second time: rows 1-14, 16-24, 27, 28, 30, 31 and 32 all had published posts, rows 25, 26 and 29 are
+retired from the rotation, and row 15 is still parked for a distinct angle, so a Tue/Fri run reading
+top to bottom again found nothing writable. Row 33 targets a query no row covered, distinct from row
+7 (raising toys at all), row 21 (a partner who refuses) and row 22 (a partner who feels replaced):
+in all three of those the toy was never successfully bought and used together, and in row 33 it was,
+once, and the aftermath is the subject. It is also distinct from the guides post
+`what-should-you-expect-the-first-time-you-use-a-sex-toy`, which is prospective and solo-leaning
+where row 33 is retrospective and partnered. `check-topic-collision.ts` was clean against 20 prior
+posts. A COVERED row (15, 25, 26, 29) is not a permanent dead entry: retire it by
 striking it from the working rotation once a genuinely distinct angle is found or the cluster is
 judged fully held by its sibling post, rather than leaving every future run to re-read and
 re-reject the same four rows indefinitely.
