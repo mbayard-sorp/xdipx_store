@@ -43,7 +43,7 @@ Also: "The email team should also be able to use any of the images I've favorite
 The November plan is `marketing_calendar` rows 49 to 57; row 50 lists every send from Oct 27 to Dec 1. In short:
 
 - **Early access, Nov 17 to Nov 26, list only.** Code `EARLYGIFT25` (promo row #17448): 25% off 11 hero products, $40 minimum, once per customer. Sends Nov 17, 19, 21, 24. Nothing about Black Friday pricing appears on the homepage or social before Nov 27.
-- **Public, Nov 27 to Nov 30.** Code `BLACKFRIDAY25` (promo row #17449): the same 11 products and terms. Sends Nov 27 and 28 and Cyber Monday Nov 30. Fri Nov 27 and Mon Nov 30 are off the Tue/Thu/Sat cadence and wait on the owner's decision.
+- **Public, Nov 27 to Nov 30.** Code `BLACKFRIDAY25` (promo row #17449): the same 11 products and terms. Sends Nov 27 and 28 and Cyber Monday Nov 30. Fri Nov 27 and Mon Nov 30 are send days: daily cadence (owner direction 2026-11-02, below) puts every day on, not off.
 - **The 11 heroes** are all map_price 0, about 26% gross after the code: Doxy Original wand, Nixie rechargeable wand, ROMP Spin Travel, Vessa, Together Double Tap, Juven app panty, Lucile rabbit, Adam & Eve Full of Love, Miss Nikita, Daily Vibe kit, and the Tantus vibrating ring. The reserve is the Camtoyz Flexicurve rabbit. Re-check stock on Nov 24.
 - **Copy:** say "25% off" and state the dates. No struck MSRP, no savings-against-MSRP claim, no countdown, no "last chance". Early access is a perk the reader earned by subscribing, never a clock.
 - A code exists only once the owner mints it. Until the promo row shows minted, the copy names no code.
@@ -63,9 +63,17 @@ What that makes standing policy:
 7. **Gift card** in every send, at the bottom above Emma's closer: "can't decide" framing, linked to `/products/egift-card`, with the live denominations read on draft day ($25 to $400 today). No delivery-timing claim unless confirmed.
 8. **Gift claims.** State the 30-day unopened return window, 1 to 2 business days to ship, 3 to 7 for standard delivery, plain packaging, the XDIPX statement line, and free shipping at $59, each read from `app/lib/faq-content.ts` and `app/lib/shipping.ts` on draft day. No Dec 25 arrival promise until a cutoff is agreed.
 9. **A date in an email is a fact, not a clock.** "Through Nov 26" is fine. "Last call", "only X days left", and any day counter are not, per `docs/emma-voice.md`.
-10. **MAP.** Owner direction 2026-09-25 rule 5 (`docs/pricing-autopilot-audit-2026-09-25.md`): MAP applies only to Lovense and Playground. A price under a stored `map_price` on another brand does not disqualify a product from an email. Blocker 431 tracks the docs that still say otherwise.
+10. **MAP is disputed, not settled; this routine follows the stricter reading until the owner resolves it.** `docs/pricing-autopilot-audit-2026-09-25.md` rule 5 says MAP applies only to Lovense and Playground, but open owner blocker `431` (`map-doctrine-conflict-charter-vs-pricing-audit`) says that contradicts the Hard Rule in `docs/store-team/mission-brief.md` ("MAP rules are law... not in an email") and has asked the owner to pick one side since 2026-10-05. Until blocker 431 closes, this routine does not narrow MAP enforcement to two brands: no struck price or discount framing on any MAP = MSRP product, any brand.
 11. **Notification, not status.** The team builds each draft on its draft date without being asked and sends the owner one notification when it is ready to view. No notification on a day with no draft due, and no other routine status to the owner about email. The owner reviews, gives feedback, and hits send; no autosend. Feedback is applied to the same draft, and the owner is notified again. If a draft cannot be built (valve off, code not minted, a failure), the owner gets one notification with the reason, because a silent miss is what lost the Oct 29 send.
 12. **The builder, until the cloud trigger exists:** the desktop scheduled task `xdipx-email-draft-day`, 06:30 local time, which only fires while the Claude app is open and runs on next launch if it was closed. Disable it in the same change that records the cloud trigger id in this doc's Activation checklist step 6, so two builders never run.
+
+## Owner direction, 2026-11-02 (binding)
+
+> "I want emails going out every day until the end of the year. This is the season where people spend the most money." (all-hands)
+
+**Cadence.** From 2026-11-02 through 2026-12-31, every day is a send day (`marketing_calendar` row 60, "Email Program: daily through Dec 31"). Themed sends keep row 58's job, ladder, and code; standing blocks per row 59. The draft is built the morning of the send. Tue/Thu/Sat resumes on 2027-01-01 unless the owner extends it. This replaces the old Fri Nov 27 / Mon Nov 30 "off cadence, wait on the owner" line above: those two days are on, like every other day in the window. Thanksgiving (11-26) and Christmas Day (12-25) are sends with a short, warm job and no code push.
+
+**Variety and list-health guard.** A daily send to a list under 250 carries real variety and list-health risk. No hero product repeats within seven sends; no grid product repeats within three. `email-analyst` checks unsubscribes per send; if two sends in a row lose more than 1.5% of recipients, it files a `strategy` suggestion to the owner on cadence. It never pauses sends on its own.
 
 ## Step 0: Start and gate
 
