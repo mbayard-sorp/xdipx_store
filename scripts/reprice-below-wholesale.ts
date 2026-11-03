@@ -26,148 +26,27 @@
  *   npx tsx scripts/reprice-below-wholesale.ts --apply     # writes the floor price to Shopify
  */
 import './_load-env'
-import { adminGraphQL, normalizeMetafieldKey, updateVariantPricing } from '../app/lib/shopify.server'
-import { enforceWholesaleFloor } from '../app/lib/pricing-engine-v2.server'
-import { getMinMarkupPct } from '../app/lib/pricing-apply-v2.server'
+import { updateVariantPricing } from '../app/lib/shopify.server'
+import { scanRepriceBelowWholesale } from '../app/lib/reprice-below-wholesale-scan.server'
 
 const APPLY = process.argv.includes('--apply')
 const AS_JSON = process.argv.includes('--json')
 const limitIdx = process.argv.indexOf('--limit')
 const LIMIT = limitIdx > -1 ? parseInt(process.argv[limitIdx + 1] ?? '0', 10) || Infinity : Infinity
 
-const TEST_SKU_PREFIX = /^XDX-TEST-/i
-const PAGE_SIZE = 50
-const PAGE_DELAY_MS = 400
-
-interface CandidateRow {
-  variantGid: string
-  sku: string
-  handle: string
-  title: string
-  vendor: string | null
-  productType: string | null
-  price: number
-  wholesaleCost: number
-  floorPrice: number
-  compareAtPrice: number | null
-  currentMarginPct: number | null
-  qty: number
-  recommendation: 'reprice' | 'delist'
-}
-
-interface ProductNode {
-  id: string
-  handle: string
-  title: string
-  vendor: string | null
-  productType: string | null
-  variants: {
-    nodes: Array<{
-      id: string
-      sku: string | null
-      price: string
-      compareAtPrice: string | null
-      inventoryQuantity: number
-    }>
-  }
-  metafields: { nodes: Array<{ namespace: string; key: string; value: string }> }
-}
-
-async function fetchActiveProducts(): Promise<ProductNode[]> {
-  const all: ProductNode[] = []
-  let cursor: string | null = null
-  let first = true
-
-  do {
-    if (!first) await new Promise(r => setTimeout(r, PAGE_DELAY_MS))
-    first = false
-
-    const data = await adminGraphQL<{
-      products: {
-        pageInfo: { hasNextPage: boolean; endCursor: string | null }
-        nodes: ProductNode[]
-      }
-    }>(`
-      query RepriceCandidates($first: Int!, $after: String) {
-        products(first: $first, after: $after, query: "status:active") {
-          pageInfo { hasNextPage endCursor }
-          nodes {
-            id
-            handle
-            title
-            vendor
-            productType
-            variants(first: 100) {
-              nodes { id sku price compareAtPrice inventoryQuantity }
-            }
-            metafields(keys: ["xdipx.wholesale_cost"], first: 5) {
-              nodes { namespace key value }
-            }
-          }
-        }
-      }
-    `, { first: PAGE_SIZE, after: cursor })
-
-    all.push(...data.products.nodes)
-    cursor = data.products.pageInfo.hasNextPage ? data.products.pageInfo.endCursor : null
-  } while (cursor !== null)
-
-  return all
-}
-
 async function main() {
-  const minMarkupPct = await getMinMarkupPct()
-  const products = await fetchActiveProducts()
-
-  const rows: CandidateRow[] = []
-  let variantsScanned = 0
-
-  for (const product of products) {
-    const mfMap = new Map<string, string>()
-    for (const mf of product.metafields.nodes) mfMap.set(normalizeMetafieldKey(mf), mf.value)
-    const wholesaleCostRaw = mfMap.get('wholesale_cost')
-    const wholesaleCost = wholesaleCostRaw != null ? parseFloat(wholesaleCostRaw) : null
-    if (wholesaleCost == null || wholesaleCost <= 0) continue
-
-    for (const variant of product.variants.nodes) {
-      variantsScanned++
-      if (TEST_SKU_PREFIX.test(variant.sku ?? '')) continue
-
-      const price = parseFloat(variant.price)
-      const floorPrice = enforceWholesaleFloor(price, wholesaleCost, minMarkupPct)
-      if (floorPrice === price) continue // at or above the floor already
-
-      const compareAtPrice = variant.compareAtPrice != null ? parseFloat(variant.compareAtPrice) : null
-      rows.push({
-        variantGid: variant.id,
-        sku: variant.sku || '(no sku)',
-        handle: product.handle,
-        title: product.title,
-        vendor: product.vendor,
-        productType: product.productType,
-        price,
-        wholesaleCost,
-        floorPrice,
-        compareAtPrice,
-        currentMarginPct: price > 0 ? Math.round(((price - wholesaleCost) / price) * 10000) / 100 : null,
-        qty: variant.inventoryQuantity,
-        recommendation: variant.inventoryQuantity > 0 ? 'reprice' : 'delist',
-      })
-    }
-  }
-
-  rows.sort((a, b) => a.currentMarginPct! - b.currentMarginPct!)
+  const { scannedProducts, variantsScanned, minMarkupPct, rows } = await scanRepriceBelowWholesale()
 
   if (AS_JSON) {
     console.log(JSON.stringify({
-      scannedProducts: products.length,
+      scannedProducts,
       variantsScanned,
       minMarkupPct,
       violators: rows.length,
       rows,
     }, null, 2))
   } else {
-    console.log(`Scanned ${products.length} ACTIVE products with a wholesale_cost metafield (${variantsScanned} variants).`)
+    console.log(`Scanned ${scannedProducts} ACTIVE products with a wholesale_cost metafield (${variantsScanned} variants).`)
     console.log(`Min markup floor: ${(minMarkupPct * 100).toFixed(1)}% (monitor_p2_min_markup_pct)`)
     console.log(`Variants priced below wholesale floor: ${rows.length}`)
     console.log('')

@@ -161,6 +161,22 @@ export const CRON_EXPECTATIONS: readonly CronExpectation[] = [
       + 'missed tick is not itself a money event the way a missed recompute is.',
   },
   {
+    route: '/cron/reprice-below-wholesale-scan',
+    plane: 'vercel',
+    schedule: '10 8 * * 1',
+    periodMinutes: WEEKLY,
+    graceMinutes: 240,
+    recorded: false,
+    moneyRelevant: false,
+    ownerTeam: 'product',
+    notes:
+      'Ticket #19545. Read-only weekly counterpart to scripts/reprice-below-wholesale.ts: scans the '
+      + 'ACTIVE catalog for variants priced below the wholesale floor and posts the measured count to '
+      + 'owner blocker #1550, the standing reprice-vs-delist decision. No Shopify write path exists in '
+      + 'this route or the shared scan module; a breach here delays that blocker\'s next refresh, not a '
+      + 'price.',
+  },
+  {
     route: '/cron/checkout-probe',
     plane: 'vercel',
     schedule: '0 */6 * * *',

@@ -852,6 +852,32 @@ export function createCronRoutes() {
   cronRoute('/pricing-batch-watchdog', handlePricingBatchWatchdog)
 
   /**
+   * GET|POST /cron/reprice-below-wholesale-scan
+   * Schedule: Monday 08:10 UTC (weekly) -- the unattended counterpart to
+   * scripts/reprice-below-wholesale.ts (ticket #19545). Runs the same
+   * read-only scan and posts the violator count, the reprice/delist split,
+   * and the top 25 rows to owner blocker #1550 (the reprice-vs-delist
+   * decision this scan exists to inform). No --apply path exists here or in
+   * the shared scan module; only the CLI script can write a price.
+   */
+  cronRoute('/reprice-below-wholesale-scan', async (_req, res) => {
+    try {
+      const { runRepriceBelowWholesaleReadout } = await import('../app/lib/reprice-below-wholesale-readout.server.js')
+      const result = await runRepriceBelowWholesaleReadout()
+      res.json({
+        ok: true,
+        updatedTargetBlocker: result.updatedTargetBlocker,
+        violators: result.scan.violators,
+        repriceCount: result.scan.repriceCount,
+        delistCount: result.scan.delistCount,
+      })
+    } catch (err) {
+      console.error('[cron:reprice-below-wholesale-scan]', err)
+      res.status(500).json({ error: String(err) })
+    }
+  })
+
+  /**
    * POST /cron/import-monitor
    * Schedule: 08:00 UTC daily — diff 4 Nalpac feeds against carried-SKU set,
    * tier + score + price-preview candidates, upsert import_candidates.
