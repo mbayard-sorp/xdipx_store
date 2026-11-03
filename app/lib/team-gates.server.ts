@@ -212,6 +212,16 @@ saying the batch exists, is available, or just arrived ("pick one", "it just lan
 REVISE for that specifically, never for naming product types plainly, and never by pushing the
 caption toward abstraction instead.
 
+Worked example, ticket #19589 (run 1806 took 20 calls to find one caption this rule actually
+accepts, so a caption of this shape is PASS, not REVISE, on the first call):
+"Wands, lube, and wearables, picked for how well they actually pair with what is already on your
+nightstand." This names three product types plainly, in a list, and connects them with one sentence
+about why they are grouped. It says nothing about the batch existing, arriving, or being in stock.
+Reading this as too vague to tell what the post covers is wrong: it names the types outright. Reading
+it as a commerce-event inventory announcement is also wrong: nothing in it claims availability. Judge
+any caption of this shape, naming types plus a connecting sentence about what they do or who they are
+for, the same way: PASS, not REVISE for either reason above.
+
 Charter (core + addendum):
 `
 
@@ -238,9 +248,32 @@ export async function runVoiceGateCheck(input: VoiceGateInput): Promise<VoiceGat
   }
 
   const system = `${VOICE_GATE_SYSTEM_PREFIX}${charterFor(addendum)}`
+  const content: Anthropic.ContentBlockParam[] = [
+    { type: 'text', text: buildVoiceGateUserContent({ text, platform, precedentsBlock }) },
+  ]
+  const parsed = await callVoiceGateModel(system, content)
+  return { verdict: parsed.verdict, reviewer: 'voice-gate', notes: parsed.notes }
+}
+
+/**
+ * One voice-gate model call: request, token logging, max_tokens diagnostics,
+ * and parsing. Mirrors `callPublishGateModel`'s retry shape (ticket #19589):
+ * a response cut off by the token cap fails `extractJson` and fails closed to
+ * a BLOCK-shaped parse error ("could not parse a verdict"), which on a long
+ * caption against the full charter + New-in-carousel worked example reads
+ * exactly like run 1806's truncation incident unless retried. 512 was
+ * measured too tight for a ~350-word caption's worth of reasoning; raised to
+ * 1024 to make the cutoff rarer, and retried once with a concise-JSON-only
+ * instruction when it still happens, exactly as the publish gate already does.
+ */
+async function callVoiceGateModel(
+  system: string,
+  content: Anthropic.ContentBlockParam[],
+  isRetry = false,
+): Promise<ReturnType<typeof parseVoiceGateModelOutput>> {
   const msg = await client.messages.create({
     model: SONNET,
-    max_tokens: 512,
+    max_tokens: 1024,
     // Pinned at 0 (ticket #10560), mirroring the publish gate's own fix
     // (#7896): this call ran at the SDK default temperature, and the same
     // caption re-judged minutes apart produced four different objections to
@@ -250,13 +283,34 @@ export async function runVoiceGateCheck(input: VoiceGateInput): Promise<VoiceGat
     // task, not one where call-to-call variety is a feature.
     temperature: 0,
     system: cacheableSystem(system),
-    messages: [{ role: 'user', content: buildVoiceGateUserContent({ text, platform, precedentsBlock }) }],
+    messages: [{ role: 'user', content }],
   })
   void logTokens('voice-gate', msg.usage)
   const block = msg.content[0]
   if (block?.type !== 'text') throw new Error('runVoiceGateCheck: unexpected Claude response type')
-  const parsed = parseVoiceGateModelOutput(block.text)
-  return { verdict: parsed.verdict, reviewer: 'voice-gate', notes: parsed.notes }
+  if (msg.stop_reason === 'max_tokens') {
+    console.error(
+      `[voice-gate] response hit max_tokens (${msg.usage.output_tokens} output tokens); ` +
+        'the JSON may be truncated and will fail-closed to BLOCK if so',
+    )
+    if (!isRetry) {
+      const shape = respondedWithPreambleOnly(block.text) ? 'entirely on prose before any JSON' : 'mid-object, after the JSON had started'
+      console.error(`[voice-gate] max_tokens spent ${shape}; retrying once with a concise-JSON-only instruction`)
+      const retryContent: Anthropic.ContentBlockParam[] = [
+        ...content,
+        {
+          type: 'text',
+          text:
+            'Your previous response was cut off by the token limit before producing one complete, valid ' +
+            'JSON object. Respond now with ONLY that JSON object, as concisely as possible (short notes, no ' +
+            'prose before or after it), starting with the { character as the very first character of your ' +
+            'response.',
+        },
+      ]
+      return callVoiceGateModel(system, retryContent, true)
+    }
+  }
+  return parseVoiceGateModelOutput(block.text)
 }
 
 /**
