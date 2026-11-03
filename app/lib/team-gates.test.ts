@@ -120,6 +120,18 @@ describe('VOICE_GATE_SYSTEM_PREFIX New-in carousel calibration (ticket #18715)',
   })
 })
 
+describe('VOICE_GATE_SYSTEM_PREFIX New-in carousel worked example (ticket #19589)', () => {
+  it('gives a concrete PASS example naming 3+ product types with a connecting sentence, resolving the too-vague vs commerce-event contradiction', async () => {
+    const { VOICE_GATE_SYSTEM_PREFIX } = await import('./team-gates.server')
+    expect(VOICE_GATE_SYSTEM_PREFIX).toContain('Worked example, ticket #19589')
+    // The example caption itself: three plain product types plus a connecting sentence.
+    expect(VOICE_GATE_SYSTEM_PREFIX).toContain('Wands, lube, and wearables')
+    // Names both wrong readings explicitly as wrong, for this shape.
+    expect(VOICE_GATE_SYSTEM_PREFIX).toContain('too vague to tell what the post covers is wrong')
+    expect(VOICE_GATE_SYSTEM_PREFIX).toContain('commerce-event inventory announcement is also wrong')
+  })
+})
+
 describe('parsePublishGateModelOutput', () => {
   it('parses a PASS with findings', () => {
     const raw = JSON.stringify({
