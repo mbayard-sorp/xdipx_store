@@ -31,6 +31,7 @@ import {
 } from '~/lib/shopify.server'
 import { buildEmmaSystemBlocks, BRAND_VOICE_SYSTEM_PROMPT } from '~/lib/claude.server'
 import { getPipelineSetting } from '~/lib/feed-processor.server'
+import { findEmmaVoiceViolationNames } from '~/lib/emma-voice-violations'
 import { SONNET } from './models.server'
 import type { GenerateCopyRequest } from '~/types'
 import type { EmmaHeroVariant } from '~/types'
@@ -585,6 +586,26 @@ function parseFieldResult(fieldKey: string, rawText: string, ctx: FieldRegenCont
 // All Shopify calls stay in shopify.server.ts; we call the exported helpers.
 // ---------------------------------------------------------------------------
 
+/**
+ * Pure voice-gate check for one field's regenerated text, run immediately
+ * before it reaches Shopify. Returns an error string naming the violation(s)
+ * when the text fails, or null when it passes. Exported (unlike the rest of
+ * this file's apply helpers) so the detection logic is unit-testable without
+ * mocking Shopify. This is the field-regen path's only voice gate today —
+ * see app/lib/emma-voice-violations.ts's module doc for why it was added
+ * (ticket #19980, split from #19949 / #8102 / #11147).
+ */
+export function checkFieldForVoiceViolations(fieldLabel: string, text: string): string | null {
+  const violations = findEmmaVoiceViolationNames(text)
+  if (violations.length === 0) return null
+  return `${fieldLabel}: Emma-voice violation(s) detected (${violations.join(', ')})`
+}
+
+function assertNoVoiceViolations(fieldLabel: string, text: string): void {
+  const error = checkFieldForVoiceViolations(fieldLabel, text)
+  if (error) throw new Error(error)
+}
+
 async function applyFieldResult(fieldKey: string, result: unknown, ctx: FieldRegenContext): Promise<void> {
   const productId = ctx.productId
 
@@ -592,6 +613,9 @@ async function applyFieldResult(fieldKey: string, result: unknown, ctx: FieldReg
     const copy = result as { eyebrow?: string; headline?: string; body?: string; aside?: string; pullQuote?: string }
     if (!copy.eyebrow || !copy.headline || !copy.body || !copy.aside) {
       throw new Error('emma-hero: incomplete parsed fields')
+    }
+    for (const [part, text] of Object.entries(copy)) {
+      if (typeof text === 'string') assertNoVoiceViolations(`emma-hero.${part}`, text)
     }
     await updateProductMetafield(productId, 'emma_hero', JSON.stringify({ ...copy, generatedAt: new Date().toISOString() }), 'json')
     if (copy.aside) {
@@ -602,6 +626,7 @@ async function applyFieldResult(fieldKey: string, result: unknown, ctx: FieldReg
 
   if (ctx.kind === 'emma-take' && fieldKey === 'emma-take') {
     if (ctx.dryRun) return
+    assertNoVoiceViolations('emma-take', result as string)
     await updateProductDescriptionHtml(productId, result as string)
     return
   }
@@ -612,23 +637,38 @@ async function applyFieldResult(fieldKey: string, result: unknown, ctx: FieldReg
     case 'tagline': {
       const arr = Array.isArray(result) ? result as string[] : [result as string]
       const val = arr[0]?.trim() ?? ''
-      if (val) await updateProductMetafield(productId, 'tagline', val, 'single_line_text_field')
+      if (val) {
+        assertNoVoiceViolations('tagline', val)
+        await updateProductMetafield(productId, 'tagline', val, 'single_line_text_field')
+      }
       break
     }
     case 'full_story': {
       const html = result as string
-      if (html) await updateProductMetafield(productId, 'full_story', html, 'multi_line_text_field')
+      if (html) {
+        assertNoVoiceViolations('full_story', html)
+        await updateProductMetafield(productId, 'full_story', html, 'multi_line_text_field')
+      }
       break
     }
     case 'both_ways': {
       const bw = result as { forHim: string; forHer: string }
-      if (bw.forHim) await updateProductMetafield(productId, 'works_for_him', bw.forHim, 'multi_line_text_field')
-      if (bw.forHer) await updateProductMetafield(productId, 'works_for_her', bw.forHer, 'multi_line_text_field')
+      if (bw.forHim) {
+        assertNoVoiceViolations('works_for_him', bw.forHim)
+        await updateProductMetafield(productId, 'works_for_him', bw.forHim, 'multi_line_text_field')
+      }
+      if (bw.forHer) {
+        assertNoVoiceViolations('works_for_her', bw.forHer)
+        await updateProductMetafield(productId, 'works_for_her', bw.forHer, 'multi_line_text_field')
+      }
       break
     }
     case 'seo_meta': {
       const meta = result as string
-      if (meta) await updateProductMetafield(productId, 'seo_meta_description', meta, 'multi_line_text_field')
+      if (meta) {
+        assertNoVoiceViolations('seo_meta_description', meta)
+        await updateProductMetafield(productId, 'seo_meta_description', meta, 'multi_line_text_field')
+      }
       break
     }
     case 'specifications': {
