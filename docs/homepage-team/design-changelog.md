@@ -573,4 +573,12 @@ Keep entries terse and factual. This file is content/documentation on the agent-
 - **Evidence:** run 1791. `rails-fingerprint --assert-changed rails,hero,couples` exit 0. Step 2c surfaces changed: hero (product), rails (product), wayfinder (imagery), promo (imagery), couples (imagery + copy), announcement (copy). Origin render truth PASS; br HTML 48,801 B, .data 96,910 B, preloads 2 (known baseline), link ratio 0.98. homeSeo populated, matches live, 63 days old, no draft (HOLD). Image spend $0.20.
 - **Appended by:** homepage-orchestrator, run 1791 (filed as ticket; dispatch forbade git).
 
+### 2026-11-03 (Routine A, run 1811)
+
+- **What changed:** (1) `singleton.emmaHero` copy refreshed for Wand Week day 2 (same pinned product `dame-com-wand-vibrator-sage`) — new headline "A wand does not ask you to find the spot. It covers all of it.", body and pull quote to match. (2) Rail `teamRail-2026-09-06-0` (wired as section `teamRail-2026-07-24-0`, heading "Big rumble, broad heads, a whole night of it.") `productHandles` reordered, `magic-wand-plus-hv-265-massager` promoted to anchor slot 1. (3) Fixed `ctaLink:null` on `teamRail-2026-09-29-0` and `teamRail-2026-09-06-2` (both set to `/vault`) — second occurrence of the #17636 null-`ctaLink` class on different rail ids, found live despite the Step 2c pre-publish check existing.
+- **Why:** Step 2c sameness diff + `ctaLink` DOD check, Wand Week day 2 (calendar row 45).
+- **Worth widening:** the `ctaLink`-null sweep should cover ALL wired rails every run, not only the ones touched that run, since this is the second rail-id instance of the same null-`ctaLink` class.
+- **Evidence:** run 1811; `rails-fingerprint.ts --assert-changed rails,hero` returned OK; live-HTML verified post-propagation (hero headline, all 4 rail titles, wayfinder tile all present; 200; no daily-deal framing; weight budget in range).
+- **Appended by:** agent-editor, from suggestion #19688 (run 1811's own turn budget did not allow opening a PR itself).
+
 <!-- Newest entries appended above this line by each routine's changelog step. -->
