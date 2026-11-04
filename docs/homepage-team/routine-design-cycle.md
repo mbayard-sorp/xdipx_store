@@ -313,15 +313,31 @@ attached, and it should be rewritten or deleted rather than kept for the reassur
   375/768/1440 against `docs/design-doctrine.md` and scores its rubric (hierarchy, spacing rhythm,
   type, color, imagery, motion, overall). The PR does not open on a REVISE or BLOCK; fix and
   re-review. Record the verdict + scores as an `/event` row (`agentRole:'design-critic'`).
-  **Calibration (ticket #16881).** The gate's own `<calibration>` block (`.claude/agents/design-critic.md`)
-  requires scoring 5 known-good and 5 known-bad historical screenshots before a BLOCK is trusted;
-  until that calibration run is recorded as its own `/event` row, the gate issues REVISE wherever it
-  would otherwise BLOCK, because an untrusted BLOCK is worse than a visible REVISE. **This
-  orchestrator (Routine B) owns recording that calibration event** — provide the 5-good/5-bad set,
-  dispatch the calibration pass, and post the `/event` row once scores separate cleanly; until then,
-  every REVISE that design-critic reports as a withheld BLOCK must be surfaced as a withheld BLOCK in
-  this run's summary and event row, never folded into the ordinary REVISE count, so the record shows
-  what was actually scored rather than reading as one more routine REVISE.
+  **Calibration (ticket #16881, supply fixed #18635).** The gate's own `<calibration>` block
+  (`.claude/agents/design-critic.md`) requires scoring 5 known-good and 5 known-bad screenshots
+  before a BLOCK is trusted; until that calibration run is recorded as its own `/event` row, the
+  gate issues REVISE wherever it would otherwise BLOCK, because an untrusted BLOCK is worse than a
+  visible REVISE. **This orchestrator (Routine B) owns recording that calibration event** — dispatch
+  the calibration pass and post the `/event` row once scores separate cleanly; until then, every
+  REVISE that design-critic reports as a withheld BLOCK must be surfaced as a withheld BLOCK in this
+  run's summary and event row, never folded into the ordinary REVISE count, so the record shows what
+  was actually scored rather than reading as one more routine REVISE.
+  - **The 5-good/5-bad set is `docs/homepage-team/calibration/`, committed and regenerable — do not
+    go looking for historical screenshots.** #16881 assigned an owner to a task whose inputs did not
+    exist: the corpus was specified as HISTORICAL captures, `.design-snapshots/` is gitignored, and a
+    scheduled cloud routine runs in an ephemeral container cloned fresh each time, so no capture any
+    run has ever taken survives to the next run. Run 1703 tried to record the calibration and could
+    not, for that reason and no other. The corpus is now ten committed crops cut from live production
+    by `scripts/design-calibration.ts`, where each `bad-*` entry reinstates one documented,
+    ticket-cited defect this repo actually shipped and four of the five have an exact good twin (same
+    region, same viewport, one variable). Dispatch the pass against that directory and its
+    `manifest.json`; `README.md` there carries the expected verdict and the rule behind each entry.
+    Regenerate with `npx tsx scripts/design-calibration.ts` when the storefront moves under a
+    fixture, and re-read a regenerated `good-*` before committing it: if it has picked up a real
+    defect, that is a finding for the cycle, not a fixture to paper over.
+  - **Expected verdicts in that directory are the fixture, not a target.** A disagreement between the
+    committed verdict and what the gate scores IS the calibration result. Never edit the manifest to
+    agree with a gate run.
   **A subagent's task-output file size is not a liveness probe (run 1703).** The harness does not
   write that file incrementally; it stays at its initial prompt's size until the agent completes, so
   a transcript sitting at a few hundred bytes for several minutes does not mean `design-critic` has

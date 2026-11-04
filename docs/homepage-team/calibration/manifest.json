@@ -1,0 +1,96 @@
+{
+  "generatedFrom": "https://xdipx.com",
+  "note": "Regenerate with: npx tsx scripts/design-calibration.ts. Expected verdicts are the point of the fixture; do not edit them to match a gate run.",
+  "entries": [
+    {
+      "slug": "good-01-rail-header-375",
+      "file": "good-01-rail-header-375.png",
+      "expected": "PASS",
+      "viewport": "375px",
+      "carries": "A rail header at the 375 floor after the #18637 fix: the heading owns a full-width row, the See-all drops onto its own row below it with its whitelist arrow intact.",
+      "rule": "doctrine §2 (type hierarchy), CTA whitelist (the arrow is part of the label)",
+      "reinstates": null
+    },
+    {
+      "slug": "good-02-tab-bar-375",
+      "file": "good-02-tab-bar-375.png",
+      "expected": "PASS",
+      "viewport": "375px (consent stored)",
+      "carries": "The primary mobile navigation at 375 after the #18637 fix: every label renders at its natural width inside a horizontal scroller, in DM Sans, with the account tab pinned outside the scroller.",
+      "rule": "doctrine §2 (DM Sans for nav, labels, CTA text), mobile-first at 375",
+      "reinstates": null
+    },
+    {
+      "slug": "good-03-rail-band-1440",
+      "file": "good-03-rail-band-1440.png",
+      "expected": "PASS",
+      "viewport": "1440px (consent stored)",
+      "carries": "A storefront rail at 1440 in v3 chrome: flat cards on a single plum-soft ground, no borders, no drop shadows, no rounded card frames, prices and brand eyebrows in DM Sans.",
+      "rule": "doctrine §1 (one ground per band, flat on paper), §5 (card system), §3 (coral reserved for the CTA)",
+      "reinstates": null
+    },
+    {
+      "slug": "good-04-meet-emma-1440",
+      "file": "good-04-meet-emma-1440.png",
+      "expected": "PASS",
+      "viewport": "1440px (consent stored)",
+      "carries": "The Meet Emma band at 1440: editorial serif display against body copy in DM Sans, generous vertical rhythm, a single tinted ground.",
+      "rule": "doctrine §2 (type pairing), §1 (spacing rhythm)",
+      "reinstates": null
+    },
+    {
+      "slug": "good-05-ink-closer-1440",
+      "file": "good-05-ink-closer-1440.png",
+      "expected": "PASS",
+      "viewport": "1440px (consent stored)",
+      "carries": "The ink closer band at 1440: white display type on bg-ink, one plum emphasis word lifted with .em-on-dark (~6.75:1), coral CTA measured at 5.51:1 white-on-coral.",
+      "rule": "doctrine §2 (exactly one emphasis word per headline), WCAG AA floor (4.5:1 body, 3:1 large display)",
+      "reinstates": null
+    },
+    {
+      "slug": "bad-01-rail-header-collision-375",
+      "file": "bad-01-rail-header-collision-375.png",
+      "expected": "BLOCK",
+      "viewport": "375px",
+      "carries": "The rail header collision: the heading text ends on the same baseline as the See-all CTA with no vertical separation, so the CTA reads as a continuation of the sentence.",
+      "rule": "doctrine §2 (type hierarchy must be legible as hierarchy), mobile-first at 375",
+      "reinstates": "div.flex.flex-wrap.items-end.justify-between.gap-4.mb-6 > div:first-child { flex: 1 1 0% !important; }"
+    },
+    {
+      "slug": "bad-02-tab-bar-runon-375",
+      "file": "bad-02-tab-bar-runon-375.png",
+      "expected": "BLOCK",
+      "viewport": "375px (consent stored)",
+      "carries": "The primary mobile navigation rendered as one run-on glyph string: seven labels squeezed into slices narrower than themselves, with inter-word gaps indistinguishable from inter-letter gaps.",
+      "rule": "mobile-first at 375 (CLAUDE.md), doctrine §2 (labels must read as labels)",
+      "reinstates": "nav[aria-label=\"Browse categories\"] button { flex: 1 1 0% !important; min-width: 0 !important; padding-left: 0 !important; padding-right: 0 !important; }"
+    },
+    {
+      "slug": "bad-03-nav-serif-375",
+      "file": "bad-03-nav-serif-375.png",
+      "expected": "BLOCK",
+      "viewport": "375px (consent stored)",
+      "carries": "The primary navigation set in the display serif, where doctrine §2 assigns DM Sans. The band looks deliberate and is a type-system violation.",
+      "rule": "doctrine §2 (Newsreader for display, DM Sans for nav / labels / CTA text)",
+      "reinstates": "nav[aria-label=\"Browse categories\"], nav[aria-label=\"Browse categories\"] * { font-family: Newsreader, Georgia, serif !important; }"
+    },
+    {
+      "slug": "bad-04-plum-on-ink-1440",
+      "file": "bad-04-plum-on-ink-1440.png",
+      "expected": "BLOCK",
+      "viewport": "1440px (consent stored)",
+      "carries": "Plum emphasis on an ink ground without the .em-on-dark lift: roughly 2.5:1, so the emphasis word is the least legible word in the headline it is meant to emphasise.",
+      "rule": "mission brief §2 (plum on dark always uses .em-on-dark), WCAG AA floor per doctrine (3:1 large display)",
+      "reinstates": "#discover em.em { color: var(--color-plum) !important; }"
+    },
+    {
+      "slug": "bad-05-v2-card-chrome-1440",
+      "file": "bad-05-v2-card-chrome-1440.png",
+      "expected": "BLOCK",
+      "viewport": "1440px (consent stored)",
+      "carries": "Stale v2 card chrome on a v3 storefront rail: rounded corners, a drop shadow and a cream border against the flat-on-paper card system the doctrine locks.",
+      "rule": "doctrine §1 and §5 (flat coral on white paper, hairline frames, no drop shadows, no cream grounds)",
+      "reinstates": "section:has(> div > div.flex.flex-wrap.items-end.justify-between.gap-4.mb-6) a[href^=\"/products/\"] { border-radius: 16px !important; box-shadow: 0 10px 24px rgba(26,20,24,0.18) !important; border: 1px solid #EFECE4 !important; background: #FAF4EA !important; padding: 10px !important; }"
+    }
+  ]
+}
