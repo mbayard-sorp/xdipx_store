@@ -1561,6 +1561,77 @@ describe('legible text baked into the image', () => {
       expect(r.blocked).toBe(false)
     })
   })
+
+  // Ticket #19939, run 1836 (2026-11-04 social-drafts, 14:00 slate). Three of
+  // four BLOCKed candidates in that run were real, verified against the
+  // stored verdicts on social_media_assets (#1723/post 558, #1724/post 559,
+  // #1730/post 562): each one's own transcription concludes no legible text
+  // or brand mark is there, in a phrasing the existing list did not cover.
+  // #1726/post 560 is deliberately NOT included here: "garbled/partially-
+  // formed marks ... resembling small initials or a logo but not clearly
+  // readable" names a shape resembling a real brand mark, not a decorative
+  // texture, so it is left blocking.
+  describe('wordmark/"or other" phrasings and decorative-pattern "garbled" (ticket #19939)', () => {
+    it('asset #1723 / post 558: "legible" followed by a branching wordmark/text-characters noun phrase is not a brand-mark misread', () => {
+      expect(classifyLegibleText(
+        'A small circular swirl/logo embossed on the product surface; no clearly legible brand wordmark or text characters discernible.',
+      )).toBe('none')
+    })
+
+    it('the full pipeline no longer blocks the post 558 candidate', async () => {
+      const r = await run(
+        'A small circular swirl/logo embossed on the product surface; no clearly legible brand wordmark or text characters discernible.',
+      )
+      expect(checks(r)).not.toContain('vision-legible-text')
+      expect(r.blocked).toBe(false)
+    })
+
+    it('asset #1724 / post 559: "garbled" describing a decorative embossed pattern, concluding not readable as letters, is not an attempted-text defect', () => {
+      expect(classifyLegibleText(
+        "garbled spiral/swirl embossed pattern on the product's textured head, not cleanly readable as letters",
+      )).toBe('none')
+    })
+
+    it('the full pipeline no longer blocks the post 559 candidate', async () => {
+      const r = await run(
+        "garbled spiral/swirl embossed pattern on the product's textured head, not cleanly readable as letters",
+      )
+      expect(checks(r)).not.toContain('vision-legible-text')
+      expect(r.blocked).toBe(false)
+    })
+
+    it('asset #1730 / post 562: "no X or other legible text" is not a brand-mark misread', () => {
+      expect(classifyLegibleText(
+        'Watch face visible on nightstand tray (clock numerals/markers present but not legible text); no brand wordmarks or other legible text in frame.',
+      )).toBe('none')
+    })
+
+    it('the full pipeline no longer blocks the post 562 candidate', async () => {
+      const r = await run(
+        'Watch face visible on nightstand tray (clock numerals/markers present but not legible text); no brand wordmarks or other legible text in frame.',
+      )
+      expect(checks(r)).not.toContain('vision-legible-text')
+      expect(r.blocked).toBe(false)
+    })
+
+    it('asset #1726 / post 560: "garbled" marks resembling initials or a logo still blocks, unlike the decorative-pattern case above', () => {
+      expect(classifyLegibleText(
+        'garbled/partially-formed marks on the pink product face, resembling small initials or a logo but not clearly readable',
+      )).toBe('unclassified')
+    })
+
+    it('the tightened "garbled" guard still blocks every pre-existing garbled/dot-and-dash defect example', () => {
+      expect(classifyLegibleText(
+        'garbled illegible marks beneath a circular button, resembling text but not readable',
+      )).toBe('unclassified')
+      expect(classifyLegibleText(
+        'no legible letters, though garbled dot-and-dash pseudo-text marks are visible beneath the button',
+      )).toBe('unclassified')
+      expect(classifyLegibleText(
+        'oiu. (brand wordmark, mirrored/reversed on tube); additional small text above wordmark partially legible as garbled characters; dot pattern on tube body',
+      )).toBe('unclassified')
+    })
+  })
 })
 
 // Ticket #13368: the New-in carousel's packshot card and the typographic
