@@ -43,6 +43,10 @@ export const EMAIL_DARK_COLORS = {
   line: '#3D2F3A',
   /** Plum lifted for contrast on ink; the brand plum is 2.3:1 there. */
   plum: '#C9A0EE',
+  /** Coral lifted for contrast on ink, same hover tone as `coral-2` in app.css. */
+  coral: '#FF7A5A',
+  /** The lux (goodBetterBestBlock "best" tier) plum-soft card, flipped from a tint to a card tone. */
+  plumCard: '#2E1D3A',
 } as const
 
 /**
@@ -92,18 +96,22 @@ a[x-apple-data-detectors] { color:inherit !important; text-decoration:none !impo
 @media (prefers-color-scheme: dark) {
   .x-bg { background-color:${EMAIL_DARK_COLORS.ground} !important; }
   .x-card { background-color:${EMAIL_DARK_COLORS.card} !important; }
+  .x-plumcard { background-color:${EMAIL_DARK_COLORS.plumCard} !important; }
   .x-ink { color:${EMAIL_DARK_COLORS.text} !important; }
   .x-ink2 { color:${EMAIL_DARK_COLORS.text2} !important; }
   .x-ink3 { color:${EMAIL_DARK_COLORS.text3} !important; }
   .x-plum { color:${EMAIL_DARK_COLORS.plum} !important; }
+  .x-coral { color:${EMAIL_DARK_COLORS.coral} !important; }
   .x-rule { border-color:${EMAIL_DARK_COLORS.line} !important; }
   .x-foot a { color:${EMAIL_DARK_COLORS.text3} !important; }
 }
 [data-ogsb] .x-bg { background-color:${EMAIL_DARK_COLORS.ground} !important; }
 [data-ogsb] .x-card { background-color:${EMAIL_DARK_COLORS.card} !important; }
+[data-ogsb] .x-plumcard { background-color:${EMAIL_DARK_COLORS.plumCard} !important; }
 [data-ogsc] .x-ink { color:${EMAIL_DARK_COLORS.text} !important; }
 [data-ogsc] .x-ink2 { color:${EMAIL_DARK_COLORS.text2} !important; }
 [data-ogsc] .x-ink3 { color:${EMAIL_DARK_COLORS.text3} !important; }
 [data-ogsc] .x-plum { color:${EMAIL_DARK_COLORS.plum} !important; }
+[data-ogsc] .x-coral { color:${EMAIL_DARK_COLORS.coral} !important; }
 </style>`
 }

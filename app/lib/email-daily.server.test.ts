@@ -104,6 +104,57 @@ describe('assembleDailyEmail', () => {
     expect(result.html.toLowerCase()).not.toMatch(/\bbuy now\b/)
     expect(result.html.toLowerCase()).not.toMatch(/\bsexy\b/)
   })
+
+  // Dark-mode contrast (ticket #19840, owner 2026-11-03: pale gray text on
+  // white in Apple Mail dark mode). Guards the three root causes: a second
+  // `class` attribute a client ignores, a light/tint background with no
+  // dark-mode class to flip it, and inline brand text color with no
+  // matching dark-mode class.
+  it('carries no tag with two class attributes, every light/tint background flips in dark mode, and every inline brand text color has its dark-mode class', () => {
+    // MSO conditional comments render only inside desktop Outlook's Word
+    // engine, which has no dark-mode CSS support at all (not even the
+    // `[data-ogsb]`/`[data-ogsc]` attribute selectors Outlook.com uses), so
+    // the markup inside one is correctly left unclassed, same as this file's
+    // own MSO `<style>` block already is. Strip them before scanning.
+    const html = result.html.replace(/<!--\[if mso\]>[\s\S]*?<!\[endif\]-->/g, '')
+    const tags = html.match(/<[a-z][a-z0-9]*\b[^>]*>/gi) ?? []
+    expect(tags.length).toBeGreaterThan(0)
+
+    const classAttr = (tag: string): string[] => {
+      const m = /class="([^"]*)"/.exec(tag)
+      return m?.[1] ? m[1].split(/\s+/).filter(Boolean) : []
+    }
+
+    for (const tag of tags) {
+      const classCount = (tag.match(/\bclass="/g) ?? []).length
+      expect(classCount, `tag carries ${classCount} class attributes, a client honors only the first: ${tag}`).toBeLessThanOrEqual(1)
+    }
+
+    const LIGHT_OR_TINT_BG = ['#FFFFFF', '#FAFAF9', '#F3E8FB']
+    const DARK_BG_CLASSES = ['x-bg', 'x-card', 'x-plumcard']
+    for (const tag of tags) {
+      if (!/^<(td|table)\b/i.test(tag)) continue
+      if (!LIGHT_OR_TINT_BG.some((hex) => tag.toUpperCase().includes(hex))) continue
+      const classes = classAttr(tag)
+      expect(classes.some((c) => DARK_BG_CLASSES.includes(c)), `light/tint background with no dark-mode class: ${tag}`).toBe(true)
+    }
+
+    const BRAND_TEXT_COLOR_CLASS: [string, string][] = [
+      ['#1A1418', 'x-ink'],
+      ['#3D2F3A', 'x-ink2'],
+      ['#6B5F68', 'x-ink3'],
+      ['#726673', 'x-ink3'],
+      ['#7A2BB8', 'x-plum'],
+      ['#C2350F', 'x-coral'],
+    ]
+    for (const tag of tags) {
+      const m = /(?<!background-)color:\s*(#[0-9A-Fa-f]{6})/i.exec(tag)
+      if (!m) continue
+      const entry = BRAND_TEXT_COLOR_CLASS.find(([hex]) => hex.toUpperCase() === m[1]!.toUpperCase())
+      if (!entry) continue
+      expect(classAttr(tag), `inline ${entry[0]} text with no ${entry[1]} class: ${tag}`).toContain(entry[1])
+    }
+  })
 })
 
 describe('isSendDayDefault', () => {
