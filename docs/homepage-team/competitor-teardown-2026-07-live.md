@@ -2581,3 +2581,202 @@ retired-route denylist is untouched.
 Traffic remains far below the 300-sessions/week weighting threshold, so the
 imagery, proof and nav items above stay banked as design capital and this cycle
 spent only on cheap, measured, certain fixes.
+
+## Delta, 2026-11-04 (Routine B run 1837)
+
+Three real captures, zero refusals, all recorded as results. Fetched and read
+this run: `www.honeyplaybox.com`, `www.tootimid.com`, `getmaude.com`. Two of the
+three are doctrine §7 bench rows that this document has cited for months and
+never actually fetched (`Honey Play Box`, for the closing proof act;
+`TooTimid`, for the discretion scaffolding), which satisfies the mission brief
+§4 new-competitor line twice over. `getmaude.com` is the control: it was
+fetched on 2026-10-14 and is here to re-read, not to discover. Nothing below is
+quoted or inferred from memory.
+
+### The finding that matters: Black Friday is live in the field and still nobody runs a clock
+
+This is the fourth consecutive delta to look for countdowns and the second to
+find none, and it now spans the week the field actually turns commercial.
+
+- **Honey Play Box leads with the promotion and bills it in the nav.** Its
+  announcement bar rotates three messages, one of which is "Black Friday Deal:
+  Up to 60% Off | Free 8oz Lube + Free Shipping on $75+", and its top-level nav
+  carries "Black Friday Sale" beside "Best Sellers" and "Categories". Four
+  banners sit under the header, three of them Black Friday. There is no
+  countdown timer anywhere on the page.
+- **TooTimid runs permanent sale pressure and no clock either.** "up to 80% off
+  adult sex toys!", "Fall into bed MEGA SALE toys up to 80% off", "50% OFF All
+  Orders" with code "Love50", "Final Sale - 70% OFF!" in the Lingerie menu. The
+  urgency is all adjectives and percentages. No timer.
+- **Maude runs no urgency at all.** The strongest thing on the page is "Save up
+  to 15% off!" and a free-shipping threshold at $85. No countdown, no "only X
+  left", no "ends soon". Its hero is a bundle proposition, "the more, the
+  merrier. Bundles for giving—and receiving."
+
+So across the last two deltas, **seven of seven live captures run zero
+countdowns**, including two that are mid-Black-Friday. The single live timer
+this document has ever recorded (PinkCherry, 2026-10-21 delta) is the outlier,
+and the 2026-10-28 delta was right to say so. Brief 19's "no countdown or
+urgency framing for Black Friday or Cyber Monday, dates only, not negotiable in
+any week of the November calendar" therefore costs us nothing against these
+three. They are not out-pressuring us with clocks, because they do not run any.
+Worth recording, because the assumption that they do is the one that comes up
+every November.
+
+### The second finding, and it corrects a conclusion this document drew two weeks ago
+
+The 2026-10-21 delta found "three of three bill guided selling in the nav, and
+we bill it nowhere", and that finding is what pushed backlog item 11 (Compass to
+nav-level billing) up the list. **This week's three are three of three the other
+way.**
+
+- **Honey Play Box has a quiz and keeps it out of the nav.** There is a "SEX TOY
+  QUIZ" block with "Take The Quiz" in the page body. The nav is "Best Sellers",
+  "Categories", "HPB App", "Possibilities", "Black Friday Sale". The closest
+  nav-level thing is "Build Your Own Bundle" under Possibilities.
+- **TooTimid has no quiz at all.** Its nav is ten product categories
+  (Vibrators, Dildos, Men's Toys, For Couples, Popular Collections, Anal Toys,
+  Lingerie, Bondage, Lubes, What's New). "Shop by Experience" is a category
+  menu, not a finder.
+- **Maude has no quiz and no finder.** Its nav is "shop", "subscribe", "brand",
+  "the maudern®", "find us", and "find us" is a stockist locator, not guided
+  selling.
+
+Six sites over two weeks, three for and three against. **Nav-level billing of
+guided selling is a split practice, not a convergence**, and item 11 should stop
+citing the 10-21 delta as though the field had settled it. That does not kill
+the item: ours is the only one of the six whose finder is a genuinely good
+product, and the two-link `/discover` cap means promoting it costs an existing
+link. It means the item has to be argued on our own merits and measured, not
+adopted because everyone else does it, because they do not.
+
+### The third finding unsticks backlog item 17 the rest of the way
+
+The 2026-10-28 delta found that three of four sites build proof without a review
+corpus, which turned backlog item 8 (reviews slot, real data only) from a
+blocker on item 17 (closing proof act) into a sibling of it. Honey Play Box
+settles it, because it runs the full sequence the bench row credits it with and
+runs it with no star ratings or review counts anywhere on the page: not in the
+hero, not on the Best Sellers cards, and not on the "You May Also Like" cards,
+which carry prices and discount tags only.
+
+Its closing act, in order: testimonial blocks with reviewer handles → community
+(Reddit, Discord) → "Industry Awards" (four badges) → "As Seen On" press logos
+(Health Magazine, The Inventory, Cool Material, EroFame, BuzzFeed, Rakuten,
+HBO) → trust icons ("Secure Checkout", "Discreet Shipping", "Premium Materials",
+"Earn Points", "7 Days Satisfaction Guarantee", "Worry-Free Purchase") →
+newsletter → footer, where the payment marks live.
+
+Maude's version is shorter and ends the same way: four trust blocks (Global
+Delivery, Discreet Packaging, Product Standards, Secure Checkout) → three brand
+pillars → a "featured in" press row (GQ, InStyle, Vogue, Men's Health, Vanity
+Fair, Allure, The New York Times) → editorial cards → retailer logos →
+newsletter.
+
+Both end on safety and neither needs a review corpus to get there. **Item 17 is
+buildable now, from the slots we can fill honestly today**, and item 20 (press
+slot, built empty) is the same pattern both sites run. The one slot we must
+still leave empty is press, because we have earned no placement; building it
+empty is exactly what item 20 already specifies.
+
+### A steal worth taking, and the half of it we must not take
+
+**TooTimid's discretion promise is mechanical, and that is why it works.** Its
+"100% Discreet Shipping" section does not say "we ship discreetly". It says
+orders "arrive in plain packaging" and that "the shipping label doesn't say what
+company it's from". Two checkable facts about objects, not two adjectives. It
+repeats the claim in four places (a header link, the mid-page section, a lower
+"Discreet Online Store" block, and the mobile menu).
+
+And it stops one beat short: **the billing descriptor is not mentioned
+anywhere on the page.** That is the third leg of the bench row's "box / label /
+statement" triple and the one a customer actually fears, because the statement
+is the one another person reads. We have that fact and it is already a charter
+non-negotiable: the statement reads XDIPX. So backlog item 5 should take
+TooTimid's mechanical register for the box and the label and then say the thing
+TooTimid does not, which is the only one of the three that is hard to say.
+
+The half not to take is the surrounding page. TooTimid's discretion copy sits
+inside "up to 80% off" banners and a "Pick FREE Sex Toy" offer, which is the
+clutter the bench row already fences off ("we take the mechanics, we reject
+everything else on that page"). The fence held on reading; recording it so the
+next cycle does not have to re-derive it.
+
+### A smaller steal, for item 10
+
+TooTimid labels its goal blocks in the **first person**: "I want quick, easy
+clit O's", and similarly for cock rings, stamina, anal and realistic vibes. Our
+wayfinder tiles are labelled in Emma's third person ("Soft enough to start",
+"Built to never wear out", "First toy, first glide"). The grammatical person is
+the steal and it is free: a tile that says what the READER wants is a different
+instrument from one that says what the product is, and backlog item 10 already
+asks for tiles "labeled by intent/anxiety". The register is emphatically not the
+steal: theirs is crude where the charter is plain, and "sex toy" being a normal
+noun does not make "clit O's" our voice. Any first-person label goes through
+`emma-empathy-reviewer` like every other customer-facing string.
+
+### Adopted
+
+1. **Hold the no-countdown line through November and stop treating it as a
+   cost.** Seven of seven live captures over two deltas, two of them
+   mid-Black-Friday, run no timer. Brief 19's directive matches the field.
+   Routine A merchandises dates, not clocks.
+2. **Backlog item 17 (closing proof act) is unblocked and should be costed next
+   cycle.** Honey Play Box runs the full sequence with zero review stars or
+   counts on the page, so item 8 is a sibling, not a prerequisite. Build only
+   the slots we can fill honestly; item 20's empty press slot is the same
+   pattern.
+3. **Item 5 takes TooTimid's mechanical register and adds the beat TooTimid
+   omits.** Box and label phrased as checkable facts about objects, plus the
+   billing descriptor, which none of the six sites reviewed in two weeks
+   mentions at all.
+4. **Item 10 takes the first person, not the register.** Reader-voice tile
+   labels, voice-gated like everything else.
+
+### Rejected, with reasons, so they are not re-proposed
+
+1. **Honey Play Box's nav-level "Black Friday Sale" entry.** It works for them
+   and it is a sale banner wearing a nav item. Our nav is already under a
+   two-link `/discover` cap precisely because nav slots are scarce; spending one
+   on a promotion inverts the whole IA argument.
+2. **TooTimid's four-places repetition of the discretion claim.** Saying it once
+   where it is needed is the doctrine's restraint; saying it four times is what
+   makes the rest of that page read as pressure.
+3. **Maude's numeric-rating-without-count treatment** (cards print "4.8",
+   "4.9", "5.0" with no star graphic and no review count). It is a tidy way to
+   show rating without a corpus, and it is exactly the thing mission brief §1
+   and doctrine §6 forbid: a rating with no count is proof we cannot support.
+   Item 8's "hard-suppressed below threshold" rule stands.
+4. **Honey Play Box's "-50%" discount tags on card art.** Our MAP rules make a
+   percent badge a per-product legal question, not a design choice, and brief 19
+   is currently working one live instance of exactly that going wrong.
+
+### The one thing we will do that none of them do
+
+**Keep an instrument that can be shown to work before we trust what it says.**
+None of the six sites reviewed across the last two deltas can be audited from
+outside, which is not a criticism of them, it is just what a competitor read
+is. But it is worth naming against our own cycle: this run committed a ten-image
+calibration corpus so that `design-critic`'s BLOCK verdict can be licensed by a
+pass that is reproducible rather than asserted. The storefront those sites run
+may well be better than ours in places. The difference we are choosing to keep
+is that when our gate says a band is wrong, there is a scored fixture behind the
+claim.
+
+### IA fence check
+
+This delta proposes no new section type, no Sanity schema change, and no new URL
+or route, so nothing goes to `tech-architect`. Adopted item 1 is a merchandising
+constraint for Routine A. Adopted items 2 and 3 re-rank and re-scope existing
+`[shell-PR]` and `[content-only]` backlog items and ship nothing this cycle.
+Adopted item 4 is a label decision against item 10, whose taxonomy still needs
+the IA ruling. Item 11's evidence base is corrected above, which lowers its
+priority rather than changing its shape; the two-link `/discover` cap it has to
+respect is unchanged and still enforced by `storefront-discover-cap.test.ts`.
+The locked Nº 01 to Nº 11 shell is untouched: this cycle's code is two
+`scripts/` files, a test and a committed fixture directory, none of which
+renders anything. The retired-route denylist is untouched.
+
+Traffic remains far below the 300-sessions/week weighting threshold, so the
+proof, discretion and label items above stay banked as design capital and this
+cycle spent only on a cheap, measured, certain instrument fix.

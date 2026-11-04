@@ -26,6 +26,7 @@
  *   npx tsx scripts/design-calibration.ts --base http://localhost:3000
  *   npx tsx scripts/design-calibration.ts --out /tmp/cal       # somewhere other than docs/
  *   npx tsx scripts/design-calibration.ts --only bad-01-rail-header-collision-375
+ *   npx tsx scripts/design-calibration.ts --manifest-only   # rebuild the index, re-shoot nothing
  *
  * It reuses `design-snapshots.ts`'s transport accommodations (curl-backed
  * request interception, chromium fallback path, edge-block detection) rather
@@ -34,9 +35,11 @@
  */
 
 import 'dotenv/config'
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { chromium, type Page, type Route } from '@playwright/test'
+import sharp from 'sharp'
 import {
   abortIsRenderCritical,
   curlFetch,
@@ -67,6 +70,13 @@ export type CalibrationEntry = {
   carries: string
   /** The doctrine or brief rule the entry is calibrated against. */
   rule: string
+  /**
+   * Doctrine deviations visible in a `good-*` fixture that are NOT what it
+   * calibrates. A near-miss PASS is more useful than a perfect one, but only if
+   * the miss is written down: without this, a critic correctly marking the
+   * fixture down reads as a calibration failure instead of a correct call.
+   */
+  knownDeviations?: string[]
 }
 
 /**
@@ -105,8 +115,19 @@ export const CALIBRATION: CalibrationEntry[] = [
     // differs in one variable calibrates; two unrelated images do not.
     selector: 'section:has(> div > div.flex.flex-wrap.items-end.justify-between.gap-4.mb-6)',
     carries:
-      'A storefront rail at 1440 in v3 chrome: flat cards on a single plum-soft ground, no borders, no drop shadows, no rounded card frames, prices and brand eyebrows in DM Sans.',
-    rule: 'doctrine §1 (one ground per band, flat on paper), §5 (card system), §3 (coral reserved for the CTA)',
+      'A storefront rail at 1440 in v3 chrome: flat paper-2 cards on a single plum-soft ground, each carrying the hairline border-line the doctrine requires, with no drop shadow and no second ground inside the band.',
+    rule: 'doctrine §1 (one ground per band), §3 (hairline border-line on cards, never a shadow; no old-cream grounds), §5 (card system)',
+    // Scored PASS at 4.33 by the calibration pass and agreed with, but it is a
+    // NEAR-MISS, and saying so is what keeps it useful. Two real doctrine
+    // deviations are visible in this fixture and are not what it calibrates:
+    // card 5's art is a printed retail carton (§4.4 packaging, filed), and the
+    // card brand eyebrow renders body sans ink-3 where §6 specifies mono ink-4
+    // (ProductCarousel.tsx:397 against StorefrontProductCard.tsx:83-87, filed).
+    // A critic marking this down on imagery or type is RIGHT, not miscalibrated.
+    knownDeviations: [
+      '§4.4: card 5 (nixie-rechargeable-wand-massager-ombre-metallic) renders its retail carton as card art.',
+      '§6: the card brand eyebrow is body sans ink-3, not mono ink-4 (ProductCarousel.tsx:397).',
+    ],
   },
   {
     slug: 'good-04-meet-emma-1440',
@@ -297,6 +318,14 @@ function sessionKey(e: CalibrationEntry): SessionKey {
 }
 
 async function main(): Promise<number> {
+  // Rebuild manifest.json from the PNGs already on disk. Used after editing an
+  // entry's prose, so the index can be corrected without re-shooting fixtures
+  // against a storefront that has moved since they were taken.
+  if (argv.includes('--manifest-only')) {
+    await writeManifest(OUT)
+    console.log(`manifest.json rebuilt from the committed PNGs in ${OUT}`)
+    return 0
+  }
   const entries = CALIBRATION.filter((e) => !ONLY || e.slug === ONLY)
   if (entries.length === 0) {
     console.error(`no calibration entry matches --only ${ONLY}`)
@@ -390,7 +419,9 @@ async function main(): Promise<number> {
             throw new Error(`${entry.slug}: entry has neither selector nor band`)
           }
         } finally {
-          if (handle) await handle.evaluate((el) => el.remove()).catch(() => {})
+          // `el` is typed Node; the style tag is always an Element. CI cannot see
+          // this (tsconfig excludes scripts/**), so it is asserted rather than left.
+          if (handle) await handle.evaluate((el) => (el as Element).remove()).catch(() => {})
           await page.waitForTimeout(150)
         }
         console.log(`${out} (expected ${entry.expected})`)
@@ -401,30 +432,56 @@ async function main(): Promise<number> {
     await browser.close()
   }
 
-  // A machine-readable index beside the images, so the gate can read expected
-  // verdicts without parsing the README prose.
+  await writeManifest(OUT)
+  console.log(`\n${written.length} calibration image(s) written to ${OUT}`)
+  return 0
+}
+
+/**
+ * A machine-readable index beside the images, so the gate can read expected
+ * verdicts without parsing the README prose.
+ *
+ * It carries a sha256 and the pixel dimensions of every committed PNG, which is
+ * the only thing binding a file to the entry that named it (qa-reviewer, run
+ * 1837). Without it, a fixture re-shot at a different width, left stale after an
+ * `injectCss` edit, or swapped between two slugs passes every other guard: they
+ * check that a file EXISTS, not that it is the right file. Regenerating now
+ * means committing new hashes, which is the honest behaviour.
+ */
+export async function writeManifest(dir: string): Promise<void> {
+  const entries = []
+  for (const e of CALIBRATION) {
+    const file = join(dir, `${e.slug}.png`)
+    const bytes = readFileSync(file)
+    const meta = await sharp(bytes).metadata()
+    entries.push({
+      slug: e.slug,
+      file: `${e.slug}.png`,
+      expected: e.expected,
+      viewport: `${e.width}px${e.consent ? ' (consent stored)' : ''}`,
+      carries: e.carries,
+      rule: e.rule,
+      reinstates: e.injectCss ?? null,
+      knownDeviations: e.knownDeviations ?? null,
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+      pixels: `${meta.width}x${meta.height}`,
+      bytes: bytes.length,
+    })
+  }
   writeFileSync(
-    join(OUT, 'manifest.json'),
+    join(dir, 'manifest.json'),
     `${JSON.stringify(
       {
         generatedFrom: BASE,
-        note: 'Regenerate with: npx tsx scripts/design-calibration.ts. Expected verdicts are the point of the fixture; do not edit them to match a gate run.',
-        entries: CALIBRATION.map((e) => ({
-          slug: e.slug,
-          file: `${e.slug}.png`,
-          expected: e.expected,
-          viewport: `${e.width}px${e.consent ? ' (consent stored)' : ''}`,
-          carries: e.carries,
-          rule: e.rule,
-          reinstates: e.injectCss ?? null,
-        })),
+        note: 'Regenerate with: npx tsx scripts/design-calibration.ts (or --manifest-only to rebuild this file from the committed PNGs without re-shooting them). Expected verdicts are the point of the fixture; do not edit them to match a gate run.',
+        scope:
+          'Calibrated 2026-11-04 (run 1837): 10/10 agreement, no overlap. Trusted BLOCK is licensed for layout geometry, type-role, contrast and token/palette classes ONLY. Imagery, interest floor, theme expression, day-over-day distinctness and motion have no fixture here and keep issuing withheld-BLOCK REVISE.',
+        entries,
       },
       null,
       2,
     )}\n`,
   )
-  console.log(`\n${written.length} calibration image(s) written to ${OUT}`)
-  return 0
 }
 
 if (process.argv[1]?.endsWith('design-calibration.ts')) {

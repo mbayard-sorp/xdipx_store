@@ -338,6 +338,21 @@ attached, and it should be rewritten or deleted rather than kept for the reassur
   - **Expected verdicts in that directory are the fixture, not a target.** A disagreement between the
     committed verdict and what the gate scores IS the calibration result. Never edit the manifest to
     agree with a gate run.
+  - **The pass ran on 2026-11-04 (run 1837) and it is SCOPED. Read the scope before treating a BLOCK
+    as trusted.** 10 of 10 agreement, no overlap, worst good 4.33 against best bad 3.7, and two of
+    the gate's blind pixel samples reproduced committed numbers it had not yet read. That licenses
+    trusted BLOCK on **layout geometry, type-role, contrast, and token/palette** classes only. On
+    **imagery, the §4.1 interest floor, theme expression, day-over-day distinctness and motion**, the
+    gate keeps issuing withheld-BLOCK REVISE, because no fixture exercises any of them. The gate
+    argued its own limit and the argument is the valuable part: four of the five bads are catchable
+    by a twenty-line script, so the corpus largely certifies that a scorer sees what measurement
+    already sees; the housewares and candlelit-gloom classes the agent definition calls canonical are
+    absent, and unlike the bot-wall class no exit code catches those; and there is no REVISE fixture
+    at all, so nothing tests the 3.5-to-4.2 boundary where the gate actually lives. **Partial
+    coverage recorded as full coverage is how an untrusted BLOCK gets trusted**, which is the precise
+    thing the calibration requirement was written to prevent. The README's "what to add before
+    licensing a broad BLOCK" section is the shopping list; widening the scope is a later cycle's
+    work, and until then an imagery BLOCK is still a withheld BLOCK and is still reported as one.
   **A subagent's task-output file size is not a liveness probe (run 1703).** The harness does not
   write that file incrementally; it stays at its initial prompt's size until the agent completes, so
   a transcript sitting at a few hundred bytes for several minutes does not mean `design-critic` has

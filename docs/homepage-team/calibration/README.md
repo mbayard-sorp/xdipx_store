@@ -38,14 +38,71 @@ the historical version could not offer:
 2. **The geometry can be re-verified.** Each reinstatement reverses a named
    class, so the resulting shape can be checked against the measurement the
    fixing run recorded rather than taken on trust.
-3. **Four of the five bad images have an exact good twin** — same region, same
-   viewport, same page — so the only variable between the pair is the defect.
-   A pair that differs in one thing calibrates a scorer. Ten unrelated images
-   do not.
+3. **Every bad image has a good twin** — same region, same viewport, same page
+   — so the variable between the pair is the defect. A pair that differs in one
+   thing calibrates a scorer; ten unrelated images do not. `good-02` serves two
+   bads (`bad-02` and `bad-03`), so there are five pairs across four good
+   images. One caveat on that pair, found by the calibration gate: `good-02` is
+   scroll-clipped at "Di" while `bad-02` shows all seven labels plus a plum
+   "Sale", so the visible label set differs and the pair is not strictly
+   one-variable. The defect is still unmistakable, and the plum "Sale" is a
+   property of the live bar rather than of the injection.
 
 Total weight is about 580 KB. The full-page captures these are cut from run
 2.2 to 3.6 MB each at 12,800 to 18,100 px tall, so committing ten of those
 would have put roughly 25 MB of binary in the repo. Crops are the point.
+
+## What this corpus licenses, and what it does not
+
+**Calibrated 2026-11-04, Routine B run 1837. 10 of 10 agreement with the
+committed verdicts, no overlap: the worst good averaged 4.33, the best bad 3.7,
+and every bad carried at least one dimension at or below 2. Two of the gate's
+blind pixel samples reproduced committed numbers it had not yet read (`#FAF4EA`
+on the v2 card ground, and 2.48:1 for plum on ink against the committed ~2.5:1).**
+
+The pass is **scoped**, and recording it as anything broader would be the exact
+failure the calibration requirement exists to prevent.
+
+- **Trusted BLOCK is licensed for:** layout geometry, type-role violations,
+  contrast failures, and off-token palette or chrome.
+- **Trusted BLOCK is NOT licensed for:** imagery quality and the §4.1 interest
+  floor, theme expression, day-over-day distinctness, and motion restraint.
+  Those keep issuing withheld-BLOCK REVISE, named as withheld in the review
+  block and the event row.
+
+The gate made the argument for its own limit, and it is worth keeping:
+
+1. **Four of the five bads are catchable by a script.** A baseline share, two
+   pixel values and a WCAG formula, an off-token hex, a non-zero `box-shadow`.
+   So the corpus mostly certifies that a scorer sees what measurement already
+   sees, which is not what a human-grade gate is for. `bad-03` is the only
+   fixture that needs a scorer, and it reduces to a `font-family` assertion.
+2. **Five of the nine rubric dimensions have no fixture at all.** Most
+   pointedly, `design-critic`'s own definition names the July 2026 housewares
+   set and the candlelit round as canonical bads, and neither is here. Those are
+   the most repeated visual failures in this repo's history, and unlike the
+   bot-wall class below, no exit code catches them.
+3. **There is no REVISE fixture.** The corpus has two clusters where the rubric
+   has three, separated by a point and a half. The gate's daily question is
+   almost never "is this broken", it is "is this a 3.8 or a 4.1", and nothing
+   here tests that boundary.
+4. **The goods re-anchor on production.** Every `good-*` is a live crop, so the
+   PASS anchor is whatever shipped that day. If production regresses and the
+   corpus is regenerated, the calibration silently certifies the regression.
+   `good-03` below is this already happening, which is why it is labelled.
+
+### What to add before licensing a broad BLOCK
+
+Two or three REVISE-grade fixtures (a band at `py-12` between neighbours at
+`py-16 md:py-20`; a viewport with two coral elements and nothing else wrong; a
+headline with two `.em` words). Two imagery bads from the real archive, one
+housewares frame and one candlelit boudoir-gloom frame. One near-miss good that
+breaks no token rule but fails the §4.1 interest floor. One white-label-on-bare-
+photo fixture with the scrim removed, which needs per-region analysis rather
+than two samples. One sage-ground panel. A reduced-motion still *pair* is the
+cheap partial answer for motion; day-over-day distinctness is structurally out
+of scope for a single-day corpus and should be stated as such rather than left
+looking covered.
 
 ## One class deliberately absent, and why
 
@@ -73,9 +130,26 @@ is the calibration result, and it is the whole reason to run the pass.
 |---|---|---|
 | `good-01-rail-header-375.png` | Rail header, 375 | The heading owns a full-width row and the See-all drops onto its own row beneath it, with the whitelist arrow intact. The shipped state after #18637. |
 | `good-02-tab-bar-375.png` | Bottom tab bar, 375, consent stored | Every nav label renders at its natural width inside a horizontal scroller, in DM Sans, with the account tab pinned outside the scroller. |
-| `good-03-rail-band-1440.png` | Rail band, 1440 | v3 card system: flat cards on one plum-soft ground, no borders, no drop shadows, no rounded card frames. Twin of `bad-05`. |
+| `good-03-rail-band-1440.png` | Rail band, 1440 | v3 card system: flat paper-2 cards on one plum-soft ground, each with the hairline `border-line` §3 requires, no drop shadow, no second ground inside the band. Twin of `bad-05`. **A near-miss PASS, deliberately: see below.** |
 | `good-04-meet-emma-1440.png` | Nº 04 Meet Emma, 1440 | Newsreader display against DM Sans body, one plum emphasis word, generous vertical rhythm on a single paper-2 ground. |
 | `good-05-ink-closer-1440.png` | Nº ink closer, 1440 | White display type on `bg-ink`, exactly one plum emphasis word lifted with `.em-on-dark` (~6.75:1), coral CTA at 5.51:1. Twin of `bad-04`. |
+
+#### `good-03` is a near-miss, and that is the point
+
+It scored PASS at 4.33 and the verdict stands, but it carries two real doctrine
+deviations that are **not** what it calibrates, and a critic marking it down on
+either is right rather than miscalibrated:
+
+- **§4.4, packaging.** Card 5 renders a printed retail carton as card art
+  (`nixie-rechargeable-wand-massager-ombre-metallic`). The remedy the schema
+  already provides is `card_art_blocked` plus `mood_image_url`.
+- **§6, borrowed credibility.** The card brand eyebrow renders body sans
+  `ink-3` where §6 specifies mono `ink-4`. Two card components on the same
+  storefront disagree: `ProductCarousel.tsx:397` has it wrong,
+  `StorefrontProductCard.tsx:83-87` has it right.
+
+Both are filed. They are recorded here because a fixture with an undocumented
+defect scores a correct critic as wrong, which is worse than having no fixture.
 
 ### Must score BLOCK
 
