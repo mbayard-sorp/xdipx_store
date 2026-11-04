@@ -394,7 +394,15 @@ function ProductCard({
           )}
         </div>
         <div className="p-4">
-          <p className="text-ink-3 text-xs">{product.brand}</p>
+          {/* Brand eyebrow: doctrine section 6 ("Borrowed credibility on
+              cards") specifies a mono ink-4 eyebrow, matching
+              StorefrontProductCard.tsx. Ticket #19941. */}
+          <p
+            className="text-[13px] uppercase tracking-[0.12em] text-ink-4"
+            style={{ fontFamily: 'var(--font-mono)' }}
+          >
+            {product.brand}
+          </p>
           <p
             className="font-semibold text-ink text-sm mt-0.5 line-clamp-2 group-hover:text-coral transition-colors"
             style={{ fontFamily: 'var(--font-display)' }}
