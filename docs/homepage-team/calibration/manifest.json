@@ -1,0 +1,140 @@
+{
+  "generatedFrom": "https://xdipx.com",
+  "note": "Regenerate with: npx tsx scripts/design-calibration.ts (or --manifest-only to rebuild this file from the committed PNGs without re-shooting them). Expected verdicts are the point of the fixture; do not edit them to match a gate run.",
+  "scope": "Calibrated 2026-11-04 (run 1837): 10/10 agreement, no overlap. Trusted BLOCK is licensed for layout geometry, type-role, contrast and token/palette classes ONLY. Imagery, interest floor, theme expression, day-over-day distinctness and motion have no fixture here and keep issuing withheld-BLOCK REVISE.",
+  "entries": [
+    {
+      "slug": "good-01-rail-header-375",
+      "file": "good-01-rail-header-375.png",
+      "expected": "PASS",
+      "viewport": "375px",
+      "carries": "A rail header at the 375 floor after the #18637 fix: the heading owns a full-width row, the See-all drops onto its own row below it with its whitelist arrow intact.",
+      "rule": "doctrine §2 (type hierarchy), CTA whitelist (the arrow is part of the label)",
+      "reinstates": null,
+      "knownDeviations": null,
+      "sha256": "7d677c7452ce068b94550a8c9ea74e38d85b918bbe9521f5aa58e81faabfca03",
+      "pixels": "327x123",
+      "bytes": 11309
+    },
+    {
+      "slug": "good-02-tab-bar-375",
+      "file": "good-02-tab-bar-375.png",
+      "expected": "PASS",
+      "viewport": "375px (consent stored)",
+      "carries": "The primary mobile navigation at 375 after the #18637 fix: every label renders at its natural width inside a horizontal scroller, in DM Sans, with the account tab pinned outside the scroller.",
+      "rule": "doctrine §2 (DM Sans for nav, labels, CTA text), mobile-first at 375",
+      "reinstates": null,
+      "knownDeviations": null,
+      "sha256": "a010f865a8cf8b6d39b460efbdcf104e18528e5b4f299a49513fc9569a0b858b",
+      "pixels": "375x56",
+      "bytes": 3335
+    },
+    {
+      "slug": "good-03-rail-band-1440",
+      "file": "good-03-rail-band-1440.png",
+      "expected": "PASS",
+      "viewport": "1440px (consent stored)",
+      "carries": "A storefront rail at 1440 in v3 chrome: flat paper-2 cards on a single plum-soft ground, each carrying the hairline border-line the doctrine requires, with no drop shadow and no second ground inside the band.",
+      "rule": "doctrine §1 (one ground per band), §3 (hairline border-line on cards, never a shadow; no old-cream grounds), §5 (card system)",
+      "reinstates": null,
+      "knownDeviations": [
+        "§4.4: card 5 (nixie-rechargeable-wand-massager-ombre-metallic) renders its retail carton as card art.",
+        "§6: the card brand eyebrow is body sans ink-3, not mono ink-4 (ProductCarousel.tsx:397)."
+      ],
+      "sha256": "1a1d5522c8e23abc934227fdd9ae3c1014bf91a4843d9173d46ab2c8b84923d2",
+      "pixels": "1440x617",
+      "bytes": 131976
+    },
+    {
+      "slug": "good-04-meet-emma-1440",
+      "file": "good-04-meet-emma-1440.png",
+      "expected": "PASS",
+      "viewport": "1440px (consent stored)",
+      "carries": "The Meet Emma band at 1440: editorial serif display against body copy in DM Sans, generous vertical rhythm, a single tinted ground.",
+      "rule": "doctrine §2 (type pairing), §1 (spacing rhythm)",
+      "reinstates": null,
+      "knownDeviations": null,
+      "sha256": "e1203fcb5930016627d7b4a00e9843b0b1feb412c33d2c1f9c5faf1e02741526",
+      "pixels": "1440x567",
+      "bytes": 184902
+    },
+    {
+      "slug": "good-05-ink-closer-1440",
+      "file": "good-05-ink-closer-1440.png",
+      "expected": "PASS",
+      "viewport": "1440px (consent stored)",
+      "carries": "The ink closer band at 1440: white display type on bg-ink, one plum emphasis word lifted with .em-on-dark (~6.75:1), coral CTA measured at 5.51:1 white-on-coral.",
+      "rule": "doctrine §2 (exactly one emphasis word per headline), WCAG AA floor (4.5:1 body, 3:1 large display)",
+      "reinstates": null,
+      "knownDeviations": null,
+      "sha256": "59dcd4ba3b8b9f4b3478da1cef158be4c29044a4f4279b20defb6d27fd8791e6",
+      "pixels": "1440x581",
+      "bytes": 41192
+    },
+    {
+      "slug": "bad-01-rail-header-collision-375",
+      "file": "bad-01-rail-header-collision-375.png",
+      "expected": "BLOCK",
+      "viewport": "375px",
+      "carries": "The rail header collision: the heading text ends on the same baseline as the See-all CTA with no vertical separation, so the CTA reads as a continuation of the sentence.",
+      "rule": "doctrine §2 (type hierarchy must be legible as hierarchy), mobile-first at 375",
+      "reinstates": "div.flex.flex-wrap.items-end.justify-between.gap-4.mb-6 > div:first-child { flex: 1 1 0% !important; }",
+      "knownDeviations": null,
+      "sha256": "5713d26f747967036fa2b5732cd5ab08e1b1727bc79379fc2d48289aefa0fcd4",
+      "pixels": "327x115",
+      "bytes": 11368
+    },
+    {
+      "slug": "bad-02-tab-bar-runon-375",
+      "file": "bad-02-tab-bar-runon-375.png",
+      "expected": "BLOCK",
+      "viewport": "375px (consent stored)",
+      "carries": "The primary mobile navigation rendered as one run-on glyph string: seven labels squeezed into slices narrower than themselves, with inter-word gaps indistinguishable from inter-letter gaps.",
+      "rule": "mobile-first at 375 (CLAUDE.md), doctrine §2 (labels must read as labels)",
+      "reinstates": "nav[aria-label=\"Browse categories\"] button { flex: 1 1 0% !important; min-width: 0 !important; padding-left: 0 !important; padding-right: 0 !important; }",
+      "knownDeviations": null,
+      "sha256": "7101e1dce64b6a9a1bd222f6addab789b95ee20d465d7e99a060fc7b7104eb7d",
+      "pixels": "375x56",
+      "bytes": 5115
+    },
+    {
+      "slug": "bad-03-nav-serif-375",
+      "file": "bad-03-nav-serif-375.png",
+      "expected": "BLOCK",
+      "viewport": "375px (consent stored)",
+      "carries": "The primary navigation set in the display serif, where doctrine §2 assigns DM Sans. The band looks deliberate and is a type-system violation.",
+      "rule": "doctrine §2 (Newsreader for display, DM Sans for nav / labels / CTA text)",
+      "reinstates": "nav[aria-label=\"Browse categories\"], nav[aria-label=\"Browse categories\"] * { font-family: Newsreader, Georgia, serif !important; }",
+      "knownDeviations": null,
+      "sha256": "9e7512d002b23d78d1167be8058de28a18c9a42d8b0907ddda76521c520bf089",
+      "pixels": "375x56",
+      "bytes": 3342
+    },
+    {
+      "slug": "bad-04-plum-on-ink-1440",
+      "file": "bad-04-plum-on-ink-1440.png",
+      "expected": "BLOCK",
+      "viewport": "1440px (consent stored)",
+      "carries": "Plum emphasis on an ink ground without the .em-on-dark lift: roughly 2.5:1, so the emphasis word is the least legible word in the headline it is meant to emphasise.",
+      "rule": "mission brief §2 (plum on dark always uses .em-on-dark), WCAG AA floor per doctrine (3:1 large display)",
+      "reinstates": "#discover em.em { color: var(--color-plum) !important; }",
+      "knownDeviations": null,
+      "sha256": "1ed309c0f88f0f0d7cbe9480b2fe5a55b21d1ee3c971ebc42aae13eda17e45f8",
+      "pixels": "1440x581",
+      "bytes": 41061
+    },
+    {
+      "slug": "bad-05-v2-card-chrome-1440",
+      "file": "bad-05-v2-card-chrome-1440.png",
+      "expected": "BLOCK",
+      "viewport": "1440px (consent stored)",
+      "carries": "Stale v2 card chrome on a v3 storefront rail: rounded corners, a drop shadow and a cream border against the flat-on-paper card system the doctrine locks.",
+      "rule": "doctrine §1 and §5 (flat coral on white paper, hairline frames, no drop shadows, no cream grounds)",
+      "reinstates": "section:has(> div > div.flex.flex-wrap.items-end.justify-between.gap-4.mb-6) a[href^=\"/products/\"] { border-radius: 16px !important; box-shadow: 0 10px 24px rgba(26,20,24,0.18) !important; border: 1px solid #EFECE4 !important; background: #FAF4EA !important; padding: 10px !important; }",
+      "knownDeviations": null,
+      "sha256": "989964430b9378d9bb646366521b6c14e134ca905277f7e68ae5d5dc388cd824",
+      "pixels": "1440x617",
+      "bytes": 124647
+    }
+  ]
+}
