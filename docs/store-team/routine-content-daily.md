@@ -930,6 +930,15 @@ Two reviewers, both binding, sequenced so a cheap voice failure never spends the
    - **Whole-document aphorism recount:** before resubmitting, re-run your own whole-document
      aphorism-as-closer count on the REWRITTEN draft (not just the changed strings), and separately
      count any newly added first-person sentences.
+   - **Repair-manufactured "the one I'd..." recount (runs #1574, #1817).** The most common repair
+     move, converting a flagged claim into a stated Emma view ("X is the part I would worry
+     about", "the one I would make first"), manufactures the charter's banned "the one I'd..."
+     family at volume: it is intra-document and 4-5 words long, so neither
+     `check-fresh-language.ts` (needs a shared word-6-gram against PRIOR posts) nor
+     `check-aphorism-closers.ts` (needs an anaphoric demonstrative recap) can see it. Count the
+     first-person-view shapes ("the [noun] I would/am ___") you ADDED in this repair. If the same
+     frame appears more than twice in the document after the repair, rotate the surplus to a
+     different grammatical frame before re-gating.
    - First-person solidarity-voice seams must use a concrete subject ("I start everyone from...",
      "I would rather you owned...") and must avoid the "This is / That is [defining clause]"
      shape, which itself creates an aphorism-as-closer.
