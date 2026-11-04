@@ -346,9 +346,36 @@ const EXPLICIT_NO_TEXT_PATTERNS: readonly RegExp[] = [
   // ATTEMPTED_TEXT_DEFECT_PATTERNS below, which still blocks.
   /\bnot (?:clearly |fully )?legibly readable\b/i,
   /\bpartially visible but not (?:clearly |legibly )?readable\b/i,
+  // Ticket #19939, verified against real stored verdicts (social_media_assets
+  // #1723/post 558, #1730/post 562): "no clearly legible brand wordmark or
+  // text characters discernible" and "no brand wordmarks or other legible
+  // text in frame" both deny legibility but put the recognized noun
+  // (wordmark / text characters) one or two words past "legible", or past an
+  // "or other" that the two patterns above require to sit directly after
+  // "no".
+  /\bno\s+(?:\w+\s+)?legible\b(?:[\s\w/-]{0,30})\b(wordmark|text characters?)\b/i,
+  /\bno\b[^.;]{0,60}\bor other (readable|legible) (text|words?|letters?)\b/i,
+  // Ticket #19939 (#1724/post 559): "not cleanly readable as letters"
+  // inverts "legible as X" into "readable as X", which the list did not
+  // cover.
+  /\bnot (?:cleanly |clearly |fully )?readable as (letters?|text|words?)\b/i,
 ]
 const ATTEMPTED_TEXT_DEFECT_PATTERNS: readonly RegExp[] = [
-  /\bgarbled\b/i,
+  // Ticket #19939: bare "garbled" used to veto reclassification no matter
+  // what it modified, which caught "garbled spiral/swirl embossed pattern
+  // ... not cleanly readable as letters" (#1724/post 559) -- a decorative
+  // molding descriptor, not an attempted-text defect (confirmed against the
+  // #1708/post 556 sibling SKU, posted live the day before with the
+  // identical embossed spiral motif and no such finding). Requiring
+  // "garbled" to sit near an actual text/character noun still catches every
+  // real defect example on this list and in the test suite (garbled
+  // characters, garbled dot-and-dash marks), and still blocks #1726/post
+  // 560 ("garbled/partially-formed marks ... resembling small initials or a
+  // logo but not clearly readable") on this pattern's "marks" match, which
+  // is deliberate: unlike 558/559/562, that one reads as a mark resembling
+  // a real brand mark/logo, not a decorative texture, so it stays
+  // conservative.
+  /\bgarbled\b(?:[\s\w/-]{0,25})\b(characters?|text|letters?|words?|marks?|symbols?|glyphs?|numerals?|dashes?|dots?|lettering)\b/i,
   /\bpseudo-?text\b/i,
   /\bdot-and-dash\b/i,
   /\bresembling text\b/i,
