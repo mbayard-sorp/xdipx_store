@@ -26,11 +26,11 @@ export type { CtaLabel }
 export const EMAIL_LOGO_DISPLAY_WIDTH = 160
 export const EMAIL_LOGO_URL = 'https://xdipx.com/email/xdipx-logo@2x.png' as const
 
-const cell = (bg: string, cls: 'x-bg' | 'x-card' = 'x-bg') => `bgcolor="${bg}" class="${cls}" style="background-color:${bg};`
+const cell = (bg: string, cls: 'x-bg' | 'x-card' = 'x-bg', extra?: string) => `bgcolor="${bg}" class="${extra ? `${extra} ${cls}` : cls}" style="background-color:${bg};`
 
 /** Header: the wordmark as a raster image, linked home. One per email. */
 export function headerBlock(homeHref = 'https://xdipx.com/'): string {
-  return `<tr><td class="x-px" ${cell(C.paper)}padding:28px 40px 22px 40px;" align="left">
+  return `<tr><td ${cell(C.paper, 'x-bg', 'x-px')}padding:28px 40px 22px 40px;" align="left">
 <a href="${homeHref}" target="_blank" style="text-decoration:none;"><img src="${EMAIL_LOGO_URL}" width="${EMAIL_LOGO_DISPLAY_WIDTH}" height="${EMAIL_LOGO_DISPLAY_WIDTH}" alt="xdipx" style="display:block;border:0;"></a>
 </td></tr>`
 }
@@ -77,9 +77,9 @@ export function navBlock(items: readonly EmailNavItem[] = EMAIL_NAV_DEFAULT, utm
     const href = utm ? `${base}${base.includes('?') ? '&amp;' : '?'}${utm(`nav-${slug}`)}` : base
     return `<a href="${href}" target="_blank" class="x-ink" style="display:inline-block;padding:6px 7px;font-family:${BODY_FONT};font-size:12px;line-height:18px;font-weight:600;letter-spacing:0.05em;text-transform:uppercase;color:${C.ink};text-decoration:none;">${item.title}</a>`
   })
-  return `<tr><td class="x-px" ${cell(C.paper)}padding:0 31px;" align="center">
+  return `<tr><td ${cell(C.paper, 'x-bg', 'x-px')}padding:0 31px;" align="center">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-<td class="x-rule" align="center" ${cell(C.paper)}border-top:1px solid ${C.line};border-bottom:1px solid ${C.line};padding:8px 0;">${links.join('')}</td>
+<td align="center" ${cell(C.paper, 'x-bg', 'x-rule')}border-top:1px solid ${C.line};border-bottom:1px solid ${C.line};padding:8px 0;">${links.join('')}</td>
 </tr></table>
 </td></tr>`
 }
@@ -97,10 +97,10 @@ export function heroBlock(opts: HeroBlockOpts): string {
   return `<tr><td ${cell(C.paper2, 'x-card')}line-height:0;font-size:0;">
 <a href="${opts.href}" target="_blank" style="text-decoration:none;"><img src="${opts.imageUrl}" width="600" alt="${opts.productName}" style="display:block;width:100%;max-width:100%;height:auto;border:0;"></a>
 </td></tr>
-<tr><td class="x-px" ${cell(C.paper)}padding:32px 40px 0 40px;" align="left">
+<tr><td ${cell(C.paper, 'x-bg', 'x-px')}padding:32px 40px 0 40px;" align="left">
 <h1 class="x-ink x-serif" style="margin:0;font-family:${HEAD_FONT};font-size:30px;line-height:36px;font-weight:400;letter-spacing:-0.01em;color:${C.ink};">${opts.headline}</h1>
 </td></tr>
-<tr><td class="x-px" ${cell(C.paper)}padding:24px 40px 0 40px;" align="center">
+<tr><td ${cell(C.paper, 'x-bg', 'x-px')}padding:24px 40px 0 40px;" align="center">
 ${coralButton(opts.href, opts.cta)}
 </td></tr>`
 }
@@ -121,8 +121,8 @@ function productGrid<T extends GridItem>(items: T[], badge?: (item: T) => string
       const b = badge?.(item)
       return `<td width="${colWidth}" valign="top" ${cell(C.paper)}padding:0 10px 24px 10px;">
 <a href="${item.href}" target="_blank" style="text-decoration:none;"><img src="${item.imageUrl}" width="${colWidth}" alt="${item.name}" style="display:block;width:100%;max-width:100%;height:auto;border:0;"></a>
-${b ? `<p style="margin:10px 0 2px 0;font-family:${BODY_FONT};font-size:12px;line-height:16px;font-weight:600;letter-spacing:0.02em;text-transform:uppercase;color:${C.coral};">${b}</p>` : ''}
-<a href="${item.href}" target="_blank" style="text-decoration:none;"><p style="margin:${b ? '2px' : '10px'} 0 0 0;font-family:${BODY_FONT};font-size:15px;line-height:20px;color:${C.ink};">${item.name}</p></a>
+${b ? `<p class="x-coral" style="margin:10px 0 2px 0;font-family:${BODY_FONT};font-size:12px;line-height:16px;font-weight:600;letter-spacing:0.02em;text-transform:uppercase;color:${C.coral};">${b}</p>` : ''}
+<a href="${item.href}" target="_blank" style="text-decoration:none;"><p class="x-ink" style="margin:${b ? '2px' : '10px'} 0 0 0;font-family:${BODY_FONT};font-size:15px;line-height:20px;color:${C.ink};">${item.name}</p></a>
 </td>`
     })
     // Odd item count: pad the row with an empty cell rather than stretching the last image.
@@ -134,7 +134,7 @@ ${b ? `<p style="margin:10px 0 2px 0;font-family:${BODY_FONT};font-size:12px;lin
 
 /** New-in grid: a plain two-column product grid, no badges. */
 export function newInGridBlock(items: GridItem[]): string {
-  return `<tr><td class="x-px" ${cell(C.paper)}padding:32px 40px 0 40px;">
+  return `<tr><td ${cell(C.paper, 'x-bg', 'x-px')}padding:32px 40px 0 40px;">
 ${productGrid(items)}
 </td></tr>`
 }
@@ -146,7 +146,7 @@ export interface DealItem extends GridItem {
 
 /** Deals: the same grid with an optional badge line per item. */
 export function dealsBlock(items: DealItem[]): string {
-  return `<tr><td class="x-px" ${cell(C.paper)}padding:32px 40px 0 40px;">
+  return `<tr><td ${cell(C.paper, 'x-bg', 'x-px')}padding:32px 40px 0 40px;">
 ${productGrid(items, (item) => item.badge)}
 </td></tr>`
 }
@@ -164,11 +164,11 @@ export function seasonalBlock(opts: SeasonalBlockOpts): string {
   return `<tr><td ${cell(C.paper2, 'x-card')}line-height:0;font-size:0;">
 <a href="${opts.href}" target="_blank" style="text-decoration:none;"><img src="${opts.imageUrl}" width="600" alt="${opts.headline}" style="display:block;width:100%;max-width:100%;height:auto;border:0;"></a>
 </td></tr>
-<tr><td class="x-px" ${cell(C.paper)}padding:28px 40px 0 40px;" align="left">
+<tr><td ${cell(C.paper, 'x-bg', 'x-px')}padding:28px 40px 0 40px;" align="left">
 <h2 class="x-ink x-serif" style="margin:0;font-family:${HEAD_FONT};font-size:24px;line-height:30px;font-weight:400;color:${C.ink};">${opts.headline}</h2>
-<p style="margin:12px 0 0 0;max-width:60ch;font-family:${BODY_FONT};font-size:16px;line-height:24px;color:${C.ink2};">${opts.body}</p>
+<p class="x-ink2" style="margin:12px 0 0 0;max-width:60ch;font-family:${BODY_FONT};font-size:16px;line-height:24px;color:${C.ink2};">${opts.body}</p>
 </td></tr>
-<tr><td class="x-px" ${cell(C.paper)}padding:20px 40px 0 40px;" align="center">
+<tr><td ${cell(C.paper, 'x-bg', 'x-px')}padding:20px 40px 0 40px;" align="center">
 ${coralButton(opts.href, opts.cta)}
 </td></tr>`
 }
@@ -184,12 +184,12 @@ export function yourAddOnsBlock(): string {
     const p = (field: string) => `profile.xdipx_addon_${n}_${field}`
     return `{% if ${p('handle')} %}<td width="186" valign="top" ${cell(C.paper)}padding:0 8px 20px 8px;">
 <a href="{{ ${p('url')} }}" target="_blank" style="text-decoration:none;"><img src="{{ ${p('image')} }}" width="186" alt="{{ ${p('title')} }}" style="display:block;width:100%;max-width:100%;height:auto;border:0;"></a>
-<p style="margin:8px 0 0 0;font-family:${BODY_FONT};font-size:14px;line-height:19px;color:${C.ink};">{{ ${p('title')} }}</p>
-<p style="margin:2px 0 0 0;font-family:${BODY_FONT};font-size:13px;line-height:18px;color:${C.ink3};">{{ ${p('why')} }}</p>
+<p class="x-ink" style="margin:8px 0 0 0;font-family:${BODY_FONT};font-size:14px;line-height:19px;color:${C.ink};">{{ ${p('title')} }}</p>
+<p class="x-ink3" style="margin:2px 0 0 0;font-family:${BODY_FONT};font-size:13px;line-height:18px;color:${C.ink3};">{{ ${p('why')} }}</p>
 </td>{% endif %}`
   }
   return `{% if profile.xdipx_addon_1_handle or profile.xdipx_addon_2_handle or profile.xdipx_addon_3_handle %}
-<tr><td class="x-px" ${cell(C.paper)}padding:32px 40px 0 40px;" align="left">
+<tr><td ${cell(C.paper, 'x-bg', 'x-px')}padding:32px 40px 0 40px;" align="left">
 <p class="x-ink x-serif" style="margin:0 0 16px 0;font-family:${HEAD_FONT};font-size:20px;line-height:26px;color:${C.ink};">{% if profile.xdipx_addons_kind == "owned" %}More for what you already own{% else %}Pairs well with it{% endif %}</p>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>${slot(1)}${slot(2)}${slot(3)}</tr></table>
 </td></tr>
@@ -198,7 +198,7 @@ export function yourAddOnsBlock(): string {
 
 /** Emma note: one short paragraph in the Emma voice, set as a quote. */
 export function emmaNoteBlock(note: string): string {
-  return `<tr><td class="x-px" ${cell(C.paper)}padding:28px 40px 0 40px;" align="left">
+  return `<tr><td ${cell(C.paper, 'x-bg', 'x-px')}padding:28px 40px 0 40px;" align="left">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
 <td style="border-left:2px solid ${C.line3};padding:2px 0 2px 20px;">
 <p class="x-ink x-serif" style="margin:0;max-width:60ch;font-family:${HEAD_FONT};font-size:18px;line-height:27px;font-style:italic;color:${C.ink};">${note}</p>
@@ -221,10 +221,10 @@ const NOTEBOOK_CTA: CtaLabel = 'Take a peek →'
  * whitelist, same label on every card.
  */
 export function notebookCardBlock(items: NotebookCardItem[]): string {
-  return items.slice(0, 2).map((item) => `<tr><td class="x-px" ${cell(C.paper)}padding:24px 40px 0 40px;" align="left">
+  return items.slice(0, 2).map((item) => `<tr><td ${cell(C.paper, 'x-bg', 'x-px')}padding:24px 40px 0 40px;" align="left">
 ${item.imageUrl ? `<a href="${item.href}" target="_blank" style="text-decoration:none;"><img src="${item.imageUrl}" width="520" alt="${item.title}" style="display:block;width:100%;max-width:100%;height:auto;border:0;border-radius:14px;margin:0 0 14px 0;"></a>` : ''}
 <a href="${item.href}" target="_blank" style="text-decoration:none;"><p class="x-ink x-serif" style="margin:0;font-family:${HEAD_FONT};font-size:19px;line-height:25px;color:${C.ink};">${item.title}</p></a>
-<p style="margin:6px 0 10px 0;max-width:60ch;font-family:${BODY_FONT};font-size:14px;line-height:21px;color:${C.ink3};">${item.dek}</p>
+<p class="x-ink3" style="margin:6px 0 10px 0;max-width:60ch;font-family:${BODY_FONT};font-size:14px;line-height:21px;color:${C.ink3};">${item.dek}</p>
 <a href="${item.href}" target="_blank" class="x-plum" style="font-family:${BODY_FONT};font-size:14px;font-weight:600;color:${C.plum};text-decoration:none;">${NOTEBOOK_CTA}</a>
 </td></tr>`).join('')
 }
@@ -243,12 +243,12 @@ export interface TipBlockOpts {
  */
 export function tipBlock(opts: TipBlockOpts): string {
   const productLink = opts.productHref && opts.productTitle
-    ? `<p style="margin:12px 0 0 0;"><a href="${opts.productHref}" target="_blank" style="font-family:${BODY_FONT};font-size:14px;font-weight:600;color:${C.coral};text-decoration:none;border-bottom:1px solid ${C.coral};">${opts.productTitle}</a></p>`
+    ? `<p style="margin:12px 0 0 0;"><a href="${opts.productHref}" target="_blank" class="x-coral" style="font-family:${BODY_FONT};font-size:14px;font-weight:600;color:${C.coral};text-decoration:none;border-bottom:1px solid ${C.coral};">${opts.productTitle}</a></p>`
     : ''
-  return `<tr><td class="x-px" ${cell(C.paper)}padding:28px 40px 0 40px;" align="left">
+  return `<tr><td ${cell(C.paper, 'x-bg', 'x-px')}padding:28px 40px 0 40px;" align="left">
 <p class="x-plum" style="margin:0 0 8px 0;font-family:${MONO_FONT};font-size:12px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:${C.plum};">${opts.kicker}</p>
 <p class="x-ink x-serif" style="margin:0 0 8px 0;font-family:${HEAD_FONT};font-size:20px;line-height:26px;color:${C.ink};">${opts.title}</p>
-<p style="margin:0;max-width:60ch;font-family:${BODY_FONT};font-size:15px;line-height:23px;color:${C.ink2};">${opts.body}</p>
+<p class="x-ink2" style="margin:0;max-width:60ch;font-family:${BODY_FONT};font-size:15px;line-height:23px;color:${C.ink2};">${opts.body}</p>
 ${productLink}
 </td></tr>`
 }
@@ -269,7 +269,7 @@ export function bylineBlock(opts: BylineBlockOpts): string {
   const avatar = opts.avatarUrl
     ? `<td width="40" valign="middle" ${cell(C.paper)}padding:0 12px 0 0;"><img src="${opts.avatarUrl}" width="40" height="40" alt="${opts.name}" style="display:block;width:40px;height:40px;border-radius:999px;border:0;"></td>`
     : ''
-  return `<tr><td class="x-px" ${cell(C.paper)}padding:24px 40px 0 40px;" align="left">
+  return `<tr><td ${cell(C.paper, 'x-bg', 'x-px')}padding:24px 40px 0 40px;" align="left">
 <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>${avatar}<td valign="middle">
 <p class="x-ink" style="margin:0;font-family:${BODY_FONT};font-size:14px;font-weight:600;line-height:18px;color:${C.ink};">${opts.name}</p>
 <p class="x-ink3" style="margin:1px 0 0 0;font-family:${BODY_FONT};font-size:13px;line-height:17px;color:${C.ink3};">${opts.role}</p>
@@ -292,11 +292,11 @@ const DEAL_CODE_CTA: CtaLabel = 'Show me'
  * which the caller supplies. MAP is unaffected since no price renders here.
  */
 export function dealCodeBlock(opts: DealCodeBlockOpts): string {
-  return `<tr><td class="x-px" ${cell(C.paper)}padding:28px 40px 0 40px;">
+  return `<tr><td ${cell(C.paper, 'x-bg', 'x-px')}padding:28px 40px 0 40px;">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
 <td ${cell(C.paper2, 'x-card')}padding:24px;border-radius:18px;" align="center">
 <p class="x-ink x-serif" style="margin:0 0 12px 0;font-family:${HEAD_FONT};font-size:19px;line-height:25px;color:${C.ink};">${opts.headline}</p>
-<p style="margin:0 0 14px 0;font-family:${MONO_FONT};font-size:18px;font-weight:700;letter-spacing:0.08em;color:${C.coral};border:1px dashed ${C.line3};border-radius:10px;padding:10px 20px;display:inline-block;">${opts.code}</p>
+<p class="x-coral" style="margin:0 0 14px 0;font-family:${MONO_FONT};font-size:18px;font-weight:700;letter-spacing:0.08em;color:${C.coral};border:1px dashed ${C.line3};border-radius:10px;padding:10px 20px;display:inline-block;">${opts.code}</p>
 <p class="x-ink3" style="margin:0 0 16px 0;max-width:46ch;font-family:${BODY_FONT};font-size:13px;line-height:19px;color:${C.ink3};">${opts.terms}</p>
 ${coralButton(opts.href, DEAL_CODE_CTA)}
 </td></tr></table>
@@ -341,19 +341,19 @@ export function goodBetterBestBlock(opts: GoodBetterBestBlockOpts): string {
     const lux = t.tier === 'best'
     const imgWidth = lux ? colWidth - 28 : colWidth
     return `<td width="${colWidth}" valign="top" class="x-stack" style="padding:0 6px;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="${lux ? `background-color:${C.plumSoft};border-radius:14px;` : ''}"><tr><td style="padding:${lux ? '14px' : '0'};">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"${lux ? ` class="x-plumcard" style="background-color:${C.plumSoft};border-radius:14px;"` : ''}><tr><td style="padding:${lux ? '14px' : '0'};">
 <a href="${href}" target="_blank" style="text-decoration:none;"><img src="${t.imageUrl}" width="${imgWidth}" alt="${t.name}" style="display:block;width:100%;max-width:100%;height:auto;border:0;border-radius:10px;"></a>
 <p class="x-plum" style="margin:10px 0 0 0;font-family:${MONO_FONT};font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:${C.plum};">${t.tier}</p>
-<a href="${href}" target="_blank" style="text-decoration:none;"><p style="margin:3px 0 0 0;font-family:${BODY_FONT};font-size:14px;line-height:18px;color:${C.ink};">${t.name}</p></a>
-<p style="margin:3px 0 0 0;font-family:${BODY_FONT};font-size:14px;font-weight:700;color:${C.coral};">${t.price}</p>
+<a href="${href}" target="_blank" style="text-decoration:none;"><p class="x-ink" style="margin:3px 0 0 0;font-family:${BODY_FONT};font-size:14px;line-height:18px;color:${C.ink};">${t.name}</p></a>
+<p class="x-coral" style="margin:3px 0 0 0;font-family:${BODY_FONT};font-size:14px;font-weight:700;color:${C.coral};">${t.price}</p>
 <p class="x-ink3" style="margin:3px 0 0 0;font-family:${BODY_FONT};font-size:12px;line-height:16px;color:${C.ink3};">${t.line}</p>
 </td></tr></table>
 </td>`
   }).join('')
-  return `<tr><td class="x-px" ${cell(C.paper)}padding:28px 40px 0 40px;" align="left">
+  return `<tr><td ${cell(C.paper, 'x-bg', 'x-px')}padding:28px 40px 0 40px;" align="left">
 <p class="x-plum" style="margin:0 0 6px 0;font-family:${MONO_FONT};font-size:12px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:${C.plum};">${opts.kicker}</p>
 <p class="x-ink x-serif" style="margin:0 0 8px 0;font-family:${HEAD_FONT};font-size:20px;line-height:26px;color:${C.ink};">${opts.title}</p>
-<p style="margin:0 0 16px 0;max-width:60ch;font-family:${BODY_FONT};font-size:15px;line-height:22px;color:${C.ink2};">${opts.body}</p>
+<p class="x-ink2" style="margin:0 0 16px 0;max-width:60ch;font-family:${BODY_FONT};font-size:15px;line-height:22px;color:${C.ink2};">${opts.body}</p>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>${cards}</tr></table>
 </td></tr>`
 }
@@ -372,22 +372,22 @@ export interface FeaturedBrandBlockOpts {
  * function's: it renders whatever `items` it is given.
  */
 export function featuredBrandBlock(opts: FeaturedBrandBlockOpts): string {
-  return `<tr><td class="x-px" ${cell(C.paper)}padding:28px 40px 0 40px;" align="left">
+  return `<tr><td ${cell(C.paper, 'x-bg', 'x-px')}padding:28px 40px 0 40px;" align="left">
 <p class="x-ink x-serif" style="margin:0 0 4px 0;font-family:${HEAD_FONT};font-size:20px;line-height:26px;color:${C.ink};">${opts.brand}</p>
 <p class="x-ink3" style="margin:0 0 16px 0;max-width:60ch;font-family:${BODY_FONT};font-size:14px;line-height:20px;color:${C.ink3};">${opts.line}</p>
 </td></tr>
-<tr><td class="x-px" ${cell(C.paper)}padding:0 40px 0 40px;">
+<tr><td ${cell(C.paper, 'x-bg', 'x-px')}padding:0 40px 0 40px;">
 ${productGrid(opts.items.slice(0, 4))}
 </td></tr>`
 }
 
 /** Footer: unsubscribe, preference management and the physical address, same tags the flow emails use. */
 export function footerBlock(): string {
-  return `<tr><td class="x-px" ${cell(C.paper)}padding:0 40px;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td class="x-rule" height="1" ${cell(C.paper)}height:1px;line-height:1px;font-size:1px;border-top:1px solid ${C.line};">&nbsp;</td></tr></table>
+  return `<tr><td ${cell(C.paper, 'x-bg', 'x-px')}padding:0 40px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td height="1" ${cell(C.paper, 'x-bg', 'x-rule')}height:1px;line-height:1px;font-size:1px;border-top:1px solid ${C.line};">&nbsp;</td></tr></table>
 </td></tr>
-<tr><td class="x-px" ${cell(C.paper)}padding:24px 40px 40px 40px;" align="left">
-<p class="x-ink3" style="margin:0 0 10px 0;font-family:${BODY_FONT};font-size:13px;line-height:20px;color:${C.ink4};">Questions go to <a href="mailto:hello@xdipx.com" style="color:${C.ink4};text-decoration:underline;">hello@xdipx.com</a>.</p>
+<tr><td ${cell(C.paper, 'x-bg', 'x-px')}padding:24px 40px 40px 40px;" align="left">
+<p class="x-ink3" style="margin:0 0 10px 0;font-family:${BODY_FONT};font-size:13px;line-height:20px;color:${C.ink4};">Questions go to <a href="mailto:hello@xdipx.com" class="x-ink3" style="color:${C.ink4};text-decoration:underline;">hello@xdipx.com</a>.</p>
 <p class="x-ink3" style="margin:0 0 10px 0;font-family:${BODY_FONT};font-size:13px;line-height:20px;color:${C.ink4};">xdipx &middot; {{ organization.full_address }}</p>
 <p class="x-ink3 x-foot" style="margin:0;font-family:${BODY_FONT};font-size:13px;line-height:20px;color:${C.ink4};">{% unsubscribe 'Unsubscribe' %} &middot; {% manage_preferences 'Email preferences' %}</p>
 </td></tr>`
