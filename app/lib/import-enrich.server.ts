@@ -68,6 +68,7 @@ import { PRODUCT_TYPE_DIALS } from '~/types'
 import type { ProductWrites } from '~/lib/emma-orchestrator.server'
 import { applyCategoryForEnrichment, applyMaterial } from '~/lib/shopify-category.server'
 import { deriveCastTarget } from '~/lib/cast-target.server'
+import { hasFirstPartyMaterial } from '~/lib/mfg-specs/sync.server'
 
 const VALID_IVR_EXPERIENCE = new Set<string>(IVR_EXPERIENCE_LEVELS as readonly string[])
 
@@ -298,11 +299,19 @@ export async function applyFullEnrichmentWrites(numericProductId: string, writes
 
   // Material goes in the store-owned xdipx.material list (the toy category has no
   // Shopify Material attribute). Same rules as above: fill-gaps, non-fatal.
+  // Gated on a first-party source (ticket #19981): writes.material comes from
+  // the AI enrichment prompt, not the Nalpac feed, and nothing previously
+  // checked it against a real manufacturer source before it reached Shopify
+  // (sku 78048 shipped "Body-safe silicone" on a plated bullet this way).
   if (writes.material?.length) {
     try {
-      const matResult = await applyMaterial(`gid://shopify/Product/${numericProductId}`, writes.material)
-      if (matResult.errors.length) {
-        console.warn(`[import-enrich] material for product ${numericProductId}:`, JSON.stringify(matResult))
+      if (!(await hasFirstPartyMaterial(snap.handle))) {
+        console.warn(`[import-enrich] skipping xdipx.material for product ${numericProductId} (${snap.handle}): no first-party source backs "${writes.material.join(', ')}"`)
+      } else {
+        const matResult = await applyMaterial(`gid://shopify/Product/${numericProductId}`, writes.material)
+        if (matResult.errors.length) {
+          console.warn(`[import-enrich] material for product ${numericProductId}:`, JSON.stringify(matResult))
+        }
       }
     } catch (err) {
       console.error(`[import-enrich] material failed for product ${numericProductId}:`, err)

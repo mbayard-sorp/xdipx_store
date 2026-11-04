@@ -128,6 +128,53 @@ export async function getMfgSpecs(handle: string): Promise<Record<string, string
 }
 
 /**
+ * Pure decision: does this mfgProductSpecs doc shape back a first-party
+ * material claim? Only the Nalpac feed's structured Material column
+ * (`sourceVersion: 'nalpac-csv-v1'` in extractor.server.ts) counts. The
+ * `description-parse-v1` fallback never populates `material` at all (see
+ * extractFromDescription), so that sourceVersion, a missing doc, or an empty
+ * material string all mean "no first-party support". Exported separately
+ * from hasFirstPartyMaterial so this logic is unit-testable without mocking
+ * the Sanity client.
+ */
+export function isFirstPartyMaterialDoc(doc: { sourceVersion?: string; material?: string } | null): boolean {
+  return doc?.sourceVersion === 'nalpac-csv-v1' && typeof doc.material === 'string' && doc.material.trim().length > 0
+}
+
+/**
+ * Whether a product's manufacturer material is first-party backed. Used as a
+ * write gate for the AI-generated `writes.material` claim before it reaches
+ * `applyMaterial` (ticket #19981, split from #19950 / the sku-78048
+ * "Body-safe silicone" overclaim with no first-party source). No Sanity
+ * credentials, no doc, or a fetch error all fail closed to false rather than
+ * guess.
+ */
+export async function hasFirstPartyMaterial(handle: string): Promise<boolean> {
+  const projectId = process.env['SANITY_PROJECT_ID']
+  const token     = process.env['SANITY_API_TOKEN']
+  if (!projectId || !token) return false
+
+  const client = createClient({
+    projectId,
+    dataset:    process.env['SANITY_DATASET'] ?? 'production',
+    apiVersion: '2024-10-01',
+    token,
+    useCdn:     true,
+  })
+
+  try {
+    const doc = await client.fetch<{ sourceVersion?: string; material?: string } | null>(
+      `*[_type == "mfgProductSpecs" && productHandle == $handle][0]{sourceVersion, material}`,
+      { handle },
+    )
+    return isFirstPartyMaterialDoc(doc)
+  } catch (err) {
+    console.warn('[mfg-specs/sync] hasFirstPartyMaterial error:', err instanceof Error ? err.message : err)
+    return false
+  }
+}
+
+/**
  * Fire-and-forget sync hook.
  *
  * Fetches the product from Shopify, extracts specs, and upserts into Sanity.
