@@ -12,11 +12,20 @@
  * except console/decision) and has neither verifyProbe, a derivable one, nor
  * overrideNoProbeReason is rejected with 400 (ticket #8028) rather than filed
  * silently probe-less.
- *   { op: 'list', includeCleared? } -> { open: [...], cleared: [...] }
+ *   { op: 'list', limit?, includeCleared?, clearedDays? }
+ *       -> { open: [...], totalOpen, cleared: [...] }
+ *   { op: 'get', id }                -> { blocker } or 404 (any status, not just open)
  *   { op: 'clear', id, note? }      -> { ok }
  *   { op: 'dismiss', id, note? }    -> { ok }
  *   { op: 'verify' }                -> { checked, autoCleared, stillBlocked, unknown }
  *   { op: 'probes' }                -> { probes: [{ name, describes }] }
+ *
+ * `limit` on `list` lets a caller see past the 50-row default; `totalOpen` is
+ * the real open count so truncation (limit < totalOpen) is visible even when
+ * the caller doesn't raise it. `get` is the only way to check a specific id
+ * without scanning a list that may not contain it (ticket #19942: a routine
+ * told to check "is blocker N still open?" before re-filing could not,
+ * because row 51+ was invisible and there was no other lookup).
  *
  * GET returns the same payload as { op: 'list' }, so a routine can read the
  * current list without a body.
@@ -33,8 +42,10 @@ import {
   BLOCKER_CATEGORIES,
   PROBES,
   clearBlocker,
+  countOpenBlockers,
   dismissBlocker,
   fileBlocker,
+  getBlockerById,
   listOpenBlockers,
   listRecentlyCleared,
   probeGapReason,
@@ -43,16 +54,25 @@ import {
   verifyBlockers,
 } from '~/lib/owner-blockers.server'
 
+/** Caps a caller-supplied limit so `op:'list'` can't be used to pull an
+ * unbounded row count; 500 is comfortably above any real open-blocker count. */
+function clampLimit(v: unknown, fallback: number, max = 500): number {
+  const n = typeof v === 'number' ? v : Number(v)
+  return Number.isFinite(n) && n > 0 ? Math.min(Math.floor(n), max) : fallback
+}
+
 function str(v: unknown, max = 4000): string | undefined {
   return typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : undefined
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
   assertTeamAuth(request)
-  return Response.json({
-    open: await listOpenBlockers(),
-    cleared: await listRecentlyCleared(),
-  })
+  const [open, totalOpen, cleared] = await Promise.all([
+    listOpenBlockers(),
+    countOpenBlockers(),
+    listRecentlyCleared(),
+  ])
+  return Response.json({ open, totalOpen, cleared })
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -128,10 +148,22 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   if (op === 'list') {
-    return Response.json({
-      open: await listOpenBlockers(),
-      cleared: b['includeCleared'] ? await listRecentlyCleared() : [],
-    })
+    const limit = clampLimit(b['limit'], 50)
+    const [open, totalOpen] = await Promise.all([listOpenBlockers(limit), countOpenBlockers()])
+    const cleared = b['includeCleared']
+      ? await listRecentlyCleared(
+        typeof b['clearedDays'] === 'number' && b['clearedDays'] > 0 ? b['clearedDays'] : undefined,
+      )
+      : []
+    return Response.json({ open, totalOpen, cleared })
+  }
+
+  if (op === 'get') {
+    const id = Number(b['id'] ?? 0)
+    if (!id) return new Response('Bad Request: id required', { status: 400 })
+    const blocker = await getBlockerById(id)
+    if (!blocker) return new Response('Not Found: no blocker with that id', { status: 404 })
+    return Response.json({ blocker })
   }
 
   if (op === 'clear' || op === 'dismiss') {

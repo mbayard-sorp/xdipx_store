@@ -856,6 +856,33 @@ export async function listAllBlockers(limit = 200): Promise<OwnerBlocker[]> {
   return (res.rows ?? []).map(r => toBlocker(r as Record<string, unknown>))
 }
 
+/**
+ * Ticket #19942. `listOpenBlockers`'s 50-row cap plus no get-by-id meant a
+ * routine told to check "is blocker N still open?" before re-filing
+ * structurally could not: row 51+ is invisible to the list, and there was no
+ * other way to ask about one id directly. Returns the row in ANY status
+ * (open, cleared, or dismissed), not only open, since "does this id exist
+ * and what happened to it" is exactly what a caller re-checking before
+ * re-filing needs to know.
+ */
+export async function getBlockerById(id: number): Promise<OwnerBlocker | null> {
+  const res = await db.execute(sql`
+    SELECT ${SELECT_COLS} FROM owner_blockers WHERE id = ${id}`)
+  const row = (res.rows ?? [])[0]
+  return row ? toBlocker(row as Record<string, unknown>) : null
+}
+
+/**
+ * Ticket #19942. Pairs with `listOpenBlockers`'s `limit` so a caller can tell
+ * a full page (hit the limit, but nothing beyond it) from a truncated one
+ * (hit the limit, with more rows still open behind it).
+ */
+export async function countOpenBlockers(): Promise<number> {
+  const res = await db.execute(sql`
+    SELECT count(*)::int AS n FROM owner_blockers WHERE status = 'open'`)
+  return Number((res.rows ?? [])[0]?.['n'] ?? 0)
+}
+
 /* ── Verification sweep ────────────────────────────────────────────────────── */
 
 export interface VerifyResult {
