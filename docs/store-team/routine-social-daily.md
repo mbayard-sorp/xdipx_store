@@ -755,6 +755,25 @@ since qualifies as stale. Mark it `rejected` with a note naming the closed campa
 `scheduledFor`, instead of reworking it or leaving it to be re-read next run. Sweep up to **5 stale
 rows per run** so the queue converges instead of aging in place.
 
+**A `status:'failed'` post (a real publish attempt that errored, not a gate bounce) is owner-gated,
+not a routine fix (ticket #20103).** `op:'rework'` and `op:'stale'` only ever touch a `needs_changes`
+row; neither reaches a `failed` row, and there is intentionally no `op:'retry'` or `op:'dismiss'` on
+`/api/team/social-post` to add one. The two functions that could close one,
+`retryFailedSocialPost` and `deleteSocialPost` (`app/lib/social-post-ops.server.ts`), are wired only
+into the owner-UI action in `app/routes/admin.socials.queue.tsx`, and that is deliberate:
+`retryFailedSocialPost` calls the platform publisher directly the moment it is invoked, the same
+immediate live-publish action as the admin "Post now" button documented in Step 2.8, with no read of
+`instagram_autopublish_enabled` / `x_autopublish_enabled` anywhere in the call path. Exposing it over
+the team API would hand an unattended routine a second, valve-independent way to put something live,
+which is exactly what CLAUDE.md's "social autopost remain owner-gated" line (Money valves section)
+reserves for the owner. So when the run-start sweep finds a `social_posts` row sitting at
+`status:'failed'`, do not try to close it here: file it on the owner blocker list
+(`POST /api/team/blocker {"op":"file", category:"console", whereToGo:"/admin/socials/queue",
+verifyProbe:"row_matches", verifyArg:"social_posts|id|<id>|status|posted", ...}`) instead of filing a
+plain `code` ticket for it, and name the row and the platform error in the blocker `detail`. The
+owner clears it with Retry (now that a given transient error, e.g. Meta 9004, has its own fix landed)
+or Delete, both already in `/admin/socials/queue`.
+
 ## Step 2.6 — Stock gate (never feature an out-of-stock product)
 
 Owner direction 2026-08-09, after a live post featuring an out-of-stock product had to be deleted.
