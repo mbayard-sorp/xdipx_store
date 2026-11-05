@@ -149,7 +149,7 @@ import { parseVoiceGateVerdict } from '~/lib/social-voice-gate.server'
 import { applyPublishGateVerdict, parsePublishGateVerdict, reworkSocialPost, parseReworkInput, markStaleSocialPostRejected } from '~/lib/social-publish-approve.server'
 import { captureSocialEngagement, captureInstagramAccount, rankBySaves } from '~/lib/social-engagement.server'
 import { getSocialMixReport, formatSocialMixReportLines } from '~/lib/social-mix-report.server'
-import { hasStoryLine, isRetiredBodyZone, parseSceneAxes } from '~/lib/social-scene-vocab'
+import { hasStoryLine, isRetiredBodyZone, needsStoryLine, parseSceneAxes } from '~/lib/social-scene-vocab'
 
 export async function action({ request }: ActionFunctionArgs) {
   assertTeamAuth(request)
@@ -210,11 +210,20 @@ export async function action({ request }: ActionFunctionArgs) {
     // (2026-10-04/05) shipped with an empty imageBrief: "a cast member
     // holding a product up in an empty room ... meaningless to our
     // customers." A video-fanout row (videoJobId/episodeId set) is exempt —
-    // its story lives in the script, not a stills brief.
+    // its story lives in the script, not a stills brief. Scoped to drafts
+    // that actually carry a cast/body-zone frame (ticket #20000; see
+    // `needsStoryLine`'s own comment) rather than to any shopifyProductId-
+    // bearing row, so the Step 2.9a New-in carousel's no-cast packshot/
+    // typographic slides are exempt too.
     const isVideoFanout = typeof b['videoJobId'] === 'number' || typeof b['episodeId'] === 'number'
     if ((b['platform'] === 'instagram' || b['platform'] === 'x') &&
-        typeof b['shopifyProductId'] === 'string' && b['shopifyProductId'].length > 0 &&
-        !isVideoFanout &&
+        needsStoryLine({
+          shopifyProductId: typeof b['shopifyProductId'] === 'string' ? b['shopifyProductId'] : undefined,
+          isVideoFanout,
+          bodyZone: typeof b['bodyZone'] === 'string' ? b['bodyZone'] : undefined,
+          cropScale: typeof b['cropScale'] === 'string' ? b['cropScale'] : undefined,
+          postType: typeof b['postType'] === 'string' ? b['postType'] : undefined,
+        }) &&
         !hasStoryLine(typeof b['imageBrief'] === 'string' ? b['imageBrief'] : undefined)) {
       return new Response(
         'Bad Request: a product-featuring Instagram or X draft requires an imageBrief carrying a Writers Room ' +
