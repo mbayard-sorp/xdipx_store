@@ -140,7 +140,7 @@ function productName(p: CatalogProduct): string {
 export function distinctiveTokens(name: string): string[] {
   return normalize(name)
     .split(' ')
-    .filter((t) => t.length >= 3 && !GENERIC_TOKENS.has(t))
+    .filter((t) => t.length >= 3 && !GENERIC_TOKENS.has(t) && !isSpecClaimToken(t))
 }
 
 /**
@@ -349,6 +349,27 @@ const SPEC_CLAIM_PATTERNS: readonly { category: SpecClaimCategory; re: RegExp }[
   { category: 'runtime', re: RUNTIME_RE },
   { category: 'mechanism', re: MECHANISM_RE },
 ]
+
+/**
+ * True when `token` alone would be matched by one of the spec-claim patterns
+ * above (ticket #20122, second occurrence after #15618's packaging-token
+ * case). `distinctiveTokens()` uses this to exclude a token from a product's
+ * naming requirement: a Shopify title can carry its own xdipx-namespace
+ * vocabulary into a spec-shaped word (`Womanizer Enhance 2-in-1 Air
+ * Pulsation Clitoral Vibrator` reduces to [womanizer, enhance, air,
+ * pulsation, clitoral]), and `findUnsourcedSpecClaims` correctly flags that
+ * same word as an unsourced claim per the PDP-as-source rule. Without this
+ * exclusion the two checks are jointly unsatisfiable for such a product:
+ * `heroNamesAnyProduct` requires every distinctive token present in
+ * heroImageAlt (or imagePrompt), while `findUnsourcedSpecClaims` forbids a
+ * mechanism/material/firmness/runtime/dimension word from appearing in
+ * heroImageAlt at all. Dropping the spec-shaped token from the REQUIRED set
+ * resolves this the same way GENERIC_TOKENS already drops category words:
+ * neither kind of word identifies one product versus another.
+ */
+function isSpecClaimToken(token: string): boolean {
+  return SPEC_CLAIM_PATTERNS.some(({ re }) => new RegExp(re.source, re.flags).test(token))
+}
 
 /**
  * Flags spec-shaped claims in heroImageAlt: a dimension/measurement, a
