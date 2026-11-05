@@ -256,6 +256,13 @@ asserted beside it could never fire. Checking the guard against other *shapes* o
 direction was. If the one-sentence trace cannot be stated, the guard is a comment with an assertion
 attached, and it should be rewritten or deleted rather than kept for the reassurance.
 
+**Then apply both rules to the assertion itself (run 1837).** Delete the clause the test's own title
+names and re-run: if it stays green, the title is a claim the assertion cannot support. A guard over
+a committed fixture must bind the fixture to its entry (a hash, not an existence check), because
+every other assertion about a file passes for the wrong file. A fixture's description is also read
+as instruction by whoever scores it next, so it is doctrine text and gets checked against the
+doctrine, not written from memory of the pixels.
+
 - `tech-architect` — coupling, layer, Oxygen-seam integrity, migration impact; writes/links an ADR if
   the change is non-trivial.
 - `qa-reviewer` — typecheck, build, tests, and the prototype exercised in the preview MCP at 375px +
