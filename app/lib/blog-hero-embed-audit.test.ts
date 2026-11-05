@@ -574,3 +574,52 @@ describe('findUnsourcedSpecClaims', () => {
     expect(findUnsourcedSpecClaims('   ')).toEqual([])
   })
 })
+
+// Ticket #20122 (second occurrence of the #15618 class, this time for
+// MECHANISM tokens rather than packaging tokens): a Shopify title whose
+// distinctive tokens include a spec-shaped word made heroNamesAnyProduct and
+// findUnsourcedSpecClaims jointly unsatisfiable for that product — naming it
+// required the word in heroImageAlt, and having the word in heroImageAlt was
+// always flagged as an unsourced claim. "Womanizer Enhance 2-in-1 Air
+// Pulsation Clitoral Vibrator" is the live case (content run 1856,
+// /notebook/does-sex-get-worse-with-age).
+describe('spec-shaped distinctive tokens never become a naming requirement (#20122)', () => {
+  const WOMANIZER_ENHANCE: CatalogProduct[] = [
+    {
+      handle: 'womanizer-enhance-black',
+      title: 'Womanizer Enhance 2-in-1 Air Pulsation Clitoral Vibrator',
+    },
+    ...CATALOG,
+  ]
+
+  it('distinctiveTokens drops "pulsation" (MECHANISM_RE) but keeps the brand/model/body-part tokens', () => {
+    expect(distinctiveTokens('Womanizer Enhance 2-in-1 Air Pulsation Clitoral Vibrator')).toEqual([
+      'womanizer',
+      'enhance',
+      'air',
+      'clitoral',
+    ])
+  })
+
+  it('heroNamesAnyProduct is true for an alt-only hero naming the product with no mechanism word', () => {
+    const post: AuditBlogPost = {
+      slug: 'does-sex-get-worse-with-age',
+      heroImageAlt:
+        'the Womanizer Enhance held in warm coral light, a clitoral-forward editorial still with soft air drifting around pastel tones',
+      imagePrompt: null,
+      embedHandles: ['womanizer-enhance-black'],
+    }
+    expect(heroNamesAnyProduct(post, WOMANIZER_ENHANCE)).toBe(true)
+    // The same alt that satisfies the naming requirement must stay clean of
+    // any unsourced spec claim — that is the whole point of the fix.
+    expect(findUnsourcedSpecClaims(post.heroImageAlt)).toEqual([])
+  })
+
+  it('findUnsourcedSpecClaims still flags "pulsation" if someone puts it back in the alt', () => {
+    const heroImageAlt = 'the Womanizer Enhance air pulsation toy in warm coral light'
+    expect(findUnsourcedSpecClaims(heroImageAlt)).toContainEqual({
+      category: 'mechanism',
+      match: 'pulsation',
+    })
+  })
+})
