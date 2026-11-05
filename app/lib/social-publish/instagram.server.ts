@@ -39,6 +39,20 @@ const POLL_TIMEOUT_MS = 120_000
 /** Instagram carousels hold 2-10 slides. */
 const CAROUSEL_MIN_ITEMS = 2
 const CAROUSEL_MAX_ITEMS = 10
+/**
+ * One retry, after a short delay, for Meta code 9004 ("Only photo or video
+ * can be accepted as media type") on container creation (ticket #20015, post
+ * #564). `jpegImageUrl` already pins every Shopify CDN url to JPEG, and that
+ * pin reproduces as JPEG under every Accept header / UA combination checked
+ * by hand against the live CDN — yet row 393 (2026-10-05) and row 564
+ * (2026-11-04) both hit this exact error on an already-pinned url, so
+ * whatever is inconsistent lives at a CDN-edge level this account cannot
+ * inspect, not in the url construction. A single retry costs one extra
+ * request and lets a second attempt land on a different edge before the
+ * whole post dies; a second consecutive 9004 still fails loudly rather than
+ * retrying forever.
+ */
+const MEDIA_TYPE_ERROR_RETRY_DELAY_MS = 3_000
 
 function apiBase(): string {
   const version = process.env['IG_GRAPH_API_VERSION']?.trim() || DEFAULT_API_VERSION
@@ -160,14 +174,25 @@ function metaCodeSuffix(error: MetaError): string {
   return ` (code ${error.code}${error.error_subcode !== undefined ? `, subcode ${error.error_subcode}` : ''})`
 }
 
-/** Create one media container; returns its id or an error detail. */
+/**
+ * Create one media container; returns its id or an error detail. Retries
+ * once on Meta code 9004 (see `MEDIA_TYPE_ERROR_RETRY_DELAY_MS`) before
+ * giving up.
+ */
 async function createContainer(
   igId: string,
   params: Record<string, string>,
   token: string,
+  retriesLeft = 1,
 ): Promise<{ ok: true; id: string } | { ok: false; detail: string }> {
   const created = await igRequest(`/${igId}/media`, { method: 'POST', params, token })
-  if (!created.ok) return { ok: false, detail: describeInstagramApiError(created.error) + metaCodeSuffix(created.error) }
+  if (!created.ok) {
+    if (created.error.code === 9004 && retriesLeft > 0) {
+      await sleep(MEDIA_TYPE_ERROR_RETRY_DELAY_MS)
+      return createContainer(igId, params, token, retriesLeft - 1)
+    }
+    return { ok: false, detail: describeInstagramApiError(created.error) + metaCodeSuffix(created.error) }
+  }
   const id = String(created.data['id'] ?? '')
   if (!id) return { ok: false, detail: 'Instagram returned no container id' }
   return { ok: true, id }
