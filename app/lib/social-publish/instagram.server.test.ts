@@ -309,28 +309,72 @@ describe('instagramPublisher JPEG pinning and failure detail (row 393)', () => {
     expect(imageUrls.every(u => new URL(u).searchParams.get('format') === 'pjpg')).toBe(true)
   })
 
-  it('names the failing slide and Meta codes when a slide container is refused', async () => {
+  it('names the failing slide and Meta codes when a slide container is refused twice', async () => {
     vi.stubEnv('IG_GRAPH_ACCESS_TOKEN', 'tok')
     vi.stubEnv('IG_BUSINESS_ACCOUNT_ID', 'ig-1')
     let item = 0
+    vi.useFakeTimers()
     vi.stubGlobal('fetch', vi.fn(async () => {
       item += 1
-      if (item === 3) {
+      // Slide 2's container create is refused on both its original attempt
+      // and its one retry, so the whole post still fails terminally.
+      if (item === 3 || item === 4) {
         return jsonResponse({ error: { message: 'Only photo or video can be accepted as media type.', code: 9004, error_subcode: 2207052 } })
       }
       // Odd calls create a slide, even calls poll it to FINISHED.
       return jsonResponse(item % 2 === 1 ? { id: `item-${item}` } : { status_code: 'FINISHED' })
     }))
-    const result = await instagramPublisher.publish({
+    const pending = instagramPublisher.publish({
       postId: 393,
       media: { kind: 'carousel', imageUrls: [cdn, cdn, cdn] },
       caption: 'three',
     })
+    const settled = pending.then(v => ({ ok: true as const, v }), e => ({ ok: false as const, e }))
+    await vi.runAllTimersAsync()
+    const outcome = await settled
+    expect(outcome.ok).toBe(true)
+    if (!outcome.ok) return
+    const result = outcome.v
     expect(result.ok).toBe(false)
     if (!result.ok) {
       expect(result.detail).toBe(
         'Carousel slide 2/3: Only photo or video can be accepted as media type. (code 9004, subcode 2207052)',
       )
     }
+  })
+
+  it('retries a single 9004 on a slide container and succeeds on the second attempt', async () => {
+    vi.stubEnv('IG_GRAPH_ACCESS_TOKEN', 'tok')
+    vi.stubEnv('IG_BUSINESS_ACCOUNT_ID', 'ig-1')
+    let item = 0
+    let refused = false
+    vi.useFakeTimers()
+    vi.stubGlobal('fetch', vi.fn(async (input: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET'
+      if (method === 'POST') {
+        const params = Object.fromEntries(new URLSearchParams(String(init?.body)))
+        if (String(input).endsWith('/media_publish')) return jsonResponse({ id: 'published-1' })
+        if (params['media_type'] === 'CAROUSEL') return jsonResponse({ id: 'carousel-1' })
+        // First item-container attempt only is refused with 9004.
+        if (params['is_carousel_item'] === 'true' && !refused) {
+          refused = true
+          return jsonResponse({ error: { message: 'Only photo or video can be accepted as media type.', code: 9004, error_subcode: 2207052 } })
+        }
+        item += 1
+        return jsonResponse({ id: `item-${item}` })
+      }
+      return jsonResponse({ status_code: 'FINISHED' })
+    }))
+    const pending = instagramPublisher.publish({
+      postId: 564,
+      media: { kind: 'carousel', imageUrls: [cdn, cdn] },
+      caption: 'two',
+    })
+    const settled = pending.then(v => ({ ok: true as const, v }), e => ({ ok: false as const, e }))
+    await vi.runAllTimersAsync()
+    const outcome = await settled
+    expect(outcome.ok).toBe(true)
+    if (!outcome.ok) return
+    expect(outcome.v).toEqual({ ok: true, externalPostId: 'published-1' })
   })
 })
