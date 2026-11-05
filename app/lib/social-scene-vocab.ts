@@ -487,3 +487,33 @@ export function hasStoryLine(imageBrief: string | null | undefined): boolean {
   }
   return hasField('Moment') && hasField('Set') && hasField('Cue')
 }
+
+/**
+ * Does this product-featuring draft/rework need a story at all (ticket
+ * #20000)? #13739's own motivating incident was a cast member holding a
+ * product up in an empty room, and `bodyZone`/`cropScale` are stamped on
+ * every GENERATED cast or on-skin image (CLAUDE.md's v2 metafield additions;
+ * `requireSceneAxesForGeneration`) and never on a rendered plate or
+ * packshot-card slide, so their presence is the actual signal that a scene
+ * exists to tell a story about. `postType === 'campaign'` is the one other
+ * reserved cast-scene signal (`routine-social-daily.md`'s on-skin standing
+ * campaign convention), kept as a second disjunct in case a future on-skin
+ * draft call omits the axes.
+ *
+ * The prior rule required a STORY LINE on ANY shopifyProductId-bearing
+ * Instagram/X draft, which caught the Step 2.9a New-in carousel
+ * (`routine-social-daily.md`) — a documented no-cast packshot/typographic
+ * format that records its hook product as `shopifyProductId` purely for
+ * cooldown/mix-report tracking (post #564) — with a 400 on first attempt and
+ * no hint that the fix was a hand-written all-N/A STORY LINE block.
+ */
+export function needsStoryLine(input: {
+  shopifyProductId?: string | null | undefined
+  isVideoFanout: boolean
+  bodyZone?: string | null | undefined
+  cropScale?: string | null | undefined
+  postType?: string | null | undefined
+}): boolean {
+  if (!input.shopifyProductId || input.isVideoFanout) return false
+  return !!input.bodyZone || !!input.cropScale || input.postType === 'campaign'
+}

@@ -176,39 +176,53 @@ describe('draft op — alt-text preflight (#5486)', () => {
 
 // Ticket #13739: a product-featuring Instagram/X draft with no Writers Room
 // story line is "a cast member holding a product up in an empty room" —
-// exactly what rows 384/395 shipped with an empty imageBrief.
+// exactly what rows 384/395 shipped with an empty imageBrief. Ticket #20000
+// (post #564) narrowed this to drafts that actually carry a cast/body-zone
+// frame (bodyZone/cropScale set, or postType:'campaign'), so these fixtures
+// carry `bodyZone` to stand in for a real cast scene; the no-cast New-in
+// carousel exemption has its own describe block below.
 describe('draft op — Writers Room story-line preflight (ticket #13739)', () => {
   const igMedia = ['https://cdn.shopify.com/files/ig-scene.jpg']
   const altText = 'A cast member holds the toy in warm light.'
+  const bodyZone = 'hip-hollow'
   const storyLine =
     'STORY LINE womanizer-next-sage, jade\n' +
     '  Moment: ANTICIPATION. Jade is about to start her evening wind-down.\n' +
     '  Set: her bed, with a warm lamp and a half-folded throw blanket.\n' +
     '  Cue: the lamp light.\n'
 
-  it('rejects a product-featuring Instagram draft with no imageBrief at all', async () => {
+  it('rejects a cast-scene Instagram draft with no imageBrief at all', async () => {
     const res = await post({
       op: 'draft', platform: 'instagram', tweetText: 'IG caption', voiceGate, mediaUrls: igMedia, altText,
-      shopifyProductId: 'gid://shopify/Product/1',
+      shopifyProductId: 'gid://shopify/Product/1', bodyZone,
     })
     expect(res.status).toBe(400)
     expect(await res.text()).toMatch(/STORY LINE/)
     expect(createDraftMock).not.toHaveBeenCalled()
   })
 
-  it('rejects a product-featuring X draft whose imageBrief has no STORY LINE block', async () => {
+  it('rejects a cast-scene X draft whose imageBrief has no STORY LINE block', async () => {
     const res = await post({
       op: 'draft', platform: 'x', tweetText: 'X caption', voiceGate, mediaUrls: igMedia, altText,
-      shopifyProductId: 'gid://shopify/Product/1', imageBrief: 'a cast member holding the toy in a kitchen',
+      shopifyProductId: 'gid://shopify/Product/1', cropScale: 'close', imageBrief: 'a cast member holding the toy in a kitchen',
     })
     expect(res.status).toBe(400)
     expect(createDraftMock).not.toHaveBeenCalled()
   })
 
-  it('accepts a product-featuring Instagram draft with a well-formed STORY LINE block', async () => {
+  it('rejects a postType:campaign draft with no bodyZone/cropScale and no STORY LINE block', async () => {
     const res = await post({
       op: 'draft', platform: 'instagram', tweetText: 'IG caption', voiceGate, mediaUrls: igMedia, altText,
-      shopifyProductId: 'gid://shopify/Product/1', imageBrief: storyLine,
+      shopifyProductId: 'gid://shopify/Product/1', postType: 'campaign',
+    })
+    expect(res.status).toBe(400)
+    expect(createDraftMock).not.toHaveBeenCalled()
+  })
+
+  it('accepts a cast-scene Instagram draft with a well-formed STORY LINE block', async () => {
+    const res = await post({
+      op: 'draft', platform: 'instagram', tweetText: 'IG caption', voiceGate, mediaUrls: igMedia, altText,
+      shopifyProductId: 'gid://shopify/Product/1', bodyZone, imageBrief: storyLine,
     })
     expect(res.status).toBe(200)
     expect(createDraftMock).toHaveBeenCalled()
@@ -223,7 +237,7 @@ describe('draft op — Writers Room story-line preflight (ticket #13739)', () =>
   it('does not require a story line on a video-fanout draft (videoJobId set)', async () => {
     const res = await post({
       op: 'draft', platform: 'instagram', tweetText: 'video clip still', voiceGate, mediaUrls: igMedia, altText,
-      shopifyProductId: 'gid://shopify/Product/1', videoJobId: 42,
+      shopifyProductId: 'gid://shopify/Product/1', bodyZone, videoJobId: 42,
     })
     expect(res.status).toBe(200)
     expect(createDraftMock).toHaveBeenCalled()
@@ -232,7 +246,36 @@ describe('draft op — Writers Room story-line preflight (ticket #13739)', () =>
   it('does not require a story line on other platforms (LinkedIn)', async () => {
     const res = await post({
       op: 'draft', platform: 'linkedin', tweetText: 'LI post', voiceGate, mediaUrls: igMedia,
-      shopifyProductId: 'gid://shopify/Product/1',
+      shopifyProductId: 'gid://shopify/Product/1', bodyZone,
+    })
+    expect(res.status).toBe(200)
+    expect(createDraftMock).toHaveBeenCalled()
+  })
+})
+
+// Ticket #20000 (post #564): the Step 2.9a New-in carousel is a documented
+// no-cast packshot/typographic format that records its hook product as
+// shopifyProductId purely for cooldown/mix-report tracking, never a cast
+// scene with a story to tell. A row with no bodyZone/cropScale and no
+// postType:'campaign' is exempt from the story-line preflight even with no
+// imageBrief at all.
+describe('draft op — Writers Room story-line preflight exempts no-cast rows (ticket #20000)', () => {
+  const cardMedia = ['https://cdn.shopify.com/files/social-card-plate-1.jpg']
+  const altText = 'A typographic card.'
+
+  it('accepts a shopifyProductId-bearing New-in carousel draft with no imageBrief and no cast signal', async () => {
+    const res = await post({
+      op: 'draft', platform: 'instagram', tweetText: 'New-in caption', voiceGate, mediaUrls: cardMedia, altText,
+      shopifyProductId: 'gid://shopify/Product/1', postType: 'new_in',
+    })
+    expect(res.status).toBe(200)
+    expect(createDraftMock).toHaveBeenCalled()
+  })
+
+  it('accepts the same shape on X', async () => {
+    const res = await post({
+      op: 'draft', platform: 'x', tweetText: 'New-in caption', voiceGate, mediaUrls: cardMedia, altText,
+      shopifyProductId: 'gid://shopify/Product/1', postType: 'new_in',
     })
     expect(res.status).toBe(200)
     expect(createDraftMock).toHaveBeenCalled()

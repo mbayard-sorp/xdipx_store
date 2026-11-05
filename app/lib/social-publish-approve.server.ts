@@ -74,7 +74,7 @@ import {
   type GatePlatform,
 } from './social-publish-gate.server'
 import { findingToStored, type GateStatusValue, type StoredGateFinding } from './social-gate-status'
-import { hasStoryLine, isRetiredBodyZone, parseSceneAxes } from './social-scene-vocab'
+import { hasStoryLine, isRetiredBodyZone, needsStoryLine, parseSceneAxes } from './social-scene-vocab'
 
 /**
  * Platforms this gate may verdict.
@@ -1090,10 +1090,20 @@ export async function reworkSocialPost(
     // Fail-closed Writers Room story-line requirement (ticket #13739), judged
     // on the EFFECTIVE row after this rework, same shape as the altText check
     // above. Rework cannot change platform/shopifyProductId/videoJobId/
-    // episodeId, so those always come from the loaded row.
+    // episodeId, so those always come from the loaded row. Scoped the same
+    // way as the draft op (ticket #20000, `needsStoryLine`): only a row that
+    // actually carries a cast/body-zone frame owes a story.
     const isVideoFanout = post.videoJobId != null || post.episodeId != null
     const effectiveBrief = input.imageBrief ?? post.imageBrief
-    if (post.shopifyProductId && !isVideoFanout && !hasStoryLine(effectiveBrief)) {
+    const effectiveStoryBodyZone = input.bodyZone ?? post.bodyZone
+    const effectiveCropScale = input.cropScale ?? post.cropScale
+    if (needsStoryLine({
+          shopifyProductId: post.shopifyProductId,
+          isVideoFanout,
+          bodyZone: effectiveStoryBodyZone,
+          cropScale: effectiveCropScale,
+          postType: post.postType,
+        }) && !hasStoryLine(effectiveBrief)) {
       return {
         ok: false,
         status: 400,
