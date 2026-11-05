@@ -274,6 +274,18 @@ per PR, so a full 15-PR run is ~30 minutes of Max.
    `lastError`/`suggestion_links` history first: if QA or a prior pass already supplied the concrete
    value the row needs, use it directly instead of falling back to a marker that only defers the same
    fix to a third pass.
+
+   **Before re-pushing to an existing branch after a QA bounce, confirm the new content actually
+   differs from the branch's current HEAD in the way `lastError` asked for** (ticket #19926). PR
+   #1878 (ticket #19567) was bounced a second time with the PR's content byte-for-byte unchanged
+   from the version already bounced once with a concrete `lastError` naming the two files and lines
+   that needed to change; whatever re-claimed the bounced ticket and re-pushed to its existing
+   branch never actually edited them. A bounce increments `attempt_count` regardless of whether real
+   work happened, so a silent no-op push burns a QA review cycle for zero new work and pushes the
+   ticket one step closer to the 3-attempt owner escalation for a fix that was never attempted.
+   Before pushing a redo commit to an already-bounced branch, diff the new content against the
+   branch's current HEAD and confirm the diff actually touches what `lastError` named; if it does
+   not, the repair step did not run, and that is what the run summary should say, not a re-push.
 4. **Refuse and flag** any suggestion that would weaken a money valve, the Emma voice gate, MAP
    rules, propose-only discipline, or the improvement loop's own human gates. Post a `decision`
    event stating what it would have weakened, and **leave the row approved** for the owner.
