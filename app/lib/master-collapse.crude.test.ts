@@ -59,6 +59,11 @@ describe('isCrudeTitle — soft-holds crude-named SKUs (#18014)', () => {
     ['Jizz Blaster Squirt Gun'],
     ['Cock Oil', 'Cock Oil Co'],
     ['Classic Massager', 'Dirty Whore Novelties'],
+    // ticket #20260: Hott Products novelty line, hand-rejected at tier B with
+    // no [crude-title] gap_reason.
+    ['Quick Dick Hit It Vibrating Flexible Dildo'],
+    ['Wet Dreams Dream Boy Flutter Butter Jelly Cock&Ball Sling 10 Freq Bullet'],
+    ['Wet Dreams Dream Boy Flutter Butter Jelly Cock & Ball Sling 10 Freq Bullet'],
   ]
 
   it.each(crudeCases)('flags %s (%s)', (title, brand) => {
@@ -78,6 +83,12 @@ describe('isCrudeTitle — soft-holds crude-named SKUs (#18014)', () => {
     'Doxy Original Wand Massager',
     'Sportsheets Ball Gag',
     'Pjur Original Silicone Lube',
+    // ticket #20260: "cock & ball" / "cock&ball" is the ordinary category name
+    // for c-rings and cock-and-ball slings, not a crude token — confirmed as a
+    // false positive against two already-imported real catalog rows before
+    // being dropped from CRUDE_TITLE_PATTERNS.
+    'Tantus Stirrup C-Ring Cock and Ball Sling Onyx',
+    'LEVELZ Vibrating Silicone Cock & Ball Ring with Shaft Loop Black',
   ]
 
   it.each(legitCases)('does not flag %s', (title) => {
