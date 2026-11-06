@@ -741,6 +741,19 @@ export function isNoveltyCategory(master: MasterRecord): boolean {
  * Licker: Strawberry', and 'GoodHead Pussy Licker Spray' in the same week six
  * similarly-named rows were rejected on sight.
  *
+ * Widened (ticket #20260, third occurrence of the same gap) after run 1867
+ * hand-rejected two Hott Products novelty SKUs that reached tier B with no
+ * [crude-title] gap_reason: 'Quick Dick Hit It Vibrating Flexible Dildo' and
+ * 'Wet Dreams Dream Boy Flutter Butter Jelly Cock&Ball Sling 10 Freq Bullet'.
+ * That both rows reached a tier rather than staying stuck proved the gap was
+ * the token list, not tier routing, settling #18014's open question. Added
+ * `quick dick` and `flutter butter`. `cock & ball` / `cock&ball` was
+ * considered and dropped: it is the ordinary category name for c-ring and
+ * cock-and-ball-sling products and already matches two legitimate, already
+ * imported SKUs (Tantus Stirrup C-Ring Cock and Ball Sling, LEVELZ Vibrating
+ * Silicone Cock & Ball Ring) — exactly the false-positive failure mode this
+ * list's own design note warns against.
+ *
  * Tokens are deliberately specific so this never catches a legitimate wellness
  * SKU that merely shares a word — see isNoveltyCategory's own note on the same
  * failure mode. Mirrors NOVELTY_PATTERNS/isNoveltyCategory immediately above;
@@ -748,7 +761,7 @@ export function isNoveltyCategory(master: MasterRecord): boolean {
  * surfaced for manual approval — never a hard reject).
  */
 export const CRUDE_TITLE_PATTERNS =
-  /\b(?:jizz|fuck(?:ing|slut)|cum\s*guzzlers?|sluts?|whores?|pussy\s*lickers?|dick\s*boy|dickalicious|cock\s*oil)\b/i
+  /\b(?:jizz|fuck(?:ing|slut)|cum\s*guzzlers?|sluts?|whores?|pussy\s*lickers?|dick\s*boy|dickalicious|cock\s*oil|quick\s*dick|flutter\s*butter)\b/i
 
 /**
  * True when a master's display title or brand matches a crude-token pattern.
