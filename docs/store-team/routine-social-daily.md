@@ -1603,6 +1603,14 @@ that verdict stands and you do not work around it. Before accepting such a verdi
 roster was read with `SANITY_API_TOKEN` and not an empty token: on 2026-08-19 an unauthenticated
 count reported zero when seven existed.
 
+**Check `mixReport`'s `castRotation` line before `social-art-director` picks a cast member, not
+only before generation (ticket #20164).** `castRotation` reports the busiest face in any 5
+consecutive Instagram cast frames (cap 2) alongside the rolling-14 `castVolume` share, and both are
+computable from `cast_slugs` on already-posted rows before any image is requested. Call
+`POST /api/team/social-post {"op":"mixReport"}` (Step 7) ahead of this step, same as the Step 5.0a
+on-skin-mix check below, and when the line reads `breach`, rule the overweighted cast member out of
+today's pick instead of discovering the breach after the frame is generated.
+
 **`sceneLocation` is a required element of the draft call, not an optional extra (ticket #10269).**
 `social_posts.scene_location` shipped in migration 093 and `POST /api/team/social-post {op:'draft'}`
 has accepted it from day one, but no document ever told a caller to send it, so it sat null on
