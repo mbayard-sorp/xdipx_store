@@ -599,4 +599,11 @@ Keep entries terse and factual. This file is content/documentation on the agent-
 - **Evidence:** run 1831. rails-fingerprint --assert-changed rails,hero,couples exit 0. Step 2c surfaces: hero (product), rails (product), wayfinder (imagery), promo (imagery), couples (copy), announcement (copy). Origin render truth PASS; br HTML 49,060 B, .data 97,429 B, 1 hero preload, link ratio 0.98. homeSeo populated, matches live, 65 days old, no draft (HOLD).
 - **Appended by:** homepage-orchestrator, run 1831 (filed as ticket; no PR this run).
 
+### 2026-11-05 (Routine A, run 1850)
+
+- **What changed:** `singleton.emmaHero` headline/body/pullQuote refreshed on the held Magic Wand Mini pin (rev xfrHEJl8nXhWOThPwwN1Is). Couples band `playTogether-starter` re-pointed from `/products/romp-glow` (copy named the Mini, link did not match) to `/products/dame-com-wand-vibrator-sage`, new giver-voiced heading/body and new archetype C image image-d9e4546b3984df42633a9fd34e80ce3b8a36dbf4-2560x1440-jpg. Wayfinder `wf65a` relabelled "Every wand, big to small" with new archetype B image image-a7de5985a33ddd17cf587110b50aef38f6ee90d3-2560x1440-jpg (Intense Wand on plum). Promo heading/emphasis/body refreshed. Ticker `a1003m1`. Rail `teamRail-2026-09-06-2` relined (Intense Wand lead, Enby 3, Ohwii glass, VibePad Intense 2, High On Love hemp-seed glide replacing unknown-margin JO H2O 8 oz), ctaLink `/vault` -> `/collections/wands` (rev 2R626sz53wWi3Krcz5vTz4). `singleton.homepage` rev 2R626sz53wWi3Krcz5vSZX. Masthead standfirst micro-refresh on categoryPage-body and categoryPage-wear (cycle day 2).
+- **Why:** Wand Week (calendar row 45) day 4; brief 19 no hero swap; couples copy/link mismatch; unknown-margin SKU in a wired rail.
+- **Evidence:** run 1850. rails-fingerprint --assert-changed rails,couples OK (rails, hero, couples changed). Step 2c surfaces: couples (imagery + product), wayfinder (imagery), rails (product), hero (copy), promo (copy), announcement (copy). Origin render truth 13/13 PASS; br HTML 48,960 B, .data 97,784 B, preloads 2, link ratio 0.976. 3 images generated (1 rejected on self-review: three people on a couples band), 2 placed. homeSeo HOLD (66 days, matches live).
+- **Appended by:** homepage-orchestrator, run 1850 (filed as ticket; turn cap).
+
 <!-- Newest entries appended above this line by each routine's changelog step. -->
