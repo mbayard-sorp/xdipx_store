@@ -305,17 +305,8 @@ rediscovering the gap. Row 31 above is the worked example (authored by run 1684,
 published clean). Row 32 is the second (authored by run 1742, 2026-10-30, serving calendar row 28's
 "Aftercare Is Not Optional" window from the "Questions Nobody Asks Out Loud" pillar). Row 33 is the
 third (authored by content run 1817, 2026-11-03). Row 34 is the fourth (authored by content run 1875,
-2026-11-06, serving the Wand Week window on calendar row 45). By that run the bank was spent for the
-third time: rows 1-14, 16-24, 27, 28 and 30-33 all had published posts, rows 25, 26 and 29 are retired,
-and row 15 is still parked, and the `seoContentBrief` queue held no `real-talk` brief at all (its five
-queued rows were three `wellness-basics` and two `comparisons`). Row 34 targets day-to-day VARIANCE,
-which no row covered: it is distinct from row 6 (a toy that is too intense, a constant property of the
-toy), from row 17 (long-term desensitization from heavy use, a trend), and from row 16 and the published
-`what-to-do-when-orgasm-takes-longer-than-it-used-to` (a trend with age or medication). Those three are
-all about a direction of travel; row 34 is about two nights a week apart. `check-topic-collision.ts` was
-clean against 20 prior posts on heading, title and shared-embed surfaces, and `check-self-consistency.ts`
-cross-post pass was clean against all 112 published posts. By that run the bank was fully spent for the
-second time: rows 1-14, 16-24, 27, 28, 30, 31 and 32 all had published posts, rows 25, 26 and 29 are
+2026-11-06, serving the Wand Week window on calendar row 45). By that run the bank was fully spent for
+the second time: rows 1-14, 16-24, 27, 28, 30, 31 and 32 all had published posts, rows 25, 26 and 29 are
 retired from the rotation, and row 15 is still parked for a distinct angle, so a Tue/Fri run reading
 top to bottom again found nothing writable. Row 33 targets a query no row covered, distinct from row
 7 (raising toys at all), row 21 (a partner who refuses) and row 22 (a partner who feels replaced):
@@ -323,7 +314,16 @@ in all three of those the toy was never successfully bought and used together, a
 once, and the aftermath is the subject. It is also distinct from the guides post
 `what-should-you-expect-the-first-time-you-use-a-sex-toy`, which is prospective and solo-leaning
 where row 33 is retrospective and partnered. `check-topic-collision.ts` was clean against 20 prior
-posts. A COVERED row (15, 25, 26, 29) is not a permanent dead entry: retire it by
+posts. By that run the bank was spent for the third time: rows 1-14, 16-24, 27, 28 and 30-33 all had
+published posts, rows 25, 26 and 29 are retired, and row 15 is still parked, and the `seoContentBrief`
+queue held no `real-talk` brief at all (its five queued rows were three `wellness-basics` and two
+`comparisons`). Row 34 targets day-to-day VARIANCE, which no row covered: it is distinct from row 6
+(a toy that is too intense, a constant property of the toy), from row 17 (long-term desensitization
+from heavy use, a trend), and from row 16 and the published
+`what-to-do-when-orgasm-takes-longer-than-it-used-to` (a trend with age or medication). Those three are
+all about a direction of travel; row 34 is about two nights a week apart. `check-topic-collision.ts` was
+clean against 20 prior posts on heading, title and shared-embed surfaces, and `check-self-consistency.ts`
+cross-post pass was clean against all 112 published posts. A COVERED row (15, 25, 26, 29) is not a permanent dead entry: retire it by
 striking it from the working rotation once a genuinely distinct angle is found or the cluster is
 judged fully held by its sibling post, rather than leaving every future run to re-read and
 re-reject the same four rows indefinitely.
