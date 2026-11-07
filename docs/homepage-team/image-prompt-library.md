@@ -2827,3 +2827,26 @@ cast: jade
 - **Lesson, and it is the OPPOSITE of what this run first wrote down:** do NOT keep brand words out of the hero copy to appease `check-hero-embed-match.ts`. The checker needs the product NAMED: `heroNamesAnyProduct` reads `heroImageAlt` + `imagePrompt` together and wants every distinctive token of the Shopify title. A prompt that says only "the handheld device from reference 2" fails it with "hero names no catalog product at all". What this product cannot carry is the MECHANISM half of its own title: `findUnsourcedSpecClaims` flags `pulsation` and `air-pulse` in `heroImageAlt` as an unsourced mechanism claim, correctly, because an `xdipx`-namespace title is our own copy. So the split that worked: brand and model in the alt ("Womanizer Enhance clitoral vibrator"), the full title plus handle recorded in `imagePrompt` as the reference-plate identification, and no mechanism word in the alt. One more trap on the way: while the alt said "clitoral stimulator", the copy matched the non-embedded `bella-rose-purple` (Rose Air Pulsation Stimulator Purple) and tripped `findHeroEmbedMismatches`; "clitoral vibrator" cleared it. Filed as ticket #20122, second occurrence of the class after #15618's packaging tokens.
 - **Alt:** A woman in a plain top studies a black Womanizer Enhance clitoral vibrator raised in one hand while weighing it against her open, empty other hand, calm and steady, in a bright sunlit room with a soft pink wall.
 - **Note on the prompt:** the generation prompt described the cast member as "a mature woman in her early 40s", while jade's `castMember` doc gives `ageRange: early 30s`. The anatomy gate passed her as unambiguously adult and `media-manager` reported she reads closer to 30 than 40, so the frame shipped, but the prompt and the cast doc disagree and the next run using jade should prompt her own age range.
+
+## Notebook §0-H keeper (health-adjacent, sincere) — content run 1875, "Why the Same Toy Feels Different on Different Days"
+
+`[cast: maya]` `blogPost-why-does-a-toy-feel-different-on-different-days` (`real-talk`, † health-adjacent, sincere, no levity, no scale exaggeration). "Is this normal? / Is it just me?" row played sincerely and low: pjur TOY GLIDE Water-Based Lubricant 3.4 oz (`pjur-toy-glide-3-4-oz`) held low and tilted in one hand, free palm open and empty at chest height, eyes lowered to the bottle, lips pressed, brow slightly furrowed. Asset `image-4208a89f677d832e7274af23626cbb4f2b4f503f-1200x900-png`, 4:3, `atlas/seedream-4.5-edit` composite rung. Route: `--feature content-blog --run-id 1875 --label-tolerant`, same `--prompt` repeated on upload. One round (2 candidates), candidate 2 kept.
+- **Casting:** `maya` (prior five: jade, vivian, priya, marcus, sofia). No `editorialPhoto`, so white crew-neck and plain trousers named explicitly. Staged standing, bottle low, plain wall, to differ from the 10-23 seated bottle-at-eye-level frame.
+- **Lesson:** the prompt said "no bedding in frame" and a bed edge still rendered at the bottom of candidate 2; benign here, name "no bed in frame" if the backdrop must be wall only. Candidate 1 (window on the left, hand on hip) rendered a wry half-smile; "lips pressed, corners level, eyes lowered at the product" worked better in candidate 2.
+- **Label:** label-heavy SKU, `--label-tolerant` used; the label text renders garbled ("TOY GLUE" by the gate's read) at hero scale, silhouette, yellow dot and white-to-blue body faithful.
+
+## Notebook §0-P keeper — content run 1893, "Is It Normal to Have More Solo Sex Than Partnered Sex?"
+
+`cast: none` + iroha temari HANA (`iroha-temari-hana`), `wellness-basics`, sincere staging (no archetype E). Ref `100757B.jpg`
+(clean unboxed view; `100757A.jpg` is a printed carton, skipped). Route: `gen-notebook-art.ts --feature content-blog --run-id 1893`,
+Atlas `seedream-4.5-edit`, 4:3. Asset `image-312b42ea5ce76e376e067e816ef58c65cdbb34c3-2304x1728-jpg`.
+- **Checker gotcha:** title tokens are iroha, temari, hana AND "clitoral" (rechargeable is a spec token, stripped). Alt without
+  "clitoral" and prompt without it = "hero names no catalog product". Fix without a spec claim in the alt: put "clitoral vibrator"
+  in the PROMPT only, which means regenerating (the stored prompt must be the one that made the image).
+- **Fidelity gate:** pale-lilac ground rounds drift petal colour to washed pastel (`colour: drift`, blocked at upload). Fix that worked:
+  "petal shapes in the same medium rose-pink as the reference (clearly saturated pink petals against the white frosted base, not pale)".
+- **Ground:** unspecified "plum-soft" gives mid mauve with hard window shadows (r1, r1c2 rejects). "very pale ... close to #F3E8FB,
+  almost white, flat, no dark corners, no mauve or deep purple, no window, no hard shadows" gave the keeper.
+- **Keeper (r4 c1):** prompt = "Bright high-key editorial product photograph, soft diffused daylight, very pale plum-soft seamless backdrop ...
+  The iroha temari HANA clitoral vibrator from the reference photo reproduced exactly ... petal shapes in the same medium rose-pink as the
+  reference ... large in frame, left of center ... negative space on the right ... no text, no people, no hands ...". Minor: faint lilac rim at base.
