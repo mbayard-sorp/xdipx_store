@@ -55,21 +55,25 @@ export function extraSpendFeaturesForTeam(team: TeamId): string[] {
 /**
  * Image-generation feature labels counted toward each team's daily image cap.
  * Only teams with a configured maxImagesPerDay appear here. The homepage label
- * is the original hardcoded one; content counts the Notebook labels; social
- * counts 'social-images' (ticket #3678 — never 'homepage-images') plus
- * 'social-drafts' (ticket #5429): the daily drafting routine's own atlas/
- * seedream calls are logged under the same feature label as its token spend
- * ('social-drafts', see docs/store-team/README.md and the social-media-manager
- * agent def), which this list omitted entirely, so 34 real generations since
- * 2026-08-22 counted as zero toward the cap. Because that feature is SHARED
- * with plain token rows, a feature match alone is not enough to know a row is
- * an image — team.server.ts's getTodayImageCount additionally requires
+ * is the original hardcoded one; content counts the Notebook labels plus
+ * 'content-blog' (ticket #20471 — the daily post hero's own feature label,
+ * mandated by routine-content-daily.md Step 4 / ticket #11100 for spend
+ * attribution, which this list omitted entirely, so every daily-post hero
+ * generation counted as zero toward the cap); social counts 'social-images'
+ * (ticket #3678 — never 'homepage-images') plus 'social-drafts' (ticket
+ * #5429): the daily drafting routine's own atlas/seedream calls are logged
+ * under the same feature label as its token spend ('social-drafts', see
+ * docs/store-team/README.md and the social-media-manager agent def), which
+ * this list omitted entirely, so 34 real generations since 2026-08-22 counted
+ * as zero toward the cap. Because 'social-drafts' and 'content-blog' are each
+ * SHARED with plain token rows, a feature match alone is not enough to know a
+ * row is an image — team.server.ts's getTodayImageCount additionally requires
  * `input_tokens = 0 AND output_tokens = 0`, the structural signature every
  * `logImageCost` row carries and no real token-log row does.
  */
 export const TEAM_IMAGE_FEATURES: Readonly<Partial<Record<TeamId, readonly string[]>>> = {
   homepage: ['homepage-images'],
-  content:  ['notebook-images', 'content-images'],
+  content:  ['notebook-images', 'content-images', 'content-blog'],
   social:   ['social-images', 'social-drafts'],
 }
 

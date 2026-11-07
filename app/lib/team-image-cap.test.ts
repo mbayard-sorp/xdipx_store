@@ -52,6 +52,11 @@ describe('TEAM_IMAGE_FEATURES / OWNER_IMAGE_CALLERS (fix 1 & 2, canonical vocab)
     expect(TEAM_IMAGE_FEATURES.social).toContain('social-images')
     expect(TEAM_IMAGE_FEATURES.social).toContain('social-drafts')
   })
+  it('content counts content-blog alongside the Notebook labels (ticket #20471)', () => {
+    expect(TEAM_IMAGE_FEATURES.content).toContain('notebook-images')
+    expect(TEAM_IMAGE_FEATURES.content).toContain('content-images')
+    expect(TEAM_IMAGE_FEATURES.content).toContain('content-blog')
+  })
   it('lists both owner-initiated callers (fix 2)', () => {
     expect(OWNER_IMAGE_CALLERS).toContain('owner-slate-preview')
     expect(OWNER_IMAGE_CALLERS).toContain('owner-studio')
