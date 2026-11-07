@@ -638,8 +638,8 @@ first-submit REVISE), so before submit also run these three under-claim checks:
   published evidence supported leading with a bounded yes.
 - **A hedging disclaimer in the store's own voice is a defect, not a safety measure.** A line like
   "we make no medical claim about it" reads as compliant but is an accuracy defect: the
-  no-medical-claims rule is already satisfied by the reportage-of-research framing plus the clinician
-  hand-off this routine mandates elsewhere, so the disclaimer only substitutes evasion for the bounded
+  no-medical-claims rule is already satisfied by the reportage-of-research framing plus the tiered
+  clinician hand-off (content-plan §8B) this routine mandates elsewhere, so the disclaimer only substitutes evasion for the bounded
   answer the evidence allows. Cut it and state the bound.
 - **A simplified clinical definition keeps every defining criterion.** When you deliberately simplify
   a clinical definition, confirm the omission dropped only precision, not a load-bearing element. Run
@@ -761,7 +761,7 @@ already-written universal claim wrong without anything about that claim's own wo
 2026-10-01):** once the draft is complete, read `.claude/skills/humanizer/SKILL.md` and run its full
 process on the body, the excerpt, and the FAQ answers: mark the tells, draft, check, final. Then
 patch the result into the Sanity draft. The 2026-10-01 test on
-`why-you-can-orgasm-alone-but-not-with-a-partner` halved blind-judged tell density, and it also
+why-you-can-orgasm-alone-but-not-with-a-partner halved blind-judged tell density, and it also
 taught the three ways the pass goes wrong. Guard against each one:
 
 - **It drops voice.** The first pass cut the opening first-person line, a candid "we can sell you"
@@ -927,6 +927,23 @@ Two reviewers, both binding, sequenced so a cheap voice failure never spends the
      contradiction scan section against section, not sentence against sentence. A claim scoped in one
      block must also be re-checked in every OTHER block that repeats it, because scoping one instance
      is what makes the unscoped siblings invisible.
+   - **Displacement scan (part of the same pre-resubmit self-check, ticket #20291).** A repair can
+     delete the SHAPE a checker or reviewer flagged while leaving the IDEA itself intact, relocated
+     to a different place in the document. Three occurrences in one post on content run 1875
+     (2026-11-06), each caught only by `emma-empathy-reviewer` and none by any deterministic
+     checker: a saying cut from the body reappeared as an FAQ answer; once that was cut, it
+     reappeared as the per-variable closer; once that was cut too, it reappeared compressed into a
+     figure. No checker sees this because `check-fresh-language.ts` compares word 6-grams against
+     PRIOR posts only (blind to intra-document relocation) and `check-aphorism-closers.ts` /
+     `check-antithesis-cap` each key on a specific shape that a relocated, re-shaped idea usually
+     falls outside. Run this scan after every repair, before re-gating: for every string the repair
+     DELETED, state the idea that string was carrying, then grep the whole document — the FAQ block
+     and the SEO fields included — for that idea in any new wording, and confirm it was removed
+     rather than relocated. The contradiction-and-scope-widening scan above models a rewritten
+     string against the rest of the document; the enumeration-consistency scan keys on a shared
+     enumeration; the section-level scan looks for a broken rule system. None of the three asks
+     where a deleted idea WENT. The fix is to delete the idea, not re-shape it — each of the three
+     relocations above was itself an attempt to satisfy the previous flag.
    - **Whole-document aphorism recount:** before resubmitting, re-run your own whole-document
      aphorism-as-closer count on the REWRITTEN draft (not just the changed strings), and separately
      count any newly added first-person sentences.
