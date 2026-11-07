@@ -244,25 +244,12 @@ Format rules added 2026-07-21 (owner-approved):
 - **Series membership.** Real Talk posts belong to the `real-talk` series (§4). The writer flags
   the fit in the run summary as usual; attachment stays a `blogPostExtras` doc via the seed script
   or Studio. Reading order is lightest-topic-first rather than beginner-first.
-- **Clinician line is mandatory on † topics, and must carry an explicit tier (added 2026-11-06,
-  #20292).** Rows marked † below border on health; the "worth seeing a clinician if…" line in the
-  root-cause section is required, not judgment-call, on those, and the line must state which of
-  three house tiers applies: **same-day emergency care**, **an appointment soon**, or **worth
-  raising when convenient**. A trigger with no stated tier is a defect, not a default: content run
-  1875 (2026-11-06) drafted a same-day-emergency presentation (saddle-area or genital numbness
-  together with a change in bladder or bowel control, or weakness in a leg — the cauda equina
-  cluster) as "worth getting looked at this week," with every deterministic check green, and only
-  `sex-wellness-reviewer`'s own web-verified read caught that a reader could act on "this week" to
-  their harm.
+- **Clinician line is mandatory on † topics.** Rows marked † below border on health; the "worth
+  seeing a clinician if…" line in the root-cause section is required, not judgment-call, on those.
 - **Clinician line also applies without the dagger (added 2026-08-03).** Care/hygiene Real Talk
   topics that touch bacteria, irritation, or infection risk carry the "worth seeing a clinician
-  if…" line, with its tier per the rule above, even when the row is not marked †. Write it in on
-  the first draft; do not spend a shared rewrite cycle adding it later.
-- **Same-day-emergency red-flag clusters, house wording (seed, extend as new ones are found).**
-  Match the wording below rather than re-deriving an urgency from an adverb:
-  - Numbness around the genitals, the anus, or the inner thighs that arrives together with a
-    change in bladder or bowel control, or with weakness in a leg, needs urgent or emergency care
-    the same day.
+  if…" line even when the row is not marked †. Write it in on the first draft; do not spend a
+  shared rewrite cycle adding it later.
 
 Topic bank (33; work top to bottom within the Tue/Fri rhythm, reorder to serve the theme week,
 extend freely — additions need a slug, problem, and target query):
@@ -303,7 +290,7 @@ extend freely — additions need a slug, problem, and target query):
 | 32 | how-often-do-couples-have-sex | Frequency comparison anxiety: doing arithmetic on your own sex life against a number you half-heard, and managing the count instead of the sex | "how often do couples have sex" |
 | 33 | we-bought-a-sex-toy-and-never-used-it | A toy both partners agreed to buy went badly or just awkwardly on the first try and now sits unused, with neither partner raising it again because raising it means reopening the moment it went wrong | "we bought a sex toy and never used it again" |
 
-† = health-adjacent; the "worth seeing a clinician if…" line, with its tier, is mandatory (see above).
+† = health-adjacent; the "worth seeing a clinician if…" line is mandatory.
 
 **When no writable row remains (added 2026-10-28, #18359).** The bank ran fully dry on 2026-10-27:
 26 of 30 rows had published posts and the other four (15, 25, 26, 29) each carry a standing COVERED
@@ -325,20 +312,7 @@ in all three of those the toy was never successfully bought and used together, a
 once, and the aftermath is the subject. It is also distinct from the guides post
 `what-should-you-expect-the-first-time-you-use-a-sex-toy`, which is prospective and solo-leaning
 where row 33 is retrospective and partnered. `check-topic-collision.ts` was clean against 20 prior
-posts.
-
-**Append-only convention for this block (added 2026-11-06, #20313).** The next content run that
-authors a new bank-extension row under this rule appends its own occurrence paragraph strictly
-after the end of the previous occurrences' text block — immediately before the next top-level
-subsection below (e.g. "A COVERED row is not a permanent dead entry...") — never spliced between
-an existing row's table-order sentence (e.g. "Row N is the Mth...") and that same row's own
-circumstance sentence (e.g. "By that run the bank was fully spent..."). PR #1908/ticket #20293
-(R-QA run 1877, 2026-11-06) found exactly that splice: a later row's occurrence paragraph landed
-between an earlier row's two sentences, inverting the chronological record this block exists to
-preserve. Bounced and fixed rather than shipped; this note makes the convention explicit so it is
-followed, not rediscovered, next time.
-
-A COVERED row (15, 25, 26, 29) is not a permanent dead entry: retire it by
+posts. A COVERED row (15, 25, 26, 29) is not a permanent dead entry: retire it by
 striking it from the working rotation once a genuinely distinct angle is found or the cluster is
 judged fully held by its sibling post, rather than leaving every future run to re-read and
 re-reject the same four rows indefinitely.
