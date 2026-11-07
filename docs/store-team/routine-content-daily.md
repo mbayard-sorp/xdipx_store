@@ -761,7 +761,7 @@ already-written universal claim wrong without anything about that claim's own wo
 2026-10-01):** once the draft is complete, read `.claude/skills/humanizer/SKILL.md` and run its full
 process on the body, the excerpt, and the FAQ answers: mark the tells, draft, check, final. Then
 patch the result into the Sanity draft. The 2026-10-01 test on
-why-you-can-orgasm-alone-but-not-with-a-partner halved blind-judged tell density, and it also
+`why-you-can-orgasm-alone-but-not-with-a-partner` halved blind-judged tell density, and it also
 taught the three ways the pass goes wrong. Guard against each one:
 
 - **It drops voice.** The first pass cut the opening first-person line, a candid "we can sell you"
