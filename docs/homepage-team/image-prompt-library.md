@@ -2834,3 +2834,19 @@ cast: jade
 - **Casting:** `maya` (prior five: jade, vivian, priya, marcus, sofia). No `editorialPhoto`, so white crew-neck and plain trousers named explicitly. Staged standing, bottle low, plain wall, to differ from the 10-23 seated bottle-at-eye-level frame.
 - **Lesson:** the prompt said "no bedding in frame" and a bed edge still rendered at the bottom of candidate 2; benign here, name "no bed in frame" if the backdrop must be wall only. Candidate 1 (window on the left, hand on hip) rendered a wry half-smile; "lips pressed, corners level, eyes lowered at the product" worked better in candidate 2.
 - **Label:** label-heavy SKU, `--label-tolerant` used; the label text renders garbled ("TOY GLUE" by the gate's read) at hero scale, silhouette, yellow dot and white-to-blue body faithful.
+
+## Notebook §0-P keeper — content run 1893, "Is It Normal to Have More Solo Sex Than Partnered Sex?"
+
+`cast: none` + iroha temari HANA (`iroha-temari-hana`), `wellness-basics`, sincere staging (no archetype E). Ref `100757B.jpg`
+(clean unboxed view; `100757A.jpg` is a printed carton, skipped). Route: `gen-notebook-art.ts --feature content-blog --run-id 1893`,
+Atlas `seedream-4.5-edit`, 4:3. Asset `image-312b42ea5ce76e376e067e816ef58c65cdbb34c3-2304x1728-jpg`.
+- **Checker gotcha:** title tokens are iroha, temari, hana AND "clitoral" (rechargeable is a spec token, stripped). Alt without
+  "clitoral" and prompt without it = "hero names no catalog product". Fix without a spec claim in the alt: put "clitoral vibrator"
+  in the PROMPT only, which means regenerating (the stored prompt must be the one that made the image).
+- **Fidelity gate:** pale-lilac ground rounds drift petal colour to washed pastel (`colour: drift`, blocked at upload). Fix that worked:
+  "petal shapes in the same medium rose-pink as the reference (clearly saturated pink petals against the white frosted base, not pale)".
+- **Ground:** unspecified "plum-soft" gives mid mauve with hard window shadows (r1, r1c2 rejects). "very pale ... close to #F3E8FB,
+  almost white, flat, no dark corners, no mauve or deep purple, no window, no hard shadows" gave the keeper.
+- **Keeper (r4 c1):** prompt = "Bright high-key editorial product photograph, soft diffused daylight, very pale plum-soft seamless backdrop ...
+  The iroha temari HANA clitoral vibrator from the reference photo reproduced exactly ... petal shapes in the same medium rose-pink as the
+  reference ... large in frame, left of center ... negative space on the right ... no text, no people, no hands ...". Minor: faint lilac rim at base.
