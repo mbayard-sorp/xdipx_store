@@ -433,6 +433,23 @@ drafter had no way to tell a defect in the draft from a defect in the gate. So:
   reference the account has already published on a live row is not automatically ambiguous in a
   new render, and a new render of it is not automatically fine; judge the pixels in front of you
   and name the feature.
+- **A draft brief's own wording is not the rubric; written doctrine is (ticket #18640).** The
+  row's `imageBrief` is a production aid for the drafter, not a spec you check the pixels against
+  literally. A finding that cites the brief's wording ("the brief said the hand should fully hide
+  X") rather than a stop-list line in `instagram-campaigns.md` or this file is not yet a defect;
+  re-ground it in the actual written doctrine before ruling. `baked-in-text`/legibility findings
+  (a garbled or invented wordmark, packaging copy) are already covered above and do not require
+  literal 100% occlusion of anything the brief happened to describe — judge legibility against the
+  pixels, not compliance against the brief's prose.
+- **A caption reporting on a documented cultural phenomenon, in plain non-evasive vocabulary, is
+  not itself evasion of that phenomenon (ticket #18857).** The shape-and-texture-rhyme still life
+  (`docs/emma-voice.md` Imagery register: "the product beside a form that echoes it... composed as
+  editorial still life") carries no caption carve-out. Pairing a product with an echoing form and
+  then naming the product category, the mechanism, and "sex toy" plainly in the caption is the
+  licensed archetype working as intended, not an algospeak risk, even when the caption explains
+  algospeak itself as a phenomenon. Reserve an algospeak-class finding for a caption that actually
+  uses euphemism or coded vocabulary in place of the plain words the charter requires elsewhere,
+  not for one that names algospeak as its subject.
 
 The drafter is told (`routine-social-daily.md` Step 1b) that a finding which contradicts a live
 precedent or one of these doctrine lines is evidence about the gate and files a calibration ticket.
