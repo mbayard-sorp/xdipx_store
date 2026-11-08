@@ -18,7 +18,7 @@
  * reads a KV-cached snapshot and an admin "Refresh" action recomputes it. The
  * pure scoring logic lives in `enrichment-coverage.ts`.
  */
-import { adminGraphQL } from '~/lib/shopify.server'
+import { adminGraphQL, normalizeMetafieldKey } from '~/lib/shopify.server'
 import { kvGet, kvSet } from '~/lib/kv.server'
 import { ENRICHMENT_FIELDS, tallyCoverage } from '~/lib/enrichment-coverage'
 import type { CoverageProductNode, EnrichmentCoverage } from '~/lib/enrichment-coverage'
@@ -29,8 +29,16 @@ const KV_KEY = 'enrichment:coverage:v1'
 const CACHE_TTL_SECONDS = 6 * 60 * 60 // 6h; a Refresh recomputes on demand.
 const MAX_PAGES = 60                   // 60 × 100 = 6,000 SKUs; catalog is ~3K.
 
-const IDENTIFIERS = ENRICHMENT_FIELDS
-  .map(f => `{ namespace: "xdipx", key: "${f.key}" }`)
+// Admin API's Product.metafields is a MetafieldConnection: it rejects the
+// Storefront-only `identifiers:` argument ("Field 'metafields' doesn't accept
+// argument 'identifiers'"), and it also rejects a `namespace:` argument
+// passed alongside `keys:`. The working form is fully-qualified
+// "namespace.key" strings with no separate namespace argument — same pattern
+// as the `keys:` queries elsewhere in shopify.server.ts. Queried this way,
+// Shopify returns `key` in the qualified "xdipx.tagline" form, so the mapper
+// below normalizes back to the bare key via `normalizeMetafieldKey`.
+const KEYS = ENRICHMENT_FIELDS
+  .map(f => `"xdipx.${f.key}"`)
   .join('\n            ')
 
 const COVERAGE_PAGE_QUERY = /* GraphQL */ `
@@ -40,9 +48,11 @@ const COVERAGE_PAGE_QUERY = /* GraphQL */ `
       nodes {
         id
         description
-        metafields(identifiers: [
-            ${IDENTIFIERS}
-        ]) { key value }
+        metafields(keys: [
+            ${KEYS}
+        ], first: ${ENRICHMENT_FIELDS.length}) {
+          nodes { namespace key value }
+        }
       }
     }
   }
@@ -51,7 +61,11 @@ const COVERAGE_PAGE_QUERY = /* GraphQL */ `
 interface CoveragePage {
   products: {
     pageInfo: { hasNextPage: boolean; endCursor: string | null }
-    nodes: CoverageProductNode[]
+    nodes: Array<{
+      id: string
+      description: string | null
+      metafields: { nodes: Array<{ namespace: string; key: string; value: string }> }
+    }>
   }
 }
 
@@ -66,7 +80,13 @@ export async function computeEnrichmentCoverage(): Promise<EnrichmentCoverage> {
 
   for (let page = 0; page < MAX_PAGES; page++) {
     const data: CoveragePage = await adminGraphQL<CoveragePage>(COVERAGE_PAGE_QUERY, { cursor })
-    nodes.push(...data.products.nodes)
+    for (const p of data.products.nodes) {
+      nodes.push({
+        id: p.id,
+        description: p.description,
+        metafields: p.metafields.nodes.map(mf => ({ key: normalizeMetafieldKey(mf), value: mf.value })),
+      })
+    }
     if (!data.products.pageInfo.hasNextPage) break
     cursor = data.products.pageInfo.endCursor
     if (!cursor) break
