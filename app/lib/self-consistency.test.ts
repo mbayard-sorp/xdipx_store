@@ -244,6 +244,53 @@ describe('findCrossPostIngressConflicts (run 1666 shape, ticket #18045)', () => 
   })
 })
 
+describe('negation cues: "out of" and "without" (run 1911 shape, ticket #20643)', () => {
+  // The live house wording from how-do-you-use-a-sex-toy-safely: the negation
+  // on "shower" sits in "keep it out of the", which the old NEGATION_RE never
+  // matched, so this entire forbidding sentence read as ALLOW on both shower
+  // and submerge and tripped a false cross-post conflict against any post
+  // that correctly forbids the same actions.
+  const houseSentence =
+    'IPX4 means the toy withstands splashing water from any direction, wipe it down, ' +
+    'keep it out of the shower, and never submerge it.'
+
+  it('reads "keep it out of the shower" as forbidding direct spray, not allowing it', () => {
+    const report = analyzeParagraphs([{ section: 'Care', text: houseSentence }])
+    expect(report.findings.some(f => f.kind === 'conflicting-instruction')).toBe(false)
+  })
+
+  it('does not flag a cross-post conflict against a post that also forbids the shower', () => {
+    const draftParagraphs = [{ section: 'Care', text: houseSentence }]
+    const priors = [
+      {
+        slug: 'what-does-a-wand-vibrator-do',
+        paragraphs: [
+          { section: 'Water ratings', text: 'An IPX4 toy should never go in the shower or under a direct spray.' },
+        ],
+      },
+    ]
+    expect(findCrossPostIngressConflicts(draftParagraphs, priors)).toHaveLength(0)
+  })
+
+  it('still flags a genuine "without" forbid against a post that allows the same action', () => {
+    const draftParagraphs = [
+      { section: 'Care', text: 'IPX4 means you can rinse the toy without ever letting it submerge.' },
+    ]
+    const priors = [
+      {
+        slug: 'other-post',
+        paragraphs: [
+          { section: 'Water ratings', text: 'An IPX4 toy can be fully submerged for a quick clean.' },
+        ],
+      },
+    ]
+    const conflicts = findCrossPostIngressConflicts(draftParagraphs, priors)
+    expect(conflicts).toHaveLength(1)
+    expect(conflicts[0]?.draftPolarity).toBe('forbid')
+    expect(conflicts[0]?.priorPolarity).toBe('allow')
+  })
+})
+
 describe('analyzeDraft — portable text structure, including the FAQ block', () => {
   it('counts a cross-site mismatch when one site lands only in the FAQ block', () => {
     const report = analyzeDraft({
