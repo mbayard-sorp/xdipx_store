@@ -110,7 +110,13 @@ const ACTION_BUCKETS: ActionBucket[] = [
   },
 ]
 
-const NEGATION_RE = /\b(never|cannot|can't|do not|don't|does not|doesn't|should not|shouldn't|avoid|not|no)\b/i
+// `without` and `out of` cover the house phrasing "withstands splashing water
+// from any direction, wipe it down, keep it out of the shower, and never
+// submerge it": the negation on "shower" sits in "keep it out of the", which
+// no prior cue matched, so the checker read a forbidding sentence as an
+// ALLOW and flagged a false cross-post conflict (ticket #20643).
+const NEGATION_RE =
+  /\b(never|cannot|can't|do not|don't|does not|doesn't|should not|shouldn't|avoid|without|out of|not|no)\b/i
 
 export type InstructionPolarity = 'allow' | 'forbid'
 
