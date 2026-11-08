@@ -1219,6 +1219,14 @@ as `kind:'code'` drops into R-DEV's claim queue, where R-DEV cannot honestly wri
 never held and can only block it (#4114, #4660). The PR still merges through the release engine once
 QA verifies; only the lane changes.
 
+**Confirm the link landed before moving on (#20454).** Immediately after the `op:create` or
+`op:update` call that is supposed to carry the `pr` link, `op:get` that same ticket id back and
+confirm `links` actually contains a `pr`-kind entry with the right ref — the same confirm-it-landed
+discipline `routine-qa-daily.md` Step 6 already requires of QA for its own transitions. A ticket
+whose own creator never re-reads it back is how a dropped link (applyRef stayed null while the PR
+was real) slips through with CI, the allowlist, and the build all green, costing R-WATCH's fallback
+autofiler a second, duplicate tracking ticket for the same PR.
+
 ```bash
 curl -s -X POST "$BASE_URL/api/homepage-team/run" \
   -H "x-team-secret: $HOMEPAGE_TEAM_TOKEN" -H "content-type: application/json" \
