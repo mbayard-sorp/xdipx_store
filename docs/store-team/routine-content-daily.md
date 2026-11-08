@@ -596,14 +596,19 @@ REVISE:
   documented pre-flight had already passed clean. As with every shape above, the fix is narrowing or
   deletion, never a hedge — run 649 resolved its instance by deletion and both gates confirmed the
   result.
-- a **conditional claim from a named source, restated without its condition** — the source says X
-  is true *when* Y, and the draft states X unconditionally. Not limited to specs: it applies to
-  any claim traced to a named source, including a behavioural or psychological one, and it is
-  invisible to every bullet above because nothing in it is quantified, superlative, or numeric
-  (run 925, second occurrence after run 466's IPX7 line). For every claim attributed to a named
-  source, quote the source's own sentence next to the draft's sentence before submit, and check
-  whether the source's sentence carries a `when`, an `if`, or an `as long as` that the draft's
-  does not.
+- a **conditional or tentative claim from a named source, restated as definite** — the source says
+  X is true *when* Y, or states X only as a possibility, and the draft states X unconditionally or
+  as settled fact. Not limited to specs: it applies to any claim traced to a named source,
+  including a behavioural or psychological one, and it is invisible to every bullet above because
+  nothing in it is quantified, superlative, or numeric (run 925, second occurrence after run 466's
+  IPX7 line; run 1893, third occurrence, a source's "might be related to" restated as "is"). For
+  every claim attributed to a named source, quote the source's own sentence next to the draft's
+  sentence before submit, and check whether the source's sentence carries a `when`, an `if`, an
+  `as long as`, or a **modal** (`might`, `may`, `could`, `suggests`, `is likely`, `possibly`, `may
+  be related to`) that the draft's does not. Matching the source's own tentative modality inside
+  the attribution clause is accurate attribution, not a hedge on our claim, since the tentativeness
+  belongs to the source and the authority stays in the flat sentences around it; the modal must
+  stay attached to the source, because moving it onto our own assertion does become a hedge.
 - **Where a primary source's own prose and its own tables disagree, the tables win (ticket
   #14798).** A primary source is not automatically safe just because it was read directly: run 1377's
   accuracy gate re-derived every figure from a cited paper's table counts and found the paper's own
