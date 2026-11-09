@@ -8,6 +8,8 @@ import { BreadcrumbStructuredData } from '~/components/seo/BreadcrumbStructuredD
 import { ItemListStructuredData } from '~/components/seo/ItemListStructuredData'
 import { FAQStructuredData } from '~/components/seo/FAQStructuredData'
 import { buildSocialMeta } from '~/lib/social-meta'
+import { canonicalUrl } from '~/lib/seo'
+import { resolveCompareCanonicalPath } from '~/lib/compare-canonical-aliases'
 import type { Product } from '~/types'
 
 const ORIGIN = 'https://xdipx.com'
@@ -42,13 +44,21 @@ export const meta: MetaFunction<typeof loader> = ({ data: loaderData }) => {
   const { comparison } = loaderData
   const title = (comparison.seoTitle ?? comparison.title) + ' | Compare | xdipx'
   const description = comparison.seoDescription ?? comparison.excerpt
-  const canonical = `${ORIGIN}/compare/${comparison.slug}`
+  const selfUrl = `${ORIGIN}/compare/${comparison.slug}`
+
+  // Canonical strategy (ticket #20824): a slug in COMPARE_CANONICAL_ALIASES
+  // duplicates an existing Notebook post on the same comparison, so it
+  // consolidates its SEO signal there instead of competing with its own
+  // twin. The .md alternate always describes THIS page's own machine
+  // twin, not the aliased target's, so it stays keyed off selfUrl either
+  // way — same precedent as COLLECTION_CANONICAL_ALIASES.
+  const canonical = canonicalUrl({ path: resolveCompareCanonicalPath(comparison.slug) })
 
   return [
     { title },
     { name: 'description', content: description },
     { tagName: 'link', rel: 'canonical', href: canonical },
-    { tagName: 'link', rel: 'alternate', type: 'text/markdown', href: `${canonical}.md` },
+    { tagName: 'link', rel: 'alternate', type: 'text/markdown', href: `${selfUrl}.md` },
     ...buildSocialMeta({ title, description, url: canonical, image: null, type: 'article' }),
     ...(comparison.noIndex ? [{ name: 'robots', content: 'noindex' }] : []),
   ]
