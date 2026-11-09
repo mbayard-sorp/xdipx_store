@@ -62,8 +62,21 @@ jobs:
 
       # `npm ci` runs postinstall, which builds only when VERCEL=1. It is unset
       # here, so install stays fast and the build below is the explicit step.
+      #
+      # Retried: a postinstall binary fetch (ffmpeg-static pulling its release
+      # asset from GitHub's own releases CDN) can 5xx transiently with zero
+      # relation to the PR's diff (ticket #20777, two unrelated branches hit
+      # the identical 504 within one morning). `npm ci` itself has no retry
+      # for a failed postinstall, so one flaky download failed the whole PR.
       - name: Install
-        run: npm ci
+        run: |
+          for i in 1 2 3; do
+            npm ci && exit 0
+            echo "npm ci failed (attempt $i/3)" >&2
+            [ "$i" -lt 3 ] && sleep $((i * 10))
+          done
+          echo "::error::npm ci failed after 3 attempts"
+          exit 1
 
       - name: Typecheck
         run: npm run typecheck
@@ -170,9 +183,19 @@ jobs:
           node-version: 24
           cache: npm
 
+      # Retried for the same reason as the `check` job's Install step: a
+      # postinstall binary fetch (ffmpeg-static) can 5xx transiently,
+      # unrelated to this PR's diff (ticket #20777).
       - name: Install
         if: steps.touch.outputs.touched == 'true'
-        run: npm ci
+        run: |
+          for i in 1 2 3; do
+            npm ci && exit 0
+            echo "npm ci failed (attempt $i/3)" >&2
+            [ "$i" -lt 3 ] && sleep $((i * 10))
+          done
+          echo "::error::npm ci failed after 3 attempts"
+          exit 1
 
       - name: Wait for Postgres
         if: steps.touch.outputs.touched == 'true'
