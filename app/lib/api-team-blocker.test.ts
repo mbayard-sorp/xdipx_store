@@ -1,10 +1,13 @@
 /**
- * Route-level guard for POST /api/team/blocker's op:'file' pre-check added in
- * ticket #8028: a probe-required category (every BLOCKER_CATEGORIES value
- * except console/decision) with neither a real nor a derivable verifyProbe
- * nor an explicit overrideNoProbeReason is rejected with 400 before
- * fileBlocker is ever called, mirroring the existing CONFIRMED-title
- * pre-check in the same route.
+ * Route-level guard for POST /api/team/blocker's op:'file' pre-check, added
+ * in ticket #8028 and tightened in #20825: every category with neither a
+ * real nor a derivable verifyProbe nor an explicit overrideNoProbeReason is
+ * rejected with 400 before fileBlocker is ever called, mirroring the
+ * existing CONFIRMED-title pre-check in the same route. console/decision
+ * (and approval) never need a PROBE specifically, but #20825 closed the gap
+ * where they needed nothing at all: 59 of 121 open blockers measured
+ * 2026-11-09 carried neither, every one of them in exactly these carve-out
+ * categories.
  *
  * Mocks `~/lib/owner-blockers.server` entirely, sourcing the pure pieces
  * (BLOCKER_CATEGORIES, probeGapReason, suggestProbeFor) from
@@ -109,13 +112,29 @@ describe("op:'file' rejects a probe-required category with no probe and no overr
     expect(fileBlockerMock).toHaveBeenCalled()
   })
 
-  it('200s for the console carve-out with no probe at all', async () => {
+  it('400s for the console carve-out with no probe and no reason (#20825)', async () => {
     const res = await post({ op: 'file', dedupeKey: 'x', title: 'y', category: 'console' })
+    expect(res.status).toBe(400)
+  })
+
+  it('200s for the console carve-out once an override reason is given (#20825)', async () => {
+    const res = await post({
+      op: 'file', dedupeKey: 'x', title: 'y', category: 'console',
+      overrideNoProbeReason: 'completes inside a third-party console this server cannot read',
+    })
     expect(res.status).toBe(200)
   })
 
-  it('200s for the decision carve-out with no probe at all', async () => {
+  it('400s for the decision carve-out with no probe and no reason (#20825)', async () => {
     const res = await post({ op: 'file', dedupeKey: 'x', title: 'y', category: 'decision' })
+    expect(res.status).toBe(400)
+  })
+
+  it('200s for the decision carve-out once an override reason is given (#20825)', async () => {
+    const res = await post({
+      op: 'file', dedupeKey: 'x', title: 'y', category: 'decision',
+      overrideNoProbeReason: 'owner judgment call with no observable completion state',
+    })
     expect(res.status).toBe(200)
   })
 })

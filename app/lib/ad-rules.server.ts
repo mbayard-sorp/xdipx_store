@@ -331,6 +331,9 @@ async function raiseR7Alert(day: string, sentence: string, pausedCreatives: numb
     priority: 1,
     source: 'agent',
     sourceRef: 'ad-rules:R7',
+    // Resuming is the owner's Undo click in the Live tab, not a state this
+    // check can observe from here (ticket #20825).
+    overrideNoProbeReason: 'Resuming is your own Undo click on the Live tab; nothing here can tell an intentional pause from one still needing review.',
   })
   if (!r.filed) console.error('[ad-rules] R7 owner alert failed', r.error)
   return r.filed ? 'filed' : 'failed'

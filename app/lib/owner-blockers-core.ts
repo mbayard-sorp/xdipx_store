@@ -174,6 +174,15 @@ export const PROBE_DESCRIPTIONS: Record<string, (arg: string) => string> = {
     const [table, keyCol, keyVal, col, want] = a.split('|')
     return `${table}.${col} is "${want}" for ${keyCol}=${keyVal}`
   },
+  /* Arg is `platform|externalId` (ticket #20825). Re-reads the exact entity
+   * the ads pager's rejected-entity page named, off ad_platform_entities'
+   * own (platform, external_id) unique index. */
+  ad_entity_not_rejected: a => {
+    const [platform, externalId] = a.split('|')
+    return `${platform} entity ${externalId} is no longer DISAPPROVED or WITH_ISSUES`
+  },
+  /* Arg is a comma-separated list of video_episodes ids (ticket #20825). */
+  video_episodes_not_pending: a => `none of video_episodes ${a} are still production_status='pending_approval'`,
   /* Arg is a migration filename (e.g. "093_pricing_audit_trigger_values.sql").
    * Clears the moment scripts/apply-migrations.ts records the file in
    * schema_migrations_applied, so a MANUAL-classified migration's blocker
@@ -196,12 +205,13 @@ export const PROBE_DESCRIPTIONS: Record<string, (arg: string) => string> = {
 /**
  * Categories where a row without a probe is a defect, not a style choice.
  *
- * `console` and `decision` are the carve-outs, and for opposite reasons:
- * `console` completes inside a third-party UI this server cannot read, and
- * `decision` has no observable completion state at all. Everything else leaves
- * a trace something here can check, so a probe-less row in those categories is
- * a row that will be cleared by hand — which is what 15 of the 32 blockers
- * filed to date actually were.
+ * `console` and `decision` are the carve-outs from needing a PROBE
+ * specifically, and for opposite reasons: `console` completes inside a
+ * third-party UI this server cannot read, and `decision` has no observable
+ * completion state at all. Everything else leaves a trace something here can
+ * check, so a probe-less row in those categories is a row that will be
+ * cleared by hand — which is what 15 of the 32 blockers filed to date
+ * actually were.
  *
  * `other` joined this list in ticket #8028 (self-healing-automation tracker
  * milestone a4-probes). It is the catch-all a filer reaches for when nothing
@@ -210,6 +220,19 @@ export const PROBE_DESCRIPTIONS: Record<string, (arg: string) => string> = {
  * non-`decision` category with nothing requiring one. `other` is not a third
  * legitimate carve-out the way `console`/`decision` are — a row that genuinely
  * has no observable completion state belongs in `decision`, not `other`.
+ *
+ * Carve-out from needing a probe is NOT the same as carve-out from needing
+ * ANYTHING (ticket #20825). Before this ticket, `probeGapReason` returned
+ * `null` outright for `console`/`decision`/`approval` — not just "no probe
+ * required" but "no gap at all", so `fileBlocker` never even checked for an
+ * `overrideNoProbeReason` on those rows. Measured 2026-11-09: 59 of 121 open
+ * blockers carried neither a probe nor a reason, and every single one was in
+ * one of exactly these three categories — the carve-out from the probe
+ * requirement had quietly become a carve-out from the whole "name why this
+ * can't clear itself" discipline. `probeGapReason` below now returns a gap
+ * for every category once a probe is missing; only the category list here
+ * decides whether that gap's message asks for a probe (required) or accepts
+ * that none can exist and asks for a reason instead (not required).
  */
 export const PROBE_REQUIRED_CATEGORIES: readonly BlockerCategory[] = [
   'migration', 'valve', 'credential', 'merge', 'execute', 'other',
@@ -239,17 +262,22 @@ export function suggestProbeFor(
 }
 
 /**
- * Does this row still need a probe after auto-assignment? Reported, not thrown:
- * a filer that cannot supply one must still be able to put the blocker in front
- * of the owner. Losing the row is worse than losing the probe.
+ * Does this row still need SOMETHING after auto-assignment — a probe where
+ * one is expected, or (ticket #20825) an override reason everywhere else?
+ * Reported, not thrown: a filer that cannot supply a probe must still be
+ * able to put the blocker in front of the owner. Losing the row is worse
+ * than losing the probe. `fileBlocker` is what turns a non-null return here
+ * into an outright reject when no `overrideNoProbeReason` accompanies it.
  */
 export function probeGapReason(
   input: Pick<BlockerInput, 'category' | 'verifyProbe'>,
 ): string | null {
   if (input.verifyProbe) return null
   const category = (input.category ?? 'other') as BlockerCategory
-  if (!PROBE_REQUIRED_CATEGORIES.includes(category)) return null
-  return `category '${category}' should carry a verifyProbe; this row will need clearing by hand`
+  if (PROBE_REQUIRED_CATEGORIES.includes(category)) {
+    return `category '${category}' should carry a verifyProbe; this row will need clearing by hand`
+  }
+  return `category '${category}' carries no verifyProbe`
 }
 
 export function isProbe(name: unknown): name is string {

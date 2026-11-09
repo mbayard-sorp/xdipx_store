@@ -677,6 +677,9 @@ export async function reportDeadPublishRow(
         category: 'approval',
         priority: 1,
         source: 'agent',
+        // Clears itself the moment this exact post actually ships (ticket #20825).
+        verifyProbe: 'row_matches',
+        verifyArg: `social_posts|id|${post.id}|status|posted`,
       })
     } catch {
       // Same: an advisory must not take the tick down.
@@ -710,6 +713,13 @@ export async function reportDeadPublishRow(
         category: 'decision',
         priority: 1,
         source: 'agent',
+        // See the comment above this block: the only cheap authenticated X
+        // read answers fine on a read-only or credit-depleted account, so it
+        // cannot honestly distinguish "fixed" from "still blocked" and would
+        // risk clearing this row while posting is still dead (ticket #20825).
+        overrideNoProbeReason:
+          'No X read can honestly tell "credits/token fixed" from "still blocked" without attempting a real '
+          + 'post, which this check must not do as a side effect; clears by hand once you confirm posting works again.',
       })
     } catch {
       // Same: an advisory must not take the tick down.
@@ -1129,6 +1139,12 @@ export async function runSocialPublishTick(deps: PublishTickDeps): Promise<Publi
           category: 'decision',
           priority: 1,
           source: 'agent',
+          // Same reasoning as the other x-publish-blocked-credits filing
+          // above: no X read can honestly tell "fixed" from "still blocked"
+          // without attempting a real post (ticket #20825).
+          overrideNoProbeReason:
+            'No X read can honestly tell "credits/token fixed" from "still blocked" without attempting a real '
+            + 'post, which this check must not do as a side effect; clears by hand once you confirm posting works again.',
         })
       } catch {
         // An advisory must never take the tick down.

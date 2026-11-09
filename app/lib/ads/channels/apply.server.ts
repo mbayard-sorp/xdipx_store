@@ -301,6 +301,10 @@ function autoPauseCapBlocker(day: string, count: number, target: EntityRef, prop
     priority: 1,
     source: 'sweep',
     sourceRef: 'ads:apply:auto-pause-cap',
+    // The cap resets on the UTC day rolling over, not on any state a probe
+    // can observe; whether to pause the rest by hand or flip the valve is
+    // the owner's call either way (ticket #20825).
+    overrideNoProbeReason: 'The daily auto-pause cap resets at 00:00 UTC; whether to act on the rest is the owner\'s call, not a probeable state.',
   }
 }
 

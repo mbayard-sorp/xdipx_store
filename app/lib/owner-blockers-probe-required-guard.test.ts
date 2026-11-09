@@ -12,6 +12,15 @@
  * path here is hermetic too. The accept path (an override reason, or a
  * category with a probe) reaches the DB, mocked the same way the
  * neighbouring upsert-refresh and dedupe-canonicalize suites do.
+ *
+ * Ticket #20825 tightened this further: `console`/`decision`/`approval`
+ * used to be a carve-out from the WHOLE gate (probeGapReason returned null
+ * outright), not just from needing a PROBE specifically. Measured
+ * 2026-11-09: 59 of 121 open blockers carried neither a probe nor a reason,
+ * every one of them in exactly these three categories. They still never
+ * need a probe -- `console` completes in a third-party UI, `decision` has
+ * no observable completion state, `approval` can genuinely be a pure
+ * notification -- but they now need a reason just like everything else.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -44,17 +53,23 @@ describe('fileBlocker rejects a probe-required category with no probe and no ove
     })
   }
 
-  it('does not throw for the console carve-out', async () => {
-    await expect(
-      fileBlocker({ dedupeKey: 'test-console', title: 'x', category: 'console' }),
-    ).resolves.toBeDefined()
-  })
+  for (const category of ['console', 'decision', 'approval'] as const) {
+    it(`throws for the '${category}' carve-out too when neither a probe nor a reason is given (#20825)`, async () => {
+      await expect(
+        fileBlocker({ dedupeKey: `test-${category}-no-probe`, title: 'x', category }),
+      ).rejects.toThrow(/carries no verifyProbe/i)
+      expect(executeMock).not.toHaveBeenCalled()
+    })
 
-  it('does not throw for the decision carve-out', async () => {
-    await expect(
-      fileBlocker({ dedupeKey: 'test-decision', title: 'x', category: 'decision' }),
-    ).resolves.toBeDefined()
-  })
+    it(`does not throw for '${category}' once an override reason is given (#20825)`, async () => {
+      await expect(
+        fileBlocker({
+          dedupeKey: `test-${category}-with-reason`, title: 'x', category,
+          overrideNoProbeReason: `${category} has no observable completion state a probe can check`,
+        }),
+      ).resolves.toBeDefined()
+    })
+  }
 })
 
 describe('fileBlocker accepts an explicit override in place of a probe (#8028)', () => {

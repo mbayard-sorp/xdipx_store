@@ -814,6 +814,15 @@ export interface OpsWatchFacts {
    * genuine miss.
    */
   notebookYesterday: { slug: string } | { missed: true; holdReason: string | null } | null
+  /**
+   * Of today's open owner_blockers rows, how many carry neither a verifyProbe
+   * nor an overrideNoProbeReason (ticket #20825). `fileBlocker` rejects a new
+   * row in that state since this ticket, but a backlog of rows filed before
+   * the gate tightened can still sit open with neither, which is exactly how
+   * 59 of 121 open rows were measured 2026-11-09 with nothing enforcing a
+   * fix. `null` on a read failure, distinct from a genuine zero.
+   */
+  blockerProbeCoverage: { totalOpen: number; withNeither: number } | null
 }
 
 /**
@@ -882,6 +891,20 @@ export function renderOpsWatchSection(f: OpsWatchFacts): string {
   // for ~2 days (#5061/#5092).
   if (f.purchaseCapiWriteFailures > 0) {
     parts.push(`<p style="margin:0 0 4px;color:${BAD};"><strong>${f.purchaseCapiWriteFailures} Purchase (Meta CAPI) ledger write${f.purchaseCapiWriteFailures === 1 ? '' : 's'} failed in the last 24h.</strong> Conversion tracking is undercounting; check that meta_capi_outbox exists and the DB is healthy.</p>`)
+  }
+
+  // Blocker probe-coverage ratio (ticket #20825). fileBlocker rejects a new
+  // row with neither a probe nor a reason, but a backlog filed before that
+  // gate tightened can still carry neither; a nonzero count here is exactly
+  // the regression #20825 measured (59 of 121) becoming visible again.
+  if (f.blockerProbeCoverage !== null) {
+    const { totalOpen, withNeither } = f.blockerProbeCoverage
+    const covered = totalOpen - withNeither
+    if (withNeither > 0) {
+      parts.push(`<p style="margin:0 0 4px;color:${WARN};">Blocker probe coverage: ${covered}/${totalOpen} open blockers carry a probe or a reason &mdash; <strong>${withNeither} carry neither</strong> and will need clearing by hand.</p>`)
+    } else if (totalOpen > 0) {
+      parts.push(`<p style="margin:0 0 4px;color:${GOOD};">Blocker probe coverage: ${covered}/${totalOpen} open blockers carry a probe or a reason.</p>`)
+    }
   }
 
   return parts.join('')
@@ -1441,6 +1464,7 @@ async function gatherOpsWatch(): Promise<OpsWatchFacts> {
     tokenWriteFailures: 0,
     purchaseCapiWriteFailures: 0,
     notebookYesterday: null,
+    blockerProbeCoverage: null,
   }
 
   // Yesterday's Notebook status (ticket #13393): live slug, or a miss with
@@ -1562,6 +1586,19 @@ async function gatherOpsWatch(): Promise<OpsWatchFacts> {
     out.purchaseCapiWriteFailures = await getPurchaseCapiWriteFailureCount()
   } catch (err) {
     console.warn('[owner-digest] purchase-capi write-failure count failed:', String(err).slice(0, 200))
+  }
+
+  // Blocker probe-coverage ratio (ticket #20825): a regression here means
+  // rows are piling up with nothing that can tell the owner's own action
+  // apart from no action at all, which is exactly the failure mode #20825
+  // measured at 59 of 121.
+  try {
+    const { listOpenBlockers, countOpenBlockers } = await import('~/lib/owner-blockers.server')
+    const [rows, totalOpen] = await Promise.all([listOpenBlockers(500), countOpenBlockers()])
+    const withNeither = rows.filter(b => !b.verifyProbe && !b.overrideNoProbeReason).length
+    out.blockerProbeCoverage = { totalOpen, withNeither }
+  } catch (err) {
+    console.warn('[owner-digest] blocker probe-coverage check failed:', String(err).slice(0, 200))
   }
 
   return out

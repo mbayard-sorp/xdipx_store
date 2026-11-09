@@ -426,6 +426,7 @@ describe('renderOpsWatchSection', () => {
     tokenWriteFailures: 0,
     purchaseCapiWriteFailures: 0,
     notebookYesterday: { slug: 'does-app-controlled-feel-different' },
+    blockerProbeCoverage: null,
   }
 
   it('reports the live Notebook slug', () => {
@@ -534,6 +535,38 @@ describe('renderOpsWatchSection', () => {
     })
     expect(html).toContain('#9')
     expect(html).toContain('Retired by agent-editor')
+  })
+
+  describe('blocker probe coverage (#20825)', () => {
+    it('reports no line at all when the read failed (null)', () => {
+      expect(renderOpsWatchSection({ ...base, blockerProbeCoverage: null })).not.toContain('probe coverage')
+    })
+
+    it('warns with the count once any open blocker carries neither a probe nor a reason', () => {
+      const html = renderOpsWatchSection({
+        ...base,
+        blockerProbeCoverage: { totalOpen: 121, withNeither: 59 },
+      })
+      expect(html).toContain('62/121 open blockers carry a probe or a reason')
+      expect(html).toContain('<strong>59 carry neither</strong>')
+    })
+
+    it('reports a clean line with no warning once every open row has a probe or a reason', () => {
+      const html = renderOpsWatchSection({
+        ...base,
+        blockerProbeCoverage: { totalOpen: 121, withNeither: 0 },
+      })
+      expect(html).toContain('121/121 open blockers carry a probe or a reason')
+      expect(html).not.toContain('carry neither')
+    })
+
+    it('reports nothing when there are no open blockers at all', () => {
+      const html = renderOpsWatchSection({
+        ...base,
+        blockerProbeCoverage: { totalOpen: 0, withNeither: 0 },
+      })
+      expect(html).not.toContain('probe coverage')
+    })
   })
 })
 

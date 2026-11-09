@@ -54,6 +54,7 @@ beforeEach(async () => {
     title: 'ATLAS_CLOUD_API_KEY missing for 0.2h',
     detail: 'one env var, 0.2 hours',
     category: 'console',
+    overrideNoProbeReason: 'test fixture: console carve-out, not under test here',
   })
 })
 
@@ -137,6 +138,7 @@ describe('priority is measured, omission-safe', () => {
       title: 'ATLAS_CLOUD_API_KEY missing for 0.2h',
       category: 'console',
       priority: 1,
+      overrideNoProbeReason: 'test fixture: console carve-out, not under test here',
     })
     expect(priorityUpdateParam()).toBe(1)
   })
@@ -150,6 +152,7 @@ describe('priority is measured, omission-safe', () => {
       dedupeKey: 'atlas-key-missing',
       title: 'ATLAS_CLOUD_API_KEY missing for 0.4h',
       category: 'console',
+      overrideNoProbeReason: 'test fixture: console carve-out, not under test here',
     })
     // rawPriority binds as null on omission, so COALESCE falls through to
     // owner_blockers.priority and the stored value is left untouched.

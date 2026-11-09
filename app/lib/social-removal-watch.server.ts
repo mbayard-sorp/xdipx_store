@@ -385,6 +385,10 @@ export async function runRemovalWatch(deps: RemovalWatchDeps = {}): Promise<Remo
         category: 'decision',
         priority: 2,
         source: 'agent',
+        // Per ticket #11454 this value is the owner's to pick, not something
+        // the code should infer from a probe; clear it by hand once the
+        // ceiling key is set (ticket #20825).
+        overrideNoProbeReason: 'The recovery ceiling value is the owner\'s to pick (ticket #11454); clear by hand once set.',
       })
     }
 

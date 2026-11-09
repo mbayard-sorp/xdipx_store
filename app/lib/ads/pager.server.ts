@@ -53,9 +53,19 @@ export interface PageDetail {
   dedupeKey?: string
   priority?: number
   sourceRef?: string
-  /** decision by default: no probe can say a page is over, so the owner closes it. */
+  /** decision by default: most pages have no mechanical clear, so the owner closes them. */
   category?: 'decision' | 'approval'
   source?: 'sweep' | 'agent'
+  /** Set when the page's own condition is mechanically re-checkable (e.g. the rejected-entity page below). */
+  verifyProbe?: string
+  verifyArg?: string
+  /**
+   * Required (ticket #20825) when no verifyProbe is given: `decision`/
+   * `approval` no longer carve a page out of the "name why this can't
+   * clear itself" discipline just by category. Every page call site below
+   * sets exactly one of verifyProbe or this.
+   */
+  overrideNoProbeReason?: string
 }
 
 export type FileBlockerFn = (input: BlockerInput) => Promise<{ id: number; created: boolean; reopened: boolean }>
@@ -98,6 +108,8 @@ export async function pageOwner(
       priority: detail.priority ?? 1,
       source: detail.source ?? 'sweep',
       sourceRef: detail.sourceRef ?? `ads:pager:${reason}`,
+      ...(detail.verifyProbe ? { verifyProbe: detail.verifyProbe, verifyArg: detail.verifyArg ?? '' } : {}),
+      ...(detail.overrideNoProbeReason ? { overrideNoProbeReason: detail.overrideNoProbeReason } : {}),
     })
     return { key, filed: true, id: r.id }
   } catch (err) {
@@ -204,6 +216,10 @@ export async function runPagerChecks(deps: PagerDeps = {}): Promise<PagerResult>
       ].join('\n\n'),
       whereToGo: 'https://xdipx.com/admin/ads/tree, then the ad in Meta Ads Manager',
       unblocks: 'Delivery on the rejected entity, and the account standing behind it.',
+      // Clears the moment the next entity sync reads this exact row as
+      // anything but DISAPPROVED/WITH_ISSUES (ticket #20825).
+      verifyProbe: 'ad_entity_not_rejected',
+      verifyArg: `${e.platform}|${e.externalId}`,
     }))
   }
 
@@ -221,6 +237,9 @@ export async function runPagerChecks(deps: PagerDeps = {}): Promise<PagerResult>
       ].join('\n\n'),
       whereToGo: 'https://xdipx.com/admin/ads/tree, then Meta Ads Manager',
       unblocks: 'Spend above the cap you set.',
+      // Today's spend is monotonic within the day; it cannot un-cross 1.5x
+      // the cap once it has, so there is nothing to probe (ticket #20825).
+      overrideNoProbeReason: `${day}'s spend cannot retroactively drop back under the cap; clear by hand once reviewed.`,
     }))
   }
 
@@ -238,6 +257,9 @@ export async function runPagerChecks(deps: PagerDeps = {}): Promise<PagerResult>
       ].join('\n\n'),
       whereToGo: 'https://curious.xdipx.com, then Meta Events Manager',
       unblocks: 'Lead spend that Meta cannot optimize against.',
+      // The 6h window this page already fired on is in the past; a later
+      // clean reading does not retroactively fix it (ticket #20825).
+      overrideNoProbeReason: 'The stale 6h window this fired on cannot retroactively become fine; clear by hand once checked.',
     }))
   }
 

@@ -442,6 +442,14 @@ export async function runDiscountExposureAudit(
         source: 'sweep',
         sourceRef: d.discountId,
         evidence: `discountNodes (status:active method:code) + ${reachable.length} reachable of ${variants.length} live catalog variants + nalpac_price_history, read ${new Date().toISOString().slice(0, 10)}`,
+        // Whether to end the code, write a covering promo row, or accept the
+        // exposure is the owner's call, so this does not clear itself; the
+        // next daily sweep simply stops re-filing once isCoveredByOpenPromo
+        // is true, which is not the same as this open row clearing (ticket
+        // #20825).
+        overrideNoProbeReason:
+          'The owner decides whether to end this code, write a covering promo row, or accept the exposure; '
+          + 'no probe clears this row on its own, clear it by hand once decided.',
       })
       blockerFiled = true
     }
