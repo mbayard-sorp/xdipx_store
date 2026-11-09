@@ -523,7 +523,7 @@ describe('handleOrderFulfilled', () => {
     expect(createInvite.mock.calls[0]![0]).toMatchObject({ shopifyProductId: 'gid://shopify/Product/200' })
   })
 
-  it('records no_invite_created when every line item is already invited (ticket #16267)', async () => {
+  it('records no_invite_created with a reason when every line item is already invited (ticket #16267)', async () => {
     const { createInvite, getInvitedProductIdsForOrder, recordOrderFulfillmentOutcome } = await mocks()
     createInvite.mockClear()
     recordOrderFulfillmentOutcome.mockClear()
@@ -535,6 +535,63 @@ describe('handleOrderFulfilled', () => {
     } as Parameters<typeof handleOrderFulfilled>[0])
 
     expect(createInvite).not.toHaveBeenCalled()
-    expect(recordOrderFulfillmentOutcome).toHaveBeenCalledWith('111', 'no_invite_created')
+    expect(recordOrderFulfillmentOutcome).toHaveBeenCalledWith(
+      '111', 'no_invite_created', expect.stringContaining('already_invited:gid://shopify/Product/100'),
+    )
+  })
+
+  // ticket #16818: a `no_invite_created` outcome used to carry no reason at
+  // all, so a recurring silent drop could never be diagnosed from the data
+  // without re-reading rolled-off function logs. Each skip path now names
+  // itself in the stored reason.
+  it('records a no_sku reason when every line item is missing a SKU (ticket #16818)', async () => {
+    const { createInvite, recordOrderFulfillmentOutcome } = await mocks()
+    createInvite.mockClear()
+    recordOrderFulfillmentOutcome.mockClear()
+
+    await handleOrderFulfilled({
+      ...baseOrder,
+      email: 'buyer@example.com',
+      line_items: [{ id: 7, product_id: 100, sku: '', title: 'No SKU', quantity: 1, price: '20.00' }],
+    } as Parameters<typeof handleOrderFulfilled>[0])
+
+    expect(createInvite).not.toHaveBeenCalled()
+    expect(recordOrderFulfillmentOutcome).toHaveBeenCalledWith(
+      '111', 'no_invite_created', expect.stringContaining('no_sku:line_item_7'),
+    )
+  })
+
+  it('records a no_product_id reason when a line item has a SKU but no product_id (ticket #16818)', async () => {
+    const { createInvite, recordOrderFulfillmentOutcome } = await mocks()
+    createInvite.mockClear()
+    recordOrderFulfillmentOutcome.mockClear()
+
+    await handleOrderFulfilled({
+      ...baseOrder,
+      email: 'buyer@example.com',
+      line_items: [{ id: 8, sku: 'Z9', title: 'No product id', quantity: 1, price: '20.00' }],
+    } as Parameters<typeof handleOrderFulfilled>[0])
+
+    expect(createInvite).not.toHaveBeenCalled()
+    expect(recordOrderFulfillmentOutcome).toHaveBeenCalledWith(
+      '111', 'no_invite_created', expect.stringContaining('no_product_id:sku_Z9'),
+    )
+  })
+
+  it('records a create_invite_error reason when createInvite throws (ticket #16818)', async () => {
+    const { createInvite, recordOrderFulfillmentOutcome } = await mocks()
+    recordOrderFulfillmentOutcome.mockClear()
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    createInvite.mockRejectedValueOnce(new Error('duplicate key value'))
+
+    await handleOrderFulfilled({
+      ...baseOrder,
+      email: 'buyer@example.com',
+    } as Parameters<typeof handleOrderFulfilled>[0])
+
+    expect(recordOrderFulfillmentOutcome).toHaveBeenCalledWith(
+      '111', 'no_invite_created', expect.stringContaining('create_invite_error:gid://shopify/Product/100:duplicate key value'),
+    )
+    spy.mockRestore()
   })
 })
