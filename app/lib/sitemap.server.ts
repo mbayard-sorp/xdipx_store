@@ -57,6 +57,7 @@ import {
 } from '~/lib/sitemap-selection'
 import { INDEX_VERSION } from '~/lib/discovery.server'
 import { CANONICAL_ALIASED_HANDLES } from '~/lib/collection-canonical-aliases'
+import { CANONICAL_ALIASED_COMPARE_SLUGS } from '~/lib/compare-canonical-aliases'
 import { getDropPageUpdatedAt } from '~/lib/category-page.server'
 import { dealHistory } from '../../db/schema'
 import { eq } from 'drizzle-orm'
@@ -438,13 +439,19 @@ async function assembleSegments(): Promise<SitemapSegment[]> {
   // ── compare: /compare/$slug (BOFU answer pages) ──────────────────────────
   // High-intent "X vs Y" surfaces, priority just below product pages. The .md
   // twins are intentionally not listed (advertised via rel="alternate" only),
-  // matching the notebook/collection precedent.
-  const compareUrls: SitemapUrl[] = comparisons.map(c => ({
-    loc: `${BASE}/compare/${c.slug}`,
-    lastmod: (c._updatedAt ?? c.publishedAt)?.split('T')[0],
-    changefreq: 'weekly',
-    priority: '0.7',
-  }))
+  // matching the notebook/collection precedent. A slug in
+  // CANONICAL_ALIASED_COMPARE_SLUGS canonicalizes to its Notebook twin
+  // (ticket #20824) and is dropped here too — same rule as
+  // CANONICAL_ALIASED_HANDLES just above: a URL that canonicalizes elsewhere
+  // should never be submitted for indexing on its own.
+  const compareUrls: SitemapUrl[] = comparisons
+    .filter(c => !CANONICAL_ALIASED_COMPARE_SLUGS.has(c.slug))
+    .map(c => ({
+      loc: `${BASE}/compare/${c.slug}`,
+      lastmod: (c._updatedAt ?? c.publishedAt)?.split('T')[0],
+      changefreq: 'weekly',
+      priority: '0.7',
+    }))
 
   // ── shop (pSEO pilot): /shop/$tag/$type ───────────────────────────────────
   // Capped at PSEO_SITEMAP_LIMIT (app/lib/pseo-combos.server.ts) combinations,
