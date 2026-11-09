@@ -683,9 +683,18 @@ export async function handleOrderFulfilled(order: ShopifyFulfilledOrder): Promis
   // "Review Invite Sent" event at actual send time.
   const sendAfter = new Date(Date.now() + settings.inviteDelayDays * 24 * 60 * 60 * 1000)
   let invited = false
+  // Per-line-item skip reasons, so a `no_invite_created` outcome names the
+  // actual cause in the data instead of leaving the investigator to guess
+  // from a list of candidate branches (ticket #16818, same silent-success
+  // class as #16267: that ticket gave the PII-redaction branch a reason, but
+  // this branch still recorded no reason at all).
+  const skipReasons: string[] = []
 
   for (const lineItem of order.line_items) {
-    if (!lineItem.sku) continue
+    if (!lineItem.sku) {
+      skipReasons.push(`no_sku:line_item_${lineItem.id}`)
+      continue
+    }
 
     // The product id is already in the fulfillment payload. This used to call
     // `/products.json?limit=1&sku=...`, but REST `/products.json` has no `sku`
@@ -696,11 +705,15 @@ export async function handleOrderFulfilled(order: ShopifyFulfilledOrder): Promis
     const productId = lineItem.product_id
     if (!productId) {
       console.warn(`[webhook:order-fulfilled] line item ${lineItem.sku} has no product_id, skipping invite`)
+      skipReasons.push(`no_product_id:sku_${lineItem.sku}`)
       continue
     }
 
     const shopifyProductId = `gid://shopify/Product/${productId}`
-    if (alreadyInvited.has(shopifyProductId)) continue
+    if (alreadyInvited.has(shopifyProductId)) {
+      skipReasons.push(`already_invited:${shopifyProductId}`)
+      continue
+    }
     alreadyInvited.add(shopifyProductId)
 
     const reviewerName = [
@@ -715,10 +728,20 @@ export async function handleOrderFulfilled(order: ShopifyFulfilledOrder): Promis
       reviewerEmail,
       reviewerName,
       sendAfter,
-    }).then(() => { invited = true }).catch(err => console.error('[webhook:invite-create]', err))
+    }).then(() => { invited = true }).catch(err => {
+      console.error('[webhook:invite-create]', err)
+      skipReasons.push(`create_invite_error:${shopifyProductId}:${err instanceof Error ? err.message : String(err)}`)
+    })
   }
 
-  await recordOrderFulfillmentOutcome(String(order.id), invited ? 'invited' : 'no_invite_created')
+  if (invited) {
+    await recordOrderFulfillmentOutcome(String(order.id), 'invited')
+  } else {
+    await recordOrderFulfillmentOutcome(
+      String(order.id), 'no_invite_created',
+      skipReasons.join('; ').slice(0, 500) || 'no line items to evaluate',
+    )
+  }
 }
 
 // ─── Product created handler ──────────────────────────────────────────────
