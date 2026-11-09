@@ -721,6 +721,22 @@ export async function resetKlaviyoMissAttempts(shopifyOrderIds: string[]): Promi
 }
 
 /**
+ * Read-only preview of what `resetKlaviyoMissAttempts` would clear for the
+ * named orders, same WHERE clause, no mutation (ticket #20828's dry-run
+ * requirement for `scripts/reset-klaviyo-miss-attempts.ts`).
+ */
+export async function countResettableKlaviyoMissAttempts(shopifyOrderIds: string[]): Promise<number> {
+  if (shopifyOrderIds.length === 0) return 0
+  const rows = await sql`
+    SELECT count(*)::int AS n FROM order_fulfillment_webhook_log
+    WHERE outcome = 'no_invite_created'
+      AND reason LIKE ${KLAVIYO_MISS_REASON_PREFIX + '%'}
+      AND shopify_order_id = ANY(${shopifyOrderIds})
+  `
+  return Number(rows[0]?.['n'] ?? 0)
+}
+
+/**
  * `review_invites` rows touched in the last `days` days. The table has no
  * `created_at`: `sent_at` defaults to `now()` at INSERT time (createInvite
  * never sets it) and stays there until `markInviteSent` overwrites it at
