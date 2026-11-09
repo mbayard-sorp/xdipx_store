@@ -14,6 +14,7 @@
 import type { DiscoveryProduct } from '~/types/discovery'
 import { EMPTY_STATE } from '~/types/discovery'
 import { scoreProduct } from '~/lib/discovery-emma'
+import { isFeedAwareIneligible } from '~/lib/feed-eligibility'
 import type { ProductTypeDial } from '~/types'
 import {
   type CuriosityLane,
@@ -163,11 +164,17 @@ export function applySanityFloor(
  * (id 8, "Hides all discontinued"), which `applyRules()` applies and which the
  * shelf never passes through. That row is live data and a curator's call, not
  * this function's to override.
+ *
+ * Also gated by `isFeedAwareIneligible` (ticket #20826,
+ * `~/lib/feed-eligibility.ts`): a product that clears `MIN_SHELF_STOCK` on
+ * Shopify's own count can still be a bad curated pick when the supplier feed
+ * itself reports zero, or when total buyable units are thin enough to be a
+ * real sellout risk even before Shopify's count catches up.
  */
 function passesBaseFilters(p: DiscoveryProduct): boolean {
   const inStock = p.totalInventory == null || p.totalInventory > MIN_SHELF_STOCK
   const live = p.discontinuedAt == null
-  return p.imageUrl != null && inStock && live
+  return p.imageUrl != null && inStock && live && !isFeedAwareIneligible(p)
 }
 
 // ─── Price-band mix (§e.7) ───────────────────────────────────────────────────

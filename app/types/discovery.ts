@@ -183,6 +183,22 @@ export interface DiscoveryProduct {
    * type would quietly stop matching the runtime value.
    */
   discontinuedAt: string | null
+  /**
+   * The default variant's SKU (the same SKU Nalpac keys its feed on), or null
+   * when unset. Used only to join against `nalpac_price_history.qty` for the
+   * feed-aware eligibility gate (ticket #20826) — never displayed.
+   */
+  sku: string | null
+  /**
+   * The representative SKU's live supplier quantity from the Nalpac feed
+   * (`nalpac_price_history.qty`), or null when the SKU has no feed row (never
+   * carried, or the row has not synced yet — null always passes the gate, the
+   * same "no signal is not evidence of zero" rule as `totalInventory`). This
+   * can disagree with Shopify's own `totalInventory` — the supplier can show
+   * zero while Shopify still reports units on hand — which is exactly the gap
+   * `app/lib/feed-eligibility.ts` exists to catch.
+   */
+  feedQty: number | null
 }
 
 export interface ScoredProduct {

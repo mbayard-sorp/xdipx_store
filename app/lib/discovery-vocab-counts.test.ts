@@ -26,6 +26,8 @@ function makeProduct(overrides: Partial<DiscoveryProduct> & Pick<DiscoveryProduc
     productType:    overrides.productType ?? null,
     productTypeDial: overrides.productTypeDial ?? null,
     discontinuedAt: overrides.discontinuedAt ?? null,
+    sku:            overrides.sku ?? null,
+    feedQty:        overrides.feedQty !== undefined ? overrides.feedQty : null,
     ...overrides,
   }
 }

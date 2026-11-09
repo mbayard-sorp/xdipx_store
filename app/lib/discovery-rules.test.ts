@@ -43,6 +43,8 @@ function makeProduct(overrides: Partial<DiscoveryProduct> & Pick<DiscoveryProduc
     productType:    overrides.productType ?? null,
     productTypeDial: overrides.productTypeDial ?? null,
     discontinuedAt: overrides.discontinuedAt ?? null,
+    sku:            overrides.sku ?? null,
+    feedQty:        overrides.feedQty !== undefined ? overrides.feedQty : null,
     ...overrides,
   }
 }
@@ -86,7 +88,12 @@ const catalog: DiscoveryProduct[] = [
   makeProduct({ handle: 'bondage-2', category: 'Play',    productType: 'bondage',   price: 75,  title: 'Leather Cuffs',            mood: ['Bold'],       audience: ['A Partner'], matters: ['Soft-touch'] }),
   makeProduct({ handle: 'couples-1', category: 'Play',    productType: 'couples',   price: 150, title: 'Couples Vibrator',         mood: ['Intimate'],   audience: ['Us'],        matters: ['Rechargeable'] }),
   makeProduct({ handle: 'couples-2', category: 'Play',    productType: 'couples',   price: 90,  title: 'Remote Couples Ring',      mood: ['Playful'],    audience: ['Us'],        matters: ['Remote-controlled'] }),
-  makeProduct({ handle: 'wand-1',    category: 'Play',    productType: 'vibrator',  price: 110, title: 'Magic Wand Massager',      mood: ['Sensual'],    audience: ['Me'],        matters: ['Whisper-quiet'], totalInventory: 5 }),
+  // totalInventory left at makeProduct's default (10): the always-on feed-aware
+  // floor (ticket #20826, 5 or fewer) would otherwise swallow this product in
+  // every test below that expects it to survive regardless of inventoryMin —
+  // see the dedicated 'feed-aware eligibility gate' describe block for tests
+  // that actually exercise that floor.
+  makeProduct({ handle: 'wand-1',    category: 'Play',    productType: 'vibrator',  price: 110, title: 'Magic Wand Massager',      mood: ['Sensual'],    audience: ['Me'],        matters: ['Whisper-quiet'] }),
 
   // Body — lubes/wellness
   makeProduct({ handle: 'lube-1',    category: 'Body',    productType: 'lube',      price: 18,  title: 'Water-Based Lube',         mood: ['Sensual'],    audience: ['Me'],        matters: ['Latex-free'] }),
@@ -112,7 +119,11 @@ describe('applyRules — exclude_product', () => {
     const rules = [makeRule({ ruleType: 'exclude_product', ruleValue: 'vibe-1' })]
     const result = applyRules(catalog, rules, 0)
     expect(result.find(p => p.handle === 'vibe-1')).toBeUndefined()
-    expect(result.length).toBe(catalog.length - 1)
+    // catalog also carries two incidentally-thin fixtures (fetish-1: 2 units,
+    // harness-3: 1 unit) that the always-on feed-aware floor (ticket #20826)
+    // excludes independent of this rule, so "everything else" is catalog
+    // minus vibe-1 minus those two, not minus one.
+    expect(result.length).toBe(catalog.length - 3)
   })
 
   it('is case-sensitive (non-matching handle is kept)', () => {
@@ -186,7 +197,9 @@ describe('applyRules — exclude_price_max', () => {
     const rules = [makeRule({ ruleType: 'exclude_price_max', ruleValue: '50' })]
     const result = applyRules(catalog, rules, 0)
     expect(result.every(p => p.price <= 50)).toBe(true)
-    // lube-1 ($18), fetish-1 ($45), bondage-1 ($35), lube-2 ($28), massage-1 ($40) survive.
+    // lube-1 ($18), bondage-1 ($35), lube-2 ($28), massage-1 ($40) survive.
+    // fetish-1 ($45) is priced under the cap too but is excluded separately by
+    // the always-on feed-aware floor (totalInventory: 2) — see ticket #20826.
     expect(result.find(p => p.handle === 'lube-1')).toBeDefined()
     expect(result.find(p => p.handle === 'vibe-1')).toBeUndefined() // $80
   })
@@ -212,16 +225,62 @@ describe('applyRules — inventoryMin', () => {
   })
 
   it('keeps products with inventory exactly at the floor', () => {
-    const result = applyRules(catalog, [], 5)
-    // wand-1 has totalInventory: 5 — must survive (not strictly less than 5)
-    expect(result.find(p => p.handle === 'wand-1')).toBeDefined()
+    // A fresh fixture above the feed-aware floor (ticket #20826's fixed 5),
+    // so this test isolates the curator-tunable mechanism's own boundary
+    // rather than colliding with the separate always-on gate.
+    const atFloor = makeProduct({ handle: 'at-floor', category: 'Body', totalInventory: 8 })
+    const result = applyRules([...catalog, atFloor], [], 8)
+    // not strictly less than 8
+    expect(result.find(p => p.handle === 'at-floor')).toBeDefined()
   })
 
-  it('is disabled when inventoryMin is 0', () => {
-    const result = applyRules(catalog, [], 0)
-    // All products survive the inventory check
-    expect(result.find(p => p.handle === 'fetish-1')).toBeDefined()
-    expect(result.find(p => p.handle === 'harness-3')).toBeDefined()
+  it('is disabled when inventoryMin is 0 (the curator floor only)', () => {
+    // Also above the feed-aware floor, for the same isolation reason as above.
+    const midStock = makeProduct({ handle: 'mid-stock', category: 'Body', totalInventory: 6 })
+    const result = applyRules([...catalog, midStock], [], 0)
+    expect(result.find(p => p.handle === 'mid-stock')).toBeDefined()
+    // fetish-1 (totalInventory: 2) and harness-3 (totalInventory: 1) are NOT
+    // examples of this any more: they are now excluded by the separate,
+    // always-on feed-aware gate regardless of inventoryMin — see the
+    // dedicated describe block below.
+    expect(result.find(p => p.handle === 'fetish-1')).toBeUndefined()
+    expect(result.find(p => p.handle === 'harness-3')).toBeUndefined()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// applyRules — feed-aware eligibility gate (ticket #20826)
+// ---------------------------------------------------------------------------
+
+describe('applyRules — feed-aware eligibility gate', () => {
+  it('excludes a product whose representative sku has feed qty 0, whatever totalInventory says', () => {
+    const p = makeProduct({ handle: 'feed-zero', category: 'Body', totalInventory: 4, feedQty: 0 })
+    const result = applyRules([p], [], 0)
+    expect(result.find(x => x.handle === 'feed-zero')).toBeUndefined()
+  })
+
+  it('excludes a product with 5 or fewer total buyable units, even with no feed signal', () => {
+    const p = makeProduct({ handle: 'thin-units', category: 'Body', totalInventory: 5, feedQty: null })
+    const result = applyRules([p], [], 0)
+    expect(result.find(x => x.handle === 'thin-units')).toBeUndefined()
+  })
+
+  it('stays on even when the curator-tunable inventoryMin is 0', () => {
+    const p = makeProduct({ handle: 'always-on', category: 'Body', totalInventory: 5, feedQty: null })
+    const result = applyRules([p], [], 0)
+    expect(result.find(x => x.handle === 'always-on')).toBeUndefined()
+  })
+
+  it('keeps a product above the floor with no feed row (null is not a zero)', () => {
+    const p = makeProduct({ handle: 'healthy', category: 'Body', totalInventory: 6, feedQty: null })
+    const result = applyRules([p], [], 0)
+    expect(result.find(x => x.handle === 'healthy')).toBeDefined()
+  })
+
+  it('keeps a product with untracked totalInventory (null) and no feed signal', () => {
+    const p = makeProduct({ handle: 'untracked', category: 'Body', totalInventory: null, feedQty: null })
+    const result = applyRules([p], [], 0)
+    expect(result.find(x => x.handle === 'untracked')).toBeDefined()
   })
 })
 
@@ -248,10 +307,14 @@ describe('applyRules — out-of-stock gate', () => {
     expect(result.find(p => p.handle === 'untracked-1')).toBeDefined()
   })
 
-  it('keeps a product with exactly one unit in stock', () => {
+  it('is not excluded by THIS gate at exactly one unit (isOutOfStock(1) === false below)', () => {
+    // A 1-unit product no longer survives applyRules overall — the separate,
+    // always-on feed-aware floor (ticket #20826, 5 or fewer) now excludes it
+    // first. That is covered in the dedicated describe block above; this test
+    // only needs to show the out-of-stock gate itself isn't what's doing it.
     const lastOne = makeProduct({ handle: 'last-one', category: 'Pleasure', totalInventory: 1 })
     const result = applyRules([lastOne, ...catalog], [], 0)
-    expect(result.find(p => p.handle === 'last-one')).toBeDefined()
+    expect(result.find(p => p.handle === 'last-one')).toBeUndefined()
   })
 
   it('applies alongside exclusion rules without disabling them', () => {
