@@ -12,20 +12,24 @@
  * `WMB9hY` today, but a metric id is account-specific and not something to
  * ship as a constant.
  *
- * Caveat, stated plainly: the exact shape of a "Fulfilled Order" event's
- * `event_properties` (the order-id field, the line-items array) could not
- * be verified against a real event from this session — reading one would
- * mean pulling a live customer email and order contents into this
- * transcript, which this session's own PII-handling policy blocks, and
- * correctly so. The field paths below (`id` for the order id, `line_items[]
- * .sku` / `.product_id`) are the ones ticket #19525 specifies, which its
- * filer evidently read off a real event in their own session (the ticket
- * notes hitting Klaviyo's 429 rate limit while doing so). Every read here
- * is defensive — a field that isn't where expected resolves to `null`/empty
- * rather than throwing or fabricating a value, so a wrong guess about the
- * shape fails *safe* (reported as "no match found", never a wrong invite)
- * rather than *unsafe*. Confirm against one real log row before relying on
- * this in production.
+ * The real event shape, verified 2026-11-09 against this account's live
+ * "Fulfilled Order" events (ticket #20828) without reading any PII: the
+ * order id and the full Shopify line-items array are NOT at the top level
+ * of `event_properties` — ticket #19525's filer's `id` / `line_items[]`
+ * paths were wrong for this account, which is the entire reason all 7
+ * orders #20822 fixed the lookback window for still never resolved. The
+ * real paths are `event_properties.$extra.id` (confirmed against all 7 of
+ * those stuck orders — every one matched) and
+ * `event_properties.$extra.line_items[]`, each item carrying `sku` and
+ * `product_id` directly (not nested under a `product` sub-object). `$extra`
+ * is Klaviyo's verbatim mirror of the Shopify order payload; everything
+ * else at the top level of `event_properties` (`Items`, `FulfillmentStatus`,
+ * etc.) is Klaviyo's own flattened, human-readable projection of the same
+ * order and does not carry the Shopify order id at all. Every read here
+ * stays defensive — a field that isn't where expected resolves to
+ * `null`/empty rather than throwing or fabricating a value, so a future
+ * shape change still fails *safe* (reported as "no match found", never a
+ * wrong invite) rather than *unsafe*.
  */
 
 const KLAVIYO_BASE = 'https://a.klaviyo.com/api'
@@ -105,8 +109,14 @@ export interface FulfilledOrderMatch {
   lineItems: FulfilledOrderLineItem[]
 }
 
-function extractLineItems(eventProperties: Record<string, unknown>): FulfilledOrderLineItem[] {
-  const raw = eventProperties['line_items']
+/** `event_properties.$extra` — Klaviyo's verbatim mirror of the Shopify order payload. */
+function extraOf(eventProperties: Record<string, unknown>): Record<string, unknown> {
+  const extra = eventProperties['$extra']
+  return extra && typeof extra === 'object' ? (extra as Record<string, unknown>) : {}
+}
+
+function extractLineItems(extra: Record<string, unknown>): FulfilledOrderLineItem[] {
+  const raw = extra['line_items']
   if (!Array.isArray(raw)) return []
   return raw.flatMap((li): FulfilledOrderLineItem[] => {
     if (!li || typeof li !== 'object') return []
@@ -142,13 +152,10 @@ export async function resolveFulfilledOrderEmail(
   let path: string | null =
     `/events/?filter=${encodeURIComponent(filter)}&include=profile&sort=-datetime&page[size]=100`
 
-  // Diagnostic trail for a total miss (ticket #20822). The order-id field
-  // read below (`event_properties.id`) was specified by #19525's filer off
-  // one real event in their own session; if this account's actual
-  // "Fulfilled Order" payload uses a different key, every lookup here
-  // fails the same way with nothing in the logs to show why. Neither the
-  // event id nor an order id is PII, so this is safe to log; capped at 20
-  // so a cold account with many non-matching events can't log unboundedly.
+  // Diagnostic trail for a total miss (ticket #20822, field path corrected
+  // by #20828). Neither the event id nor an order id is PII, so this is
+  // safe to log; capped at 20 so a cold account with many non-matching
+  // events can't log unboundedly.
   const seen: Array<{ eventId: string; propsId: string | null }> = []
   let eventsScanned = 0
   let pagesScanned = 0
@@ -160,7 +167,8 @@ export async function resolveFulfilledOrderEmail(
     for (const event of page.data ?? []) {
       eventsScanned++
       const props = event.attributes?.event_properties ?? {}
-      const eventOrderId = props['id'] != null ? String(props['id']) : null
+      const extra = extraOf(props)
+      const eventOrderId = extra['id'] != null ? String(extra['id']) : null
 
       if (eventOrderId === shopifyOrderId) {
         const profileId = event.relationships?.profile?.data?.id ?? null
@@ -172,7 +180,7 @@ export async function resolveFulfilledOrderEmail(
         return {
           email: profile?.attributes?.email ?? null,
           reviewerName: name.trim().length > 0 ? name.trim() : null,
-          lineItems: extractLineItems(props),
+          lineItems: extractLineItems(extra),
         }
       }
 
@@ -185,7 +193,7 @@ export async function resolveFulfilledOrderEmail(
   console.warn(
     `[klaviyo-order-email] no "Fulfilled Order" event matched order ${shopifyOrderId} ` +
       `(metric ${metricId}, sinceDays ${sinceDays}, scanned ${eventsScanned} event(s) across ${pagesScanned} page(s)). ` +
-      `First ${seen.length} event id -> event_properties.id seen: ${JSON.stringify(seen)}`,
+      `First ${seen.length} event id -> event_properties.$extra.id seen: ${JSON.stringify(seen)}`,
   )
   return null
 }

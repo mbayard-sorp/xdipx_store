@@ -13,13 +13,24 @@ const METRICS_PAGE = {
   links: { next: null },
 }
 
+// Ticket #20828: the real "Fulfilled Order" event nests the Shopify order id
+// and line items under `event_properties.$extra`, not at the top level —
+// `Items`/`FulfillmentStatus`/etc. at the top level are Klaviyo's own
+// flattened projection and never carry the order id at all. This fixture
+// mirrors the verified real shape, including a decoy top-level `Items` to
+// catch a regression back to reading the wrong field.
 function eventsPage(matchOrderId: string | null) {
   return {
     data: matchOrderId
       ? [
           {
             id: 'evt_1',
-            attributes: { event_properties: { id: matchOrderId, line_items: [{ sku: 'SKU-A', product_id: 1001 }] } },
+            attributes: {
+              event_properties: {
+                Items: [{ ProductID: 'decoy', ProductName: 'decoy' }],
+                $extra: { id: matchOrderId, line_items: [{ sku: 'SKU-A', product_id: 1001 }] },
+              },
+            },
             relationships: { profile: { data: { id: 'prof_1' } } },
           },
         ]
@@ -129,6 +140,28 @@ describe('resolveFulfilledOrderEmail', () => {
     expect(logged).toContain('999-not-the-order-we-want')
     expect(logged).not.toContain('buyer@example.com') // no email/PII in the diagnostic
     warnSpy.mockRestore()
+  })
+
+  // Ticket #20828: all 7 orders #20822 widened the lookback window for still
+  // never resolved, because the order id was being read from the wrong
+  // field. An event shaped the OLD (wrong) way — order id at the top level,
+  // no `$extra` — must now report a miss, not a stale false-positive match.
+  it('does not match an event with the old (wrong) top-level id/line_items shape', async () => {
+    global.fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url.includes('/metrics/')) return jsonResponse(METRICS_PAGE)
+      return jsonResponse({
+        data: [{
+          id: 'evt_1',
+          attributes: { event_properties: { id: '111', line_items: [{ sku: 'SKU-A', product_id: 1001 }] } },
+          relationships: { profile: { data: { id: 'prof_1' } } },
+        }],
+        included: [{ type: 'profile', id: 'prof_1', attributes: { email: 'buyer@example.com' } }],
+        links: { next: null },
+      })
+    }) as unknown as typeof fetch
+
+    expect(await resolveFulfilledOrderEmail('111')).toBeNull()
   })
 
   it('retries once on a 429 and then succeeds', async () => {

@@ -3,20 +3,26 @@
  * orders so `getPiiRedactedOrdersNeedingKlaviyoRetry` (app/lib/reviews.server.ts)
  * picks them up again on the next `/cron/review-reminders` run (ticket #20822).
  *
- * This writes to the production order_fulfillment_webhook_log table. The
- * cloud dev sandbox this ticket was authored in cannot run it (production
- * writes are outside what that session is permitted to do); run it from an
- * environment with real DATABASE_URL write access, after the matching-logic
- * and lookback-window fix in this same PR has deployed, otherwise these 7
- * orders just re-exhaust their 3 attempts again tomorrow.
+ * This writes to the production order_fulfillment_webhook_log table, so it
+ * is dry-run by default (ticket #20828): it only reports how many rows
+ * WOULD clear until `--apply` is passed. The cloud dev sandbox these
+ * tickets were authored in cannot write production data either way
+ * (outside what that kind of session is permitted to do) — run `--apply`
+ * from an environment with real DATABASE_URL write access, after the
+ * matching-logic fix (ticket #20828, the `$extra.id` field path) has
+ * deployed, otherwise these orders just re-exhaust their 3 attempts again
+ * tomorrow. Idempotent either way: a second run (dry or applied) against
+ * already-cleared orders reports/clears 0 rows, never an error.
  *
- *   npx tsx --env-file=.env scripts/reset-klaviyo-miss-attempts.ts
- *   npx tsx --env-file=.env scripts/reset-klaviyo-miss-attempts.ts 1234567890 2345678901
+ *   npx tsx --env-file=.env scripts/reset-klaviyo-miss-attempts.ts              # dry run, default orders
+ *   npx tsx --env-file=.env scripts/reset-klaviyo-miss-attempts.ts --apply      # actually clear, default orders
+ *   npx tsx --env-file=.env scripts/reset-klaviyo-miss-attempts.ts --apply 1234567890 2345678901
  */
-import { resetKlaviyoMissAttempts } from '../app/lib/reviews.server'
+import { countResettableKlaviyoMissAttempts, resetKlaviyoMissAttempts } from '../app/lib/reviews.server'
 
 // The 7 orders ticket #20822 found stuck at KLAVIYO_MISS_MAX_ATTEMPTS (3 of 3)
-// as of 2026-11-09. Override with explicit order ids on the command line.
+// as of 2026-11-09, confirmed still stuck as of #20828 (2026-11-09). Override
+// with explicit order ids on the command line.
 const DEFAULT_ORDER_IDS = [
   '7147336040619',
   '7157313503403',
@@ -28,9 +34,20 @@ const DEFAULT_ORDER_IDS = [
 ]
 
 async function main() {
-  const orderIds = process.argv.slice(2).length > 0 ? process.argv.slice(2) : DEFAULT_ORDER_IDS
-  console.log(`Resetting Klaviyo miss attempts for ${orderIds.length} order(s):`, orderIds)
-  const cleared = await resetKlaviyoMissAttempts(orderIds)
+  const rawArgs = process.argv.slice(2)
+  const apply = rawArgs.includes('--apply')
+  const orderIds = rawArgs.filter((a) => a !== '--apply')
+  const targets = orderIds.length > 0 ? orderIds : DEFAULT_ORDER_IDS
+
+  if (!apply) {
+    const wouldClear = await countResettableKlaviyoMissAttempts(targets)
+    console.log(`DRY RUN: would clear ${wouldClear} miss-attempt log row(s) for ${targets.length} order(s):`, targets)
+    console.log('Pass --apply to actually clear them.')
+    return
+  }
+
+  console.log(`Resetting Klaviyo miss attempts for ${targets.length} order(s):`, targets)
+  const cleared = await resetKlaviyoMissAttempts(targets)
   console.log(`Cleared ${cleared} miss-attempt log row(s). These orders are eligible for the next review-reminders run.`)
 }
 
