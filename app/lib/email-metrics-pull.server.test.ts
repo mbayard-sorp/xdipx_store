@@ -10,6 +10,8 @@ const mem = vi.hoisted(() => ({
   orderAttributionRows: [] as Array<Record<string, unknown>>,
   inserted: [] as Array<Record<string, unknown>>,
   updated: [] as Array<{ id: unknown; set: Record<string, unknown> }>,
+  /** When set, the next insert matching this campaignKey rejects instead of recording. */
+  forceInsertFailForCampaignKey: null as string | null,
 }))
 
 vi.mock('./db.server', () => {
@@ -31,8 +33,11 @@ vi.mock('./db.server', () => {
       },
       insert: () => ({
         values: (v: Record<string, unknown>) => {
+          if (mem.forceInsertFailForCampaignKey && v['campaignKey'] === mem.forceInsertFailForCampaignKey) {
+            return { onConflictDoNothing: () => Promise.reject(new Error('insert failed')) }
+          }
           mem.inserted.push(v)
-          return Promise.resolve()
+          return { onConflictDoNothing: () => Promise.resolve() }
         },
       }),
       update: () => ({
@@ -51,14 +56,23 @@ vi.mock('./klaviyo-flows.server', () => ({
   getMetricIdsByName: vi.fn(async () => new Map([['Placed Order', 'SHOPIFY_ORDER']])),
 }))
 
+vi.mock('./klaviyo-campaigns.server', () => ({
+  listKlaviyoCampaigns: vi.fn(async () => []),
+  previewKlaviyoCampaign: vi.fn(async () => ({ campaign: { type: 'campaign', id: 'unused' }, messages: [] })),
+}))
+
 import {
   fetchCampaignStatus,
   fetchCampaignValuesReport,
+  mapKlaviyoStatusToSendStatus,
   orderAttributionForCampaign,
+  reconcileEmailSendsFromKlaviyo,
+  reconciledCampaignKey,
   runEmailMetricsPull,
   sumStatisticsForCampaign,
   type CampaignValuesReportResult,
 } from './email-metrics-pull.server'
+import { listKlaviyoCampaigns, previewKlaviyoCampaign } from './klaviyo-campaigns.server'
 
 const okJson = (body: unknown, status = 200) =>
   ({ ok: status >= 200 && status < 300, status, headers: new Headers(), text: async () => JSON.stringify(body) }) as unknown as Response
@@ -70,6 +84,7 @@ afterEach(() => {
   mem.orderAttributionRows = []
   mem.inserted = []
   mem.updated = []
+  mem.forceInsertFailForCampaignKey = null
 })
 
 describe('sumStatisticsForCampaign', () => {
@@ -273,5 +288,105 @@ describe('runEmailMetricsPull', () => {
 
     expect(result.errors).toEqual(['no-placed-order-metric-id'])
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('mapKlaviyoStatusToSendStatus', () => {
+  it('maps Sent to sent, Cancelled to skipped, and everything else to drafted', () => {
+    expect(mapKlaviyoStatusToSendStatus('Sent')).toBe('sent')
+    expect(mapKlaviyoStatusToSendStatus('Cancelled')).toBe('skipped')
+    expect(mapKlaviyoStatusToSendStatus('Draft')).toBe('drafted')
+    expect(mapKlaviyoStatusToSendStatus('Scheduled')).toBe('drafted')
+    expect(mapKlaviyoStatusToSendStatus('Unknown')).toBe('drafted')
+  })
+})
+
+describe('reconciledCampaignKey', () => {
+  it('prefixes with klaviyo- so it can never collide with a daily-YYYYMMDD key', () => {
+    expect(reconciledCampaignKey('ABC123')).toBe('klaviyo-ABC123')
+  })
+})
+
+describe('reconcileEmailSendsFromKlaviyo (#20823)', () => {
+  it('reports no-klaviyo-api-key and calls nothing when the key is unset', async () => {
+    vi.stubEnv('KLAVIYO_API_KEY', '')
+    const result = await reconcileEmailSendsFromKlaviyo()
+    expect(result).toEqual({ campaignsSeen: 0, created: 0, errors: ['no-klaviyo-api-key'] })
+    expect(listKlaviyoCampaigns).not.toHaveBeenCalled()
+  })
+
+  it('creates nothing when every Klaviyo campaign already has an email_sends row', async () => {
+    vi.stubEnv('KLAVIYO_API_KEY', 'test-key')
+    vi.mocked(listKlaviyoCampaigns).mockResolvedValueOnce([
+      { type: 'campaign', id: 'C1', attributes: { status: 'Sent', name: 'Already tracked' } },
+    ])
+    mem.emailSendsRows = [{ klaviyoCampaignId: 'C1' }]
+
+    const result = await reconcileEmailSendsFromKlaviyo()
+
+    expect(result).toEqual({ campaignsSeen: 1, created: 0, errors: [] })
+    expect(mem.inserted).toHaveLength(0)
+  })
+
+  it('backfills an email_sends row for a campaign built directly in Klaviyo, with no matching row', async () => {
+    vi.stubEnv('KLAVIYO_API_KEY', 'test-key')
+    vi.mocked(listKlaviyoCampaigns).mockResolvedValueOnce([
+      { type: 'campaign', id: 'HAND1', attributes: { status: 'Sent', name: 'Hand-built send', send_time: '2026-11-04T18:00:00Z' } },
+    ])
+    vi.mocked(previewKlaviyoCampaign).mockResolvedValueOnce({
+      campaign: { type: 'campaign', id: 'HAND1' },
+      messages: [{ type: 'campaign-message', id: 'M1', attributes: { definition: { content: { subject: 'Real subject line' } } } }],
+    })
+    mem.emailSendsRows = [] // nothing known yet
+
+    const result = await reconcileEmailSendsFromKlaviyo()
+
+    expect(result).toEqual({ campaignsSeen: 1, created: 1, errors: [] })
+    expect(mem.inserted).toHaveLength(1)
+    expect(mem.inserted[0]).toMatchObject({
+      campaignKey: 'klaviyo-HAND1',
+      klaviyoCampaignId: 'HAND1',
+      sendDate: '2026-11-04',
+      subject: 'Real subject line',
+      audience: 'reconciled-from-klaviyo',
+      status: 'sent',
+      reviewStatus: 'approved',
+    })
+    expect((mem.inserted[0]!['sentAt'] as Date).toISOString()).toBe('2026-11-04T18:00:00.000Z')
+  })
+
+  it('falls back to the campaign name when the subject cannot be read, without failing the row', async () => {
+    vi.stubEnv('KLAVIYO_API_KEY', 'test-key')
+    vi.mocked(listKlaviyoCampaigns).mockResolvedValueOnce([
+      { type: 'campaign', id: 'HAND2', attributes: { status: 'Draft', name: 'Fallback name' } },
+    ])
+    vi.mocked(previewKlaviyoCampaign).mockRejectedValueOnce(new Error('404'))
+    mem.emailSendsRows = []
+
+    const result = await reconcileEmailSendsFromKlaviyo()
+
+    expect(result).toEqual({ campaignsSeen: 1, created: 1, errors: [] })
+    expect(mem.inserted[0]).toMatchObject({ subject: 'Fallback name', status: 'drafted', sendDate: null, sentAt: null })
+  })
+
+  it('records a per-campaign error and keeps reconciling the rest', async () => {
+    vi.stubEnv('KLAVIYO_API_KEY', 'test-key')
+    vi.mocked(listKlaviyoCampaigns).mockResolvedValueOnce([
+      { type: 'campaign', id: 'BAD', attributes: { status: 'Sent' } },
+      { type: 'campaign', id: 'GOOD', attributes: { status: 'Draft', name: 'Fine' } },
+    ])
+    vi.mocked(previewKlaviyoCampaign)
+      .mockRejectedValueOnce(new Error('no subject'))
+      .mockRejectedValueOnce(new Error('no subject'))
+    mem.emailSendsRows = []
+    mem.forceInsertFailForCampaignKey = 'klaviyo-BAD'
+
+    const result = await reconcileEmailSendsFromKlaviyo()
+
+    expect(result.campaignsSeen).toBe(2)
+    expect(result.created).toBe(1)
+    expect(result.errors).toEqual(['campaign BAD: insert failed'])
+    expect(mem.inserted).toHaveLength(1)
+    expect(mem.inserted[0]).toMatchObject({ campaignKey: 'klaviyo-GOOD' })
   })
 })

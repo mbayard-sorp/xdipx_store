@@ -943,12 +943,19 @@ export function createCronRoutes() {
    * `email_sends` row from the last 30 days, join order_attribution, write
    * `email_campaign_metrics`, and flip a campaign to `sent` once Klaviyo
    * reports it that way (ticket #15004, routine-email-daily.md).
+   *
+   * Reconciliation (ticket #20823) runs first, in the same route: any
+   * Klaviyo email campaign with no matching `email_sends` row (built
+   * directly in the Klaviyo UI rather than through this app's own drafting
+   * path) gets one backfilled, so the metrics pull right below has a row to
+   * attach its stats to in this same run rather than waiting a day.
    */
   cronRoute('/email-metrics-pull', async (_req, res) => {
     try {
-      const { runEmailMetricsPull } = await import('../app/lib/email-metrics-pull.server.js')
+      const { runEmailMetricsPull, reconcileEmailSendsFromKlaviyo } = await import('../app/lib/email-metrics-pull.server.js')
+      const reconcile = await reconcileEmailSendsFromKlaviyo()
       const result = await runEmailMetricsPull()
-      res.json({ ok: true, result })
+      res.json({ ok: true, reconcile, result })
     } catch (err) {
       console.error('[cron/email-metrics-pull] failed:', err)
       res.status(500).json({ ok: false, error: (err as Error).message })
