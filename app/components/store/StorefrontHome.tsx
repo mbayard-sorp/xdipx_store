@@ -568,6 +568,8 @@ function shopifyToDiscovery(p: LeanCardProduct): DiscoveryProduct {
     // team rail is a hand-picked lineup, so there is no backfill to exclude
     // from. `null` is the inert value, matching the other unused fields above.
     discontinuedAt: null,
+    sku: null,
+    feedQty: null,
   }
 }
 

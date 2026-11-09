@@ -39,6 +39,8 @@ function makeRail(category: 'Pleasure' | 'Play' | 'Body' | 'Wear', n: number): R
         productType: null,
         productTypeDial: null,
         discontinuedAt: null,
+        sku: null,
+        feedQty: null,
       },
     })),
   }

@@ -44,6 +44,8 @@ function product(overrides: Partial<DiscoveryProduct> = {}): DiscoveryProduct {
     productType:    null,
     productTypeDial: null,
     discontinuedAt: null,
+    sku:            null,
+    feedQty:        null,
     ...overrides,
   }
 }

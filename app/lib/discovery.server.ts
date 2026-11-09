@@ -11,7 +11,7 @@
 
 import { eq } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
-import { discoveryIndexPayload } from '../../db/schema'
+import { discoveryIndexPayload, nalpacPriceHistory } from '../../db/schema'
 import { adminGraphQL } from '~/lib/shopify.server'
 import { kvDel, kvGet, kvSet, isKvConfigured } from '~/lib/kv.server'
 import type { ProductTypeDial } from '~/types'
@@ -67,6 +67,13 @@ import {
 //     product as live until the rebuild lands. Hence the bump rather than a
 //     tolerant read: the shelf must never run this test against a payload that
 //     structurally cannot answer it.
+// v11: added `sku` (default variant SKU) + `feedQty` (nalpac_price_history.qty
+//     joined by that sku) so the curiosity shelf and the discovery rails can
+//     run the feed-aware eligibility gate (ticket #20826, `feed-eligibility.ts`).
+//     v10 entries lack both, which read as `null` — "no signal" — on either
+//     field, i.e. the gate never fires until the rebuild lands. Bumped rather
+//     than left tolerant for the same reason v10 was: a stale cached entry
+//     must never silently skip a gate the new code assumes is live.
 /**
  * Exported so the SEO coverage gauge (seo-daily.server.ts) measures the SAME
  * payload the storefront serves. It previously hardcoded `version = 'v7'`, so
@@ -75,7 +82,7 @@ import {
  * A stale number that looks live is worse than no number, so the version now
  * has exactly one definition and a bump moves every reader at once.
  */
-export const INDEX_VERSION = 'v10'
+export const INDEX_VERSION = 'v11'
 export const INDEX_KEY = `discovery:index:${INDEX_VERSION}`
 export const INDEX_TTL_SECONDS = 60 * 60 * 24 // 24h — matches vocab TTL; bust explicitly via invalidateDiscoveryIndex() on tag/catalog changes
 
@@ -264,7 +271,7 @@ interface AdminProductNode {
   productType:  string | null   // Shopify's native "Product organization → Type"
   vendor: string | null
   featuredImage: { url: string; altText: string | null } | null
-  variants: { nodes: Array<{ id: string }> } | null
+  variants: { nodes: Array<{ id: string; sku?: string | null }> } | null
   priceRangeV2: {
     minVariantPrice: { amount: string }
     maxVariantPrice: { amount: string } | null
@@ -357,7 +364,7 @@ const PRODUCTS_PAGE_QUERY = /* GraphQL */ `
         productType
         vendor
         featuredImage { url altText }
-        variants(first: 1) { nodes { id } }
+        variants(first: 1) { nodes { id sku } }
         priceRangeV2 { minVariantPrice { amount } maxVariantPrice { amount } }
         compareAtPriceRange { minVariantCompareAtPrice { amount } }
         options(first: 3) { name optionValues { name } }
@@ -444,6 +451,11 @@ function nodeToDiscoveryProduct(
     productType,
     productTypeDial,
     discontinuedAt,
+    sku: n.variants?.nodes?.[0]?.sku ?? null,
+    // Populated in a single bulk pass over the whole page in
+    // `buildDiscoveryIndex`, once every product's `sku` is known — not here,
+    // where joining per product would mean one query per product.
+    feedQty: null,
   }
 }
 
@@ -664,6 +676,13 @@ export async function fetchHonoraryProducts(
         productType,
         productTypeDial: dial || null,
         discontinuedAt: (node.discontinuedAtRaw?.value ?? '').trim() || null,
+        // This path (collection-pin honorary fallbacks) does not query sku or
+        // join the feed; null always passes `isFeedAwareIneligible`'s feed
+        // check, so an honorary pin is still caught by the totalInventory
+        // clause above but not the feed-zero one. A pin is already an
+        // explicit curator decision, unlike the algorithmic rail pool.
+        sku: null,
+        feedQty: null,
       })
     }
   }
@@ -758,7 +777,32 @@ export async function buildDiscoveryIndex(): Promise<DiscoveryProduct[]> {
     if (!cursor) break
   }
 
+  await attachFeedQty(out)
   return out
+}
+
+/**
+ * Join each product's `sku` against `nalpac_price_history.qty` (ticket
+ * #20826, the feed-aware eligibility gate in `~/lib/feed-eligibility.ts`).
+ * One bulk read of the whole table rather than a per-product query — the
+ * table is keyed one row per currently-carried SKU, the same order of
+ * magnitude as the catalog this function already crawls page by page.
+ * Mutates `products` in place; best-effort, since a failed read here must
+ * not fail the whole rebuild (every product simply keeps `feedQty: null`,
+ * which the gate reads as "no signal", same as never syncing at all).
+ */
+async function attachFeedQty(products: DiscoveryProduct[]): Promise<void> {
+  try {
+    const rows = await db
+      .select({ sku: nalpacPriceHistory.sku, qty: nalpacPriceHistory.qty })
+      .from(nalpacPriceHistory)
+    const bySku = new Map(rows.map(r => [r.sku, r.qty]))
+    for (const p of products) {
+      if (p.sku) p.feedQty = bySku.get(p.sku) ?? null
+    }
+  } catch (err) {
+    console.error('[discovery] feed qty join failed, every product keeps feedQty:null:', err)
+  }
 }
 
 /**

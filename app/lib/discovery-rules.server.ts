@@ -16,6 +16,7 @@ import { discoveryRules, pipelineSettings } from '../../db/schema'
 import { kvGet, kvSet, kvDel, cached, invalidateCache } from '~/lib/kv.server'
 import { rankSingleRail } from '~/lib/discovery-emma'
 import { invalidateDiscoveryIndex } from '~/lib/discovery.server'
+import { isFeedAwareIneligible } from '~/lib/feed-eligibility'
 import type {
   Category,
   DiscoveryProduct,
@@ -428,6 +429,15 @@ export function applyRules(
     // regardless of the curator-tunable inventoryMin floor below. Untracked
     // (null) passes: no count is not the same as a zero count.
     if (isOutOfStock(p.totalInventory)) {
+      return false
+    }
+
+    // --- feed-aware gate (always on, ticket #20826) ---
+    // Independent of, and stricter than, the curator-tunable inventoryMin
+    // below: Shopify's totalInventory can lag what the supplier actually has,
+    // and a product thin enough to sell out mid-feature is a bad pick for a
+    // rail regardless of how low the curator has set their own floor.
+    if (isFeedAwareIneligible(p)) {
       return false
     }
 

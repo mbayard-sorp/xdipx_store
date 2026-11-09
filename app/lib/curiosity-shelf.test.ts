@@ -39,6 +39,8 @@ function mk(p: Partial<DiscoveryProduct> & { id: string; handle: string }): Disc
     productType: p.productType ?? null,
     productTypeDial: p.productTypeDial ?? null,
     discontinuedAt: p.discontinuedAt ?? null,
+    sku: p.sku ?? null,
+    feedQty: p.feedQty === undefined ? null : p.feedQty,
   }
 }
 
@@ -177,21 +179,37 @@ describe('resolveLane', () => {
     expect(bestSellersUnverified.seeAllHref).toBeNull()
   })
 
-  // ── 11. a deck never seats a thin-stock survivor (ticket #14926) ────────────
-  it('excludes a tracked 1-3 unit product from the deck but keeps untracked and 4+ unit products', () => {
+  // ── 11. a deck never seats a thin-stock survivor (ticket #14926, floor
+  //         raised 3 -> 5 by the feed-aware gate, ticket #20826) ─────────────
+  it('excludes a tracked 1-5 unit product from the deck but keeps untracked and 6+ unit products', () => {
     const index = [
       ...typePool('vibrator', 5, i => 30 + i),
       mk({ id: 'thin-1', handle: 'thin-1', title: 'thin 1', productTypeDial: 'vibrator', price: 45, totalInventory: 1 }),
-      mk({ id: 'thin-3', handle: 'thin-3', title: 'thin 3', productTypeDial: 'vibrator', price: 46, totalInventory: 3 }),
-      mk({ id: 'ok-4', handle: 'ok-4', title: 'ok 4', productTypeDial: 'vibrator', price: 47, totalInventory: 4 }),
+      mk({ id: 'thin-5', handle: 'thin-5', title: 'thin 5', productTypeDial: 'vibrator', price: 46, totalInventory: 5 }),
+      mk({ id: 'ok-6', handle: 'ok-6', title: 'ok 6', productTypeDial: 'vibrator', price: 47, totalInventory: 6 }),
       mk({ id: 'untracked', handle: 'untracked', title: 'untracked', productTypeDial: 'vibrator', price: 48, totalInventory: null }),
     ]
     const resolved = resolveLane(lane({ key: 'hums' }), index, 0, OPTS())!
     const handles = resolved.deck.map(p => p.handle)
     expect(handles).not.toContain('thin-1')
-    expect(handles).not.toContain('thin-3')
-    expect(handles).toContain('ok-4')
+    expect(handles).not.toContain('thin-5')
+    expect(handles).toContain('ok-6')
     expect(handles).toContain('untracked')
+  })
+
+  // ── 11b. the feed-aware gate also catches feed qty 0 independent of units
+  //          (ticket #20826, the lust-fetish-seraphina incident: Shopify still
+  //          counted units on hand while the supplier feed reported zero) ───
+  it('excludes a product with healthy totalInventory when its feed qty is 0', () => {
+    const index = [
+      ...typePool('vibrator', 5, i => 30 + i),
+      mk({ id: 'feed-zero', handle: 'feed-zero', title: 'feed zero', productTypeDial: 'vibrator', price: 49, totalInventory: 40, feedQty: 0 }),
+      mk({ id: 'feed-ok', handle: 'feed-ok', title: 'feed ok', productTypeDial: 'vibrator', price: 51, totalInventory: 40, feedQty: 12 }),
+    ]
+    const resolved = resolveLane(lane({ key: 'hums' }), index, 0, OPTS())!
+    const handles = resolved.deck.map(p => p.handle)
+    expect(handles).not.toContain('feed-zero')
+    expect(handles).toContain('feed-ok')
   })
 
   // ── 12. liveness is the discontinued STATE, not the productType string ──────
