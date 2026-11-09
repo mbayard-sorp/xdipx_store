@@ -19,6 +19,10 @@ Overall: AMBER (7/9 phases merged and probe-verified on main; p5-gate-columns an
 
 ## Status log
 
+### 2026-11-09 (program-manager, run 1925). Overall stays AMBER. No RAG changes.
+
+Probed at main b497269. p5-gate-columns: `BLOCK_STAMP_REGEX` is still defined at `team.server.ts:3316` and read at line 3454; blocker #133 open. The columns are doing the work: gate rows created this week were 13 BLOCK / 11 PASS (54%), down from 68%. p7-design: still no design-critic event naming /admin/socials (the 11-04, 11-07 and 11-09 verdicts are all homepage); blocker #649 open; #5232 still `approved` and should be dismissed as superseded by #14120 and #13680. Lane health, for context: 11 Instagram posts published, no zero days; 13 social runs succeeded, 1 failed (11-06, `zero-post-day:instagram`, the social agent again declining the cast-composite pipeline under blocker #1917). X last posted 2026-10-21. **Asks for the owner:** decide #1917 and #1140.
+
 ### 2026-11-02 (program-manager, run 1794). Overall stays AMBER. No RAG changes.
 
 File probes for the seven done phases re-checked on main f4f65b8 (library, composer, gate route, analytics route all present). p5-gate-columns (`BLOCK_STAMP_REGEX` still referenced in `team.server.ts`) and p7-design unchanged. Lane health is the real signal this week: 5 of 14 social runs failed, X posted 0 (blocker #1140), gate block rate 68% (blocker #1917).

@@ -130,6 +130,10 @@ has.
 
 ## Status log
 
+### 2026-11-09 (program-manager, run 1925). Overall stays RED. No RAG changes; notes refreshed.
+
+Probed at main b497269. `/cron/release-engine` ran 1,082 times with no failure (last week's 359 were one conflicted PR). Blocked rows 125, 121 at `attempt_count` 0 (e1-blocked stays RED). The pile now carries `block_class`: null 38, needs-split 27, no-code-work 22, dependency 13, superseded 12, owner-env 8, duplicate 3, protected-path 2; the 38 nulls all predate the classifier, so a one-off backfill is filed as a code row (`tracker:e1-blockclass-backfill`) because draining by class cannot start on rows with no class. Approved `process` 143 (148 last week); approved campaign/promo/process together 199. e2-approved note: its probe assumes `promo_execute_enabled` and `email_campaign_push_enabled` are false, and both are true now, so the probe needs rewording by the owner. Backup: eighth week, `backup_runs` dump and restore-probe skipped with 'no private blob token configured' (#427). a4-probes: 5 open blockers without a probe or a reason (4 last week); #1672 cleared, new ones are #413, #552, #676, #1095, #4756. a5-triggers: the duplicate Thursday Apply Pass fired again 11-05 22:08 (#64, #65). **Asks for the owner:** provision the backup blob token (#427); disable the duplicate Thursday Apply trigger (#64/#65).
+
 ### 2026-11-02 (program-manager, run 1794). Overall stays RED. No RAG changes; notes refreshed.
 
 Release path recovered (blocker #1683 cleared, `/cron/main-ci-watch` last failed 10-28 22:10, engine merging since 10-28 22:20) but no row on this tracker flips because of it. Blocked 122 (118 at attempt 0, up from 112), approved `process` 148 (up from 128), approved `campaign` 35 (down from 45). Backup: seventh week with no succeeded dump or restore probe (#427). a4-probes improves to 4 open rows. Blocker #1672 cannot clear by construction (its probe needs a secret header); filed as a code row. **Asks for the owner:** provision the backup blob token (#427), disable the duplicate Thursday Apply trigger (#64/#65).
