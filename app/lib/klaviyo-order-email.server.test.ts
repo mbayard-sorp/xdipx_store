@@ -92,6 +92,45 @@ describe('resolveFulfilledOrderEmail', () => {
     expect(await resolveFulfilledOrderEmail('111')).toBeNull()
   })
 
+  it('follows pagination to a second events page before giving up (#20822)', async () => {
+    // First page has no match but links to a second; the match is only on
+    // page two. Confirms the match loop is not a one-page read.
+    let eventsCalls = 0
+    global.fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url.includes('/metrics/')) return jsonResponse(METRICS_PAGE)
+      eventsCalls++
+      if (eventsCalls === 1) {
+        return jsonResponse({ ...eventsPage(null), links: { next: 'https://a.klaviyo.com/api/events/?page=2' } })
+      }
+      return jsonResponse(eventsPage('111'))
+    }) as unknown as typeof fetch
+
+    const result = await resolveFulfilledOrderEmail('111')
+    expect(result?.email).toBe('buyer@example.com')
+    expect(eventsCalls).toBe(2)
+  })
+
+  it('logs a non-PII diagnostic (event ids and their props.id) on a total miss (#20822)', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    global.fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url.includes('/metrics/')) return jsonResponse(METRICS_PAGE)
+      // An event exists in the window, but its order id does not match.
+      return jsonResponse(eventsPage('999-not-the-order-we-want'))
+    }) as unknown as typeof fetch
+
+    const result = await resolveFulfilledOrderEmail('111')
+    expect(result).toBeNull()
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    const logged = warnSpy.mock.calls[0]?.join(' ') ?? ''
+    expect(logged).toContain('111')
+    expect(logged).toContain('evt_1')
+    expect(logged).toContain('999-not-the-order-we-want')
+    expect(logged).not.toContain('buyer@example.com') // no email/PII in the diagnostic
+    warnSpy.mockRestore()
+  })
+
   it('retries once on a 429 and then succeeds', async () => {
     let metricCalls = 0
     global.fetch = vi.fn(async (input: string | URL | Request) => {
