@@ -18,6 +18,7 @@ import { and, eq, gte, isNotNull } from 'drizzle-orm'
 import { db } from './db.server'
 import { emailSends, emailCampaignMetrics, orderAttribution } from '../../db/schema'
 import { getMetricIdsByName } from './klaviyo-flows.server'
+import { listKlaviyoCampaigns, previewKlaviyoCampaign, type KlaviyoCampaignResource } from './klaviyo-campaigns.server'
 
 const KLAVIYO_BASE = 'https://a.klaviyo.com/api'
 const KLAVIYO_REVISION = '2026-07-15'
@@ -264,6 +265,114 @@ export async function runEmailMetricsPull(): Promise<EmailMetricsPullResult> {
       }
     } catch (err) {
       result.errors.push(`campaign ${campaignId}: ${(err as Error).message}`)
+    }
+  }
+
+  return result
+}
+
+// ─── Reconciliation (ticket #20823) ─────────────────────────────────────────
+// `email_sends` only ever gained a row through `draftDailyEmail`/
+// `pushApprovedCampaign` (app/lib/email-daily-draft.server.ts,
+// klaviyo-campaigns.server.ts), both gated behind `email_campaign_push_enabled`.
+// Any campaign the owner (or an interactive session) built directly in the
+// Klaviyo UI instead never created one, so this store's own measurement loop
+// — email_campaign_metrics, email-analyst's hypothesis ledger — has nothing
+// to read for those sends even though they are real, live campaigns.
+// `runEmailMetricsPull` itself only ever looks AT existing `email_sends`
+// rows, so it cannot discover these on its own; reconciliation is a
+// separate step the cron route runs first.
+
+export function mapKlaviyoStatusToSendStatus(klaviyoStatus: string): 'drafted' | 'sent' | 'skipped' {
+  if (klaviyoStatus === 'Sent') return 'sent'
+  if (klaviyoStatus === 'Cancelled') return 'skipped'
+  return 'drafted'
+}
+
+/** Klaviyo campaign ids never collide with the `daily-YYYYMMDD` keys our own drafting path mints. */
+export function reconciledCampaignKey(campaignId: string): string {
+  return `klaviyo-${campaignId}`
+}
+
+export interface ReconcileResult {
+  /** Email-channel campaigns Klaviyo reported. */
+  campaignsSeen: number
+  /** `email_sends` rows created for a campaign with no existing row. */
+  created: number
+  errors: string[]
+}
+
+/**
+ * Backfills `email_sends` for every Klaviyo email campaign with no matching
+ * row, matched strictly on `klaviyoCampaignId` so an existing row (drafted
+ * through this app) is never duplicated or overwritten. A reconciled row
+ * carries `audience: 'reconciled-from-klaviyo'` so the ledger can tell it
+ * apart from one our own drafting path created, and `reviewStatus:
+ * 'approved'` because a campaign already live in Klaviyo was, by
+ * construction, already decided — there is no draft left to review.
+ */
+export async function reconcileEmailSendsFromKlaviyo(): Promise<ReconcileResult> {
+  const result: ReconcileResult = { campaignsSeen: 0, created: 0, errors: [] }
+
+  if (!process.env['KLAVIYO_API_KEY']) {
+    result.errors.push('no-klaviyo-api-key')
+    return result
+  }
+
+  let campaigns: KlaviyoCampaignResource[] = []
+  try {
+    campaigns = await listKlaviyoCampaigns({ channel: 'email' })
+  } catch (err) {
+    result.errors.push(`list campaigns failed: ${(err as Error).message}`)
+    return result
+  }
+  result.campaignsSeen = campaigns.length
+  if (campaigns.length === 0) return result
+
+  const existingRows = await db
+    .select({ klaviyoCampaignId: emailSends.klaviyoCampaignId })
+    .from(emailSends)
+    .where(isNotNull(emailSends.klaviyoCampaignId))
+  const knownCampaignIds = new Set(existingRows.map((r) => r.klaviyoCampaignId))
+
+  for (const campaign of campaigns) {
+    if (knownCampaignIds.has(campaign.id)) continue
+
+    try {
+      const attrs = campaign.attributes ?? {}
+      const status = typeof attrs['status'] === 'string' ? attrs['status'] : 'Unknown'
+      const sendTime = typeof attrs['send_time'] === 'string' ? attrs['send_time'] : null
+      const name = typeof attrs['name'] === 'string' ? attrs['name'] : null
+
+      // Best effort: the campaign-message subject needs one extra read per
+      // newly-discovered campaign. A failure here never blocks the row —
+      // the campaign name is still a usable fallback label in the ledger.
+      let subject: string | null = null
+      try {
+        const preview = await previewKlaviyoCampaign(campaign.id)
+        const content = preview.messages[0]?.attributes?.['definition'] as Record<string, unknown> | undefined
+        const definitionContent = content?.['content'] as Record<string, unknown> | undefined
+        subject = typeof definitionContent?.['subject'] === 'string' ? (definitionContent['subject'] as string) : null
+      } catch (err) {
+        console.error('[email-metrics-pull] reconcile: could not read subject for campaign', campaign.id, err)
+      }
+
+      await db
+        .insert(emailSends)
+        .values({
+          campaignKey: reconciledCampaignKey(campaign.id),
+          sendDate: sendTime ? sendTime.slice(0, 10) : null,
+          klaviyoCampaignId: campaign.id,
+          subject: subject ?? name,
+          audience: 'reconciled-from-klaviyo',
+          status: mapKlaviyoStatusToSendStatus(status),
+          sentAt: status === 'Sent' && sendTime ? new Date(sendTime) : null,
+          reviewStatus: 'approved',
+        })
+        .onConflictDoNothing()
+      result.created++
+    } catch (err) {
+      result.errors.push(`campaign ${campaign.id}: ${(err as Error).message}`)
     }
   }
 
