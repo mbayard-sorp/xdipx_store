@@ -52,6 +52,14 @@ vi.mock('~/lib/db.server', () => ({ db: h.db }))
 vi.mock('~/lib/instagram-token.server', () => ({
   getInstagramAccessToken: async () => process.env['IG_GRAPH_ACCESS_TOKEN']?.trim() || null,
 }))
+// Ticket #20826: the unreachable-post counter is persisted in KV. Mocked to
+// a plain in-memory object so this file never touches real KV (prod or
+// local) and each test controls its own starting state.
+const kvState = vi.hoisted(() => ({ store: new Map<string, unknown>() }))
+vi.mock('~/lib/kv.server', () => ({
+  kvGet: async (key: string) => kvState.store.get(key) ?? null,
+  kvSet: async (key: string, value: unknown) => { kvState.store.set(key, value) },
+}))
 
 import {
   describeCommentsApiError,
@@ -63,6 +71,7 @@ beforeEach(() => {
   h.state.selects = []
   h.state.insertReturns = []
   h.state.insertedValues = []
+  kvState.store.clear()
 })
 
 afterEach(() => {
@@ -153,7 +162,7 @@ describe('ingestRecentComments', () => {
 
     const result = await ingestRecentComments()
 
-    expect(result).toEqual({ ok: true, postsChecked: 2, fetched: 3, inserted: 2 })
+    expect(result).toEqual({ ok: true, postsChecked: 2, fetched: 3, inserted: 2, skippedUnreachable: 0 })
     expect(h.state.insertedValues).toHaveLength(3)
     expect((h.state.insertedValues[0] as { externalCommentId: string }).externalCommentId).toBe('c1')
     expect((h.state.insertedValues[0] as { text: string }).text).toBe('love this')
@@ -208,7 +217,94 @@ describe('ingestRecentComments', () => {
 
     const result = await ingestRecentComments()
 
-    expect(result).toEqual({ ok: true, postsChecked: 1, fetched: 1, inserted: 0 })
+    expect(result).toEqual({ ok: true, postsChecked: 1, fetched: 1, inserted: 0, skippedUnreachable: 0 })
+  })
+
+  // Ticket #20826: one deleted/permission-stripped post must not fail the
+  // whole run while other posts in the window still answer normally.
+  it('does not fail the whole run when only some posts error with object-does-not-exist', async () => {
+    vi.stubEnv('IG_GRAPH_ACCESS_TOKEN', 'tok')
+    h.state.selects.push([{ externalPostId: 'media-bad' }, { externalPostId: 'media-good' }])
+    h.state.insertReturns.push([{ id: 1 }])
+    vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+      const url = new URL(String(input))
+      if (url.pathname.endsWith('/media-bad/comments')) {
+        return jsonResponse({
+          error: {
+            message: "Unsupported get request. Object with ID 'media-bad' does not exist, cannot be loaded due to missing permissions, or does not support this operation.",
+            code: 100,
+            error_subcode: 33,
+          },
+        })
+      }
+      return jsonResponse({ data: [{ id: 'c1', text: 'hi', username: 'alice' }] })
+    }))
+
+    const result = await ingestRecentComments()
+
+    expect(result.ok).toBe(true)
+    expect(result.postsChecked).toBe(2)
+    expect(result.skippedUnreachable).toBe(0)
+    expect(result.fetched).toBe(1)
+    expect(result.inserted).toBe(1)
+    expect(result.detail).toContain('does not exist')
+  })
+
+  // Ticket #20826: a run where EVERY checked post errors is still a real
+  // failure (e.g. a dead token errors every post identically) and must
+  // still fail loudly, not be swallowed by the "one bad post" tolerance.
+  it('still fails when every checked post errors', async () => {
+    vi.stubEnv('IG_GRAPH_ACCESS_TOKEN', 'tok')
+    h.state.selects.push([{ externalPostId: 'media-1' }, { externalPostId: 'media-2' }])
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      jsonResponse({ error: { message: 'Session expired', code: 190 } }),
+    ))
+
+    const result = await ingestRecentComments()
+
+    expect(result.ok).toBe(false)
+    expect(result.postsChecked).toBe(2)
+    expect(result.detail).toContain('IG_GRAPH_ACCESS_TOKEN is expired or revoked')
+  })
+
+  // Ticket #20826: after enough consecutive object-missing errors, the post
+  // stops being queried at all, while a healthy sibling post keeps getting
+  // checked and the run reports ok:true.
+  it('marks a post unreachable after repeated object-missing errors and stops querying it', async () => {
+    vi.stubEnv('IG_GRAPH_ACCESS_TOKEN', 'tok')
+    const objectMissing = () => jsonResponse({
+      error: {
+        message: "Unsupported get request. Object with ID 'media-bad' does not exist, cannot be loaded due to missing permissions, or does not support this operation.",
+        code: 100,
+        error_subcode: 33,
+      },
+    })
+    const fetchMock = vi.fn(async (input: string) => {
+      const url = new URL(String(input))
+      if (url.pathname.endsWith('/media-bad/comments')) return objectMissing()
+      return jsonResponse({ data: [] })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    // Three consecutive hourly runs, each with the same two posts.
+    for (let i = 0; i < 3; i++) {
+      h.state.selects.push([{ externalPostId: 'media-bad' }, { externalPostId: 'media-good' }])
+      const result = await ingestRecentComments()
+      expect(result.ok).toBe(true)
+      expect(result.postsChecked).toBe(2)
+      expect(result.skippedUnreachable).toBe(0)
+    }
+
+    // Fourth run: media-bad has now hit the threshold and is skipped outright.
+    fetchMock.mockClear()
+    h.state.selects.push([{ externalPostId: 'media-bad' }, { externalPostId: 'media-good' }])
+    const result = await ingestRecentComments()
+
+    expect(result.ok).toBe(true)
+    expect(result.postsChecked).toBe(1)
+    expect(result.skippedUnreachable).toBe(1)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('media-good')
   })
 })
 
