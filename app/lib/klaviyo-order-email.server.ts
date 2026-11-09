@@ -131,36 +131,61 @@ export async function resolveFulfilledOrderEmail(
   opts: { sinceDays?: number } = {},
 ): Promise<FulfilledOrderMatch | null> {
   const metricId = await getMetricIdByName('Fulfilled Order')
-  if (!metricId) return null
+  if (!metricId) {
+    console.warn('[klaviyo-order-email] no "Fulfilled Order" metric found on this account; cannot resolve order', shopifyOrderId)
+    return null
+  }
 
-  const since = new Date(Date.now() - (opts.sinceDays ?? 14) * 24 * 60 * 60 * 1000).toISOString()
+  const sinceDays = opts.sinceDays ?? 14
+  const since = new Date(Date.now() - sinceDays * 24 * 60 * 60 * 1000).toISOString()
   const filter = `and(equals(metric_id,"${metricId}"),greater-or-equal(datetime,${since}))`
   let path: string | null =
     `/events/?filter=${encodeURIComponent(filter)}&include=profile&sort=-datetime&page[size]=100`
 
+  // Diagnostic trail for a total miss (ticket #20822). The order-id field
+  // read below (`event_properties.id`) was specified by #19525's filer off
+  // one real event in their own session; if this account's actual
+  // "Fulfilled Order" payload uses a different key, every lookup here
+  // fails the same way with nothing in the logs to show why. Neither the
+  // event id nor an order id is PII, so this is safe to log; capped at 20
+  // so a cold account with many non-matching events can't log unboundedly.
+  const seen: Array<{ eventId: string; propsId: string | null }> = []
+  let eventsScanned = 0
+  let pagesScanned = 0
+
   while (path) {
     const page = await klaviyoGet<KlaviyoEventsPage>(path)
+    pagesScanned++
 
     for (const event of page.data ?? []) {
+      eventsScanned++
       const props = event.attributes?.event_properties ?? {}
       const eventOrderId = props['id'] != null ? String(props['id']) : null
-      if (eventOrderId !== shopifyOrderId) continue
 
-      const profileId = event.relationships?.profile?.data?.id ?? null
-      const profile = profileId
-        ? (page.included ?? []).find((inc) => inc.type === 'profile' && inc.id === profileId)
-        : null
-      const name = [profile?.attributes?.first_name, profile?.attributes?.last_name].filter(Boolean).join(' ')
+      if (eventOrderId === shopifyOrderId) {
+        const profileId = event.relationships?.profile?.data?.id ?? null
+        const profile = profileId
+          ? (page.included ?? []).find((inc) => inc.type === 'profile' && inc.id === profileId)
+          : null
+        const name = [profile?.attributes?.first_name, profile?.attributes?.last_name].filter(Boolean).join(' ')
 
-      return {
-        email: profile?.attributes?.email ?? null,
-        reviewerName: name.trim().length > 0 ? name.trim() : null,
-        lineItems: extractLineItems(props),
+        return {
+          email: profile?.attributes?.email ?? null,
+          reviewerName: name.trim().length > 0 ? name.trim() : null,
+          lineItems: extractLineItems(props),
+        }
       }
+
+      if (seen.length < 20) seen.push({ eventId: event.id, propsId: eventOrderId })
     }
 
     path = stripBase(page.links?.next)
   }
 
+  console.warn(
+    `[klaviyo-order-email] no "Fulfilled Order" event matched order ${shopifyOrderId} ` +
+      `(metric ${metricId}, sinceDays ${sinceDays}, scanned ${eventsScanned} event(s) across ${pagesScanned} page(s)). ` +
+      `First ${seen.length} event id -> event_properties.id seen: ${JSON.stringify(seen)}`,
+  )
   return null
 }

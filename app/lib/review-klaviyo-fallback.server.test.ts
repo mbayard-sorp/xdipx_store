@@ -8,13 +8,13 @@
  * forever.
  */
 import { describe, expect, it, vi } from 'vitest'
-import { resolveMissingEmailInvites, type ResolveDeps } from './review-klaviyo-fallback.server'
+import { resolveMissingEmailInvites, sinceDaysForPendingOrder, type ResolveDeps } from './review-klaviyo-fallback.server'
 import type { FulfilledOrderMatch } from './klaviyo-order-email.server'
 
 function fakeDeps(overrides: Partial<ResolveDeps> = {}): ResolveDeps & { createInviteCalls: unknown[] } {
   const createInviteCalls: unknown[] = []
   const deps: ResolveDeps = {
-    listPendingOrderIds: async () => ['111'],
+    listPendingOrders: async () => [{ shopifyOrderId: '111', pendingSinceDays: 2 }],
     resolveEmail: async (): Promise<FulfilledOrderMatch | null> => ({
       email: 'buyer@example.com',
       reviewerName: 'Jordan Rivera',
@@ -94,7 +94,10 @@ describe('resolveMissingEmailInvites', () => {
 
   it('one order failing does not stop the rest from resolving', async () => {
     const deps = fakeDeps({
-      listPendingOrderIds: async () => ['111', '222'],
+      listPendingOrders: async () => [
+        { shopifyOrderId: '111', pendingSinceDays: 2 },
+        { shopifyOrderId: '222', pendingSinceDays: 2 },
+      ],
       resolveEmail: async (orderId) => {
         if (orderId === '111') throw new Error('klaviyo down')
         return { email: 'buyer2@example.com', reviewerName: null, lineItems: [{ sku: 'SKU-C', productId: '3003' }] }
@@ -104,5 +107,35 @@ describe('resolveMissingEmailInvites', () => {
     expect(result.invited).toBe(1)
     expect(deps.createInviteCalls).toHaveLength(1)
     expect(deps.createInviteCalls[0]).toMatchObject({ shopifyOrderId: '222' })
+  })
+
+  it('asks Klaviyo for a wider window as a pending order ages, not a fixed 14 days (#20822)', async () => {
+    const sinceDaysCalls: number[] = []
+    const deps = fakeDeps({
+      listPendingOrders: async () => [{ shopifyOrderId: '111', pendingSinceDays: 20 }],
+      resolveEmail: async (_orderId, sinceDays) => {
+        sinceDaysCalls.push(sinceDays)
+        return null
+      },
+    })
+    await resolveMissingEmailInvites(deps)
+    expect(sinceDaysCalls).toEqual([sinceDaysForPendingOrder(20)])
+    expect(sinceDaysCalls[0]).toBeGreaterThan(14) // a fixed 14-day window would have missed this order
+  })
+})
+
+describe('sinceDaysForPendingOrder', () => {
+  it('floors at the original 14-day window for a freshly pending order', () => {
+    expect(sinceDaysForPendingOrder(0)).toBe(14)
+    expect(sinceDaysForPendingOrder(2)).toBe(14)
+  })
+
+  it('grows with the order\'s age so an order older than 14 days is still covered', () => {
+    expect(sinceDaysForPendingOrder(17)).toBe(20)
+    expect(sinceDaysForPendingOrder(20)).toBe(23)
+  })
+
+  it('caps at 45 days so one very stale order cannot force an unbounded lookback', () => {
+    expect(sinceDaysForPendingOrder(200)).toBe(45)
   })
 })

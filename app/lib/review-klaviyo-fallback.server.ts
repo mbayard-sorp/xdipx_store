@@ -20,12 +20,34 @@ import {
   recordOrderFulfillmentOutcome,
   KLAVIYO_MISS_MAX_ATTEMPTS,
   KLAVIYO_MISS_REASON_PREFIX,
+  type PendingKlaviyoRetryOrder,
 } from './reviews.server'
 import type { CreateInviteInput } from '~/types/reviews'
 
+/**
+ * Lower bound matches the original fixed window (#19525); upper bound caps
+ * how far back a single lookup can ask Klaviyo to scan, regardless of how
+ * stale a pending order is. `sinceDaysForPendingOrder` below is the part
+ * that actually varies per order (#20822).
+ */
+const MIN_SINCE_DAYS = 14
+const MAX_SINCE_DAYS = 45
+
+/**
+ * A fixed 14-day Klaviyo lookback window missed orders that were already
+ * older than 14 days by the time the daily retry ran (#20822: two of seven
+ * stuck orders were 17 and 20 days past their redaction date). Size the
+ * window to the order's own age instead, with a few days of slack for
+ * clock skew between the webhook and this run, capped so one very old
+ * stuck order can't force an unbounded Klaviyo query range.
+ */
+export function sinceDaysForPendingOrder(pendingSinceDays: number): number {
+  return Math.min(MAX_SINCE_DAYS, Math.max(MIN_SINCE_DAYS, pendingSinceDays + 3))
+}
+
 export interface ResolveDeps {
-  listPendingOrderIds: () => Promise<string[]>
-  resolveEmail: (shopifyOrderId: string) => Promise<FulfilledOrderMatch | null>
+  listPendingOrders: () => Promise<PendingKlaviyoRetryOrder[]>
+  resolveEmail: (shopifyOrderId: string, sinceDays: number) => Promise<FulfilledOrderMatch | null>
   getInvitedProductIds: (shopifyOrderId: string) => Promise<Set<string>>
   createInvite: (input: CreateInviteInput) => Promise<unknown>
   recordOutcome: (shopifyOrderId: string, outcome: 'invited' | 'no_invite_created', reason: string) => Promise<void>
@@ -36,8 +58,8 @@ export interface ResolveDeps {
 
 export function defaultResolveDeps(inviteDelayDays: number): ResolveDeps {
   return {
-    listPendingOrderIds: getPiiRedactedOrdersNeedingKlaviyoRetry,
-    resolveEmail: resolveFulfilledOrderEmail,
+    listPendingOrders: getPiiRedactedOrdersNeedingKlaviyoRetry,
+    resolveEmail: (id, sinceDays) => resolveFulfilledOrderEmail(id, { sinceDays }),
     getInvitedProductIds: (id) => getInvitedProductIdsForOrder(id).catch(() => new Set<string>()),
     createInvite,
     recordOutcome: recordOrderFulfillmentOutcome,
@@ -59,17 +81,17 @@ export interface ResolveMissingEmailInvitesResult {
  * Resolve every order still waiting on a Klaviyo-sourced email, create one
  * invite per distinct product not already invited for that order, and
  * record the outcome. Idempotent: an order with an existing review_invites
- * row never reaches this function (`deps.listPendingOrderIds` excludes it),
+ * row never reaches this function (`deps.listPendingOrders` excludes it),
  * and a replay within the same run never double-invites a product because
  * `deps.getInvitedProductIds` plus an in-run `seen` set both guard it.
  */
 export async function resolveMissingEmailInvites(deps: ResolveDeps): Promise<ResolveMissingEmailInvitesResult> {
   const result: ResolveMissingEmailInvitesResult = { invited: 0, missed: 0, matchedNoLineItems: 0 }
-  const pendingOrderIds = await deps.listPendingOrderIds()
+  const pendingOrders = await deps.listPendingOrders()
 
-  for (const shopifyOrderId of pendingOrderIds) {
+  for (const { shopifyOrderId, pendingSinceDays } of pendingOrders) {
     try {
-      const match = await deps.resolveEmail(shopifyOrderId)
+      const match = await deps.resolveEmail(shopifyOrderId, sinceDaysForPendingOrder(pendingSinceDays))
 
       if (!match?.email) {
         const attempt = (await deps.countMissAttempts(shopifyOrderId)) + 1

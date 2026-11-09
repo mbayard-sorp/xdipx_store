@@ -660,16 +660,27 @@ export async function countKlaviyoMissAttempts(shopifyOrderId: string): Promise<
   return Number(rows[0]?.['n'] ?? 0)
 }
 
+export interface PendingKlaviyoRetryOrder {
+  shopifyOrderId: string
+  /** Days since the webhook first died on PII redaction for this order. */
+  pendingSinceDays: number
+}
+
 /**
  * Orders whose webhook died on PII redaction, have no review_invites row
  * yet, and have not already exhausted `KLAVIYO_MISS_MAX_ATTEMPTS` Klaviyo
  * lookup misses — the candidates for `resolveFulfilledOrderEmail`
  * (app/lib/klaviyo-order-email.server.ts) on the daily review-reminders
- * cron.
+ * cron. `pendingSinceDays` is how long ago the order first redacted, used
+ * by the caller to size the Klaviyo events lookback window per order
+ * (ticket #20822: a fixed 14-day window missed orders already older than
+ * that by the time this retry runs).
  */
-export async function getPiiRedactedOrdersNeedingKlaviyoRetry(): Promise<string[]> {
+export async function getPiiRedactedOrdersNeedingKlaviyoRetry(): Promise<PendingKlaviyoRetryOrder[]> {
   const rows = await sql`
-    SELECT DISTINCT l.shopify_order_id AS shopify_order_id
+    SELECT
+      l.shopify_order_id AS shopify_order_id,
+      EXTRACT(DAY FROM now() - MIN(l.created_at))::int AS pending_since_days
     FROM order_fulfillment_webhook_log l
     WHERE l.outcome = 'no_email_pii_redacted'
       AND NOT EXISTS (
@@ -681,8 +692,32 @@ export async function getPiiRedactedOrdersNeedingKlaviyoRetry(): Promise<string[
           AND miss.outcome = 'no_invite_created'
           AND miss.reason LIKE ${KLAVIYO_MISS_REASON_PREFIX + '%'}
       ) < ${KLAVIYO_MISS_MAX_ATTEMPTS}
+    GROUP BY l.shopify_order_id
   `
-  return rows.map((r) => r['shopify_order_id'] as string)
+  return rows.map((r) => ({
+    shopifyOrderId: r['shopify_order_id'] as string,
+    pendingSinceDays: Number(r['pending_since_days'] ?? 0),
+  }))
+}
+
+/**
+ * Clears prior Klaviyo-resolution-miss log rows for the named orders, so
+ * `countKlaviyoMissAttempts` reads 0 again and `getPiiRedactedOrdersNeedingKlaviyoRetry`
+ * picks them back up on the next cron run. For orders whose
+ * `KLAVIYO_MISS_MAX_ATTEMPTS` misses all predate a fix to the resolution
+ * logic itself (ticket #20822) — a real production-data mutation, not
+ * something to run speculatively. Returns the number of rows cleared.
+ */
+export async function resetKlaviyoMissAttempts(shopifyOrderIds: string[]): Promise<number> {
+  if (shopifyOrderIds.length === 0) return 0
+  const rows = await sql`
+    DELETE FROM order_fulfillment_webhook_log
+    WHERE outcome = 'no_invite_created'
+      AND reason LIKE ${KLAVIYO_MISS_REASON_PREFIX + '%'}
+      AND shopify_order_id = ANY(${shopifyOrderIds})
+    RETURNING shopify_order_id
+  `
+  return rows.length
 }
 
 /**
