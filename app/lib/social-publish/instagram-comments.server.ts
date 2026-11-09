@@ -26,8 +26,33 @@ import { db } from '~/lib/db.server'
 import { socialComments, socialPosts } from '../../../db/schema'
 import { igRequest, describeInstagramApiError, type MetaError } from './instagram.server'
 import { getInstagramAccessToken } from '~/lib/instagram-token.server'
+import { kvGet, kvSet } from '~/lib/kv.server'
 
 const RECENT_POST_WINDOW_DAYS = 14
+
+/**
+ * Ticket #20826: one Instagram post that was later deleted or had its
+ * permissions changed must not take the hourly ingest down for the other
+ * posts in the window, and must not be retried hourly forever once it is
+ * clearly gone. Meta's "object does not exist, cannot be loaded due to
+ * missing permissions, or does not support this operation" shape is code
+ * 100, subcode 33 (the same classification `getInstagramMediaState` in
+ * `./instagram.server.ts` already uses for the removal watcher, kept local
+ * here rather than shared since it is a two-line check on the same `MetaError`
+ * shape both files already import).
+ */
+function isObjectMissingError(error: MetaError): boolean {
+  return error.code === 100 && (error.error_subcode === 33 || error.error_subcode === undefined)
+}
+
+/** Consecutive "object does not exist" errors before a post stops being retried hourly. */
+const UNREACHABLE_AFTER_CONSECUTIVE_ERRORS = 3
+/** Persisted {mediaId: consecutive-error-count} map. No TTL, same as `KV_KEYS.pinnedAccessoryIds`. */
+const UNREACHABLE_COUNTS_KV_KEY = 'social:ig:comments-ingest:unreachable-counts'
+
+async function loadUnreachableCounts(): Promise<Record<string, number>> {
+  return (await kvGet<Record<string, number>>(UNREACHABLE_COUNTS_KV_KEY)) ?? {}
+}
 
 /** Meta's "missing permission" shape: code 10, or code 200 with subcode 33. */
 function isMissingScopeError(error: MetaError): boolean {
@@ -75,6 +100,15 @@ export interface IngestResult {
    * `postsChecked > 0`).
    */
   skipped?: string
+  /**
+   * Ticket #20826: posts excluded from this run's `postsChecked` because
+   * they already hit `UNREACHABLE_AFTER_CONSECUTIVE_ERRORS` consecutive
+   * "object does not exist" errors on prior runs. Present (possibly 0)
+   * whenever the run actually considered the post list; absent on the two
+   * early-exit paths above (no token, no posts at all) where the question
+   * does not apply.
+   */
+  skippedUnreachable?: number
 }
 
 /**
@@ -100,13 +134,21 @@ async function recentInstagramMediaIds(): Promise<string[]> {
 async function ingestMediaComments(
   mediaId: string,
   token: string,
-): Promise<{ fetched: number; inserted: number; malformed: number; detail?: string }> {
+): Promise<{ fetched: number; inserted: number; malformed: number; detail?: string; objectMissing?: boolean }> {
   const res = await igRequest(`/${mediaId}/comments`, {
     method: 'GET',
     params: { fields: 'id,text,username,timestamp,replies' },
     token,
   })
-  if (!res.ok) return { fetched: 0, inserted: 0, malformed: 0, detail: describeCommentsApiError(res.error) }
+  if (!res.ok) {
+    return {
+      fetched: 0,
+      inserted: 0,
+      malformed: 0,
+      detail: describeCommentsApiError(res.error),
+      objectMissing: isObjectMissingError(res.error),
+    }
+  }
 
   const raw = (res.data['data'] as RawComment[] | undefined) ?? []
   let inserted = 0
@@ -162,17 +204,52 @@ export async function ingestRecentComments(): Promise<IngestResult> {
     }
   }
 
+  // Ticket #20826: skip posts already marked unreachable rather than
+  // retrying an "object does not exist" error hourly forever.
+  const unreachableCounts = await loadUnreachableCounts()
+  const checkIds: string[] = []
+  let skippedUnreachable = 0
+  for (const id of mediaIds) {
+    if ((unreachableCounts[id] ?? 0) >= UNREACHABLE_AFTER_CONSECUTIVE_ERRORS) skippedUnreachable++
+    else checkIds.push(id)
+  }
+
+  if (checkIds.length === 0) {
+    return {
+      ok: true,
+      postsChecked: 0,
+      fetched: 0,
+      inserted: 0,
+      skippedUnreachable,
+      skipped: `all ${mediaIds.length} Instagram post(s) in the last 14 days are marked unreachable`,
+    }
+  }
+
   let fetched = 0
   let inserted = 0
   let malformed = 0
+  let erroredCount = 0
   let firstErrorDetail: string | undefined
-  for (const mediaId of mediaIds) {
+  let unreachableCountsChanged = false
+  for (const mediaId of checkIds) {
     const result = await ingestMediaComments(mediaId, token)
     fetched += result.fetched
     inserted += result.inserted
     malformed += result.malformed
-    if (result.detail && !firstErrorDetail) firstErrorDetail = result.detail
+    if (result.detail) {
+      erroredCount++
+      if (!firstErrorDetail) firstErrorDetail = result.detail
+      if (result.objectMissing) {
+        unreachableCounts[mediaId] = (unreachableCounts[mediaId] ?? 0) + 1
+        unreachableCountsChanged = true
+      }
+    } else if (mediaId in unreachableCounts) {
+      // A previously-flaky post answered cleanly again; clear its strike count.
+      delete unreachableCounts[mediaId]
+      unreachableCountsChanged = true
+    }
   }
+  if (unreachableCountsChanged) await kvSet(UNREACHABLE_COUNTS_KV_KEY, unreachableCounts)
 
   // Ticket #12077, DONE WHEN 2: a run that fetched real comments but stored
   // none of them, where the shortfall isn't explained by every fetched
@@ -181,19 +258,28 @@ export async function ingestRecentComments(): Promise<IngestResult> {
   // nothing there), is a defect, most likely the Graph API returning a
   // comment shape this parser doesn't recognize. That must fail loudly
   // rather than reporting a blank "succeeded" that looks identical to a
-  // quiet week.
-  if (!firstErrorDetail && fetched > 0 && inserted === 0 && malformed > 0) {
+  // quiet week. Independent of the per-post API-error accounting below: it
+  // only fires when no per-post error already explains the shortfall.
+  const malformedFailure = erroredCount === 0 && fetched > 0 && inserted === 0 && malformed > 0
+  if (malformedFailure) {
     firstErrorDetail =
-      `Instagram returned ${fetched} comment(s) across ${mediaIds.length} post(s), but ${malformed} `
+      `Instagram returned ${fetched} comment(s) across ${checkIds.length} post(s), but ${malformed} `
       + 'lacked an id or text field this parser expects and 0 were stored. Check the Graph API '
       + 'response shape (fields=id,text,username,timestamp,replies).'
   }
 
+  // Ticket #20826, DONE WHEN 3: one bad post (or a few) must not fail the
+  // whole run — only a run where EVERY checked post errored is a real
+  // failure (e.g. the access token itself is dead, which errors every post
+  // identically rather than just the one Meta says is gone).
+  const allErrored = checkIds.length > 0 && erroredCount === checkIds.length
+
   return {
-    ok: !firstErrorDetail,
-    postsChecked: mediaIds.length,
+    ok: !malformedFailure && !allErrored,
+    postsChecked: checkIds.length,
     fetched,
     inserted,
+    skippedUnreachable,
     ...(firstErrorDetail ? { detail: firstErrorDetail } : {}),
   }
 }
