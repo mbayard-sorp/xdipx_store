@@ -227,6 +227,11 @@ export async function runSignalPulls(deps: SignalPullDeps = {}): Promise<SignalP
         unblocks: 'Every ad on the account: none of them deliver while it is not ACTIVE.',
         priority: 1,
         sourceRef: 'cron:ads-insights:account_status',
+        // Not a verifyProbe: this same hourly check calls clearBlocker
+        // directly in the `else` branch below the moment account_status
+        // reads back non-null and clean, so the row really does clear
+        // itself, just not through the probe registry (ticket #20825).
+        overrideNoProbeReason: 'Clears via a direct clearBlocker call from this same hourly check once account_status reads clean again, not through the verifyProbe registry.',
       }, { fileBlocker: deps.fileBlocker })
     } else if (reading.accountStatus != null) {
       const cleared = await (deps.clearBlocker ?? defaultClearBlocker)(ACCOUNT_PAGE_KEY, `account_status read ${reading.statusName} at ${now.toISOString()}`)

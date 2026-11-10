@@ -369,6 +369,49 @@ async function rowMatches(arg: string): Promise<ProbeVerdict> {
 }
 
 /**
+ * Is this ad entity no longer rejected/restricted? Arg is `platform|externalId`,
+ * read back against ad_platform_entities' own (platform, external_id) unique
+ * index — the exact row the rejection page (app/lib/ads/pager.server.ts) was
+ * filed from (ticket #20825).
+ *
+ * A missing row is a could-not-ask, not a clear: blocker #3125 on this same
+ * estate documented ad_platform_entities holding ZERO rows for a whole
+ * platform because its entity sync had failed six times, so "no row found"
+ * here is evidence about the sync, not about whether Meta's own rejection
+ * was ever lifted. Answering true on that gap would clear a real rejection
+ * on the strength of absence — the exact #4702 failure shape.
+ */
+async function adEntityNotRejected(arg: string): Promise<ProbeVerdict> {
+  const [platform, externalId] = arg.split('|')
+  if (!platform || !externalId) return null
+  const res = await db.execute(sql`
+    SELECT effective_status FROM ad_platform_entities
+     WHERE platform = ${platform} AND external_id = ${externalId} LIMIT 1`)
+  const row = (res.rows ?? [])[0] as Record<string, unknown> | undefined
+  if (!row) return null
+  const { REJECTED_STATUSES } = await import('~/lib/ads/pager.server')
+  return !(REJECTED_STATUSES as readonly string[]).includes(String(row['effective_status'] ?? ''))
+}
+
+/**
+ * Have none of these video_episodes ids been left at production_status
+ * 'pending_approval'? Arg is a comma-separated list of ids (ticket #20825,
+ * blocker #552: ids 8-12 waited six days unread). Clears once every named id
+ * has moved to any other status (approved or needs_changes both count — the
+ * point is that the owner looked, not which way they ruled). An id missing
+ * from the table entirely is a could-not-ask, not a clear.
+ */
+async function videoEpisodesNotPending(arg: string): Promise<ProbeVerdict> {
+  const ids = arg.split(',').map(s => parseInt(s.trim(), 10)).filter(n => Number.isFinite(n))
+  if (ids.length === 0) return null
+  const res = await db.execute(sql`
+    SELECT id, production_status FROM video_episodes WHERE id = ANY(${ids})`)
+  const rows = (res.rows ?? []) as Record<string, unknown>[]
+  if (rows.length !== ids.length) return null // at least one id not found: could not ask
+  return rows.every(r => String(r['production_status'] ?? '') !== 'pending_approval')
+}
+
+/**
  * Has this migration file been recorded in schema_migrations_applied? Arg is
  * the filename. Table-existence is checked first because a very old, pre-081
  * database might not have the ledger yet; that is a could-not-ask, not a
@@ -482,6 +525,8 @@ const RUNNERS: Record<string, (arg: string) => Promise<ProbeVerdict>> = {
   ad_token_healthy: adTokenHealthy,
   ad_health_clean: adHealthClean,
   row_matches:   rowMatches,
+  ad_entity_not_rejected: adEntityNotRejected,
+  video_episodes_not_pending: videoEpisodesNotPending,
   migration_applied: migrationApplied,
   order_fulfilled: orderFulfilled,
   buyable_share: buyableShare,

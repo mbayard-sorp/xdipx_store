@@ -33,6 +33,16 @@ describe('probe vocabulary', () => {
       expect(isProbe(name)).toBe(true)
     }
   })
+
+  it('describes the two new #20825 probes in a sentence the owner can read', () => {
+    expect(PROBE_DESCRIPTIONS['ad_entity_not_rejected']!('meta|120249750018750056'))
+      .toBe('meta entity 120249750018750056 is no longer DISAPPROVED or WITH_ISSUES')
+    expect(PROBE_DESCRIPTIONS['video_episodes_not_pending']!('8,9,10,11,12'))
+      .toBe("none of video_episodes 8,9,10,11,12 are still production_status='pending_approval'")
+    for (const name of ['ad_entity_not_rejected', 'video_episodes_not_pending']) {
+      expect(isProbe(name)).toBe(true)
+    }
+  })
 })
 
 describe('decision category', () => {
@@ -87,9 +97,16 @@ describe('probeGapReason', () => {
     expect(probeGapReason({ category: 'valve', verifyProbe: 'setting_true' })).toBeNull()
   })
 
-  it('is silent for the two carve-outs', () => {
-    expect(probeGapReason({ category: 'console', verifyProbe: null })).toBeNull()
-    expect(probeGapReason({ category: 'decision', verifyProbe: null })).toBeNull()
+  it('still flags console/decision/approval once a probe is missing, just without demanding one (#20825)', () => {
+    // These never need a PROBE (console completes in a third-party UI,
+    // decision has no observable completion state, approval can be a pure
+    // notification), but they are not exempt from the gate altogether:
+    // fileBlocker still requires an overrideNoProbeReason for them.
+    for (const category of ['console', 'decision', 'approval'] as const) {
+      const gap = probeGapReason({ category, verifyProbe: null })
+      expect(gap).not.toBeNull()
+      expect(gap).not.toMatch(/should carry a verifyProbe/i)
+    }
   })
 })
 

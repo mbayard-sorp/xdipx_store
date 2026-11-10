@@ -31,6 +31,7 @@ const SEED: BlockerInput[] = [
     priority: 2,
     source: 'ops-doc',
     sourceRef: 'docs/store-team/ops-blockers.md#25/#31',
+    overrideNoProbeReason: 'Completes in claude.ai connector settings, a console this server has no API access to.',
     evidence: 'ops-blockers.md: "Sanity MCP connector not attached to the content trigger\'s session, though the playbook mandates Sanity MCP for all reads/writes."',
   },
   {
@@ -44,6 +45,7 @@ const SEED: BlockerInput[] = [
     priority: 2,
     source: 'ops-doc',
     sourceRef: 'docs/store-team/ops-blockers.md#30',
+    overrideNoProbeReason: 'Completes in the claude.ai code sandbox settings, a console this server has no API access to.',
     evidence: 'ops-blockers.md: "Write-safety classifier blocks the Sanity publish write even when content_team_autopublish=true and the voice gate PASSed, silently degrading autopublish to draft-only."',
   },
   {
@@ -56,6 +58,7 @@ const SEED: BlockerInput[] = [
     category: 'console',
     priority: 2,
     source: 'ops-doc',
+    overrideNoProbeReason: 'Completes in the claude.ai code sandbox egress settings, a console this server has no API access to.',
     sourceRef: 'docs/store-team/ops-blockers.md#35',
     evidence: 'ops-blockers.md: "*.fal.media (e.g. v3b.fal.media) is not in the egress allowlist (download 403 after a successful generate)."',
   },
@@ -69,6 +72,7 @@ const SEED: BlockerInput[] = [
     category: 'console',
     priority: 3,
     source: 'ops-doc',
+    overrideNoProbeReason: 'Completes in the GCP console\'s Billing page, a console this server has no API access to.',
     sourceRef: 'docs/store-team/ops-blockers.md#35',
     evidence: 'ops-blockers.md: "the Imagen fallback 403s because billing is disabled on GCP project xdipx-store-image-gen."',
   },
