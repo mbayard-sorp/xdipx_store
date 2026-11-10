@@ -552,6 +552,19 @@ git fetch origin main >/dev/null && git grep -n "<file/flag/symbol from the tick
    verification needs a live DB read this sandbox cannot do, say so plainly in the PR's "what I could
    not verify" section rather than spending a `psql` timeout rediscovering it.
 
+   **The block is on raw production reads, not on the transport (tickets #20828, #20829).** The
+   app's own `@neondatabase/serverless` + `drizzle(neon-http)` driver (`app/lib/db.server.ts`) DOES
+   connect over HTTPS from here — a plain `select 1` round-trips fine — so it looks like a safe
+   workaround for a table the team API does not expose. It is not: this session's own auto-mode
+   permission classifier denies a raw query against production tables outright (reason
+   `[Production Reads]`), before the query ever runs, regardless of whether it goes over raw TCP or
+   Neon's HTTP-over-HTTPS driver. For a table `/api/team/*` *does* expose (suggestions, links,
+   runs), that API's `op:get`/`op:list` is the correct read path — never a DB script, even for a
+   one-off diagnostic — because it returns the same underlying rows without tripping the
+   classifier. For a table it does not expose, there is no sanctioned read path from this sandbox;
+   say so rather than spending a turn rediscovering that a different transport doesn't change the
+   verdict.
+
 3i. **A shared pre-condition helper added to fix a bug must be confirmed called from every
    registry entry point, not just the one that triggered the fix.** (#13418) When a fix is a shared
    `assert*`/`require*` helper wired into a multi-lane dispatch or registry (a switch, a handler map,
