@@ -1527,6 +1527,16 @@ resolves to what the feed is actually featuring. Do this as part of the run and 
 
 ## Step 5 — Imagery (every visual platform draft ships with a real asset)
 
+**Likeness/consent pre-check, before any cast-composite or bodyscape generation call (mission-brief.md
+§2b: likeness judgment calls are the owner's decision, not a gate-calibration defect a run can route
+around).** `GET /api/team/blocker` and refuse to generate if an open blocker exists whose `category` is
+`decision` and whose `dedupeKey` or title names the cast-composite/implied-nude bodyscape imagery
+pipeline (e.g. `social-likeness-imagery-pipeline-review` or equivalent — read the title, a dedupeKey
+is not guaranteed to match exactly). A standing priority-1 decision blocker on this pipeline is an
+owner-level halt: it does not expire by being missed once, and the next run re-checking from scratch
+is not a substitute for an owner resolution on the open row. If the check finds no matching open
+blocker, proceed with imagery generation as this step otherwise directs.
+
 An Instagram, TikTok, **or X** draft **must carry at least one `mediaUrls` entry**. This is not a
 quality preference, it is a publish requirement: the pre-publish gate blocks a post with no media on
 every platform it publishes (`social-publish-gate.server.ts`, "Media is required on X as well as
