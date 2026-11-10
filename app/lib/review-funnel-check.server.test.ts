@@ -14,6 +14,7 @@ function deps(over: Partial<ReviewFunnelCheckDeps> = {}): ReviewFunnelCheckDeps 
   return {
     fulfillmentLogCountSince: async () => 0,
     inviteCountSince: async () => 0,
+    outcomeBreakdownSince: async () => [],
     fileTicket,
     ...over,
   } as ReviewFunnelCheckDeps & { fileTicket: ReturnType<typeof mockFile> }
@@ -21,7 +22,11 @@ function deps(over: Partial<ReviewFunnelCheckDeps> = {}): ReviewFunnelCheckDeps 
 
 describe('checkReviewFunnelSilentDrop', () => {
   it('files a ticket when orders fulfilled but zero invites were created', async () => {
-    const d = deps({ fulfillmentLogCountSince: async () => 22, inviteCountSince: async () => 0 })
+    const d = deps({
+      fulfillmentLogCountSince: async () => 22,
+      inviteCountSince: async () => 0,
+      outcomeBreakdownSince: async () => [{ outcome: 'no_email_pii_redacted', count: 22 }],
+    })
     const report = await checkReviewFunnelSilentDrop(d)
 
     expect(report).toMatchObject({ fulfilled: 22, invited: 0, breached: true, ticketId: 42 })
@@ -30,6 +35,21 @@ describe('checkReviewFunnelSilentDrop', () => {
     expect(ticket.dedupeKey).toBe('review-funnel-silent-drop')
     expect(ticket.suggestion).toContain(`${REVIEW_FUNNEL_CHECK_WINDOW_DAYS} days`)
     expect(ticket.suggestion).toContain('handleOrderFulfilled')
+    expect(ticket.suggestion).toContain('no_email_pii_redacted=22')
+  })
+
+  it('names the Klaviyo-retry fallback instead of the PII branch when that outcome dominates', async () => {
+    const d = deps({
+      fulfillmentLogCountSince: async () => 23,
+      inviteCountSince: async () => 0,
+      outcomeBreakdownSince: async () => [{ outcome: 'no_invite_created', count: 23 }],
+    })
+    const report = await checkReviewFunnelSilentDrop(d)
+
+    expect(report.breached).toBe(true)
+    const ticket = d.fileTicket.mock.calls[0]![0]
+    expect(ticket.suggestion).toContain('no_invite_created=23')
+    expect(ticket.suggestion).toContain('review-klaviyo-fallback.server.ts')
   })
 
   it('does nothing when nothing fulfilled in the window', async () => {

@@ -634,6 +634,33 @@ export async function countFulfillmentWebhookLogSince(days: number): Promise<num
   return Number(rows[0]?.['n'] ?? 0)
 }
 
+export interface FulfillmentOutcomeCount {
+  outcome: OrderFulfillmentWebhookOutcome
+  count: number
+}
+
+/**
+ * Per-outcome counts from `order_fulfillment_webhook_log` in the last `days`
+ * days, highest count first (ticket #20953). The silent-drop detector
+ * (`review-funnel-check.server.ts`) used to name `no_email_pii_redacted` as
+ * "the known cause" in every ticket it filed regardless of what actually
+ * happened, which stopped being informative once a second outcome (the
+ * Klaviyo-retry exhaustion path, `no_invite_created`, #19525/#20822) could
+ * also zero out invites for a window. Reading this breakdown lets the filed
+ * ticket name the real outcome instead of repeating a guess.
+ */
+export async function getFulfillmentOutcomeBreakdownSince(days: number): Promise<FulfillmentOutcomeCount[]> {
+  const rows = await sql`
+    SELECT outcome, count(*)::int AS n FROM order_fulfillment_webhook_log
+    WHERE created_at > now() - (${days} || ' days')::interval
+    GROUP BY outcome ORDER BY n DESC
+  `
+  return rows.map(r => ({
+    outcome: r['outcome'] as OrderFulfillmentWebhookOutcome,
+    count: Number(r['n']),
+  }))
+}
+
 // ─── Klaviyo email-resolution fallback (ticket #19525) ─────────────────────
 // `order_fulfillment_webhook_log.outcome` is a fixed CHECK constraint
 // (migration 126) with no value for "Klaviyo had no matching event yet", and

@@ -17,9 +17,16 @@
 
 export const REVIEW_FUNNEL_CHECK_WINDOW_DAYS = 7
 
+export interface OutcomeCount {
+  outcome: string
+  count: number
+}
+
 export interface ReviewFunnelCheckDeps {
   fulfillmentLogCountSince(days: number): Promise<number>
   inviteCountSince(days: number): Promise<number>
+  /** Per-outcome breakdown over the same window, highest count first (ticket #20953). */
+  outcomeBreakdownSince(days: number): Promise<OutcomeCount[]>
   fileTicket(t: { dedupeKey: string; priority: number; suggestion: string }): Promise<{ id: number; deduped: boolean }>
 }
 
@@ -40,14 +47,22 @@ export async function checkReviewFunnelSilentDrop(deps: ReviewFunnelCheckDeps): 
   const breached = fulfilled > 0 && invited === 0
   if (!breached) return { fulfilled, invited, breached, ticketId: null, deduped: false }
 
+  const breakdown = await deps.outcomeBreakdownSince(days)
+  const breakdownText = breakdown.length > 0
+    ? breakdown.map(o => `${o.outcome}=${o.count}`).join(', ')
+    : 'no rows (log itself is empty for this window)'
+
   const { id, deduped } = await deps.fileTicket({
     dedupeKey: 'review-funnel-silent-drop',
     priority: 2,
     suggestion:
       `Review invite funnel produced zero invites over the last ${days} days despite ` +
       `${fulfilled} orders/fulfilled webhook ${fulfilled === 1 ? 'call' : 'calls'} logged in that window ` +
-      `(order_fulfillment_webhook_log). Check handleOrderFulfilled (server/webhooks.ts) first; its ` +
-      `no-email PII-redaction branch is the known cause as of ticket #16267. ` +
+      `(order_fulfillment_webhook_log). Outcome breakdown for the same window: ${breakdownText}. ` +
+      `Check handleOrderFulfilled (server/webhooks.ts) first if no_email_pii_redacted dominates (the ` +
+      `known cause as of ticket #16267); if no_invite_created dominates instead, check the Klaviyo-retry ` +
+      `fallback (app/lib/review-klaviyo-fallback.server.ts, #19525/#20822) for exhausted attempts or a ` +
+      `broken resolution instead of re-diagnosing the PII branch. ` +
       `DONE WHEN: review_invites gets new rows again within a day of the next fulfilled order, or the ` +
       `ticket names the real blocker if it is not that branch this time.`,
   })
@@ -56,12 +71,14 @@ export async function checkReviewFunnelSilentDrop(deps: ReviewFunnelCheckDeps): 
 
 /** Production wiring, called once a day from the /cron/review-reminders run. */
 export async function runReviewFunnelSilentDropCheck(): Promise<ReviewFunnelCheckReport> {
-  const { countFulfillmentWebhookLogSince, countInvitesCreatedSince } = await import('./reviews.server')
+  const { countFulfillmentWebhookLogSince, countInvitesCreatedSince, getFulfillmentOutcomeBreakdownSince } =
+    await import('./reviews.server')
   const { fileDetectionTicket, makeDedupeKey } = await import('./detection-tickets.server')
 
   return checkReviewFunnelSilentDrop({
     fulfillmentLogCountSince: countFulfillmentWebhookLogSince,
     inviteCountSince: countInvitesCreatedSince,
+    outcomeBreakdownSince: getFulfillmentOutcomeBreakdownSince,
     fileTicket: async t => {
       const id = await fileDetectionTicket({
         detector: 'review-funnel-check',
