@@ -47,6 +47,7 @@ describe('imageTeamFromFeature', () => {
     expect(imageTeamFromFeature('homepage-images')).toBe('homepage')
     expect(imageTeamFromFeature('notebook-images')).toBe('content')
     expect(imageTeamFromFeature('content-images')).toBe('content')
+    expect(imageTeamFromFeature('content-blog')).toBe('content')
     expect(imageTeamFromFeature('social-images')).toBe('social')
   })
 
