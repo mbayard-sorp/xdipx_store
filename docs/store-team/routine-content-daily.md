@@ -320,6 +320,16 @@ below, instead of — or alongside without duplicating — the Notebook post.
   JSON-LD), `seoTitle`/`seoDescription`, `publishedAt`, `status`.
 - **Author it via** `npx tsx scripts/sanity-content-cli.ts create-if-not-exists --id comparison-<slug> --file <path-to-json>`
   (the CLI is generic across `_type`; no code change is needed).
+- **Pre-commission duplicate-topic check, mandatory, before authoring either doc type (ticket
+  #20824, split b).** Before commissioning a new comparison topic (Sunday `comparison` doc or a
+  Notebook comparison post), grep existing `blogPost` and `comparison` slugs for the same
+  head-to-head (both orderings of the two products/categories, and known synonyms — "lube" vs
+  "lubricant", "wand" vs "massager"). Four /compare/-vs-Notebook duplicate pairs already shipped
+  this way (`app/lib/compare-canonical-aliases.ts` has the worked examples and the GSC evidence of
+  the ranking-signal split it caused): in every case the newer page launched weeks to months after
+  its twin was already indexed, competing against its own established page instead of linking to
+  it. If a topic already exists in either doc type, apply the **Link-to-Notebook differentiation
+  rule** below instead of commissioning a second page on the same comparison.
 - **Link-to-Notebook differentiation rule, mandatory.** The comparison doc is a short, structured
   spec-and-verdict surface (scannable `attributes` rows plus a one-paragraph `verdict`), never a
   re-run of the Notebook essay's prose. Where a Notebook post on the same head-to-head already
@@ -747,18 +757,26 @@ addition to, not instead of, the enumeration-consistency scan in Step 5 item 3, 
 to the rewrite cycle: this pre-flight catches it on first submit, before a gate cycle is spent on
 it.
 
-**A MATERIAL, PRODUCT-CLASS, or CONSTRUCTION-TYPE split the post introduces is also a "rule the
-post sets" (ticket #19278, second occurrence).** Run 1037 told readers to read the printed ingress
-code and never the adjective, then two sections later extended a running-water endorsement on the
-strength of the bare adjective. Run 1762 (`how-do-you-clean-a-stroker`) split by material mid-repair
-— the accuracy gate's cycle-2 REVISE asked for "find out what yours is made of, because the care
-splits by material" — and that reframe left four downstream mechanism claims (step 5 "thermoplastic
-softens with heat", a drying step, two FAQ answers) stated universally when they are only true of
-the porous TPE/TPR half; `check-self-consistency.ts` exits 0 on this shape because a material split
-shares no reusable TOKEN the checker keys on. Whenever a draft introduces a split by material,
-product class, or construction type, re-read every mechanism, heat, water, cleaning, and lifespan
-claim downstream of that split and confirm it is scoped to the side it is actually true of, BEFORE
-submit — and apply this with extra force when the split is itself introduced by a repair cycle
+**A MATERIAL, PRODUCT-CLASS, CONSTRUCTION-TYPE, or TERMINOLOGY split the post introduces is also a
+"rule the post sets" (ticket #19278, third occurrence).** Run 1037 told readers to read the printed
+ingress code and never the adjective, then two sections later extended a running-water endorsement on
+the strength of the bare adjective. Run 1762 (`how-do-you-clean-a-stroker`) split by material
+mid-repair — the accuracy gate's cycle-2 REVISE asked for "find out what yours is made of, because
+the care splits by material" — and that reframe left four downstream mechanism claims (step 5
+"thermoplastic softens with heat", a drying step, two FAQ answers) stated universally when they are
+only true of the porous TPE/TPR half. Run 1928
+(`is-a-rotating-bead-vibrator-really-different-from-a-standard-rabbit-vibrator`) introduced a
+motion-class taxonomy (rotating, rolling, thrusting, thumping) and then used the four terms
+inconsistently across the opening, the counting section, the who-is-it-for section, and the FAQ,
+never defining "thumping" at all; all six deterministic checkers, `check-self-consistency.ts`
+included, exited 0, because a terminology split, like a material split, shares no reusable TOKEN the
+checker keys on. Whenever a draft introduces a split by material, product class, construction type,
+**or a term/category system the post itself introduces for a mechanism or category**, before submit:
+(a) list every term the post uses for that mechanism or category, (b) confirm each is defined once
+before its first use, and (c) confirm no two terms are used for the same thing and no one term is
+used for two things, across the body AND the FAQ — then re-read every mechanism, heat, water,
+cleaning, and lifespan claim downstream of the split and confirm it is scoped to the side it is
+actually true of. Apply this with extra force when the split is itself introduced by a repair cycle
 rather than present in the first draft, since a repair's own reframe is exactly what can leave an
 already-written universal claim wrong without anything about that claim's own wording changing.
 
