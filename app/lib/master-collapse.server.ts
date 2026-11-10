@@ -754,6 +754,14 @@ export function isNoveltyCategory(master: MasterRecord): boolean {
  * Silicone Cock & Ball Ring) — exactly the false-positive failure mode this
  * list's own design note warns against.
  *
+ * Widened again (ticket #20832, fourth occurrence) against the 10 titles
+ * product-manager hand-rejected since 2026-10-30: the live list hit 4 of 10
+ * and missed 6. Added `cum dump(ster)?s?` and `booty lickers?` and `barely
+ * legal`. `creature cocks` was considered and dropped: the brand has 14
+ * imported and 14 rejected SKUs, so a token on the brand name alone would be
+ * a false-positive class, not a precision gain — exactly the failure mode
+ * this list's design note already warns against with `cock & ball`.
+ *
  * Tokens are deliberately specific so this never catches a legitimate wellness
  * SKU that merely shares a word — see isNoveltyCategory's own note on the same
  * failure mode. Mirrors NOVELTY_PATTERNS/isNoveltyCategory immediately above;
@@ -761,7 +769,7 @@ export function isNoveltyCategory(master: MasterRecord): boolean {
  * surfaced for manual approval — never a hard reject).
  */
 export const CRUDE_TITLE_PATTERNS =
-  /\b(?:jizz|fuck(?:ing|slut)|cum\s*guzzlers?|sluts?|whores?|pussy\s*lickers?|dick\s*boy|dickalicious|cock\s*oil|quick\s*dick|flutter\s*butter)\b/i
+  /\b(?:jizz|fuck(?:ing|slut)|cum\s*guzzlers?|cum\s*dump(?:ster)?s?|sluts?|whores?|pussy\s*lickers?|booty\s*lickers?|dick\s*boy|dickalicious|cock\s*oil|quick\s*dick|flutter\s*butter|barely\s*legal)\b/i
 
 /**
  * True when a master's display title or brand matches a crude-token pattern.
