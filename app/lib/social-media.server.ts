@@ -665,7 +665,7 @@ export async function rehostSocialImage(opts: RehostSocialImageOpts): Promise<Re
   })
 
   const { runVisionGate, recordVisionVerdict } = await import('./social-vision-gate.server')
-  const verdict = await runVisionGate(url)
+  const verdict = await runVisionGate(url, undefined, undefined, 'notebook-echo-rehost')
   if (asset?.id != null) {
     await recordVisionVerdict(asset.id, verdict)
     await tagIncompleteVisionVerdict(asset.id, verdict)
@@ -983,7 +983,7 @@ async function generateCastCompositeBatch(
       // returns, exactly the same as a rehost failure above. Runs against the
       // CROPPED buffer's uploaded url when a crop happened (#10999), so the
       // gate judges the pixels that would ship.
-      const verdict = await runVisionGate(url)
+      const verdict = await runVisionGate(url, undefined, undefined, 'cast-candidate')
       if (asset?.id != null) await recordVisionVerdict(asset.id, verdict)
       await tagIncompleteVisionVerdict(asset?.id, verdict)
       if (!verdict.pass) {
@@ -1300,7 +1300,7 @@ export async function generateAndUploadSocialImage(
         return null
       }
     },
-    runGate: (url) => runVisionGate(url),
+    runGate: (url) => runVisionGate(url, undefined, undefined, opts.caller),
     recordVerdict: async (assetId, verdict) => {
       await recordVisionVerdict(assetId, verdict)
       await tagIncompleteVisionVerdict(assetId, verdict)

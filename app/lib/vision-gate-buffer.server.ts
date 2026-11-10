@@ -212,12 +212,22 @@ export function fidelityDepsForEnv(runId?: number, team?: TeamId): ProductFideli
  *  imagery-ceiling vision gate. Never throws — same fail-closed contract as
  *  the social and Notebook-hero paths. `team` (default: the route's own
  *  'content' default) picks which team's budget/run-lock the remote check
- *  gates on when it has to fall back to the server-side route. */
-export async function gateImageBuffer(buf: Buffer, deps?: VisionGateDeps, runId?: number, team?: TeamId): Promise<VisionVerdict> {
+ *  gates on when it has to fall back to the server-side route. `caller`
+ *  (ticket #20866) is the real call-site label forwarded to
+ *  `api_token_log.caller`; distinct from `team`, since this one function is
+ *  shared by more than one call site within the same team's budget. */
+export async function gateImageBuffer(
+  buf: Buffer,
+  deps?: VisionGateDeps,
+  runId?: number,
+  team?: TeamId,
+  caller?: string,
+): Promise<VisionVerdict> {
   return runVisionGateOnImage(
     { data: buf.toString('base64'), mediaType: sniffImageMediaType(buf) },
     deps ?? visionDepsForEnv(runId, team),
     runId?.toString(),
+    caller,
   )
 }
 

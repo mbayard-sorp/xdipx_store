@@ -121,7 +121,7 @@ export async function renderAndUploadSocialCard(
   // deterministic, so a failing verdict (e.g. the product image itself
   // reading as unsafe) has nothing to regenerate into; the caller sees the
   // recorded verdict and decides.
-  const verdict = await runVisionGate(url)
+  const verdict = await runVisionGate(url, undefined, undefined, 'social-card')
   if (asset?.id != null) {
     await recordVisionVerdict(asset.id, verdict)
     await tagIncompleteVisionVerdict(asset.id, verdict)

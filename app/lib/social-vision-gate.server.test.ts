@@ -1581,6 +1581,70 @@ describe('defaultDeps.callVision — forced tool call (ticket #13176)', () => {
     )
   })
 
+  // Ticket #20866: every call site used to log the same constant caller
+  // string regardless of which of the ~5 actual call sites triggered it, so
+  // nobody could size any one site's share of social-vision-gate spend
+  // without reading code. `caller` mirrors the `refId` precedent exactly.
+  it('forwards a real caller label through to logMessageUsage (#20866)', async () => {
+    h.mockCreate.mockReset()
+    h.mockCreate.mockResolvedValue({
+      content: [{ type: 'tool_use', id: 'toolu_caller', name: VISION_VERDICT_TOOL_NAME, input: CLEAN_RESPONSE }],
+      stop_reason: 'tool_use',
+      usage: { input_tokens: 10, output_tokens: 5 },
+    })
+    vi.mocked(logMessageUsage).mockClear()
+
+    await runVisionGateOnImage({ data: 'ZmFrZQ==', mediaType: 'image/jpeg' }, undefined, undefined, 'cast-candidate')
+
+    expect(logMessageUsage).toHaveBeenCalledWith(
+      'social-vision-gate',
+      expect.any(String),
+      'cast-candidate',
+      expect.anything(),
+      undefined,
+    )
+  })
+
+  it('falls back to the constant caller label when none is given (#20866)', async () => {
+    h.mockCreate.mockReset()
+    h.mockCreate.mockResolvedValue({
+      content: [{ type: 'tool_use', id: 'toolu_nocaller', name: VISION_VERDICT_TOOL_NAME, input: CLEAN_RESPONSE }],
+      stop_reason: 'tool_use',
+      usage: { input_tokens: 10, output_tokens: 5 },
+    })
+    vi.mocked(logMessageUsage).mockClear()
+
+    await runVisionGateOnImage({ data: 'ZmFrZQ==', mediaType: 'image/jpeg' })
+
+    expect(logMessageUsage).toHaveBeenCalledWith(
+      'social-vision-gate',
+      expect.any(String),
+      'social-vision-gate/callVision',
+      expect.anything(),
+      undefined,
+    )
+  })
+
+  it('forwards refId and caller together through runVisionGate (#20866)', async () => {
+    h.mockCreate.mockReset()
+    h.mockCreate.mockResolvedValue({
+      content: [{ type: 'tool_use', id: 'toolu_both', name: VISION_VERDICT_TOOL_NAME, input: CLEAN_RESPONSE }],
+      stop_reason: 'tool_use',
+      usage: { input_tokens: 10, output_tokens: 5 },
+    })
+    vi.mocked(logMessageUsage).mockClear()
+
+    await runVisionGateOnImage({ data: 'ZmFrZQ==', mediaType: 'image/jpeg' }, undefined, 'run-456', 'notebook-echo-rehost')
+
+    expect(logMessageUsage).toHaveBeenCalledWith(
+      'social-vision-gate',
+      expect.any(String),
+      'notebook-echo-rehost',
+      expect.anything(),
+      'run-456',
+    )
+  })
+
   // The second half of the same DONE WHEN: when the strict retry is ALSO
   // truncated, the failure must still reach Sentry, and the report must
   // name the stop reason rather than reading as an ordinary malformed-JSON

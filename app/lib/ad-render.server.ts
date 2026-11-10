@@ -122,7 +122,7 @@ async function defaultDeps(): Promise<RenderDeps> {
         }
       }
     },
-    gateVision: buf => vgb.gateImageBuffer(buf, undefined, undefined, 'ads'),
+    gateVision: buf => vgb.gateImageBuffer(buf, undefined, undefined, 'ads', 'ad-render'),
     gateFidelity: (buf, ref) => vgb.gateProductFidelityBuffer(buf, ref, undefined, undefined, 'ads'),
     compose: composeAd,
     upload: (p, buf, contentType) => blobPut(p, buf, { contentType }),

@@ -146,7 +146,9 @@ describe('generateAndPlaceHomepageImage vision gate (ticket #10483)', () => {
     const { generateAndPlaceHomepageImage } = await import('./homepage-media.server')
     await generateAndPlaceHomepageImage({ prompt: 'p', alt: 'a', target: TARGET, runId: 1099 })
 
-    expect(gateImageBuffer).toHaveBeenCalledWith(expect.any(Buffer), undefined, 1099, 'homepage')
+    // ticket #20866: gateImageBuffer's new 5th arg is the real call-site
+    // label forwarded to api_token_log.caller.
+    expect(gateImageBuffer).toHaveBeenCalledWith(expect.any(Buffer), undefined, 1099, 'homepage', 'homepage-media')
   })
 
   it('still gates with team "homepage" when no runId is given', async () => {
@@ -157,6 +159,6 @@ describe('generateAndPlaceHomepageImage vision gate (ticket #10483)', () => {
     const { generateAndPlaceHomepageImage } = await import('./homepage-media.server')
     await generateAndPlaceHomepageImage({ prompt: 'p', alt: 'a', target: TARGET })
 
-    expect(gateImageBuffer).toHaveBeenCalledWith(expect.any(Buffer), undefined, undefined, 'homepage')
+    expect(gateImageBuffer).toHaveBeenCalledWith(expect.any(Buffer), undefined, undefined, 'homepage', 'homepage-media')
   })
 })
