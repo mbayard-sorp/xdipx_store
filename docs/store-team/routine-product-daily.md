@@ -99,6 +99,25 @@ For each candidate apply editorial + strategic judgment (catalog fit, current th
 brand quality, needs-review complexity). **Margin is not a factor** (`<financial_stance>`). Decide
 approve / reject (with reason) / watch, then execute with the **bulk `ids` form**, one call per intent:
 
+**Be Savage apparel ruling (2026-11-09 weekly review).** Approve only the bodystocking,
+stocking-and-lace, sheer, caged, or crisscross-bodysuit titles (hand-check images); leave dresses,
+skirts, shorts, suits, bikinis, and sleeve/leopard festival pieces pending as **PARKED**, not
+rejected — Tier-C auto-import is off and this brand's qty (25) is below the 60 floor, so the auto
+path can't reach them and a mass reject would cost about two full 20-action days for no effect.
+Exclude parked Be Savage rows from the queue-depth figure in Step 5's daily summary.
+
+**Price-band weighting (2026-11-09 weekly review).** Couples/remote hardware at $100+ and
+consumables are the profitable bands (8 of 9 lifetime imported lines are under-$50 consumables or
+accessories; the 2026-11-04 and 2026-11-06 orders were $100+ couples/remote hardware). Report each
+day how many approvals land at or above $60 and at or above $100 in Step 5's summary. Don't
+cap-fill with under-$25 tier-B single-variant deepeners just to reach the 20-action cap.
+
+**Don't report an exhausted category as a supply gap (2026-11-09 weekly review).** "Zero
+anal/wand/suction candidates" is not a supply-gap finding once the main feed has already been read
+for those categories and 204+ candidates in them have already been imported or rejected — that's
+exhaustion, not a gap. Only report a category as under-sourced when the feed itself hasn't been
+checked for it recently.
+
 **Costume/Halloween/mask-tagged candidates, 2026-10-01 through 10-31 only.** The standing default
 rejects these as off-catalog filler for a wellness store (precedent: Bijoux Indiscrets Dalila Decal
 Eye Mask, rejected under the August Reset theme). For the duration of the Costume, Mask & Lingerie
@@ -206,9 +225,10 @@ row.
 
 ## Step 5: Report + finish
 
-Post one `decision` event under your `$RUN_ID` (`agentRole:'product-manager'`): queue depth,
-approve/reject/watch executed (and any skipped due to cap or kill switch), price-drop rows surfaced,
-downstream health, top opportunities with the numbers. **Reject-rate math uses `reviewed_at`, never
+Post one `decision` event under your `$RUN_ID` (`agentRole:'product-manager'`): queue depth
+(excluding parked rows, e.g. Be Savage — see Step 3), approve/reject/watch executed (and any
+skipped due to cap or kill switch), price-drop rows surfaced, approvals at or above $60 and at or
+above $100, downstream health, top opportunities with the numbers. **Reject-rate math uses `reviewed_at`, never
 `updated_at`**: a discovery run that still sees an already-rejected row in-feed bumps `updated_at`
 with no new review (`import-monitor.server.ts`'s "never reopen" behavior), so an `updated_at`-based
 count inflates the reject rate.
