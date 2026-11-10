@@ -478,12 +478,17 @@ export async function getSocialImageCostPerPost(
   const { sql } = await import('drizzle-orm')
   const days = opts.days ?? 7
   const platform = opts.platform ?? 'instagram'
+  // Drizzle's neon-http driver serializes an interpolated JS array as a
+  // Postgres ROW/record literal, not an array literal, so `${jsArray}::text[]`
+  // throws `cannot cast type record to text[]` on every call. Build the
+  // ARRAY[...] literal explicitly via sql.join instead (ticket #20865).
+  const featuresArray = sql.join(SOCIAL_IMAGE_PIPELINE_FEATURES.map(f => sql`${f}`), sql`, `)
   const result = await db.execute(
     sql`
       WITH spend AS (
         SELECT SUM(est_cost_usd) AS total_cost_usd, SUM(request_count) AS total_vision_calls
         FROM api_token_log
-        WHERE feature = ANY(${SOCIAL_IMAGE_PIPELINE_FEATURES}::text[])
+        WHERE feature = ANY(ARRAY[${featuresArray}]::text[])
           AND ts >= current_date - ${days}::int
       ),
       posted AS (

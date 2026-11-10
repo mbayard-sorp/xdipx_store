@@ -35,10 +35,14 @@ function fmtUsd(n: number): string {
 export async function loader({ request }: LoaderFunctionArgs) {
   await requireAdmin(request)
 
+  // Defense in depth: one rollup throwing must not take the whole page down
+  // with it (#20865 — the social-image-cost query itself threw for 4 weeks on
+  // every call, hard-500ing this entire loader). The real fix is the query;
+  // this just stops the next broken rollup from doing the same thing again.
   const [rows, blockRows, socialImageCost] = await Promise.all([
-    getDailyTokenRollup({ days: 30 }),
-    getMediaBlockRollup({ days: 30 }),
-    getSocialImageCostPerPost({ days: 7 }),
+    getDailyTokenRollup({ days: 30 }).catch(() => []),
+    getMediaBlockRollup({ days: 30 }).catch(() => []),
+    getSocialImageCostPerPost({ days: 7 }).catch(() => null),
   ])
 
   // Parse numeric strings from the view's DECIMAL / SUM columns.
@@ -136,35 +140,44 @@ export default function UsagePage() {
 
       {/* Social imagery pipeline cost per post (ticket #14938) */}
       <div className="bg-paper rounded-xl border border-line p-4 space-y-2">
-        <p className="text-sm font-semibold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
-          Social imagery cost per post — {socialImageCost.platform}, last {socialImageCost.days}d
-        </p>
-        <div className="flex flex-wrap gap-6 text-sm">
-          <div>
-            <span className="text-ink-4 text-xs">Cost / published post</span>
-            <p className="font-mono text-ink font-semibold">
-              {socialImageCost.costPerPost == null ? '—' : fmtUsd(socialImageCost.costPerPost)}
-            </p>
-          </div>
-          <div>
-            <span className="text-ink-4 text-xs">Vision calls / published post</span>
-            <p className="font-mono text-ink font-semibold">
-              {socialImageCost.visionCallsPerPost == null ? '—' : fmtNum(socialImageCost.visionCallsPerPost, 1)}
-            </p>
-          </div>
-          <div>
-            <span className="text-ink-4 text-xs">Published posts</span>
-            <p className="font-mono text-ink font-semibold">{socialImageCost.publishedPosts}</p>
-          </div>
-          <div>
-            <span className="text-ink-4 text-xs">Window spend</span>
-            <p className="font-mono text-ink font-semibold">{fmtUsd(socialImageCost.totalCostUsd)}</p>
-          </div>
-        </div>
-        {socialImageCost.publishedPosts === 0 && (
-          <p className="text-xs text-coral">
-            Zero posts published in this window — any spend above is drafts that never shipped.
+        {socialImageCost == null ? (
+          <p className="text-sm text-ink-4">
+            Social imagery cost per post — unavailable right now (the query threw; the rest of this
+            page is unaffected).
           </p>
+        ) : (
+          <>
+            <p className="text-sm font-semibold text-ink" style={{ fontFamily: 'var(--font-display)' }}>
+              Social imagery cost per post — {socialImageCost.platform}, last {socialImageCost.days}d
+            </p>
+            <div className="flex flex-wrap gap-6 text-sm">
+              <div>
+                <span className="text-ink-4 text-xs">Cost / published post</span>
+                <p className="font-mono text-ink font-semibold">
+                  {socialImageCost.costPerPost == null ? '—' : fmtUsd(socialImageCost.costPerPost)}
+                </p>
+              </div>
+              <div>
+                <span className="text-ink-4 text-xs">Vision calls / published post</span>
+                <p className="font-mono text-ink font-semibold">
+                  {socialImageCost.visionCallsPerPost == null ? '—' : fmtNum(socialImageCost.visionCallsPerPost, 1)}
+                </p>
+              </div>
+              <div>
+                <span className="text-ink-4 text-xs">Published posts</span>
+                <p className="font-mono text-ink font-semibold">{socialImageCost.publishedPosts}</p>
+              </div>
+              <div>
+                <span className="text-ink-4 text-xs">Window spend</span>
+                <p className="font-mono text-ink font-semibold">{fmtUsd(socialImageCost.totalCostUsd)}</p>
+              </div>
+            </div>
+            {socialImageCost.publishedPosts === 0 && (
+              <p className="text-xs text-coral">
+                Zero posts published in this window — any spend above is drafts that never shipped.
+              </p>
+            )}
+          </>
         )}
       </div>
 
