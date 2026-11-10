@@ -303,6 +303,7 @@ extend freely — additions need a slug, problem, and target query):
 | 32 | how-often-do-couples-have-sex | Frequency comparison anxiety: doing arithmetic on your own sex life against a number you half-heard, and managing the count instead of the sex | "how often do couples have sex" |
 | 33 | we-bought-a-sex-toy-and-never-used-it | A toy both partners agreed to buy went badly or just awkwardly on the first try and now sits unused, with neither partner raising it again because raising it means reopening the moment it went wrong | "we bought a sex toy and never used it again" |
 | 34 | why-does-a-toy-feel-different-on-different-days | The same toy that produced a reliable result last week does almost nothing tonight, and the reader reads the variance as the toy failing (so they shop for a stronger one) or their own body breaking (so they stop), when the usual move, escalating intensity in the moment, widens the gap † | "why does my vibrator feel different some days" |
+| 35 | is-it-ok-to-give-your-partner-a-sex-toy-as-a-gift | Someone wants to give their partner a sex toy and freezes, because a wrapped gift arrives finished, with an occasion attached and a social script that says the first correct response is thank you, so the honest answer and the polite answer are not the same answer and the receiver pays for "no" on the spot | "is it ok to give your partner a sex toy as a gift" |
 
 † = health-adjacent; the "worth seeing a clinician if…" line, with its tier, is mandatory (see above).
 
@@ -338,6 +339,22 @@ or medication). Those three are all about a direction of travel; row 34 is about
 apart.
 `check-topic-collision.ts` was clean against 20 prior posts on heading, title and shared-embed
 surfaces, and `check-self-consistency.ts` cross-post pass was clean against all 112 published
+posts.
+
+Row 35 is the fifth (authored by content run 1947, 2026-11-10, serving calendar row 48, the Instagram
+"Two of You, Cuffing Season" couples campaign that opens that day and runs to 11-23, and landing ahead of
+calendar row 47 "Gift It Plainly" on 11-16). By that run the bank was spent for the FOURTH time: rows 1-14,
+16-24, 27, 28 and 30-34 all had published posts, rows 25, 26 and 29 are retired, row 15 is still parked, and
+the `seoContentBrief` queue held no `real-talk` brief at all (its seven queued rows were four
+`wellness-basics`, one `comparisons`, one `guides`, and one unplanned `wellness-basics`). Row 35 targets the
+gift framing, which no row covered: the toy arrives WRAPPED, with an occasion and an audience attached and no
+undo, which is a different problem from every adjacent row. It is distinct from row 7 (raising the subject in
+conversation, where the receiver can take a day and answer at their own speed), from row 21 (a partner who
+refuses outright), from row 22 (a partner who feels replaced by a toy already in use), and from row 33 (a toy
+bought together that went badly once): in none of those is the object a gift the receiver must react to in
+real time, in front of the giver, about a decision already made and paid for. `check-slug-precheck.ts`
+returned slug-free, `check-topic-collision.ts` was clean against 20 prior posts on heading, title and
+shared-embed surfaces, and `check-self-consistency.ts` cross-post pass was clean against all 116 published
 posts.
 
 **Append-only convention for this block (added 2026-11-06, #20313).** The next content run that
