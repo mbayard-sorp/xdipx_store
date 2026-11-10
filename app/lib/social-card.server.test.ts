@@ -75,7 +75,9 @@ describe('renderAndUploadSocialCard', () => {
       productHandle: 'womanizer-next-sage',
       source: 'generated',
     }))
-    expect(deps.runVisionGate).toHaveBeenCalledWith(result.url)
+    // ticket #20866: runVisionGate's new 4th arg is the real call-site label
+    // forwarded to api_token_log.caller.
+    expect(deps.runVisionGate).toHaveBeenCalledWith(result.url, undefined, undefined, 'social-card')
     expect(deps.recordVisionVerdict).toHaveBeenCalledWith(777, expect.objectContaining({ pass: true }))
     expect(result).toEqual(expect.objectContaining({
       url: 'https://cdn.shopify.com/files/social-card-stroker-20261004-2-ab12cd.jpg',

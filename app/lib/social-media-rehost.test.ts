@@ -68,7 +68,9 @@ describe('rehostSocialImage', () => {
       source: 'upload',
       tags: ['source:notebook-hero', 'blog-slug:why-lube-matters'],
     }))
-    expect(deps.runVisionGate).toHaveBeenCalledWith(result.url)
+    // ticket #20866: runVisionGate's new 4th arg is the real call-site label
+    // forwarded to api_token_log.caller.
+    expect(deps.runVisionGate).toHaveBeenCalledWith(result.url, undefined, undefined, 'notebook-echo-rehost')
     expect(deps.recordVisionVerdict).toHaveBeenCalledWith(888, expect.objectContaining({ pass: true }))
     expect(result).toEqual(expect.objectContaining({ assetId: 888 }))
     expect(result.url).toBe(`https://cdn.shopify.com/files/${filename}`)

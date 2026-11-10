@@ -469,8 +469,15 @@ function cacheableSystem(system: string): Anthropic.TextBlockParam[] {
  * api.team.vision-gate.tsx) reaches `logMessageUsage` and ultimately
  * `api_token_log.ref_id`, instead of being silently dropped on the floor the
  * way every vision-gate spend row was before this ticket.
+ *
+ * `caller` (ticket #20866, same mirror of the `refId` precedent) is the
+ * per-call-site label that reaches `api_token_log.caller`. Every call site
+ * used to log the same constant string regardless of which of the ~5 actual
+ * call sites triggered it, so nobody could size any one site's share of
+ * social-vision-gate's $40.97/mo without reading code. Defaults to that same
+ * constant when a caller passes none, so this is purely additive.
  */
-function buildDefaultDeps(refId?: string): Required<VisionGateDeps> {
+function buildDefaultDeps(refId?: string, caller?: string): Required<VisionGateDeps> {
   return {
   fetchImageBase64: async (url) => {
     const res = await fetch(url)
@@ -535,7 +542,7 @@ function buildDefaultDeps(refId?: string): Required<VisionGateDeps> {
       ],
     })
     const { logMessageUsage } = await import('./token-log.server')
-    logMessageUsage('social-vision-gate', SONNET, 'social-vision-gate/callVision', msg.usage, refId)
+    logMessageUsage('social-vision-gate', SONNET, caller ?? 'social-vision-gate/callVision', msg.usage, refId)
 
     if (!strict) {
       const toolBlock = msg.content.find(
@@ -612,8 +619,8 @@ function buildDefaultDeps(refId?: string): Required<VisionGateDeps> {
   }
 }
 
-function resolve(deps?: VisionGateDeps, refId?: string): Required<VisionGateDeps> {
-  return { ...buildDefaultDeps(refId), ...(deps ?? {}) }
+function resolve(deps?: VisionGateDeps, refId?: string, caller?: string): Required<VisionGateDeps> {
+  return { ...buildDefaultDeps(refId, caller), ...(deps ?? {}) }
 }
 
 /**
@@ -966,8 +973,9 @@ export async function runVisionGateOnImage(
   image: { data: string; mediaType: string },
   deps?: VisionGateDeps,
   refId?: string,
+  caller?: string,
 ): Promise<VisionVerdict> {
-  const d = resolve(deps, refId)
+  const d = resolve(deps, refId, caller)
   const first = await getOneVerdict(image, d)
   return confirmExposureChecks(image, first, d)
 }
@@ -978,10 +986,15 @@ export async function runVisionGateOnImage(
  * rather than propagating, because a generation step that cannot complete
  * this check must treat that exactly like a real anatomy defect.
  */
-export async function runVisionGate(imageUrl: string, deps?: VisionGateDeps, refId?: string): Promise<VisionVerdict> {
+export async function runVisionGate(
+  imageUrl: string,
+  deps?: VisionGateDeps,
+  refId?: string,
+  caller?: string,
+): Promise<VisionVerdict> {
   try {
-    const { data, mediaType } = await resolve(deps, refId).fetchImageBase64(imageUrl)
-    return await runVisionGateOnImage({ data, mediaType }, deps, refId)
+    const { data, mediaType } = await resolve(deps, refId, caller).fetchImageBase64(imageUrl)
+    return await runVisionGateOnImage({ data, mediaType }, deps, refId, caller)
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     return failClosedVerdict(`Vision gate check could not complete: ${message}`)
@@ -1020,8 +1033,9 @@ export async function regateAsset(
   url: string,
   deps?: VisionGateDeps,
   refId?: string,
+  caller?: string,
 ): Promise<VisionVerdict> {
-  const verdict = await runVisionGate(url, deps, refId)
+  const verdict = await runVisionGate(url, deps, refId, caller)
   await recordVisionVerdict(assetId, verdict, deps)
   return verdict
 }

@@ -174,7 +174,12 @@ export async function gateVideoFrames(
 ): Promise<VideoFrameGateResult> {
   const frameVerdicts: VisionVerdict[] = []
   for (const f of frames) {
-    const verdict = await runVisionGateOnImage({ data: f.buffer.toString('base64'), mediaType: 'image/jpeg' }, deps?.visionDeps)
+    const verdict = await runVisionGateOnImage(
+      { data: f.buffer.toString('base64'), mediaType: 'image/jpeg' },
+      deps?.visionDeps,
+      undefined,
+      'video-frame-seed',
+    )
     frameVerdicts.push(verdict)
     if (!verdict.pass) {
       return {

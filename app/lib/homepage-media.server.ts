@@ -119,7 +119,7 @@ export async function generateAndPlaceHomepageImage(
   let rejectNotes = ''
   let gated = false
   for (let attempt = 1; attempt <= HOMEPAGE_VISION_MAX_ATTEMPTS; attempt++) {
-    const verdict = await gateImageBuffer(candidate, undefined, opts.runId, 'homepage')
+    const verdict = await gateImageBuffer(candidate, undefined, opts.runId, 'homepage', 'homepage-media')
     if (verdict.pass) {
       gated = true
       break
