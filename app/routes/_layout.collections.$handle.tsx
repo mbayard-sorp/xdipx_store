@@ -375,6 +375,13 @@ export default function CollectionPage() {
   const merchandisedFaq = merchandised
     ? (categoryBlocks!.find(b => b._type === 'faqBlock') ?? null)
     : null
+  // Exactly one image per page may be fetchPriority=high. The masthead hero
+  // renders under precisely this condition (see the `<picture>` below), so when
+  // it renders it owns the LCP and the grid's first card must stay lazy; when
+  // it does not render, the first card IS the LCP and takes the slot. Kept as
+  // one named expression used in both places so the two cannot drift apart and
+  // leave the page with two priority images or none.
+  const mastheadOwnsLcp = isCanonicalPage && !merchandised && !!heroImageUrl
   const [params, setParams] = useSearchParams()
 
   // GA4: this route sold products with zero analytics while it was a plain
@@ -490,7 +497,7 @@ export default function CollectionPage() {
         </div>
       ) : null}
 
-      {isCanonicalPage && !merchandised && heroImageUrl && (
+      {mastheadOwnsLcp && heroImageUrl && (
         <div className="mb-6 overflow-hidden rounded-2xl border border-line bg-cream-2">
           <picture>
             <source
@@ -621,6 +628,7 @@ export default function CollectionPage() {
                   <VaultCard
                     deal={deal}
                     quiet={handle === 'on-sale'}
+                    priority={i === 0 && !mastheadOwnsLcp}
                     {...(starred[deal.handle] ? { starred: { reason: starred[deal.handle]! } } : {})}
                   />
                 </div>

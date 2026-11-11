@@ -16,9 +16,17 @@ interface VaultCardProps {
       below it does discount drama). The price is ink for every card now
       (ticket #336), so this no longer controls price colour. */
   quiet?: boolean
+  /**
+   * This card is the page's LCP candidate: its first image loads eagerly at
+   * fetchPriority=high. Exactly one card per page may set it, and only when no
+   * masthead image above the grid already owns the LCP. Default false — see the
+   * note on `CardMediaCarousel`'s own `priority` prop for why the card cannot
+   * decide this for itself.
+   */
+  priority?: boolean
 }
 
-export function VaultCard({ deal, starred, quiet = false }: VaultCardProps) {
+export function VaultCard({ deal, starred, quiet = false, priority = false }: VaultCardProps) {
   const discount = deal.msrp > 0
     ? Math.round(((deal.msrp - deal.dealPrice) / deal.msrp) * 100)
     : 0
@@ -103,6 +111,7 @@ export function VaultCard({ deal, starred, quiet = false }: VaultCardProps) {
             title={deal.seoTitle}
             {...(deal.heroVideo ? { heroVideo: deal.heroVideo } : {})}
             images={deal.images}
+            priority={priority}
           />
 
           {!deal.inStock && (

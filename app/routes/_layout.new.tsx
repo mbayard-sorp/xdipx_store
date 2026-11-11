@@ -198,8 +198,11 @@ export default function NewArrivalsPage() {
 
       {hasProducts ? (
         <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-          {deals.map(deal => (
-            <VaultCard key={deal.id} deal={deal} />
+          {/* `/new` has no masthead image above this grid, so the first card
+              IS the LCP and is the one image on the page that may be
+              fetchPriority=high. Every other card stays lazy. */}
+          {deals.map((deal, i) => (
+            <VaultCard key={deal.id} deal={deal} priority={i === 0} />
           ))}
         </div>
       ) : (
