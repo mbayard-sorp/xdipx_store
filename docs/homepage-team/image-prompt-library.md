@@ -2850,3 +2850,14 @@ Atlas `seedream-4.5-edit`, 4:3. Asset `image-312b42ea5ce76e376e067e816ef58c65cdb
 - **Keeper (r4 c1):** prompt = "Bright high-key editorial product photograph, soft diffused daylight, very pale plum-soft seamless backdrop ...
   The iroha temari HANA clitoral vibrator from the reference photo reproduced exactly ... petal shapes in the same medium rose-pink as the
   reference ... large in frame, left of center ... negative space on the right ... no text, no people, no hands ...". Minor: faint lilac rim at base.
+
+## Notebook §0-P keeper (guides, bed restraint) — content run 1969, "What Is an Under-the-Bed Restraint System, and How Do You Use One?"
+
+`blogPost-what-is-an-under-the-bed-restraint-system-and-how-do-you-use-one` (`guides`, archetype B, product-only, no people). Black Under The Bed Restraint System (`under-the-bed-restraint-system-black`), black webbing and two black cuffs with silver D-rings across rumpled white bedding, bright morning window light with a faint blush tint. Asset `image-5fb866928b0fca5dcdbc20248abedb46d7a46433-2304x1728-jpg`, 4:3, `atlas/seedream-4.5-edit`. Route: `--feature content-blog --run-id 1969`, same `--prompt` repeated on upload. `check-hero-embed-match.ts` exits 0.
+cluster: bondage-restraints
+cast: none
+- **Ref-image:** Shopify photo `21408D.jpg` (clean unboxed packshot, cuffs and straps on white). Photos A-C are boxes with a model on them and E has no cuffs; do not use those as refs.
+- **Rounds:** three rounds of 2 candidates. R1 kept but the checker flagged three catalog collisions from prompt words. R2 (collision-free wording) candidate 1 showed a leg in a leather cuff (reject), candidate 2 blocked by the fidelity gate (finish drift: "buckled cuff" rendered leather-look). R3 named "matte fabric with a fuzzy lining and a hook-and-loop strap, no buckle, no leather, no pebbled texture"; candidate 2 kept (closest to the packshot), candidate 1 also clean.
+- **Lesson (embed-match):** on a bondage or restraint topic the category vocabulary collides with other SKUs. Keep "mattress" (with under, bed, restraint, system it names `me-you-us-bed-restraints`), "wrist", "plain" and "padded" out of BOTH prompt and alt unless the post embeds the SKU that owns them. Use "edge of the bed", "bare white wall", "black cuff". Keep black, under, bed, restraint, system. A post-hoc prompt edit is not allowed, so this costs a regeneration.
+- **Lesson (fidelity):** the real cuff is fabric with a hook-and-loop strap; "buckled" makes the model draw a leather buckle cuff. Also avoid "nylon" in the alt (unsourced spec flag).
+- **Alt:** Black Under The Bed Restraint System from Sportsheets, black straps and two black cuffs with silver D-rings running across rumpled white bedding and down over the edge of the bed in bright morning window light
