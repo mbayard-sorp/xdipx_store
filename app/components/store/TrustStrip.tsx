@@ -90,17 +90,28 @@ export function TrustStrip({
   return (
     <Reveal variant="fade" as="div" className={`border-t border-line ${className ?? ''}`}>
       <div className="mx-auto grid max-w-[1320px] grid-cols-2 gap-x-6 gap-y-3.5 px-6 py-[18px] md:grid-cols-5 md:items-start md:gap-x-8 md:px-16">
-        {items.map(item => (
-          <div key={item.headline} className="flex items-start gap-2.5 text-[13.5px] text-ink-3" style={BODY}>
-            <span className="mt-px shrink-0 text-sage" aria-hidden="true">♥</span>
-            <span>
-              {item.headline}
-              {item.subheadline && (
-                <span className="block text-[12px] text-ink-4">{item.subheadline}</span>
-              )}
-            </span>
-          </div>
-        ))}
+        {items.map((item, i) => {
+          // At 375 this is a 2-col grid: an odd item count otherwise orphans
+          // the last item alone in column 1 with an empty cell beside it
+          // (design-critic run 1967, five fallback items). Span it full width
+          // below md, where the real 5-col grid gives it its own cell anyway.
+          const isOrphan = i === items.length - 1 && items.length % 2 === 1
+          return (
+            <div
+              key={item.headline}
+              className={`flex items-start gap-2.5 text-[13.5px] text-ink-3 ${isOrphan ? 'col-span-2 md:col-span-1' : ''}`}
+              style={BODY}
+            >
+              <span className="mt-px shrink-0 text-sage" aria-hidden="true">♥</span>
+              <span>
+                {item.headline}
+                {item.subheadline && (
+                  <span className="block text-[12px] text-ink-4">{item.subheadline}</span>
+                )}
+              </span>
+            </div>
+          )
+        })}
       </div>
     </Reveal>
   )

@@ -247,39 +247,46 @@ function HeroSensationDial({ dial }: { dial: SensationDialV2 }) {
   if (items.length < HERO_DIAL_MIN_ITEMS) return null
 
   return (
-    <div className="mt-4 flex flex-wrap items-start gap-x-7 gap-y-3">
-      <span
-        className="pt-px text-[10px] uppercase tracking-[0.18em] text-ink-4"
-        style={MONO}
-      >
+    <div className="mt-4">
+      {/* Own row, own type role (doctrine §2 reserves mono/kicker for section
+          labels): this is a caption introducing the readout below, not a
+          fourth dial with no data, so it cannot share the dial labels'
+          mono/uppercase/ink-4 treatment (design-critic run 1967). */}
+      <p className="text-[11px] text-ink-3" style={BODY}>
         How it feels
-      </span>
-      {items.map(({ label, value }) => (
-        <div key={label}>
-          <span
-            className="block text-[10px] uppercase tracking-[0.16em] text-ink-4"
-            style={MONO}
-          >
-            {label}
-          </span>
-          <div
-            className="mt-1.5 flex gap-1"
-            role="img"
-            aria-label={`${label}: ${value} of 5`}
-          >
-            {Array.from({ length: 5 }).map((_, i) => (
-              <span
-                key={i}
-                aria-hidden="true"
-                className={[
-                  'h-1.5 w-5 rounded-full',
-                  i === value - 1 ? 'bg-plum' : i < value ? 'bg-sage' : 'bg-line-2',
-                ].join(' ')}
-              />
-            ))}
+      </p>
+      {/* Real grid, not flex-wrap: wrapped flex items size to content, so two
+          stacked rows land on different column widths (design-critic run
+          1967 measured a 22px offset between them at 375). A grid keeps every
+          row on the same column tracks at every breakpoint. */}
+      <div className="mt-2 grid grid-cols-2 gap-x-7 gap-y-3 md:grid-cols-3">
+        {items.map(({ label, value }) => (
+          <div key={label}>
+            <span
+              className="block text-[10px] uppercase tracking-[0.16em] text-ink-4"
+              style={MONO}
+            >
+              {label}
+            </span>
+            <div
+              className="mt-1.5 flex gap-1"
+              role="img"
+              aria-label={`${label}: ${value} of 5`}
+            >
+              {Array.from({ length: 5 }).map((_, i) => (
+                <span
+                  key={i}
+                  aria-hidden="true"
+                  className={[
+                    'h-1.5 w-5 rounded-full',
+                    i === value - 1 ? 'bg-plum' : i < value ? 'bg-sage' : 'bg-line-2',
+                  ].join(' ')}
+                />
+              ))}
+            </div>
           </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   )
 }
