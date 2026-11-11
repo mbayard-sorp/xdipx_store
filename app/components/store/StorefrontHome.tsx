@@ -1139,23 +1139,33 @@ function PhotoBand({
         className="relative flex min-h-[360px] flex-wrap items-end justify-between gap-5 overflow-hidden rounded-[var(--radius-lg)] bg-coral-soft p-8 transition-transform hover:-translate-y-0.5 md:p-14"
       >
         {hasImage && (
-          <>
-            <OptimizedImage
-              src={block!.image!.url!}
-              alt={block!.image!.alt ?? heading}
-              sizes="100vw"
-              className="absolute inset-0 h-full w-full object-cover"
-            />
-            {/* Shared PHOTO_SCRIM_STYLE, not a hand-typed gradient — see its
-                definition above for the contrast-floor math (#8417). */}
-            <div
-              className="absolute inset-0"
-              style={{ background: PHOTO_SCRIM_STYLE }}
-              aria-hidden="true"
-            />
-          </>
+          <OptimizedImage
+            src={block!.image!.url!}
+            alt={block!.image!.alt ?? heading}
+            sizes="100vw"
+            className="absolute inset-0 h-full w-full object-cover"
+          />
         )}
-        <div className="relative z-[1] flex-1 basis-[320px]">
+        <div
+          className={[
+            'relative z-[1] flex-1 basis-[320px]',
+            // Scrim scoped to the text's own box, not the whole image
+            // (ticket #21294, design-critic run 1967): the old full-`inset-0`
+            // overlay darkened the entire photo, so a bright, paid-for asset
+            // read as a near-black box well past the frame doctrine says to
+            // leave untouched. A background painted on this div instead
+            // covers only the area text actually occupies, which grows and
+            // shrinks with it automatically — no fixed-height guess needed.
+            // The negative margin/padding pair bleeds that coverage a little
+            // beyond the glyphs' tight box without changing this column's
+            // outer size in the flex row. Still the exact shared
+            // PHOTO_SCRIM_STYLE gradient (#8417), so the alignment-agnostic
+            // 0.78-0.85 contrast floor that guards variable-length CMS copy
+            // is unchanged — only the covered area shrank, not the floor.
+            hasImage ? '-my-5 rounded-[var(--radius-lg)] py-5 md:-my-7 md:py-7' : '',
+          ].join(' ')}
+          style={hasImage ? { background: PHOTO_SCRIM_STYLE } : undefined}
+        >
           <p
             className="mb-3.5 text-[11px] uppercase tracking-[0.18em]"
             style={{ ...MONO, color: hasImage ? 'white' : 'var(--color-ink-3)' }}
