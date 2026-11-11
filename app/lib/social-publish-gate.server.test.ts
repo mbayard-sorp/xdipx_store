@@ -485,6 +485,51 @@ describe('cast/product casting gate (ADR-015, ticket #10730)', () => {
     )
     expect(checks(r)).not.toContain('cast-target-mismatch')
   })
+
+  // Ticket #21150, row 579 (together-blended-pleasure-remote-controlled-
+  // triple-pronged-vibrator): a packshot-card render (satori+resvg brand
+  // card on a flat ground, no person/body/hands anywhere in the frame,
+  // vision-gate PASS) BLOCKed with zero cast named, even though there was no
+  // cast pairing to check in the first place. instagram-campaigns.md §2.9a
+  // licenses this renderer as a cast-free, product-only format.
+  describe('rendered-card exemption (ticket #21150)', () => {
+    const CARD_MEDIA = [`${CDN}/social-card-together-blended-pleasure-20261110-1-0c6634.jpg`]
+
+    it('row 579: a cast-free packshot card with zero cast named no longer blocks', async () => {
+      const r = await runChecks(
+        { caption: CLEAN, mediaUrls: CARD_MEDIA, productHandle: 'together-blended-pleasure-remote-controlled-triple-pronged-vibrator', castSlugs: [] },
+        { getAvailability: inStock, getProductTypeDial: noPairingDial, getCastTarget: femaleTarget, getCastPresentations: async () => new Map() },
+      )
+      expect(checks(r)).not.toContain('cast-target-mismatch')
+      expect(r.blocked).toBe(false)
+    })
+
+    it('the same non-universal product with zero cast still blocks on ordinary (non-card) media', async () => {
+      const r = await runChecks(
+        { caption: CLEAN, mediaUrls: GOOD_MEDIA, productHandle: 'le-wand-powerful-petite', castSlugs: [] },
+        { getAvailability: inStock, getProductTypeDial: noPairingDial, getCastTarget: femaleTarget, getCastPresentations: async () => new Map() },
+      )
+      expect(checks(r)).toContain('cast-target-mismatch')
+    })
+
+    it('a mismatched solo cast member paired with a product still blocks even on a card-shaped filename', async () => {
+      // The exemption is for a CAST-FREE render; naming a mismatched cast
+      // member is a real pairing to get wrong regardless of asset shape.
+      const r = await runChecks(
+        { caption: CLEAN, mediaUrls: CARD_MEDIA, productHandle: 'le-wand-powerful-petite', castSlugs: ['marcus'] },
+        { getAvailability: inStock, getProductTypeDial: noPairingDial, getCastTarget: femaleTarget, getCastPresentations: marcusMasculine },
+      )
+      expect(checks(r)).toContain('cast-target-mismatch')
+    })
+
+    it('a mixed post (one card, one ordinary cast photo) still gates on the ordinary photo', async () => {
+      const r = await runChecks(
+        { caption: CLEAN, mediaUrls: [...CARD_MEDIA, ...GOOD_MEDIA], productHandle: 'le-wand-powerful-petite', castSlugs: [] },
+        { getAvailability: inStock, getProductTypeDial: noPairingDial, getCastTarget: femaleTarget, getCastPresentations: async () => new Map() },
+      )
+      expect(checks(r)).toContain('cast-target-mismatch')
+    })
+  })
 })
 
 describe('attempts to sell, the thing Meta actually removes', () => {
