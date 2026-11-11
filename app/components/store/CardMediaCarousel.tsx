@@ -8,9 +8,28 @@ interface CardMediaCarouselProps {
   title:     string
   heroVideo?: HeroVideo
   images:    ProductImage[]
+  /**
+   * The owning card is this page's LCP candidate, so its first slide loads
+   * eagerly at fetchPriority=high. Defaults to false, and that default is the
+   * whole point: a carousel knows which of ITS OWN slides is first, it cannot
+   * know whether its card is the page's LCP. Only the grid rendering the cards
+   * knows that, so only the grid may grant it, and it grants it to one card.
+   *
+   * This used to be decided here as `priority={i === 0}`, where `i` is the
+   * slide index inside one card. Every card's first slide therefore rendered
+   * `<img fetchPriority="high">`, and React DOM emits one
+   * `<link rel="preload" as="image" fetchPriority="high">` per such image
+   * during SSR, so a 24-card PLP shipped 24 high-priority image preloads that
+   * all raced each other and the real LCP for the mobile connection. Measured
+   * live 2026-11-11: /collections/pleasure 29, /collections/play 29,
+   * /collections/wands 24, /collections/couples-vibrators 25 (1 masthead +
+   * 24 cards), /new 25. Same defect class, same mechanism, as the homepage
+   * grid's ticket #603, whose fix is written up in StorefrontHome.tsx.
+   */
+  priority?: boolean
 }
 
-export function CardMediaCarousel({ cardId, title, heroVideo, images }: CardMediaCarouselProps) {
+export function CardMediaCarousel({ cardId, title, heroVideo, images, priority = false }: CardMediaCarouselProps) {
   const trackRef = useRef<HTMLDivElement>(null)
   const [activeIdx, setActiveIdx] = useState(0)
 
@@ -51,7 +70,7 @@ export function CardMediaCarousel({ cardId, title, heroVideo, images }: CardMedi
                 src={slide.image.url}
                 alt={slide.image.altText || title}
                 className="w-full h-full object-cover"
-                priority={i === 0}
+                priority={priority && i === 0}
                 sizes="(min-width: 768px) 25vw, 50vw"
                 widths={[240, 360, 480, 720]}
                 fallbackWidth={480}
