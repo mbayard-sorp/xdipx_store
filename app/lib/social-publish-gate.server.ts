@@ -1188,7 +1188,23 @@ export async function runDeterministicPublishChecks(
   // site 1) is a judgment step in an interactive subagent session the
   // unattended publish path never spawns, so this deterministic check is the
   // only place the rule is actually enforced on that path.
-  if (input.productHandle) {
+  //
+  // Ticket #21150: a rendered brand card (`social-card-*`, packshot-card/
+  // plate op) is a cast-free, product-only render by construction — the same
+  // provenance signal `isRenderedCardAsset` already uses above to exempt a
+  // rendered card from the baked-in-text classification. ADR-015's rule is
+  // about a CAST MEMBER being paired with a mismatched product; a card with
+  // no cast member in frame AND no cast member named in the draft has no
+  // pairing to be wrong, and instagram-campaigns.md §2.9a licenses exactly
+  // this renderer as a cast-free, product-only format for the New-in
+  // carousel and standalone product cards. Scoped to every media url being a
+  // rendered card (so a mixed post still gates) AND zero cast named (so a
+  // draft that still claims a mismatched pairing is still caught, regardless
+  // of what the media happens to be).
+  const castSlugs = (input.castSlugs ?? []).filter((s): s is string => !!s && s.trim().length > 0)
+  const allMediaIsRenderedCard = media.length > 0 && media.every(isRenderedCardAsset)
+  const castFreeCardExempt = castSlugs.length === 0 && allMediaIsRenderedCard
+  if (input.productHandle && !castFreeCardExempt) {
     const getCastTarget = deps?.getCastTarget ?? (async (handle: string) => {
       const { getDealByHandle } = await import('./shopify.server')
       const deal = await getDealByHandle(handle)
@@ -1203,8 +1219,6 @@ export async function runDeterministicPublishChecks(
     const castTarget = castTargetRaw === 'male' || castTargetRaw === 'female' || castTargetRaw === 'universal'
       ? castTargetRaw
       : null
-
-    const castSlugs = (input.castSlugs ?? []).filter((s): s is string => !!s && s.trim().length > 0)
 
     const getPresentations = deps?.getCastPresentations ?? (async (slugs: readonly string[]) => {
       const { getApprovedCastMembers } = await import('./sanity.server')
