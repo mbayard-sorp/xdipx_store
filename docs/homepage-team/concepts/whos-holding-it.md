@@ -544,3 +544,103 @@ genuinely distinct from the winner's hesitation input — but it does not get th
 Nº 07 slot, and it is not the fallback either. Any build of it would have to
 wait for the winner and the runner-up to be ruled out, and would still owe the
 register ruling and the tag audit first.
+
+## Shared stance-tag audit, RUN AND RESOLVED — 2026-11-11, Routine B run 1967
+
+`either-or.md` and `whos-holding-it.md` have both carried the same outstanding
+item since 2026-10-07 (ticket #12610): *"This doc's stance axis depends on
+`In-Charge` and `Surrendered`. A single 20-product audit of those two tags
+either unblocks or kills both concepts. Run it once."*
+
+It is run. **It kills the stance axis in both concepts.** The axis is not
+rescuable by rewording the question, because the problem is not the question.
+
+### How it was run, credential-free
+
+No Shopify or Sanity credentials, per the playbook's credential-free probe list.
+`GET /api/team/discovery-vocab` for the live per-tag counts, then ten separate
+draws against `GET /api/discovery?variant=a&budget=300&mood=<TAG>` with a
+different audience or matters facet on each draw, keeping only items whose
+`product.mood` actually carries the tag and deduplicating by handle. Storage tag
+form throughout (`In-Charge`, `Surrendered`), never a rendered chip label. 65
+distinct products reached per tag, against the 20 the audit asked for.
+
+### What the two tags actually mean
+
+Live counts, 2026-11-11: `In-Charge` **247** products, `Surrendered` **313**.
+Those are the two smallest real mood tags in the whole vocabulary, ahead of only
+the single-product `Intimate` artifact. That is the first signal and not the
+finding.
+
+The finding is where they sit:
+
+| | `In-Charge` (65 sampled) | `Surrendered` (65 sampled) |
+|---|---|---|
+| strap-on or harness, by title or `productType` | **33 (50%)** | 3 (4%) |
+| subcategory `Bondage & Kink` | 11 (16%) | **35 (53%)** |
+| subcategory `Anal` | 6 (9%) | 15 (23%) |
+| **those three together** | **50 (76%)** | **53 (81%)** |
+
+`In-Charge` is not a stance. It is a **strap-on harness tag**: half of everything
+carrying it is a harness, and the `Accessories 20` row at the top of its
+subcategory spread is harnesses too. `Surrendered` is not a stance either. It is
+a **restraints-and-plugs tag**: Restraints, Ball Gag, Nipple Clamps, Collar,
+Blindfold, Anal Plug, Anal Beads.
+
+### Why that kills the axis rather than complicating it
+
+A stance question is supposed to cut ACROSS the catalog. Ask someone whether they
+want to take charge or hand it over, and either answer should be able to return a
+vibrator, a lube, a ring, a wand, lingerie. These two poles instead resolve to two
+disjoint product shelves that barely overlap with each other and barely reach the
+rest of the store. Answer "I want to be in charge" and the instrument shows you a
+wall of harnesses. Answer "I want to hand it over" and it shows you restraints and
+butt plugs.
+
+Mission brief §6 already rules on exactly this shape, for presets: *"The label
+must keep its promise... if the products do not look like what the label promises,
+rename the preset or retag the products; never ship the mismatch."* A discovery
+instrument is held to that rule at least as tightly as a filter pill, because the
+instrument asks the question itself and the visitor reads the result as an answer.
+
+It also explains itself. These tags were written by the product enricher one
+product at a time, and from inside a single product page "who is in charge" is
+indistinguishable from "what shape is this thing." The tag collapsed onto the
+category because nothing in the enrichment prompt could have kept it from
+collapsing.
+
+### What this resolves, in both docs
+
+1. **The stance axis is dead as specified in both concepts.** `either-or.md`'s Q3
+   and `whos-holding-it.md`'s whole premise cannot be built on these two tags.
+2. **`whos-holding-it.md` loses its premise, not a question.** It is the concept
+   whose entire subject is the stance. Treat it as **retired** unless someone
+   proposes a different instrument for stance that does not read it off the
+   existing mood vocabulary.
+3. **`either-or.md` survives at three questions instead of four**, and the audit
+   is no longer outstanding against it. Its remaining blockers are unchanged and
+   none of them is a data probe: the Nº 07 slot sign-off (open since 2026-09-02),
+   copy through the voice gate, and a re-run of the combination matrix with
+   dedupe. Dropping Q3 also removes the four cells that made its gate durability
+   "mid," so the re-measure gets cheaper, not harder.
+4. **The bench winner is unaffected.** `nothing-in-the-way.md` takes hesitation
+   as its input and never touched these two tags.
+5. **A retag is not proposed here.** Retagging 560 products to rescue one axis is
+   not a cheap-and-certain job, it is an enrichment program, and the axis it would
+   rescue came fourth of four on the concept that still wants it. If the stance
+   dimension is ever wanted for real, it needs its own vocabulary dimension rather
+   than a reinterpretation of mood, and that is a `tech-architect` and
+   `emma-product-enricher` question, not a homepage-team one.
+
+### The reusable lesson, which is bigger than these two tags
+
+**A vocabulary tag is only an axis if it is independent of product shape.** Before
+any future concept builds a question on a tag, draw 50 products carrying it and
+read the subcategory spread. If one or two subcategories hold more than about
+three quarters of the draw, the tag is a category wearing a feeling's name, and
+any question built on it will return a shelf instead of an answer. This is the
+same family of error as the cross-product gate (run 646): both are cases where
+a count that looks healthy in isolation hides what the visitor will actually be
+shown. The cross-product gate asks whether a combination returns ENOUGH. This
+asks whether a single pole returns the RIGHT KIND, and it is the cheaper of the
+two to run.

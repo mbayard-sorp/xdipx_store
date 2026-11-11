@@ -2780,3 +2780,162 @@ renders anything. The retired-route denylist is untouched.
 Traffic remains far below the 300-sessions/week weighting threshold, so the
 proof, discretion and label items above stay banked as design capital and this
 cycle spent only on a cheap, measured, certain instrument fix.
+
+---
+
+## Delta, 2026-11-11 (Routine B run 1967)
+
+**Sourcing.** Three homepages fetched live this run, 2026-11-11:
+`spectrumboutique.com`, `tootimid.com`, `lovense.com`. One refusal, recorded
+rather than filled in from memory: `lovehoney.com` returned **HTTP 403** to the
+fetch and was not read, so nothing below is attributed to it. Lovense is new to
+this bench and was chosen deliberately, for the reason in the first finding.
+Everything quoted is text the fetch actually returned.
+
+### The finding that matters: the bench's no-countdown record just broke, and it broke at the one site selling what we were told to sell
+
+Run 1837 (delta 2026-11-04) wrote that seven of seven live captures across two
+deltas ran no countdown, two of them mid-Black-Friday, and concluded that brief
+19's no-urgency directive "costs nothing against the field."
+
+That conclusion was right about the field it measured and it is now one site
+short of true. **Lovense runs a live countdown in the site header**, beside the
+cart: the label `Discount Ends in:` with a clock after it (the digits render in
+script, so the fetch returns the label and not the numbers). The bench is
+9 of 10 on no-countdown, not 10 of 10.
+
+What makes this worth a finding rather than a footnote is which site it is.
+Lovense is not a long-tail retailer. It owns the remote-control and
+app-controlled category, and brief 21 opened this week by telling the homepage
+team that the store's actual shape of demand is **a $100 to $140 couples or
+remote-control toy bought by someone who did not click an ad**, naming
+`/collections/couples-vibrators` as the second-biggest collection by GA4 views.
+So the honest statement of the field is now two statements, not one:
+
+- Against the **retailers** on this bench (Spectrum, TooTimid, Honey Play Box,
+  Maude, Dame, Babeland), the no-urgency directive still costs nothing. None of
+  them runs a clock, several of them mid-Black-Friday.
+- Against the **category-owning brand in the exact band we have been told to
+  merchandise**, it costs something, and the size of that something is not
+  known.
+
+This is not a proposal to run a countdown. The charter bans it, brief 21 bans
+it again for every week of November, and this document is not the place to
+relitigate a charter rule. It is a correction to a premise this document
+asserted a week ago and would otherwise keep inheriting. The next cycle that
+cites "nobody in the field runs a clock" should cite this paragraph instead.
+
+### The second finding: the category leader does not merchandise long distance either, and that is an opening
+
+Lovense's entire long-distance story on the homepage is a tagline,
+`Closing the Distance`, plus a `Remote Control Vibrators` category link and
+product names carrying `Bluetooth`, `App-Controlled` and `Remote-Controlled`.
+There is no module that explains when remote beats app, no comparison surface
+above the fold, and their own comparison tooling (`Find Your Perfect Lush`, and
+a `Toy Comparison` page at `/more-compare`) sits buried inside the Store
+mega-menu where a first-time visitor will not meet it.
+
+Set that beside brief 21's content directive, which says the store has no post
+comparing remote-control to app-controlled couples hardware in the $100-plus
+band, and that six of the domains ranking for
+`best remote control couples vibrator for long distance` are already in the
+store's own outreach queue. The gap is real on both sides: we do not cover it,
+and the brand that owns the category does not cover it on the surface a buyer
+lands on.
+
+That is a content-lane opening before it is a design one, and it is already
+filed there. What it changes **here** is the ranking of backlog item 11
+(Compass to nav-level billing). Run 1837 correctly lowered that item after
+finding nav-level guided selling to be a split practice rather than a norm.
+This delta does not raise it back, and adds a reason the split exists: the
+three sites read this week bill *categories* in the nav and put *comparison*
+behind it. A guided-selling nav entry is not the field's answer to "help me
+choose," a comparison page is. Item 11 stays where run 1837 put it.
+
+### The steal, and it is one sentence long
+
+TooTimid's discretion block does not claim discretion, it states the mechanism:
+
+> All orders arrive in plain packaging, and the shipping label doesn't say what
+> company it's from.
+
+Backlog item 5 (Discretion rewrite plus named guarantee) has been parked since
+July with "dreaded-moments trust-strip copy" as its whole spec. That sentence is
+the shape the spec was missing. It names the dreaded moment (someone reads the
+label), answers it with a fact, and never uses the word discreet. Our own trust
+strip currently runs the adjective.
+
+The half of TooTimid's treatment we do not take is in the Rejected list below:
+they say it four times across the page, which is what turns the rest of that
+page into pressure.
+
+### A smaller one, for the record
+
+Spectrum and TooTimid both ship **zero star ratings and zero review counts** on
+their homepage product cards. Honey Play Box did the same last delta. That is
+now four of the six retailers on this bench running a full homepage with no
+rating surface at all, which keeps loosening backlog item 8's dependency: a
+reviews slot is a thing we may want, it is demonstrably not a thing the field
+treats as table stakes, and shipping the page without one is not a visible gap.
+
+### Adopted
+
+1. **The no-countdown premise is corrected, in this document, where the next
+   cycle will read it.** Bench is 9 of 10, the exception is Lovense, and the
+   exception sits in the band brief 21 told us to merchandise. No behaviour
+   changes; the claim does.
+2. **Backlog item 5 gets TooTimid's sentence as its target shape**, which is
+   mechanism-first and adjective-free. `[content-only]`, `emma-copywriter`,
+   voice-gated as usual. Still waits on the owner for the guarantee name and
+   terms, which is the part of item 5 that was never the blocker.
+3. **Backlog item 8's dependency loosens again.** Four of six bench retailers
+   run no homepage rating surface. Item 8 stays where it is and stops being
+   argued as a gap.
+4. **Backlog item 11 stays lowered**, with a sharper reason than "the practice
+   is split": the field bills categories in the nav and puts comparison behind
+   it.
+
+### Rejected, with reasons, so they are not re-proposed
+
+1. **Lovense's `Discount Ends in:` header clock.** Charter-banned, and brief 21
+   bans urgency framing for every week of November. Recorded as a field fact,
+   never as an option.
+2. **Spectrum's brand-promo-banner hero.** Their first five modules are five
+   vendor banners in a row (Dame 20%, Pipedream 25%, Biird 15%, Essentials 20%,
+   Blush), and a visitor scrolling that page does not meet a single product.
+   This is the exact failure the mission says we win by not committing: vibes
+   and vendor logos where the product should be.
+3. **Spectrum's three stacked announcement bars** above the nav. Three bars is
+   not three messages, it is one message a visitor stops reading.
+4. **TooTimid's discount wall** (`up to 80% off`, `50% OFF SITEWIDE`,
+   `Final Sale - 70% OFF!`, all on one screen). Same reason as every prior
+   delta. Our MAP rules make a percent badge a per-product legal question
+   anyway.
+
+### The one thing we will do that none of them do
+
+**Ship exactly one image per page at high priority, and have a test that can
+prove it.** Every listing page on this site was, until this run, telling the
+browser that 24 to 29 product images were all the most important thing on the
+page, which is the same as telling it nothing. None of the sites on this bench
+can be audited from outside for this and we are not claiming they get it wrong.
+We are claiming something narrower and checkable: ours was wrong, it was found
+by measuring the served HTML rather than by looking at the page, the count is
+written down, and the fix ships with a fixture that reproduces the broken number
+before it reproduces the fixed one.
+
+### IA fence check
+
+This delta proposes no new section type, no Sanity schema change, and no new URL
+or route, so nothing goes to `tech-architect`. Adopted items 1, 3 and 4 are
+corrections to claims in this document and change no surface. Adopted item 2
+re-scopes an existing `[content-only]` backlog item and ships nothing this
+cycle. The locked Nº 01 to Nº 11 shell is untouched: this cycle's code changes
+two card components, two listing routes and one test, and adds no section and
+removes none. The two-link `/discover` cap is unchanged and still enforced by
+`storefront-discover-cap.test.ts`; the live homepage was re-counted this run at
+exactly two. The retired-route denylist is untouched.
+
+Traffic remains far below the 300-sessions/week weighting threshold, so the
+proof, discretion and nav items above stay banked as design capital, and this
+cycle spent its build budget on one cheap, measured, certain defect.
