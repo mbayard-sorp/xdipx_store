@@ -33,8 +33,12 @@
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { createRoutesStub } from 'react-router'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { VaultCard } from './VaultCard'
 import { CardMediaCarousel } from './CardMediaCarousel'
+import { CategoryMasthead } from '~/components/category/CategoryMasthead'
+import { DropMasthead } from '~/components/category/DropMasthead'
 import type { VaultDeal } from '~/types'
 
 const IMAGES = [
@@ -104,5 +108,58 @@ describe('listing-grid LCP priority', () => {
       <CardMediaCarousel cardId="c1" title="Product" images={IMAGES} />,
     )
     expect(countHighPriorityImages(html)).toBe(0)
+  })
+})
+
+/**
+ * The collection route has TWO things that can own the LCP above its grid: the
+ * plain `<picture>` hero on a non-merchandised page, and the categoryMasthead /
+ * dropMasthead block on a merchandised one. Both mastheads render their image
+ * with `priority` themselves, so a route condition that only asked
+ * `!merchandised` would hand the grid's first card a second priority image on
+ * exactly the pages that run a merchandised frame, /collections/pleasure and
+ * /collections/play among them.
+ *
+ * These two blocks pin the premise the route's condition rests on. The first
+ * checks the mastheads really do claim priority (if someone removes it, the
+ * route's condition starts giving those pages ZERO priority images, and this
+ * is where they find out). The second checks the route still reads the
+ * combined condition rather than the naive one.
+ */
+const MASTHEAD_BLOCK = {
+  _type: 'categoryMasthead' as const,
+  anchorId: 'top',
+  kicker: 'PLEASURE',
+  headline: 'Everything that is about you',
+  italicWord: 'you',
+  standfirst: 'A standfirst.',
+  imageUrl: 'https://cdn.sanity.io/images/x/y/masthead.jpg',
+  imageAlt: 'masthead',
+}
+
+describe('merchandised masthead owns the LCP above the grid', () => {
+  it('CategoryMasthead renders its image at high priority', () => {
+    const html = renderGrid(<CategoryMasthead block={MASTHEAD_BLOCK as never} />)
+    expect(countHighPriorityImages(html)).toBe(1)
+  })
+
+  it('DropMasthead renders its image at high priority', () => {
+    const html = renderGrid(
+      <DropMasthead block={{ ...MASTHEAD_BLOCK, _type: 'dropMasthead', period: 'November' } as never} />,
+    )
+    expect(countHighPriorityImages(html)).toBe(1)
+  })
+
+  it('the collection route gates its first card on both masthead shapes, not on !merchandised alone', () => {
+    const route = readFileSync(
+      fileURLToPath(new URL('../../routes/_layout.collections.$handle.tsx', import.meta.url)),
+      'utf8',
+    )
+    // The card reads the combined condition.
+    expect(route).toMatch(/priority=\{i === 0 && !aboveGridOwnsLcp\}/)
+    // Which is built from both the plain hero and the merchandised masthead.
+    expect(route).toMatch(/const aboveGridOwnsLcp =\s*plainHeroRendered \|\| merchandisedMastheadImage/)
+    // And the merchandised half looks at both masthead block types.
+    expect(route).toContain("b._type === 'categoryMasthead' || b._type === 'dropMasthead'")
   })
 })

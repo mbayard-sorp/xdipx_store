@@ -375,13 +375,32 @@ export default function CollectionPage() {
   const merchandisedFaq = merchandised
     ? (categoryBlocks!.find(b => b._type === 'faqBlock') ?? null)
     : null
-  // Exactly one image per page may be fetchPriority=high. The masthead hero
-  // renders under precisely this condition (see the `<picture>` below), so when
-  // it renders it owns the LCP and the grid's first card must stay lazy; when
-  // it does not render, the first card IS the LCP and takes the slot. Kept as
-  // one named expression used in both places so the two cannot drift apart and
-  // leave the page with two priority images or none.
-  const mastheadOwnsLcp = isCanonicalPage && !merchandised && !!heroImageUrl
+  // Exactly one image per page may be fetchPriority=high, and this route has
+  // two different things that can be the one above the grid.
+  //
+  // `plainHeroRendered` is the render guard for the plain `<picture>` below,
+  // unchanged in meaning: page 1, no merchandised frame, a hero image to show.
+  // Naming it is what lets the card below read the same condition instead of
+  // restating it and drifting from it.
+  const plainHeroRendered = isCanonicalPage && !merchandised && !!heroImageUrl
+  // A merchandised page renders no plain hero, but its first block is a
+  // categoryMasthead or dropMasthead and BOTH of those render their image with
+  // `priority` already (see CategoryMasthead.tsx / DropMasthead.tsx). So on a
+  // merchandised page with masthead art, the LCP is claimed above the grid just
+  // as surely as on a plain one, and the grid's first card must stay lazy.
+  // Reading `!merchandised` alone here would have put two priority images on
+  // /collections/pleasure and /collections/play, which both run a merchandised
+  // frame with masthead art.
+  const merchandisedMastheadImage =
+    merchandised &&
+    !!categoryBlocks?.some(
+      b =>
+        (b._type === 'categoryMasthead' || b._type === 'dropMasthead') &&
+        !!(b as { imageUrl?: string | null }).imageUrl,
+    )
+  // So: something above the grid owns the LCP, or nothing does and the first
+  // card is it.
+  const aboveGridOwnsLcp = plainHeroRendered || merchandisedMastheadImage
   const [params, setParams] = useSearchParams()
 
   // GA4: this route sold products with zero analytics while it was a plain
@@ -497,7 +516,7 @@ export default function CollectionPage() {
         </div>
       ) : null}
 
-      {mastheadOwnsLcp && heroImageUrl && (
+      {plainHeroRendered && heroImageUrl && (
         <div className="mb-6 overflow-hidden rounded-2xl border border-line bg-cream-2">
           <picture>
             <source
@@ -628,7 +647,7 @@ export default function CollectionPage() {
                   <VaultCard
                     deal={deal}
                     quiet={handle === 'on-sale'}
-                    priority={i === 0 && !mastheadOwnsLcp}
+                    priority={i === 0 && !aboveGridOwnsLcp}
                     {...(starred[deal.handle] ? { starred: { reason: starred[deal.handle]! } } : {})}
                   />
                 </div>
