@@ -385,7 +385,37 @@ const ATTEMPTED_TEXT_DEFECT_PATTERNS: readonly RegExp[] = [
   /\bmirrored\b|\breversed\b/i,
 ]
 
-export function classifyLegibleText(text: string | null | undefined): LegibleTextClass {
+/**
+ * Ticket #21149, social rows 577/578 (we-vibe-sync-2-...-green-velvet, two
+ * crops of the same real, reused Notebook-hero photo): "garbled/partially-
+ * legible embossed text ... appears to read we-vibe" on the product's own
+ * molded control-button cluster BLOCKed as 'unclassified', the fifth
+ * `vision-legible-text` hit this week on exactly this shape, and the SKU's
+ * own `holdBrief` had already flagged the risk in advance. Design-doctrine
+ * section 4 item 4's baked-in-text ban targets fake, AI-rendered glyphs; a
+ * hedge about a real product's own factory-molded marking is a camera-
+ * resolution limit on real pixels, not a transcription the model invented.
+ *
+ * Scoped narrowly to co-occurrence of "the mark is physically molded into
+ * the hardware" vocabulary and "I am guessing at a reading, not stating
+ * one" hedge vocabulary, and gated by `isUnretouchedPhoto` below so it only
+ * ever fires for media `isGeneratedSocialAsset` identifies as NOT pipeline-
+ * generated (the same real-vs-generated provenance signal this file's call
+ * site already reads off the same url for the vision-verdict legacy
+ * carve-out). An AI-rendered image hedging the identical way keeps blocking
+ * exactly as ticket #13534 established for posts #385/#386 ("genuine
+ * garbled or hedged brand-mark attempts and must keep blocking") -- every
+ * existing call to `classifyLegibleText` in this file's own test suite calls
+ * it with one argument, so `isUnretouchedPhoto` defaults to `false` and
+ * none of that behavior moves.
+ */
+const HARDWARE_BRANDING_VOCAB = /\b(embossed|engraved|molded|moulded|stamped|raised lettering)\b/i
+const HEDGED_BRAND_READING = /\bappears to (?:read|spell|say)\b/i
+
+export function classifyLegibleText(
+  text: string | null | undefined,
+  isUnretouchedPhoto = false,
+): LegibleTextClass {
   const t = (text ?? '').trim()
   if (!t) return 'none'
   if (
@@ -400,6 +430,9 @@ export function classifyLegibleText(text: string | null | undefined): LegibleTex
   // A wordmark is short and carries no sentence punctuation. Anything longer
   // is a sentence baked into the pixels, which the doctrine bans outright.
   if (words.length <= BRAND_MARK_MAX_WORDS && t.length <= BRAND_MARK_MAX_CHARS && !/[.!?;:]/.test(t)) {
+    return 'brand-mark'
+  }
+  if (isUnretouchedPhoto && HARDWARE_BRANDING_VOCAB.test(t) && HEDGED_BRAND_READING.test(t)) {
     return 'brand-mark'
   }
   return 'unclassified'
@@ -1078,7 +1111,9 @@ export async function runDeterministicPublishChecks(
     // make (see `isRenderedCardAsset`'s own doc comment). The anatomy/exposure
     // checks just above still ran and still gate; only this classification
     // stands aside.
-    const textClass = isRenderedCardAsset(u) ? 'none' : classifyLegibleText(verdict.legibleText)
+    const textClass = isRenderedCardAsset(u)
+      ? 'none'
+      : classifyLegibleText(verdict.legibleText, !isGeneratedSocialAsset(u))
     if (textClass === 'packaging' || textClass === 'caption-or-watermark' || textClass === 'unclassified') {
       const why = textClass === 'packaging'
         ? 'reads as packaging junk (barcode, label, carton or ingredient text)'

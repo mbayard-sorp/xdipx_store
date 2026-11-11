@@ -1634,6 +1634,70 @@ describe('legible text baked into the image', () => {
   })
 })
 
+// Ticket #21149, social rows 577/578 (we-vibe-sync-2-...-green-velvet, two
+// crops of the same real, reused Notebook-hero photo at
+// https://cdn.sanity.io/images/0nlwk8cf/production/540ee69d34ab29af954b4994092ee34237c9810e-1200x900.png):
+// "garbled/partially-legible embossed text ... appears to read we-vibe" on
+// the product's own molded control-button cluster BLOCKed as
+// 'unclassified', the fifth vision-legible-text hit this week on exactly
+// this shape. classifyLegibleText's new second argument distinguishes a
+// real, unretouched photo's own factory-molded marking (a camera-resolution
+// hedge, not a transcription the model invented) from the same hedge on a
+// pipeline-generated image, which keeps blocking exactly as ticket #13534
+// established.
+describe('real-photo hardware-branding hedge carve-out (ticket #21149)', () => {
+  const isLibraryMember = async () => true
+  // No `social-`/`ig-` prefix and not a video final, so `isGeneratedSocialAsset`
+  // reads this as a real, reused photo rather than pipeline-generated art --
+  // the same provenance signal `app/lib/social-media.server.ts` already uses
+  // elsewhere in this file's call site.
+  const REAL_PHOTO_MEDIA = [`${CDN}/we-vibe-sync-2-notebook-hero-1200x900.jpg`]
+  const run = (legibleText: string | null) => runRaw(
+    { caption: CLEAN, mediaUrls: REAL_PHOTO_MEDIA, postCreatedAt: null },
+    { getVisionVerdict: async () => ({ ...PASSING_VERDICT, legibleText }), isLibraryMember },
+  )
+
+  it('classifyLegibleText only reclassifies the hedge when told the source is a real, unretouched photo', () => {
+    const text = 'Garbled/partially-legible embossed text on the control-button cluster appears to read "we-vibe".'
+    expect(classifyLegibleText(text)).toBe('unclassified')
+    expect(classifyLegibleText(text, false)).toBe('unclassified')
+    expect(classifyLegibleText(text, true)).toBe('brand-mark')
+  })
+
+  it('rows 577/578: the real Notebook-hero photo no longer blocks on this hedge', async () => {
+    const r = await run(
+      'Garbled/partially-legible embossed text on the control-button cluster appears to read "we-vibe".',
+    )
+    expect(checks(r)).not.toContain('vision-legible-text')
+    expect(r.blocked).toBe(false)
+  })
+
+  it('the same hedge on a pipeline-generated image still blocks (ticket #13534 must-keep-blocking case, unaffected)', async () => {
+    const r = await runRaw(
+      { caption: CLEAN, mediaUrls: GOOD_MEDIA, postCreatedAt: null },
+      {
+        getVisionVerdict: async () => ({
+          ...PASSING_VERDICT,
+          legibleText: 'Partial embossed/printed text on the product body, appears to read something like "we-vibe" or similar but not fully legible; two small white oval buttons visible on product surface.',
+        }),
+        isLibraryMember,
+      },
+    )
+    expect(checks(r)).toContain('vision-legible-text')
+    expect(r.blocked).toBe(true)
+  })
+
+  it('a named garbled wordmark with no hardware-branding/hedge vocabulary still blocks even on a real photo', () => {
+    // "wOVae" is a mis-transcribed wordmark guess, not a camera-resolution
+    // hedge about a physical control marking -- ticket #13534's post #386
+    // case, unaffected either way.
+    expect(classifyLegibleText(
+      'wOVae (brand wordmark on product body); + and additional control button markings visible on product surface',
+      true,
+    )).toBe('unclassified')
+  })
+})
+
 // Ticket #13368: the New-in carousel's packshot card and the typographic
 // plate render real copy on purpose (`renderSocialCard`,
 // `app/lib/og-card.server.ts`), under a `social-card-*` filename. The text
