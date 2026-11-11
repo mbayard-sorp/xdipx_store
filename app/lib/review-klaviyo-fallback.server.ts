@@ -136,6 +136,26 @@ export async function resolveMissingEmailInvites(deps: ResolveDeps): Promise<Res
       if (invitedAny) result.invited++
     } catch (err) {
       console.error('[review-klaviyo-fallback] resolution failed for order', shopifyOrderId, err)
+      // Ticket #21240: a thrown error here used to leave no trace in
+      // order_fulfillment_webhook_log at all -- worse than a recorded miss,
+      // because it is invisible to both the outcome breakdown
+      // (review-funnel-check.server.ts) and countKlaviyoMissAttempts, so a
+      // persistently broken resolution (bad credentials, a non-429 error
+      // klaviyoGet does not retry, a metric-id lookup failure) retried
+      // forever with no record and no way to diagnose it from the data this
+      // ticket's own evidence came from. Recorded under its own reason
+      // prefix, not KLAVIYO_MISS_REASON_PREFIX, so the breakdown reads it as
+      // "broken" rather than "legitimately not found yet," and it does not
+      // count toward the miss-exhaustion limit, which assumes a real lookup
+      // actually ran.
+      try {
+        await deps.recordOutcome(
+          shopifyOrderId, 'no_invite_created',
+          `klaviyo_resolve_error: ${err instanceof Error ? err.message : String(err)}`.slice(0, 500),
+        )
+      } catch (recordErr) {
+        console.error('[review-klaviyo-fallback] failed to record resolution-error outcome', shopifyOrderId, recordErr)
+      }
     }
   }
 

@@ -109,6 +109,42 @@ describe('resolveMissingEmailInvites', () => {
     expect(deps.createInviteCalls[0]).toMatchObject({ shopifyOrderId: '222' })
   })
 
+  // Ticket #21240: before this fix, a thrown resolveEmail (or any other
+  // per-order failure) left no row in order_fulfillment_webhook_log at all,
+  // so it was invisible to both the outcome breakdown and
+  // countKlaviyoMissAttempts -- a broken resolution retried forever with no
+  // record. It must now be recorded, under a reason distinct from the
+  // klaviyo_miss_attempt_* prefix so it reads as "broken" rather than
+  // "legitimately not found yet."
+  it('records a distinct resolution-error outcome when resolveEmail throws, instead of leaving no trace', async () => {
+    const deps = fakeDeps({
+      resolveEmail: async () => { throw new Error('klaviyo down') },
+    })
+    await resolveMissingEmailInvites(deps)
+    expect(deps.recordOutcome).toHaveBeenCalledWith('111', 'no_invite_created', expect.stringContaining('klaviyo_resolve_error'))
+    expect(deps.recordOutcome).toHaveBeenCalledWith('111', 'no_invite_created', expect.stringContaining('klaviyo down'))
+  })
+
+  it('one order failing to record its error outcome does not stop the rest from resolving', async () => {
+    const deps = fakeDeps({
+      listPendingOrders: async () => [
+        { shopifyOrderId: '111', pendingSinceDays: 2 },
+        { shopifyOrderId: '222', pendingSinceDays: 2 },
+      ],
+      resolveEmail: async (orderId) => {
+        if (orderId === '111') throw new Error('klaviyo down')
+        return { email: 'buyer2@example.com', reviewerName: null, lineItems: [{ sku: 'SKU-C', productId: '3003' }] }
+      },
+      recordOutcome: vi.fn(async (orderId: string) => {
+        if (orderId === '111') throw new Error('db write failed')
+      }),
+    })
+    const result = await resolveMissingEmailInvites(deps)
+    expect(result.invited).toBe(1)
+    expect(deps.createInviteCalls).toHaveLength(1)
+    expect(deps.createInviteCalls[0]).toMatchObject({ shopifyOrderId: '222' })
+  })
+
   it('asks Klaviyo for a wider window as a pending order ages, not a fixed 14 days (#20822)', async () => {
     const sinceDaysCalls: number[] = []
     const deps = fakeDeps({
