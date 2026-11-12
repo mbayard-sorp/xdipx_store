@@ -950,6 +950,16 @@ batch)`.
    line of what the reader will feel or own, XDIPX, slide counter). Cards are rendered type over
    the real image, so provenance passes as generated social art and the product cannot drift. No
    price on any slide.
+
+   **Baked-in-text pre-check before picking a slide's product (ticket #21397).** `op:packshot-card`
+   uses the product's own default Shopify image verbatim, with no occlusion or regeneration pass —
+   unlike the cast-composite known wordmark-risk list further below, there is no screen here at
+   all. A run BLOCKed on `bloomgasm-thrusting-silicone-vibrator` because its default photo is a
+   vendor marketing shot with legible ROSE THRUST / BLOOMGASM wordmarks baked into the pixels.
+   Before calling `op:packshot-card` for a batch slide, glance at the product's default image: a
+   vendor promo shot carrying printed brand text or box art burns a generation-and-vision-gate
+   round discovering the BLOCK. Prefer a batch product whose default photo is a clean packshot: no
+   printed wordmark, no retail carton, no box art.
 3. **Save close.** The keepable line plus the engagement question, and the pointer that all of
    them are at xdipx.com/new, as plain text (link in bio reaches it).
 
