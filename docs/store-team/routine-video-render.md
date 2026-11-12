@@ -84,8 +84,16 @@ on main."
 
 Post a `skipped` event with reason `empty_episode_queue`; file an owner blocker
 (`{"op":"file","dedupeKey":"video:empty-episode-queue","category":"approval",
-"title":"No approved video clips to render","whereToGo":"/admin/video-studio/scripts",...}`); finish
-`status:'skipped'`; exit. **Never invent a script. Never re-render a posted clip.**
+"title":"No approved video clips to render","whereToGo":"/admin/video-studio/scripts",
+"overrideNoProbeReason":"no registered probe verifies presence of an approved renderable clip
+(rows_exist false-clears on existing rejected/posted rows; video_episodes_not_pending checks
+specific ids, not presence of an approved renderable row)",...}`); finish `status:'skipped'`; exit.
+**Never invent a script. Never re-render a posted clip.**
+
+An `approval`-category blocker with neither `verifyProbe` nor `overrideNoProbeReason` is rejected
+with 400 by `/api/team/blocker` (ticket #8028 probe-gap guard). Confirmed on video-render run 1983
+(2026-11-12): this exact POST returned 400 until the override was added, and only filed (row #57)
+once it was.
 
 ## Step 3: Stock re-check at claim
 
