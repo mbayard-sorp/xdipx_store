@@ -967,6 +967,21 @@ Two reviewers, both binding, sequenced so a cheap voice failure never spends the
      enumeration; the section-level scan looks for a broken rule system. None of the three asks
      where a deleted idea WENT. The fix is to delete the idea, not re-shape it — each of the three
      relocations above was itself an attempt to satisfy the previous flag.
+   - **Defect-class reintroduction scan (part of the same pre-resubmit self-check, ticket
+     #21314).** A repair that satisfies one gate can reintroduce a defect class the OTHER gate
+     already deleted earlier in the SAME run. SECOND NAMEABLE OCCURRENCE: run 1875 (2026-11-06)
+     added a clause during repair that was itself the thing standing between the post and ship;
+     run 1969 (2026-11-11) did it one line after the accuracy gate deleted six unsourced time
+     figures ("a minute or two", "thirty seconds", "twenty minutes"), writing a seventh ("None of
+     it takes five minutes") in the very next repair pass answering an unrelated voice-gate ask.
+     No existing scan catches this: all seven model the repair against the DOCUMENT, and a
+     reintroduced instance reads as a first instance to every deterministic checker and to the
+     cross-gate self-check alike. Before resubmitting, list the defect CLASSES either gate has
+     already made you delete in this run (unsourced durations, adequacy/quality comparatives,
+     out-of-source geometry, mechanism or diagnosis language, universal quantifiers), then
+     re-read every string the repair ADDED against that list, not just against the rest of the
+     document. Naming the list is the point: the writer holding six just-deleted time figures in
+     mind is exactly who writes a seventh.
    - **Whole-document aphorism recount:** before resubmitting, re-run your own whole-document
      aphorism-as-closer count on the REWRITTEN draft (not just the changed strings), and separately
      count any newly added first-person sentences.
