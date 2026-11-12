@@ -218,7 +218,11 @@ exactly right; the collision was the playbook's to prevent. Three rules:
    time, but it is the same collision #8423 exists to prevent, approached from the other direction.
    Either hold all edits until the gate returns, or make your in-flight edits in a separate worktree
    (`scripts/setup-worktree.sh`, named for the gate in rule 2 below — it works just as well for the
-   orchestrator's own concurrent edits).
+   orchestrator's own concurrent edits). **"Leave the tree untouched" also covers untracked files
+   that appear after the gate is dispatched (ticket #21300).** Run 1967 deleted design-critic's own
+   scratch `.mjs` helper scripts mid-analysis, reasoning they were untracked clutter nobody owned;
+   they were the gate's working files, and the gate survived only by luck. Clean up untracked files
+   the gate left behind after it returns, not while it is still running.
 2. **Any gate asked to mutate the tree runs in an isolated git worktree, not the shared checkout** —
    `scripts/setup-worktree.sh` already exists for exactly this.
 3. **After any gate that reports touching the tree, OR that reports finding foreign content in the
@@ -255,6 +259,16 @@ asserted beside it could never fire. Checking the guard against other *shapes* o
 #16885 rule above) would not have caught this, because the shapes were never the problem; the causal
 direction was. If the one-sentence trace cannot be stated, the guard is a comment with an assertion
 attached, and it should be rewritten or deleted rather than kept for the reassurance.
+
+**Apply the other-shapes check to the fix, not only the guard (ticket #21301).** Run 1967's first
+commit turned a condition off (`priority={i === 0}` on a card carousel) by asking "is this page
+merchandised?" — true of the plain hero, not of the actual question, which is whether something
+*above* the grid already claims the page's one LCP image. A `categoryMasthead`/`dropMasthead` claims
+priority itself, so `/collections/pleasure` and `/collections/play` would have shipped two
+high-priority images instead of twenty-nine, a smaller version of the same defect. Before trusting a
+fix that turns a condition off, enumerate every other thing that could satisfy the same condition on
+the surfaces in scope, and check the fix against each one by name, the same discipline #16885 asks of
+a new guard. The worked example is PR #1945's second commit.
 
 **Then apply both rules to the assertion itself (run 1837).** Delete the clause the test's own title
 names and re-run: if it stays green, the title is a claim the assertion cannot support. A guard over
@@ -563,6 +577,16 @@ that exact same hunk after yours opens even though yours was clean when you reba
 `GET /api/team/pr?number=<n>` reports `mergeable:true` right before you consider the PR done (and
 again if another changelog-append PR merges while yours is still open); a dirty pure end-of-file
 append resolves by keeping both blocks, ordered by date.
+
+**Substitute the real PR number and ticket id before appending the Evidence line, never a
+placeholder (ticket #21319).** The Evidence line is written from a template that names the PR and
+ticket; both numbers are already known at append time (the PR this entry rides, and the ticket this
+cycle filed per ADR-008 step 3), so copying the template's own placeholder text — `PR #PRNUM (draft),
+ticket #TICKETNUM` — into a real entry is a substitution bug, not a missing fact. It shipped twice
+this way (the run 1837 and run 1967 entries both merged with the literal placeholder still in them,
+later corrected by agent-editor). Read the real numbers back before writing the Evidence line, and if
+either is genuinely not yet known, say so in words rather than leaving the template's placeholder
+standing.
 
 **When the changelog append is its own PR (not riding a shell PR), the run that made the change opens
 it and files its ticket as `kind:'instructions'`, never `kind:'code'`.** (#4758) Only this run holds
