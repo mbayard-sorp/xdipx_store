@@ -31,6 +31,12 @@ compound; this file is where they stop evaporating.
   macro — and uses the scaffold tagged with it below. **Ground lock:** backdrops only from
   coral-soft, plum-soft, and paper tints (doctrine §4; sage is an accent, never a ground); a
   scaffold's color slots resolve within that set.
+- **Name the hex, never the bare word "coral" (ticket #21292).** A model reads "coral" as a
+  saturated orange-red, not the pale `#FFE6DD` tint the ground lock means: design-critic run 1967
+  measured generated grounds at 2.8-3.8x the saturation of the coral-soft token across four slots
+  that all scaffolded with the bare word. Every ground-bearing scaffold below names the hex
+  alongside a non-coral noun phrase ("a pale blush wall, #FFE6DD, almost white"), never "coral" or
+  "coral-soft" on its own as the ground description.
 - **The ground lock is a hue lock, not a surface lock** (doctrine §4.1, owner direction
   2026-08-11). Nothing requires a seamless studio backdrop: plum-soft as raw plaster and paper
   as a bare wall with a light bar across it are both inside the lock and both carry an hour, a
@@ -51,7 +57,8 @@ compound; this file is where they stop evaporating.
 
 Scaffold (always with `--ref-image` = the hero product's Shopify photo):
 
-> The {product} standing large and centered on a {coral-soft | plum-soft | paper} ground with
+> The {product} standing large and centered on {a pale blush ground, #FFE6DD, almost white | a
+> soft lilac ground, #F3E8FB, almost white | a paper-white ground, #FFFFFF} with
 > a real surface and a named hour (bare painted wall, raw plaster, paper backdrop with a
 > hard-edged window shadow raking across it; the ground lock is a hue lock, not a surface
 > lock, doctrine §4.1), bright high-key lighting, crisp single shadow, premium DTC launch
@@ -70,7 +77,8 @@ table (reads housewares).
 
 Scaffold (always with `--ref-image`):
 
-> The {product} bold and centered on a {plum-soft | coral-soft | paper} ground carrying an
+> The {product} bold and centered on {a soft lilac ground, #F3E8FB, almost white | a pale
+> blush ground, #FFE6DD, almost white | a paper-white ground, #FFFFFF} carrying an
 > hour and a texture (painted wall, plaster, a light band across it; hue lock, not a surface
 > lock), bright studio light, crisp shadow, square crop, product large in frame, premium
 > sexual-wellness brand catalog photography, playful and confident
@@ -113,7 +121,8 @@ unchanged.
 
 Scaffold (always with `--ref-image` when the promo targets a product or collection):
 
-> The {product} on a {coral-soft | plum-soft | paper} ground with a real surface texture and a
+> The {product} on {a pale blush ground, #FFE6DD, almost white | a soft lilac ground, #F3E8FB,
+> almost white | a paper-white ground, #FFFFFF} with a real surface texture and a
 > named hour (hue lock, not a surface lock) with {theme prop, small
 > and supporting, its color echoing the theme}, bright pop-art studio light, bold and celebratory, product is the
 > unmistakable star, premium campaign photography
@@ -130,7 +139,8 @@ detail frame per product. Scaffold (always with `--ref-image` = the product's Sh
 
 > {Extreme macro of the {product}'s surface texture filling the frame | one relaxed, undistorted
 > hand holding the {product} to show true size | close detail of the {product}'s tip and contour},
-> on a {coral-soft | plum-soft | paper} ground (hue lock, not a surface lock; give it an hour
+> on {a pale blush ground, #FFE6DD, almost white | a soft lilac ground, #F3E8FB, almost white |
+> a paper-white ground, #FFFFFF} (hue lock, not a surface lock; give it an hour
 > when the crop shows the ground), silk or linen surface beneath, bright
 > high-key daylight, crisp focus on the product, skin tones natural and warm, premium
 > sexual-wellness catalog photography, keep the product's shape, color, and finish exactly as the
@@ -155,7 +165,8 @@ prop, and cast reference; this scaffold never overrides a locked scheme.
 Scaffold (`--ref-image` = the product's Shopify photo when a product is in frame; 4:5 portrait):
 
 > Bright high-key editorial photograph, {named hour} sunlight from a window out of frame throwing
-> one hard-edged directional shadow band across a {coral-soft | plum-soft | paper} {textured
+> one hard-edged directional shadow band across {a pale blush, #FFE6DD, almost white | a soft
+> lilac, #F3E8FB, almost white | a paper-white, #FFFFFF} {textured
 > plaster wall | bare painted wall | paper wall with a light bar across it}, open detailed
 > shadows, never black. The {product} {mid-interruption, not at rest, e.g. half out of its
 > open drawer, charging cable still connected, resting where a hand just set it down}, keep its
@@ -1484,8 +1495,9 @@ health-adjacent topics), PDP mood slides, OG/share images, campaign moments. Wit
 no literal explicit anatomy; ground lock and high-key daylight bind — the craft is what makes it
 art instead of a shitpost. Invent fresh concepts every time; never reuse a joke.
 
-> Bright high-key editorial art photograph, soft directional daylight, {coral-soft / plum-soft /
-> paper} ground, surreal but meticulously crafted, shot like a luxury still-life campaign,
+> Bright high-key editorial art photograph, soft directional daylight, {a pale blush ground,
+> #FFE6DD, almost white / a soft lilac ground, #F3E8FB, almost white / a paper-white ground,
+> #FFFFFF}, surreal but meticulously crafted, shot like a luxury still-life campaign,
 > playful and confident, tasteful and non-explicit. {The concept — one clear visual idea, e.g.
 > "a saguaro cactus whose arms are smooth matte-coral silicone, one arm budding a tiny pink
 > flower, potted in a plain terracotta pot" / "a sleek dolphin arcing out of rippling plum silk,
@@ -1712,8 +1724,9 @@ Deck squares are product cutout stills on the tile's own tint ground (owner deci
 Archetype B on the 4 squares, richer photo reserved for the large panels). Scaffold (always with
 `--ref-image` = the product's Shopify photo; `--doc-id singleton.panelDeck`):
 
-> The {product} as a clean single-product cutout still, bold and centered on a flat solid
-> {coral-soft | plum-soft | paper-2 | paper-3} tint ground matching the tile, soft even
+> The {product} as a clean single-product cutout still, bold and centered on a flat solid tint
+> ground matching the tile ({a pale blush, #FFE6DD, almost white | a soft lilac, #F3E8FB, almost
+> white | off-white, #FAFAF9 | off-white, #F4F3F1}), soft even
 > studio light, one crisp shadow, square crop, generous negative space around the product, premium
 > sexual-wellness catalog photography, single product only, no text, no words, no letters
 
@@ -1764,7 +1777,8 @@ has no backdrop at all, so the boundary reads as a crop.
 > Abstract editorial art photograph, bright and high-key, shot like a luxury campaign, confident and
 > tasteful, non-explicit. WIDE HORIZONTAL 2:1 LANDSCAPE COMPOSITION THAT FILLS THE ENTIRE FRAME EDGE
 > TO EDGE WITH NO EMPTY BACKGROUND ANYWHERE. {A hard-edged geometric collage of overlapping flat
-> colour fields, broad blocks and diagonal bands of {coral-soft | plum-soft | paper}, each band
+> colour fields, broad blocks and diagonal bands of {pale blush, #FFE6DD, almost white | soft
+> lilac, #F3E8FB, almost white | paper-white, #FFFFFF}, each band
 > running off the edges of the frame | An extreme close crop of the {product} so close it reads as
 > pure sculptural form, its curves swelling across the whole frame}. {The {product}, ENORMOUS AND
 > CROPPED BY THE FRAME EDGES, running the full width of the composition; keep its shape, colour and
@@ -1858,8 +1872,9 @@ categoryPage-<handle>`; `--ref-image` whenever the masthead features a product):
 | wear | **A/C** fabric and human presence | Lingerie or wear on a body, private room, daylight |
 | discover | **D** editorial collage | Metaphor macro or editorial composition, curiosity-forward |
 
-> {Per the category's lock row above: subject direction}, bright high-key daylight, {coral-soft |
-> plum-soft | paper} ground where a ground applies, private-space setting with human presence
+> {Per the category's lock row above: subject direction}, bright high-key daylight, {a pale
+> blush ground, #FFE6DD, almost white | a soft lilac ground, #F3E8FB, almost white | a
+> paper-white ground, #FFFFFF} where a ground applies, private-space setting with human presence
 > where the lock calls for it, editorial premium campaign photography, tasteful and non-explicit,
 > generous negative space in the {zone} for the site-set masthead type, no text, no words, no
 > letters
@@ -1897,7 +1912,8 @@ shapes: no clocks, no countdown motifs, no starbursts, no burst badges, no ticki
 imagery of any kind.** Sale takes the quiet treatment (paper-3 ground, restrained). Scaffold
 (`--doc-id dropPage-<routeKey>`; `--ref-image` when a real arriving product leads):
 
-> {The newly landed {product} bold on a {coral-soft | plum-soft | paper} ground | a quiet
+> {The newly landed {product} bold on {a pale blush ground, #FFE6DD, almost white | a soft
+> lilac ground, #F3E8FB, almost white | a paper-white ground, #FFFFFF} | a quiet
 > restrained still on paper-3 for Sale}, soft even studio light, one crisp shadow, calm and
 > confident, premium campaign photography, nothing hurried in the frame, no clocks, no countdown
 > motifs, no starbursts, no burst badges, no text, no words, no letters
