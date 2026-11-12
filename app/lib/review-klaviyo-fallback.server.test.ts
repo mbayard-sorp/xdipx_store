@@ -31,6 +31,7 @@ function fakeDeps(overrides: Partial<ResolveDeps> = {}): ResolveDeps & { createI
     },
     recordOutcome: vi.fn(async () => {}),
     countMissAttempts: async () => 0,
+    rearmStaleMisses: vi.fn(async () => 0),
     inviteDelayDays: 7,
     ...overrides,
   }
@@ -50,7 +51,7 @@ describe('resolveMissingEmailInvites', () => {
     for (const call of deps.createInviteCalls as { sendAfter?: Date }[]) {
       expect(call.sendAfter).toBeInstanceOf(Date)
     }
-    expect(result).toEqual({ invited: 1, missed: 0, matchedNoLineItems: 0 })
+    expect(result).toEqual({ invited: 1, missed: 0, matchedNoLineItems: 0, rearmed: 0 })
     expect(deps.recordOutcome).toHaveBeenCalledWith('111', 'invited', expect.stringContaining('Klaviyo'))
   })
 
@@ -78,7 +79,7 @@ describe('resolveMissingEmailInvites', () => {
     })
     const result = await resolveMissingEmailInvites(deps)
     expect(deps.createInviteCalls).toHaveLength(0)
-    expect(result).toEqual({ invited: 0, missed: 1, matchedNoLineItems: 0 })
+    expect(result).toEqual({ invited: 0, missed: 1, matchedNoLineItems: 0, rearmed: 0 })
     expect(deps.recordOutcome).toHaveBeenCalledWith('111', 'no_invite_created', 'klaviyo_miss_attempt_2_of_3')
   })
 
@@ -88,7 +89,7 @@ describe('resolveMissingEmailInvites', () => {
     })
     const result = await resolveMissingEmailInvites(deps)
     expect(deps.createInviteCalls).toHaveLength(0)
-    expect(result).toEqual({ invited: 0, missed: 0, matchedNoLineItems: 1 })
+    expect(result).toEqual({ invited: 0, missed: 0, matchedNoLineItems: 1, rearmed: 0 })
     expect(deps.recordOutcome).toHaveBeenCalledWith('111', 'no_invite_created', expect.stringContaining('no usable line items'))
   })
 
@@ -157,6 +158,26 @@ describe('resolveMissingEmailInvites', () => {
     await resolveMissingEmailInvites(deps)
     expect(sinceDaysCalls).toEqual([sinceDaysForPendingOrder(20)])
     expect(sinceDaysCalls[0]).toBeGreaterThan(14) // a fixed 14-day window would have missed this order
+  })
+
+  // Ticket #21488: an order exhausted by the #20828 field-path bug must not
+  // stay stuck forever waiting on someone to run
+  // scripts/reset-klaviyo-miss-attempts.ts --apply by hand.
+  it('re-arms stale misses before listing pending orders, and reports how many it cleared', async () => {
+    const calls: string[] = []
+    const deps = fakeDeps({
+      rearmStaleMisses: vi.fn(async () => {
+        calls.push('rearm')
+        return 7
+      }),
+      listPendingOrders: async () => {
+        calls.push('list')
+        return [{ shopifyOrderId: '111', pendingSinceDays: 2 }]
+      },
+    })
+    const result = await resolveMissingEmailInvites(deps)
+    expect(calls).toEqual(['rearm', 'list']) // rearmed rows must be visible to this same run's listing
+    expect(result.rearmed).toBe(7)
   })
 })
 

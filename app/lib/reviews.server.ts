@@ -764,6 +764,44 @@ export async function countResettableKlaviyoMissAttempts(shopifyOrderIds: string
 }
 
 /**
+ * The instant the `event_properties.$extra.id` field-path fix landed
+ * (ticket #20828, PR #1930, merged commit d818f03). Every Klaviyo-miss row
+ * recorded before this instant was produced by the broken top-level-field
+ * lookup `getPiiRedactedOrdersNeedingKlaviyoRetry`'s callers were reading
+ * against, not a real "Klaviyo hasn't synced this order yet" miss, so it is
+ * safe to clear automatically rather than leave an order permanently
+ * exhausted waiting on someone to run
+ * `scripts/reset-klaviyo-miss-attempts.ts --apply` by hand. #20828 shipped
+ * that script but, by its own PR body, never executed it against
+ * production ("that is a post-merge ops step") — ticket #21488 is exactly
+ * that gap surfacing three days later as a `no_invite_created` majority
+ * with zero new `review_invites` rows.
+ */
+export const KLAVIYO_LOOKUP_FIX_EPOCH = new Date('2026-11-09T23:10:00Z')
+
+/**
+ * Clears every Klaviyo-miss row recorded before `epoch`, so the affected
+ * orders are picked up again by `getPiiRedactedOrdersNeedingKlaviyoRetry`
+ * on the very next cron run. Idempotent and safe to call unconditionally on
+ * every run (`review-klaviyo-fallback.server.ts` does, ticket #21488): once
+ * a row predates the epoch and is cleared, it can never match the `<
+ * epoch` condition again, so every call after the first against the same
+ * rows is a no-op. The next code fix to the resolution logic only needs to
+ * bump `KLAVIYO_LOOKUP_FIX_EPOCH`; it does not need a new manual script run.
+ * Returns the number of rows cleared.
+ */
+export async function rearmKlaviyoMissAttemptsBefore(epoch: Date): Promise<number> {
+  const rows = await sql`
+    DELETE FROM order_fulfillment_webhook_log
+    WHERE outcome = 'no_invite_created'
+      AND reason LIKE ${KLAVIYO_MISS_REASON_PREFIX + '%'}
+      AND created_at < ${epoch.toISOString()}
+    RETURNING shopify_order_id
+  `
+  return rows.length
+}
+
+/**
  * `review_invites` rows touched in the last `days` days. The table has no
  * `created_at`: `sent_at` defaults to `now()` at INSERT time (createInvite
  * never sets it) and stays there until `markInviteSent` overwrites it at

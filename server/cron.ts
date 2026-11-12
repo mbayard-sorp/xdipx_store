@@ -407,11 +407,13 @@ export function createCronRoutes() {
       // retried on the next KLAVIYO_MISS_MAX_ATTEMPTS-1 days' runs, then left alone.
       let klaviyoInvited = 0
       let klaviyoMissed = 0
+      let klaviyoRearmed = 0
       try {
         const { resolveMissingEmailInvites, defaultResolveDeps } = await import('../app/lib/review-klaviyo-fallback.server.js')
         const klaviyoResult = await resolveMissingEmailInvites(defaultResolveDeps(settings.inviteDelayDays))
         klaviyoInvited = klaviyoResult.invited
         klaviyoMissed = klaviyoResult.missed
+        klaviyoRearmed = klaviyoResult.rearmed
       } catch (err) {
         console.error('[cron:review-reminders] klaviyo email-resolution phase failed:', err)
       }
@@ -441,7 +443,7 @@ export function createCronRoutes() {
       }
 
       if (!settings.remindersEnabled) {
-        res.json({ ok: true, invitesDue: due.length, invitesSent, klaviyoInvited, klaviyoMissed, remindersSkipped: 'reminders disabled' })
+        res.json({ ok: true, invitesDue: due.length, invitesSent, klaviyoInvited, klaviyoMissed, klaviyoRearmed, remindersSkipped: 'reminders disabled' })
         return
       }
 
@@ -477,7 +479,7 @@ export function createCronRoutes() {
       })
 
       res.json({
-        ok: true, invitesDue: due.length, invitesSent, klaviyoInvited, klaviyoMissed,
+        ok: true, invitesDue: due.length, invitesSent, klaviyoInvited, klaviyoMissed, klaviyoRearmed,
         reminderTotal: invites.length, remindersSent: sent,
         ...(funnelCheck ? { funnelCheck } : {}),
       })

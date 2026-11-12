@@ -18,6 +18,8 @@ import {
   getInvitedProductIdsForOrder,
   getPiiRedactedOrdersNeedingKlaviyoRetry,
   recordOrderFulfillmentOutcome,
+  rearmKlaviyoMissAttemptsBefore,
+  KLAVIYO_LOOKUP_FIX_EPOCH,
   KLAVIYO_MISS_MAX_ATTEMPTS,
   KLAVIYO_MISS_REASON_PREFIX,
   type PendingKlaviyoRetryOrder,
@@ -52,6 +54,8 @@ export interface ResolveDeps {
   createInvite: (input: CreateInviteInput) => Promise<unknown>
   recordOutcome: (shopifyOrderId: string, outcome: 'invited' | 'no_invite_created', reason: string) => Promise<void>
   countMissAttempts: (shopifyOrderId: string) => Promise<number>
+  /** Re-arms orders whose Klaviyo-miss attempts all predate a resolution-logic fix. Returns rows cleared. */
+  rearmStaleMisses: () => Promise<number>
   /** Days from now a freshly resolved invite is scheduled to send. */
   inviteDelayDays: number
 }
@@ -64,6 +68,7 @@ export function defaultResolveDeps(inviteDelayDays: number): ResolveDeps {
     createInvite,
     recordOutcome: recordOrderFulfillmentOutcome,
     countMissAttempts: countKlaviyoMissAttempts,
+    rearmStaleMisses: () => rearmKlaviyoMissAttemptsBefore(KLAVIYO_LOOKUP_FIX_EPOCH),
     inviteDelayDays,
   }
 }
@@ -75,6 +80,8 @@ export interface ResolveMissingEmailInvitesResult {
   missed: number
   /** Orders Klaviyo matched, but with no usable line items. */
   matchedNoLineItems: number
+  /** Stale miss-attempt rows cleared before listing pending orders this run (ticket #21488). */
+  rearmed: number
 }
 
 /**
@@ -84,9 +91,17 @@ export interface ResolveMissingEmailInvitesResult {
  * row never reaches this function (`deps.listPendingOrders` excludes it),
  * and a replay within the same run never double-invites a product because
  * `deps.getInvitedProductIds` plus an in-run `seen` set both guard it.
+ *
+ * Re-arms stale misses first (ticket #21488): any order exhausted by a miss
+ * recorded before `KLAVIYO_LOOKUP_FIX_EPOCH` was exhausted by the broken
+ * field-path lookup #20828 fixed, not a real "not found yet," so it is
+ * cleared and re-listed by `deps.listPendingOrders` on this same run rather
+ * than staying permanently stuck waiting for someone to run
+ * `scripts/reset-klaviyo-miss-attempts.ts --apply` by hand.
  */
 export async function resolveMissingEmailInvites(deps: ResolveDeps): Promise<ResolveMissingEmailInvitesResult> {
-  const result: ResolveMissingEmailInvitesResult = { invited: 0, missed: 0, matchedNoLineItems: 0 }
+  const result: ResolveMissingEmailInvitesResult = { invited: 0, missed: 0, matchedNoLineItems: 0, rearmed: 0 }
+  result.rearmed = await deps.rearmStaleMisses()
   const pendingOrders = await deps.listPendingOrders()
 
   for (const { shopifyOrderId, pendingSinceDays } of pendingOrders) {
