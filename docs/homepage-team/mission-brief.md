@@ -481,6 +481,14 @@ these surfaces, verify on the live page:
 5. No fabricated dial or proof data. Sensation dials, mood/audience/matters
    tags, and any "X people picked this" style proof must come from real
    product data or real behavior, never invented to fill a slot.
+6. At most one `<link rel="preload" as="image">` in the served HTML
+   (ticket #21302). Run 1967 found every listing page shipping 24 to 29 of
+   them (`/collections/pleasure` 29, `/collections/play` 29,
+   `/collections/couples-vibrators` 25, `/new` 25, `/collections/wands`
+   24), invisible to eight weeks of design-critic verdicts because the
+   defect does not show in a screenshot. The homepage has carried this
+   exact check since ticket #13149; this item extends it to every surface
+   in this section's scope.
 
 **b. Tiered upkeep cadence (binding policy).** This cadence is not a
 suggestion, it is the standing schedule for these surfaces, the same weight
