@@ -315,9 +315,32 @@ async function resolveCastPhotoUrl(castSlug: string): Promise<string> {
   return member.editorialPhotoUrl ?? member.photoUrl
 }
 
-async function resolveProductPhotoUrl(handle: string): Promise<string> {
-  const { getProductByHandle } = await import('~/lib/shopify.server')
+/**
+ * Ticket #21538. `images[0]` is whatever Shopify happens to have first —
+ * frequently the retail carton, not the bare product — so the composite
+ * plate and the product-fidelity gate's own reference frame used to be the
+ * same wrong image: the generator faithfully rendered the carton and the
+ * gate then rejected it for not matching the real object. The catalog
+ * already carries `xdipx.bare_product_reference`
+ * (`resolveBareProductReference`, `app/lib/shopify.server.ts`) for exactly
+ * this, resolved once and stored rather than recomputed per brief, so prefer
+ * it. Still re-validated here, not trusted blindly: the same heuristic that
+ * writes the metafield can itself mispick (confirmed on
+ * temptasia-beginner-cuffs, whose stored reference pointed at a carton frame
+ * — see `scripts/fix-bare-reference-temptasia-beginner-cuffs.ts`), so a
+ * packaging-looking stored reference is treated the same as no reference at
+ * all rather than composited against.
+ */
+export async function resolveProductPhotoUrl(handle: string): Promise<string> {
+  const { getProductByHandle, looksLikePackaging } = await import('~/lib/shopify.server')
   const product = await getProductByHandle(handle)
+  const bareRef = product?.bareProductReference
+  if (bareRef?.url) {
+    const matchingImage = product?.images?.find(img => img.url === bareRef.url)
+    if (!looksLikePackaging({ url: bareRef.url, altText: matchingImage?.altText ?? null })) {
+      return bareRef.url
+    }
+  }
   const url = product?.images?.[0]?.url
   if (!url) throw new Error(`Product '${handle}' has no Shopify image to composite against`)
   return url

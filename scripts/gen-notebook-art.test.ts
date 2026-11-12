@@ -7,7 +7,17 @@
 // (app/lib/social-vision-gate.server.ts) the hero path now calls on every
 // candidate before it can reach disk or Sanity.
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { gateHeroBuffer, splitByVerdict, splitByFidelity, billableCandidateCount, remoteVisionCallVision, heroVisionDeps, sniffImageMediaType, pickHeroProductHandle } from './gen-notebook-art'
+
+const h = vi.hoisted(() => ({
+  getProductByHandle: vi.fn(),
+  looksLikePackaging: vi.fn(),
+}))
+vi.mock('~/lib/shopify.server', () => ({
+  getProductByHandle: (...args: unknown[]) => h.getProductByHandle(...args),
+  looksLikePackaging: (...args: unknown[]) => h.looksLikePackaging(...args),
+}))
+
+import { gateHeroBuffer, splitByVerdict, splitByFidelity, billableCandidateCount, remoteVisionCallVision, heroVisionDeps, sniffImageMediaType, pickHeroProductHandle, resolveProductPhotoUrl } from './gen-notebook-art'
 import type { VisionVerdict } from '../app/lib/social-vision-gate.server'
 import type { ProductFidelityVerdict } from '../app/lib/social-product-fidelity.server'
 
@@ -346,5 +356,53 @@ describe('pickHeroProductHandle', () => {
 
   it('returns null when the post embeds no product, regardless of the explicit handle', () => {
     expect(pickHeroProductHandle('some-handle', [])).toBe(null)
+  })
+})
+
+// Ticket #21538: resolveProductPhotoUrl used to always composite against
+// images[0], which is frequently the retail carton rather than the bare
+// product (confirmed on sportsheets-sex-mischief-satin-blindfold-black,
+// whose images[0] is a carton and whose bare frame sits at images[1]). It
+// now prefers the catalog's own xdipx.bare_product_reference when the stored
+// frame itself doesn't look like packaging, and falls back to images[0]
+// otherwise — never trusting the stored reference blindly, because the same
+// heuristic that writes it can mispick (temptasia-beginner-cuffs resolved to
+// a carton frame with no packaging text signal to catch it).
+describe('resolveProductPhotoUrl', () => {
+  afterEach(() => {
+    h.getProductByHandle.mockReset()
+    h.looksLikePackaging.mockReset()
+  })
+
+  it('prefers a validated bare_product_reference over images[0]', async () => {
+    h.getProductByHandle.mockResolvedValue({
+      images: [{ url: 'https://cdn.shopify.com/carton.jpg', altText: '' }],
+      bareProductReference: { url: 'https://cdn.shopify.com/bare.jpg', index: 1, reason: 'confirmed bare frame', resolvedAt: '2026-01-01', method: 'heuristic' },
+    })
+    h.looksLikePackaging.mockReturnValue(false)
+    await expect(resolveProductPhotoUrl('sportsheets-sex-mischief-satin-blindfold-black')).resolves.toBe('https://cdn.shopify.com/bare.jpg')
+  })
+
+  it('falls back to images[0] when the stored reference itself looks like packaging', async () => {
+    h.getProductByHandle.mockResolvedValue({
+      images: [{ url: 'https://cdn.shopify.com/91835A.jpg', altText: '' }],
+      bareProductReference: { url: 'https://cdn.shopify.com/91835A_dup.jpg', index: 1, reason: 'confirmed bare frame', resolvedAt: '2026-01-01', method: 'heuristic' },
+    })
+    h.looksLikePackaging.mockReturnValue(true)
+    await expect(resolveProductPhotoUrl('temptasia-beginner-cuffs')).resolves.toBe('https://cdn.shopify.com/91835A.jpg')
+  })
+
+  it('falls back to images[0] when no bare_product_reference is stored', async () => {
+    h.getProductByHandle.mockResolvedValue({
+      images: [{ url: 'https://cdn.shopify.com/only.jpg', altText: '' }],
+      bareProductReference: undefined,
+    })
+    await expect(resolveProductPhotoUrl('some-handle')).resolves.toBe('https://cdn.shopify.com/only.jpg')
+    expect(h.looksLikePackaging).not.toHaveBeenCalled()
+  })
+
+  it('throws when the product has neither a bare reference nor any image', async () => {
+    h.getProductByHandle.mockResolvedValue({ images: [], bareProductReference: null })
+    await expect(resolveProductPhotoUrl('no-images-handle')).rejects.toThrow(/has no Shopify image/)
   })
 })
