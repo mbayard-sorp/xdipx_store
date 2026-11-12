@@ -903,8 +903,13 @@ A deep-refreshed category page is done when it has, verified in the served HTML:
 - a masthead (voice-gated copy in step with the week's theme),
 - populated shelves (real products, no empty shelf sections),
 - working anchors (every block's `anchorId` resolves on the page),
-- one FAQ block, and
-- the trust block.
+- one FAQ block,
+- the trust block, and
+- at most one `<link rel="preload" as="image">` (mission-brief.md §11a item 6, ticket #21302).
+  Run 1967 found every category and drop page shipping 24-29 of them from `CardMediaCarousel`'s
+  own `priority={i === 0}`, a defect invisible to a design-critic screenshot. Count it on the same
+  fetch this definition-of-done check already makes — one grep, same pattern as the homepage's
+  Step 7 assertion 3.
 
 Never fabricate dial data (dial cards render only where `xdipx.sensation_dial` exists) and never
 fabricate proof (reviews, counts, claims). A missing dial or an empty proof surface is correct
