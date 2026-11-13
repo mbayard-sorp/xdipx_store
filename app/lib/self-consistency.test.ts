@@ -79,6 +79,111 @@ describe('ingress codes: conflicting-instruction (run 1239, defect #1 shape)', (
   })
 })
 
+describe('neighbour-water-instruction (run 2004 shape, ticket #21738)', () => {
+  // Run 2004: repairing how-do-you-use-a-prostate-massager's IPX7 block
+  // (no promise about a tap) was blocked by the accuracy gate on the
+  // UNCHANGED neighbouring block ("Wash it... warm water"), a contradiction
+  // check-self-consistency.ts's conflicting-instruction predicate cannot see
+  // because the wash block names no ingress code at all.
+  it('flags a forbidding ingress block next to an unscoped, unconditional wash instruction', () => {
+    const report = analyzeParagraphs([
+      {
+        section: 'Water ratings',
+        text: 'An IPX7 mark comes with no promise about a shower, so never run it under the tap.',
+      },
+      {
+        section: 'Cleaning',
+        text: 'Wash it every time after use, warm water and a plain unscented soap.',
+      },
+    ])
+    const hit = report.findings.find(f => f.kind === 'neighbour-water-instruction')
+    expect(hit).toBeDefined()
+    expect(hit?.token).toBe('IPX7')
+    expect(hit?.sites).toHaveLength(2)
+  })
+
+  it('flags an allowing ingress block next to an unscoped, unconditional "never submerge" instruction', () => {
+    const report = analyzeParagraphs([
+      {
+        section: 'Water ratings',
+        text: "This toy's IPX7 rating means you can use it right in the shower.",
+      },
+      {
+        section: 'Care',
+        text: 'Never submerge it in the sink; a damp cloth after use is all it needs.',
+      },
+    ])
+    const hit = report.findings.find(f => f.kind === 'neighbour-water-instruction')
+    expect(hit).toBeDefined()
+    expect(hit?.token).toBe('IPX7')
+  })
+
+  it('does not flag when the neighbour block is outside the scan window', () => {
+    const filler = { section: 'Filler', text: 'This paragraph has nothing to do with water at all.' }
+    const report = analyzeParagraphs([
+      {
+        section: 'Water ratings',
+        text: 'An IPX7 mark comes with no promise about a shower, so never run it under the tap.',
+      },
+      filler,
+      filler,
+      filler,
+      { section: 'Cleaning', text: 'Wash it every time after use, warm water and a plain unscented soap.' },
+    ])
+    expect(report.findings.some(f => f.kind === 'neighbour-water-instruction')).toBe(false)
+  })
+
+  it('does not flag a neighbour instruction that names its own rating', () => {
+    const report = analyzeParagraphs([
+      {
+        section: 'Water ratings',
+        text: 'An IPX7 mark comes with no promise about a shower, so never run it under the tap.',
+      },
+      {
+        section: 'Cleaning',
+        text: 'This IPX7 toy can be washed under warm running water after every session.',
+      },
+    ])
+    expect(report.findings.some(f => f.kind === 'neighbour-water-instruction')).toBe(false)
+  })
+
+  it('does not flag a neighbour instruction that defers to the manufacturer', () => {
+    const report = analyzeParagraphs([
+      {
+        section: 'Water ratings',
+        text: 'An IPX7 mark comes with no promise about a shower, so never run it under the tap.',
+      },
+      {
+        section: 'Cleaning',
+        text: "Check the manufacturer's care guide before washing it in warm water.",
+      },
+    ])
+    expect(report.findings.some(f => f.kind === 'neighbour-water-instruction')).toBe(false)
+  })
+
+  it('does not flag two neighbouring blocks that agree in polarity', () => {
+    const report = analyzeParagraphs([
+      {
+        section: 'Water ratings',
+        text: 'An IPX7 mark comes with no promise about a shower, so never run it under the tap.',
+      },
+      {
+        section: 'Cleaning',
+        text: 'Never wash it under running water; a damp cloth is enough.',
+      },
+    ])
+    expect(report.findings.some(f => f.kind === 'neighbour-water-instruction')).toBe(false)
+  })
+
+  it('does not flag an ingress block with no instruction, only a definition', () => {
+    const report = analyzeParagraphs([
+      { section: 'Water ratings', text: 'An IPX7 rating is granted by independent lab testing.' },
+      { section: 'Cleaning', text: 'Wash it every time after use, warm water and a plain unscented soap.' },
+    ])
+    expect(report.findings.some(f => f.kind === 'neighbour-water-instruction')).toBe(false)
+  })
+})
+
 describe('numbered enumerations: count-mismatch across sites (run 327 / run 626 shape)', () => {
   // Run 327: a body/FAQ enumeration split. Run 626: a fever-severity tier
   // change to the body red-flag list left the FAQ's copy of the same
