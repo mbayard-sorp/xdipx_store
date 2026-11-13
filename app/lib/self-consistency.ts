@@ -49,13 +49,28 @@
  *      positives are cheap — the writer reads every flagged cluster anyway —
  *      and the cost of a miss is a whole spent repair attempt.
  *
+ *   5. `neighbour-water-instruction` — a block carries an ingress-code
+ *      instruction (the same allow/forbid read `conflicting-instruction`
+ *      already extracts), and one of the blocks within a small window before
+ *      or after it gives an UNCONDITIONAL water-contact instruction (wash,
+ *      rinse, run under, soak, submerge, shower, bath, tap) that names no
+ *      rating of its own and does not defer to the manufacturer, with the
+ *      opposite polarity. This is the same shape as #2 above, except the
+ *      second site shares no token with the first — it is found by
+ *      PROXIMITY, not by the code appearing twice — which is exactly the gap
+ *      ticket #21540 found live: content run 2004 repairing
+ *      how-do-you-use-a-prostate-massager's IPX7 block (b39, "comes with no
+ *      promise about a tap") was blocked by the accuracy gate on the
+ *      UNCHANGED neighbouring block (b40, "wash it... warm water"), a
+ *      contradiction no existing predicate could see because b40 names no
+ *      code at all. See ticket #21738.
+ *
  * This deliberately does NOT catch a contradiction between two clauses that
- * share no reusable token (run 1239's wash-instruction-vs-crevice-wash shape
- * when neither sentence names the rating, or its HPV-finding-vs-wash-is-enough
- * and porous-toy-sharing shapes) — those are genuine semantic conflicts between
- * unrelated prose, not a token the document itself defines and later
- * contradicts, and need the manual whole-document re-read this checker is a
- * pre-flight for, not a replacement of.
+ * share no reusable token and sit outside each other's scan window (run
+ * 1239's HPV-finding-vs-wash-is-enough and porous-toy-sharing shapes) — those
+ * are genuine semantic conflicts between unrelated prose that still need the
+ * manual whole-document re-read this checker is a pre-flight for, not a
+ * replacement of.
  *
  * ── Cross-post pass (ticket #18045) ─────────────────────────────────────────
  * Everything above models the document against ITSELF. `findCrossPostIngressConflicts`
@@ -83,6 +98,9 @@ export type { DraftInput, DraftParagraph }
 // ─── Ingress/IP rating codes: defined-vs-instructed, and conflicting instructions ──
 
 const INGRESS_RE = /\bIPX?\d{1,2}\b/gi
+/** Non-global twin of INGRESS_RE for plain boolean `.test()` calls — a global
+ *  regex's `.test()` advances `lastIndex` across calls and alternates results. */
+const INGRESS_TEST_RE = /\bIPX?\d{1,2}\b/i
 
 /** A sentence mentioning a token also counts as DEFINING it when it uses one of these cues. */
 const DEFINER_RE = /\b(means|stands for|is rated (?:for|to)|rated (?:for|to)|indicates|guarantees|covers)\b/i
@@ -161,6 +179,91 @@ function scanIngressSentence(
     isDefiner,
     instructions,
   }))
+}
+
+// ─── Neighbour water-contact instructions: ingress-scoped vs unscoped (ticket #21738) ──
+
+/**
+ * Words that describe actually putting a toy in contact with water, phrased
+ * as a cleaning or use INSTRUCTION. Deliberately broader than ACTION_BUCKETS
+ * above: "wash" and "tap" never set an ACTION_BUCKETS cue because that
+ * vocabulary is keyed for an ingress code appearing on BOTH sides of a
+ * conflict, not a free-standing cleaning line that names no code at all —
+ * exactly why the how-do-you-use-a-prostate-massager b39/b40 pair (run 2004)
+ * was invisible to every existing predicate.
+ */
+const WATER_CONTACT_RE =
+  /\b(wash(?:es|ed|ing)?|rinse[sd]?|rinsing|runs? (?:it |them |your toy )?under|running under|soak(?:s|ed|ing)?|submerge[sd]?|submersion|shower|bath(?:e[sd]?|ing)?|tap)\b/i
+
+/**
+ * An explicit hand-off to the manufacturer's own instructions scopes a
+ * sentence just as much as naming a rating does: it defers to a
+ * product-specific source instead of asserting a blanket rule, so it is not
+ * the "unconditional" instruction this predicate is built to catch.
+ */
+const MANUFACTURER_DIRECTION_RE =
+  /\b(manufacturer|the brand'?s? (?:instructions|guide|care guide|directions)|per the (?:brand|manufacturer)|check (?:with|the) (?:brand|manufacturer))\b/i
+
+/**
+ * How many blocks before and after an ingress-instructed block to scan for
+ * an unscoped, opposite-polarity water-contact instruction. The motivating
+ * incident (run 2004) is adjacent (distance 1); a window of 2 gives a little
+ * slack for the sibling cleaning-guide posts #21540 names as likely repeats,
+ * where the wash line is not always the very next block.
+ */
+const DEFAULT_NEIGHBOUR_WATER_WINDOW = 2
+
+/**
+ * For every block carrying an ingress-code instruction, scans the blocks
+ * within `windowSize` before and after it for an UNCONDITIONAL water-contact
+ * instruction — one that names no rating of its own and does not defer to
+ * the manufacturer — whose polarity (the same negation-window read
+ * `polarityBefore` already does) is the opposite of the ingress block's.
+ * Same shape as the in-document `conflicting-instruction` check, except the
+ * second site is found by PROXIMITY rather than by the code appearing twice.
+ */
+function findNeighbourWaterInstructionFindings(
+  paragraphs: DraftParagraph[],
+  windowSize: number = DEFAULT_NEIGHBOUR_WATER_WINDOW,
+): SelfConsistencyFinding[] {
+  const ingressMentions = extractIngressMentions(paragraphs).filter(m => m.instructions.length > 0)
+  if (ingressMentions.length === 0) return []
+
+  const seen = new Set<string>()
+  const findings: SelfConsistencyFinding[] = []
+
+  for (const mention of ingressMentions) {
+    const lo = Math.max(0, mention.paragraphIndex - windowSize)
+    const hi = Math.min(paragraphs.length - 1, mention.paragraphIndex + windowSize)
+    for (let idx = lo; idx <= hi; idx++) {
+      if (idx === mention.paragraphIndex) continue
+      const para = paragraphs[idx]!
+      for (const sentence of splitSentences(para.text)) {
+        if (INGRESS_TEST_RE.test(sentence)) continue // scoped by its own rating
+        if (MANUFACTURER_DIRECTION_RE.test(sentence)) continue // defers to the manufacturer
+        const m = WATER_CONTACT_RE.exec(sentence)
+        if (!m) continue
+        const waterPolarity = polarityBefore(sentence, m.index)
+
+        for (const instr of mention.instructions) {
+          if (instr.polarity === waterPolarity) continue // agree, not a conflict
+          const key = [mention.token, instr.bucket, mention.sentence, sentence].sort().join('\u0000')
+          if (seen.has(key)) continue
+          seen.add(key)
+          findings.push({
+            kind: 'neighbour-water-instruction',
+            token: mention.token,
+            message:
+              `"${mention.token}" ${instr.polarity}s ${instr.bucket} here, but a nearby block gives an ` +
+              `unconditional water-contact instruction naming no rating of its own, and ${waterPolarity}s it.`,
+            sites: [toSite(mention), { section: para.section, sentence, paragraphIndex: idx }],
+          })
+        }
+      }
+    }
+  }
+
+  return findings
 }
 
 // ─── Numbered-enumeration promises: cross-site count mismatches ────────────────
@@ -333,6 +436,7 @@ export type SelfConsistencyFindingKind =
   | 'conflicting-instruction'
   | 'count-mismatch'
   | 'criterion-divergence'
+  | 'neighbour-water-instruction'
 
 export interface SelfConsistencySite {
   section: string
@@ -494,6 +598,9 @@ export function analyzeParagraphs(paragraphs: DraftParagraph[]): SelfConsistency
       })
     }
   }
+
+  // ── Neighbour water-contact instructions: ingress-scoped vs unscoped ──
+  findings.push(...findNeighbourWaterInstructionFindings(paragraphs))
 
   return { findings, overLimit: findings.length > 0 }
 }
