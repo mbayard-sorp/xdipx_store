@@ -128,6 +128,15 @@ git fetch origin "<headRef>" && git checkout "<headRef>"
 git diff origin/main...HEAD
 ```
 
+**A shallow clone makes a negative ancestor check lie (ticket #21509).** A fresh cloud-session clone
+of this repo can be shallow, which makes `git merge-base --is-ancestor <sha> origin/main` falsely
+report NOT an ancestor for a real, already-merged commit. Confirmed on run 1980/PR #1949's review:
+`9d1358a0` and `ad3f701f` both showed as non-ancestors until `git fetch origin main --unshallow` ran,
+after which both correctly resolved `true`. Anywhere this playbook has you verify a cited commit SHA
+against `origin/main` (a ticket's own commit citation, or the owner-direction-citation rule above),
+run `git fetch --unshallow` (or check `git rev-parse --is-shallow-repository` first) before trusting
+a negative ancestor result, so a real citation is not mistaken for a fabricated one.
+
 **Use an isolated worktree, not a shared `git checkout`, whenever more than one ticket is reviewed in
 the same pass** — whether by a delegated subagent or sequentially by the main session. A bare
 `git checkout ticket/<id>` mutates the one shared working directory, so a second review running in the
