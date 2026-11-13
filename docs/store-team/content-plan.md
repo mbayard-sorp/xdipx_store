@@ -304,6 +304,7 @@ extend freely — additions need a slug, problem, and target query):
 | 33 | we-bought-a-sex-toy-and-never-used-it | A toy both partners agreed to buy went badly or just awkwardly on the first try and now sits unused, with neither partner raising it again because raising it means reopening the moment it went wrong | "we bought a sex toy and never used it again" |
 | 34 | why-does-a-toy-feel-different-on-different-days | The same toy that produced a reliable result last week does almost nothing tonight, and the reader reads the variance as the toy failing (so they shop for a stronger one) or their own body breaking (so they stop), when the usual move, escalating intensity in the moment, widens the gap † | "why does my vibrator feel different some days" |
 | 35 | is-it-ok-to-give-your-partner-a-sex-toy-as-a-gift | Someone wants to give their partner a sex toy and freezes, because a wrapped gift arrives finished, with an occasion attached and a social script that says the first correct response is thank you, so the honest answer and the polite answer are not the same answer and the receiver pays for "no" on the spot | "is it ok to give your partner a sex toy as a gift" |
+| 36 | why-using-a-remote-control-vibrator-together-feels-awkward | A couple buys a remote-control toy specifically to share it, and the handover breaks the feedback loop in both directions: the person holding the remote is operating someone else's sensation blind, with nothing to read but a face, so they keep changing the setting hunting for a visible reaction, while the person wearing it stops feeling and starts producing a reaction so the other one knows it is working. Both end up doing a job, the usual escalation (more patterns, more intensity, a better toy) makes it worse because more settings means more guessing, and the couple reads the result as "we are bad at this" | "why does using a remote control vibrator with a partner feel awkward" |
 
 † = health-adjacent; the "worth seeing a clinician if…" line, with its tier, is mandatory (see above).
 
@@ -367,6 +368,34 @@ circumstance sentence (e.g. "By that run the bank was fully spent..."). PR #1908
 between an earlier row's two sentences, inverting the chronological record this block exists to
 preserve. Bounced and fixed rather than shipped; this note makes the convention explicit so it is
 followed, not rediscovered, next time.
+
+Row 36 is the sixth (authored by content run 2004, 2026-11-13, serving calendar row 49, the Instagram
+"Two of You, Cuffing Season" couples campaign running 11-10 to 11-23, and the weekly brief's measured
+demand shape: a $100 to $150 couples or remote-control toy bought by someone who did not click an ad).
+By that run the bank was spent for the FIFTH time: rows 1-14, 16-24, 27, 28 and 30-35 all had published
+posts, rows 25, 26 and 29 are retired, row 15 is still parked, and the `seoContentBrief` queue held no
+`real-talk` brief at all (its six queued rows were five `wellness-basics` and one `comparisons`). Row 36
+targets the CONTROL HANDOVER, which no row covered: both partners want the same thing and neither is
+refusing anything, and the problem is purely that a remote removes the touch-plus-immediate-feedback
+channel the two of them were using to adjust each other. It is distinct from row 7 (raising the subject
+at all), from row 21 (a partner who refuses), from row 22 (a partner who feels replaced), from row 24
+(mismatched touch preferences, where the two of them want different input), and from row 33 (a toy
+bought together that went badly once and now sits unused): in none of those is the toy being actively
+used by both people with the control in one person's hand. `check-slug-precheck.ts` returned slug-free,
+`check-topic-collision.ts` was clean against 20 prior posts on heading, title and shared-embed surfaces,
+and `check-self-consistency.ts` cross-post pass was clean against all 118 published posts.
+
+One finding from this row worth carrying forward, because no checker surfaces it at topic-selection
+time: `check-fresh-language.ts` caught that the first draft's embed paragraph shared twenty 6-grams with
+the published `/notebook/what-if-you-like-different-kinds-of-touch`, which already embeds the We-Vibe
+Sync 2 (rose colorway) and already resolves on "change who is holding the control". The overlap was
+editorial, not merely lexical. `check-topic-collision.ts` could not see it, because it compares
+`blogProductEmbed.productHandle` values and the two posts carry different COLORWAY handles for the same
+product. Row 36 was re-angled onto a different first-party fact (We-Vibe's own statement of shared
+vibrations from a toy worn during penetration, which gives the REMOTE-HOLDER a feedback channel rather
+than giving the wearer control) and the two posts now cross-link instead of competing. A future run
+picking a product that already appears in a published post should expect the collision checker to miss
+it when the handles differ by colorway.
 
 A COVERED row (15, 25, 26, 29) is not a permanent dead entry: retire it by
 striking it from the working rotation once a genuinely distinct angle is found or the cluster is
