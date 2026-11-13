@@ -4,7 +4,13 @@
  * Phase 6b — orderStatusLookup tool.
  *
  * Looks up the most recent Shopify order for a customer (by phone or GID),
- * optionally filtering by order name (e.g. "#1234").
+ * optionally filtering by order name (e.g. "#1234"). When `orderName` is
+ * given with a `phone` but no `customerGid`, it resolves the order directly
+ * by name (no Customer-object access needed) instead of resolving the
+ * customer from the phone first — `findCustomerByPhone` touches Shopify's
+ * Protected Customer Data, which this store's plan does not have access to
+ * (ticket #21753/#21797), so an order name already in hand is used before
+ * that dependency, not after it fails.
  *
  * Exported:
  *   - OrderStatus  — the flat return shape
@@ -235,8 +241,14 @@ async function orderStatusLookupImpl({
 }): Promise<OrderStatus> {
   let resolvedGid = customerGid
 
-  // Step 1: resolve customer GID from phone if GID not provided
-  if (!resolvedGid && phone) {
+  // Step 1: resolve customer GID from phone if GID not provided — but only
+  // when no orderName was given. findCustomerByPhone touches the Shopify
+  // Customer object, which is Protected Customer Data (plan-gated; see
+  // ticket #21753): when an orderName is already in hand, Step 2b below
+  // resolves the order directly with no Customer-object access at all, so
+  // skipping straight to it avoids that dependency entirely instead of
+  // failing on it needlessly (ticket #21797).
+  if (!resolvedGid && phone && !orderName) {
     const customer = await findCustomerByPhone(phone)
     if (!customer) {
       throw new OrderNotFoundError(`No customer found for phone ${phone}`)
