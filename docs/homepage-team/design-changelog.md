@@ -641,4 +641,10 @@ Keep entries terse and factual. This file is content/documentation on the agent-
 - Evidence: run id 1961. Step 2c sameness-diff surfaces: hero + rails (rails carries a real product-selection change, not copy alone). Post-publish render-truth gate (Step 7) passed all content assertions (hero handle, new rail heading, announcement text, no daily-deal framing) and the page-weight budget (compressed HTML 48,626B, loader data 96,052B, both under baseline ceilings). Hero preload count is 2, a pre-existing tracked defect (not introduced this run).
 - **Appended by:** agent-editor, from suggestion #21256 (run 1961's own turn budget did not allow opening a PR itself).
 
+### 2026-11-12 (Routine A, run 1979)
+- **What changed:** Hero copy refreshed (`singleton.emmaHero`: eyebrow/headline/body/pullQuote; pin unchanged, `dame-aer-suction-toy-coral`). Rail `teamRail-2026-09-06-2` relined (+`aneros-sessions-water-based-lubricant-4-2-oz`, +`pjur-med-soft-glide-100ml-3-4oz`, +`elixir-sensitive-skin-lubricant-17-oz`; -`date-night`, -`jo-h2o`; heading -> "Slick enough for every toy you own.") and `teamRail-2026-09-29-0` pairing `jo-refresh` -> `naturals-h2o-intimate-lubricant-8-5-oz` (fixes 2 cross-rail duplicates). Wayfinder tile labels wf65a/b/c + promo copy refreshed, with new promo art (`image-e938e4e2c1e6464b1379cd76910d545d2084eb9b-2560x1440-jpg`). Couples band copy refreshed with new art (`image-f5c8da15992a72d778d7ef9c08944d241ea9d9c8-2560x1440-jpg`). Announcement ticker messages a1003m2/a1003m4 refreshed. `dropPage-new` (rev `6EmQM6GES3f7Qd8gaDNXmK`) and `dropPage-on-sale` (rev `Nq1z00fCiO1HLUK0zJPFfF`) mastheads updated.
+- **Why:** Lube Sale week freshness + rail diversity rule.
+- **Evidence:** `rails-fingerprint --assert-changed` ok (rails, hero, couples changed). Step 2c sameness surfaces: rails product selection, couples imagery, promo imagery, tiles, hero copy, ticker.
+- **Appended by:** agent-editor, from suggestion #21502 (git forbidden that dispatch per #9503, so the run could not open its own changelog PR).
+
 <!-- Newest entries appended above this line by each routine's changelog step. -->
