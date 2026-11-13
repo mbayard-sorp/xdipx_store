@@ -223,6 +223,17 @@ for its text, so reusing that key here is the natural guess and it returns
 Never close a row you did not execute: a false `applied` looks handled and is worse than an aging
 row.
 
+**Known misrouting, tracked, not yours to fix (#16824, #20959, #20797).** A recurring class of rows
+lands at `targetTeam:product` with no execute path here at all: the ~20 `cost-sync-wholesale-rise`
+FLAG rows (`kind:process`, e.g. #13612-13621, #14882, #15347-49, #17949-58) are a repricing/owner
+judgment, not an import action, and catalog-data findings (wrong title/size, missing category,
+wrong/packaging image, below-MAP/below-wholesale pricing, Emma lived-experience PDP copy) belong to
+shopify-ops, content, or pricing respectively. Until the filer-side routing is fixed in code, `note`
+these with `ref` naming the correct lane, and report them **separately** in Step 5 from the ones you
+genuinely looked at and judged out of scope (e.g. "N of the M read this run have no execute path
+here at all, routed to <lane>" vs "N looked but not acted, out of scope/stale/needs code"). An honest
+zero-actioned run should read as zero-actionable given what this lane can execute, not as zero-read.
+
 ## Step 5: Report + finish
 
 Post one `decision` event under your `$RUN_ID` (`agentRole:'product-manager'`): queue depth
