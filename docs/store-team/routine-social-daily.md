@@ -2367,6 +2367,15 @@ verdict for this exact caption. `verdict` must be `PASS` and `reviewer` names th
 it; anything else (a missing verdict, a `REVISE`/`BLOCK`, or a gate that could not run) returns 400
 and writes no row.
 
+**Pre-draft checklist, before the first `op:draft` call (ticket #21726).** Rows 581/583/584/587
+and others repeatedly hit deterministic `pairing-missing` and `cast-target-mismatch` BLOCKs on the
+very first publish-gate brief fetch, burning an attempt before any judgment pass ran. Before calling
+`op:draft` for the first time on a post, confirm both: `castSlugs` is set from the reused asset
+library row or the story line's cast slug (never discovered via a gate BLOCK after the fact), and
+the caption either names a compatible pairing product or sets `pairingNoneReason` with its one-clause
+reason. Both fields are described in full below; this line exists so they are checked before the
+first draft call, not after it.
+
 **`sceneLocation` rides along on every product draft** (ticket #10269, see Step 5): the
 same value `social-art-director` chose, carried through unchanged, always, including when the crop
 ate the room. `bodyZone`/`contactMode`/`cropScale` ride along too, on every frame that touches skin.
