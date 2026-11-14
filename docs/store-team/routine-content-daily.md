@@ -1255,15 +1255,21 @@ waiting on an administrative gate, not a content defect, so `'queued'` correctly
 "pick this back up" (Step 3's `resume-draft` branch will find and resume it either way, since it is
 still an unpublished draft at that slug).
 
-**No brief was claimed (backlog-sourced topic).** The re-queue above assumes a `seoContentBrief` or
-`podcastReviewBrief` exists to flip back to `'queued'`/`'pending'`; a topic pulled straight from the
-content-plan backlog bank (Step 2, section 8B) has none, so a finished draft held only on a missing
-hero has nothing pointing any future run back to its slug (ticket #8991:
-`drafts.blogPost-how-do-long-distance-couples-stay-intimate` sat unreachable this way across two
-runs). When you hold a post for this reason and no brief was claimed for it, file a `priority:2`
-`process` suggestion naming the slug and the single missing element (e.g. "needs a section 0-H human
-hero, prose already PASSED both gates") so Step 6b's next run reads it and can resume publishing
-without re-drafting or re-gating the prose.
+**Every hero-hold gets a pointer row, whether or not a brief was claimed (ticket #21740).** A
+re-queued `seoContentBrief` is only re-picked when its category matches the day's slot, and a
+re-queued `podcastReviewBrief` is only re-picked on Thursday; either way the held post can sit
+invisible on the dashboard and the bus for up to six days. The brief re-queue and the pointer row
+below are complementary, not alternatives, so file the pointer on **every** hold, not only when no
+brief was claimed. File a `priority:2` `process` suggestion naming the slug and the single missing
+element (e.g. "needs a section 0-H human hero, prose already PASSED both gates"), so Step 6b's next
+run reads it and can resume publishing without re-drafting or re-gating the prose. Where a brief was
+also claimed, say so in the row (name the brief) so the next run reading the pointer knows the brief
+will independently resurface the topic on its own slot day. (Ticket #8991:
+`drafts.blogPost-how-do-long-distance-couples-stay-intimate` sat unreachable across two runs when no
+brief had been claimed and the old carve-out never applied. Ticket #21740's own evidence:
+`drafts.blogPost-when-youre-kinky-and-your-partner-isnt` sat unreachable for the opposite reason, a
+`podcastReviewBrief` WAS claimed and correctly re-queued, so the old carve-out skipped the pointer
+row and the finished, both-gates-clean post still waited up to six days.)
 
 **A hold caused by the environment is never `process` (ticket #13395).** A hold caused by a missing
 credential, an empty balance, or a script that refuses to run is filed as `kind:"code"`, `priority:1`,
@@ -1334,6 +1340,23 @@ for its text, so reusing that key here is the natural guess and it returns
 
 Never close a row you did not execute: a false `applied` looks handled and is worse than an aging
 row.
+
+**One finding, one ticket (ticket #21752).** When a run produces more than one independent
+docs-only finding in the same pass (e.g. a `content-plan.md` bank-row append and an unrelated
+`image-prompt-library.md` hero-keeper entry for a different post or day), file each as its own
+suggestion so each becomes its own single-file PR. Do not bundle unrelated findings under one
+ticket whose `DONE WHEN` promises a single-file diff ("the diff touches that one file and nothing
+else") and then ships two (ticket #21737 / PR #1961 bounced at R-QA for exactly this). If a ticket
+must legitimately cover more than one file, write its `DONE WHEN` to name every file the diff will
+touch, so the docs-only QA check ("touch nothing else") has something true to check against.
+
+**Confirm the PR is Open, not Draft, before filing its ticket (ticket #4144).** Mirrors
+`routine-agent-editor.md` Step 5: a PR opened from a cloud session defaults to draft, and a draft PR
+is invisible to the release engine (its gate returns `skip / code:'draft'` before CI, the allowlist,
+or the ticket are ever evaluated), so it waits forever no matter how green it is. When this routine
+(or an interactive session following it) opens a PR directly for a docs-only finding, run
+`gh pr ready <PR number>` in the same step as opening it, before filing the suggestion row that
+tracks it.
 
 ## Step 6c: Post-publish embed-stock sweep (mandatory, every run)
 
