@@ -103,7 +103,8 @@ const INGRESS_RE = /\bIPX?\d{1,2}\b/gi
 const INGRESS_TEST_RE = /\bIPX?\d{1,2}\b/i
 
 /** A sentence mentioning a token also counts as DEFINING it when it uses one of these cues. */
-const DEFINER_RE = /\b(means|stands for|is rated (?:for|to)|rated (?:for|to)|indicates|guarantees|covers)\b/i
+const DEFINER_RE =
+  /\b(means|stands for|is rated (?:for|to)|rated (?:for|to)|indicates|guarantees|covers|certifies|defines)\b/i
 
 interface ActionBucket {
   name: string
@@ -146,6 +147,36 @@ function polarityBefore(sentence: string, matchIndex: number): InstructionPolari
   return NEGATION_RE.test(window) ? 'forbid' : 'allow'
 }
 
+/**
+ * Scans EVERY occurrence of a bucket's action word in the sentence, not just
+ * the first, and reads the whole bucket as `forbid` if any occurrence's
+ * local window is negated (#21947, reproduced on what-makes-a-great-g-spot-
+ * rabbit-vibrator and the frozen "no promise about a shower or a tap"
+ * wording). A single-match `exec` picks whichever occurrence comes FIRST in
+ * the string, which is not necessarily the one that actually governs the
+ * token being scored: "Running water and jets carry their own ratings...
+ * and an IPX7 toy therefore comes with no promise about a shower or a tap"
+ * matches "Running water" at index 0 (empty window before it, so it reads
+ * `allow`) even though the sentence's real claim — "no promise about a
+ * shower" — forbids it. The identical sentence, read elsewhere in the same
+ * or a sibling post, then collides with itself as a false
+ * `conflicting-instruction`. Preferring `forbid` whenever any occurrence is
+ * negated matches the safety-conservative posture already used for the
+ * neighbour-water-instruction check below.
+ */
+function bucketPolarity(bucket: ActionBucket, sentence: string): InstructionPolarity | null {
+  const flags = bucket.re.flags.includes('g') ? bucket.re.flags : `${bucket.re.flags}g`
+  const globalRe = new RegExp(bucket.re.source, flags)
+  let sawMatch = false
+  let match: RegExpExecArray | null
+  while ((match = globalRe.exec(sentence))) {
+    sawMatch = true
+    if (polarityBefore(sentence, match.index) === 'forbid') return 'forbid'
+    if (match[0].length === 0) globalRe.lastIndex++
+  }
+  return sawMatch ? 'allow' : null
+}
+
 interface TokenSentence {
   token: string
   section: string
@@ -167,8 +198,8 @@ function scanIngressSentence(
   const isDefiner = DEFINER_RE.test(sentence)
   const instructions: { bucket: string; polarity: InstructionPolarity }[] = []
   for (const bucket of ACTION_BUCKETS) {
-    const m = bucket.re.exec(sentence)
-    if (m) instructions.push({ bucket: bucket.name, polarity: polarityBefore(sentence, m.index) })
+    const polarity = bucketPolarity(bucket, sentence)
+    if (polarity) instructions.push({ bucket: bucket.name, polarity })
   }
 
   return Array.from(tokens).map(token => ({
@@ -205,6 +236,20 @@ const MANUFACTURER_DIRECTION_RE =
   /\b(manufacturer|the brand'?s? (?:instructions|guide|care guide|directions)|per the (?:brand|manufacturer)|check (?:with|the) (?:brand|manufacturer))\b/i
 
 /**
+ * A block's OPENING sentence can explicitly scope the whole block to a
+ * different product class than the one the nearby ingress rating describes
+ * — a mains-powered wand instead of the battery toy carrying the code — in
+ * which case an unconditional water-contact instruction later in that same
+ * block is not actually about the rated product at all (#21947, reproduced
+ * on wand-vs-bullet-vibrator b40: "A wand that plugs into the wall sits
+ * outside all of that. It never goes in water..."). Tight by design, same
+ * bar as the rest of this module's closed vocabularies — add a shape here
+ * only once a second real incident names it.
+ */
+const SCOPE_CARVEOUT_RE =
+  /\bsits outside (?:all of )?(?:that|this|those)\b|\bplugs? into the wall\b|\ba corded (?:wand|device|toy)\b|\bmains[- ]power(?:ed)?\b/i
+
+/**
  * How many blocks before and after an ingress-instructed block to scan for
  * an unscoped, opposite-polarity water-contact instruction. The motivating
  * incident (run 2004) is adjacent (distance 1); a window of 2 gives a little
@@ -238,7 +283,9 @@ function findNeighbourWaterInstructionFindings(
     for (let idx = lo; idx <= hi; idx++) {
       if (idx === mention.paragraphIndex) continue
       const para = paragraphs[idx]!
-      for (const sentence of splitSentences(para.text)) {
+      const neighbourSentences = splitSentences(para.text)
+      if (neighbourSentences[0] && SCOPE_CARVEOUT_RE.test(neighbourSentences[0])) continue // whole block scoped to a different product class
+      for (const sentence of neighbourSentences) {
         if (INGRESS_TEST_RE.test(sentence)) continue // scoped by its own rating
         if (MANUFACTURER_DIRECTION_RE.test(sentence)) continue // defers to the manufacturer
         const m = WATER_CONTACT_RE.exec(sentence)
