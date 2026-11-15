@@ -77,6 +77,20 @@ Recommended for cell 2, pending the owner's nod and a MAP check:
 | B. For him | Hot Octopuss Pulse Solo Essential | $112.99 | $42 | 64 | Hands-free, no MAP, room for a real 10% code |
 | Control | Gawk Gawk 3000 (page exists) | $69.99 | $24 to $26 | 860 on the line | Used in cell 1 because the page is built and the product was never judged |
 
+### Price check, 2026-11-15
+
+Unit profit above left out the payment fee of about 3%. With it:
+
+| Offer | Our price | Street price | Unit profit | Verdict |
+|---|---|---|---|---|
+| Magic Wand Plus | $114.99 | $76 to $81 at Walmart, Best Buy marketplace and IntiMD; $104 to $120 at boutiques | $50.99, or $41.29 with a $10 code | We sit about $35 over the big retailers. Matching them leaves about $22 an order. Not a lead offer until that is settled |
+| Pulse Solo Essential | $112.99 | $119.99 at hotoctopuss.com | $38.18 today, $44.97 at $119.99 | Lead offer for him at the maker's price. The raise needs a pricing rule or the daily batch reverts it. Stock is 64; fallback is Lovense Gush 2 Motion (312 units, $129 at MAP, $51.13) |
+| Magic Wand Rechargeable | $190.14 | $110 to $130 | $28.94 at street | Rejected. Also not published to the online store |
+
+New rule for the envelope: an offer is checked against the maker's site and two large retailers before any page is built. A product we cannot sell within 10% of street price is not a lead offer.
+
+A draft page and ad copy for the wand exist (slug `magic-wand-gift`, not published, not voice-reviewed). They wait on the price question.
+
 Held back: every Male Rose product (MAP binds, thin profit), We-Vibe and Womanizer sets (priced below MAP), advent calendars (one left in stock, 23 units).
 
 ## 5. Kill rules
