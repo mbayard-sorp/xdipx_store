@@ -14,7 +14,7 @@ const NOW = new Date('2026-10-20T12:00:00Z')
 // StatisticsAdvertiserVariation) and the live login and list answers of 2026-10-20.
 const CAMPAIGN = {
   id: 9001, name: 'xdipx wand 300x250', status: 1, pricing_model: 2,
-  daily_limit_type: 1, max_daily_budget: 3.5, max_daily_budget_reset: 10, total_budget_limit: 0,
+  daily_limit_type: 1, max_daily_budget: 350, max_daily_budget_reset: 1000, total_budget_limit: 0,
   calculated_status: { id: 1, status: 'Running' },
 }
 const PAUSED_NO_LIMIT = { id: 9002, name: 'paused one', status: 0, daily_limit_type: 0, calculated_status: { id: 0, status: 'Paused' } }
