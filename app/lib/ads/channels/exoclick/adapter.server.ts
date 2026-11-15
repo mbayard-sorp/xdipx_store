@@ -16,22 +16,25 @@
  * It writes nothing to our database; sync.server.ts and insights.server.ts
  * do that for every channel the same way.
  *
- * mutate and createPaused throw ChannelNotEnabledError until every item on
- * the Channels checklist for adult:exoclick is green (plan §6). Pause,
- * resume and budget belong in exoclick/mutate.server.ts, a protected path
- * that a later owner-merged PR adds.
+ * mutate and createPaused go through exoclick/mutate.server.ts (protected,
+ * ticket #19412). That module gates every write on exoclick_operator_enabled
+ * and, for anything that can raise spend, on exoclick_total_cap_cents. With
+ * the switch off they throw ChannelNotEnabledError and send nothing.
  *
  * Policy (docs/ads-policy.md, Adult ad networks row): allowed, copy at
  * register 10, the charter's nudity definition as the imagery ceiling, and
  * UTMs mandatory on every banner URL. policyCheck enforces the UTM rule.
  */
-import { ChannelNotEnabledError } from '../errors'
 import type {
-  ChannelAdapter, DateRange, EntityLevel, NormalizedEntity, NormalizedInsightRow, PolicyContext, PolicyRefusal, PolicyVerdict, TokenHealth,
+  ChannelAdapter, DateRange, EntityLevel, NormalizedEntity, NormalizedInsightRow, TokenHealth,
 } from '../types'
 import { ExoClickError, exoClient, type ExoClient, type ExoJson } from './client.server'
+import { exoclickMutate, type ExoclickMutate } from './mutate.server'
 
-export const EXOCLICK_CHANNEL = 'adult:exoclick' as const
+import { EXOCLICK_CHANNEL, REQUIRED_UTMS, exoclickPolicyCheck, type ExoPolicyContext } from './policy-core'
+
+// Re-exported so every existing import from the adapter keeps working.
+export { EXOCLICK_CHANNEL, REQUIRED_UTMS, exoclickPolicyCheck, type ExoPolicyContext }
 
 type Json = Record<string, unknown>
 
@@ -241,54 +244,12 @@ export function exoDays(range: DateRange): string[] {
   return out
 }
 
-// -- Policy --------------------------------------------------------------------
-
-/** The four UTMs docs/ads-policy.md makes mandatory on every adult-network banner URL. */
-export const REQUIRED_UTMS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content'] as const
-
-export interface ExoPolicyContext extends PolicyContext {
-  /** Every banner destination URL the action would put on ExoClick. */
-  bannerUrls?: readonly string[]
-}
-
-/**
- * Allowed only when every banner URL carries utm_source, utm_medium,
- * utm_campaign and utm_content with a value. Each missing parameter is its
- * own refusal, named. Mirrored ExoClick variations that ExoClick rejected
- * also refuse, the same way Meta and Microsoft disapprovals do.
- */
-export function exoclickPolicyCheck(ctx: ExoPolicyContext): PolicyVerdict {
-  const refusals: PolicyRefusal[] = ctx.mirror
-    .filter(r => r.platform === EXOCLICK_CHANNEL && r.effectiveStatus === 'DISAPPROVED')
-    .map(r => ({
-      code: 'exoclick_rejected',
-      message: `ExoClick ${r.level} ${r.externalId}${r.name ? ` (${r.name})` : ''} was rejected in review. Resolve it before changing anything on ExoClick.`,
-      ref: { platform: EXOCLICK_CHANNEL, level: r.level, externalId: r.externalId },
-    }))
-  for (const raw of ctx.bannerUrls ?? []) {
-    let u: URL
-    try {
-      u = new URL(raw)
-    } catch {
-      refusals.push({ code: 'exoclick_bad_url', message: `Banner URL is not a valid URL: ${raw.slice(0, 200)}` })
-      continue
-    }
-    for (const p of REQUIRED_UTMS) {
-      if (!u.searchParams.get(p)?.trim()) {
-        refusals.push({
-          code: 'exoclick_missing_utm',
-          message: `Banner URL ${u.origin}${u.pathname} is missing ${p}. docs/ads-policy.md makes utm_source, utm_medium, utm_campaign and utm_content mandatory on every adult-network banner.`,
-        })
-      }
-    }
-  }
-  return { ok: refusals.length === 0, refusals }
-}
-
 // -- Adapter -------------------------------------------------------------------
 
 export interface ExoclickAdapterDeps {
   client?: ExoClient
+  /** The write path. Defaults to the process-wide one on the same client. */
+  mutate?: ExoclickMutate
   now?: () => Date
   /** The advertiser account id. Defaults to EXOCLICK_ACCOUNT_ID, else GET /user. */
   accountId?: () => Promise<string>
@@ -304,6 +265,7 @@ export function exoHealthError(e: unknown): string {
 export function createExoclickAdapter(deps: ExoclickAdapterDeps = {}): ChannelAdapter {
   const client = deps.client ?? exoClient
   const now = deps.now ?? (() => new Date())
+  const writer = (): ExoclickMutate => deps.mutate ?? exoclickMutate()
   let accountCache: string | null = null
 
   async function accountId(): Promise<string> {
@@ -332,7 +294,10 @@ export function createExoclickAdapter(deps: ExoclickAdapterDeps = {}): ChannelAd
 
   return {
     id: EXOCLICK_CHANNEL,
-    capabilities: { read: true, insights: true, mutate: [], audiences: 'none', preview: false },
+    capabilities: {
+      read: true, insights: true, audiences: 'none', preview: false,
+      mutate: ['pause', 'resume', 'set_budget', 'update_creative', 'block_placement'],
+    },
 
     auth: {
       /**
@@ -398,12 +363,13 @@ export function createExoclickAdapter(deps: ExoclickAdapterDeps = {}): ChannelAd
       return rows
     },
 
-    async createPaused() {
-      throw new ChannelNotEnabledError(EXOCLICK_CHANNEL, 'createPaused')
+    async createPaused(payload) {
+      const { campaignId } = await writer().createPaused(payload)
+      return campaignId ? { campaignId } : {}
     },
 
     async mutate(m) {
-      throw new ChannelNotEnabledError(EXOCLICK_CHANNEL, `mutate:${m.verb}`)
+      return writer().mutate(m)
     },
 
     async policyCheck(ctx) {

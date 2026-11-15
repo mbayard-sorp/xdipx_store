@@ -13,8 +13,14 @@
  * - Neither the API key nor the session token is ever logged. Error text that
  *   echoes either is redacted before it leaves this file.
  *
- * Reads only. Nothing here writes to ExoClick; mutate stays empty on the
- * adapter until the Channels checklist is green.
+ * post, put and del share get's retry, redact and re-login behavior. A write
+ * that can create something (a campaign, a banner) passes { retries: 0 } so a
+ * 5xx on a request that may have landed is never sent twice. A write whose
+ * repeat is harmless (pause, play, add to a block list) keeps the retries.
+ * An empty 2xx body (ExoClick answers some writes with 204) reads as {}.
+ *
+ * Callers decide whether a write may happen at all: exoclick/mutate.server.ts
+ * and operator.server.ts gate every call on exoclick_operator_enabled.
  */
 
 export const EXO_BASE = 'https://api.exoclick.com/v2'
@@ -46,10 +52,21 @@ export interface ExoSession {
   expiresIn: number
 }
 
+export interface ExoWriteOptions {
+  /** Retries after the first attempt on 429 or 5xx. Defaults to the client's maxRetries. */
+  retries?: number
+}
+
+export type ExoMethod = 'GET' | 'POST' | 'PUT' | 'DELETE'
+
 export interface ExoClient {
   /** A valid session, from cache when one is still good. */
   session(): Promise<ExoSession>
   get(path: string, params?: ExoParams): Promise<ExoJson>
+  /** JSON body in, JSON out. A top-level array body is allowed (block lists). */
+  post(path: string, body?: unknown, opts?: ExoWriteOptions): Promise<ExoJson>
+  put(path: string, body?: unknown, opts?: ExoWriteOptions): Promise<ExoJson>
+  del(path: string, body?: unknown, opts?: ExoWriteOptions): Promise<ExoJson>
   /** Drops the cached session. Tests and a 401 use it. */
   reset(): void
 }
@@ -174,19 +191,28 @@ export function createExoClient(deps: ExoClientDeps = {}): ExoClient {
     return cached
   }
 
-  async function get(path: string, params: ExoParams = {}): Promise<ExoJson> {
+  async function request(method: ExoMethod, path: string, params: ExoParams, body: unknown, retries: number): Promise<ExoJson> {
     const clean = path.replace(/^\/+/, '')
     const qs = encodeExoParams(params)
     const url = `${EXO_BASE}/${clean}${qs ? `?${qs}` : ''}`
+    const hasBody = body !== undefined
     let reloggedIn = false
     for (let attempt = 0; ; attempt++) {
       const s = await session()
       const redact = redactor([s.token, apiKeyFn()])
       let res: Response
       try {
-        res = await fetchImpl(url, { headers: { authorization: `Bearer ${s.token}`, accept: 'application/json' } })
+        res = await fetchImpl(url, {
+          method,
+          headers: {
+            authorization: `Bearer ${s.token}`,
+            accept: 'application/json',
+            ...(hasBody ? { 'content-type': 'application/json' } : {}),
+          },
+          ...(hasBody ? { body: JSON.stringify(body) } : {}),
+        })
       } catch (err) {
-        throw new ExoClickError('network', redact(`ExoClick GET ${clean} failed: ${err instanceof Error ? err.message : String(err)}`), { path: clean })
+        throw new ExoClickError('network', redact(`ExoClick ${method} ${clean} failed: ${err instanceof Error ? err.message : String(err)}`), { path: clean })
       }
       if (res.status === 401 && !reloggedIn) {
         // The session died early (revoked, or another process logged in). Log in once more.
@@ -195,25 +221,40 @@ export function createExoClient(deps: ExoClientDeps = {}): ExoClient {
         attempt--
         continue
       }
-      if (retryable(res.status) && attempt < maxRetries) {
+      if (retryable(res.status) && attempt < retries) {
         await sleep(backoff(attempt, res))
         continue
       }
-      const json = (await res.json().catch(() => null)) as ExoJson | null
+      const text = await res.text().catch(() => '')
+      let json: ExoJson | null = null
+      try {
+        json = text ? (JSON.parse(text) as ExoJson) : null
+      } catch {
+        json = null
+      }
       if (res.ok) {
+        // Reads must return JSON. A write may answer with nothing at all.
+        if (method !== 'GET' && !text.trim()) return {}
         if (!json || typeof json !== 'object') {
-          throw new ExoClickError('bad_response', `ExoClick GET ${clean} returned a body that is not JSON.`, { status: res.status, path: clean })
+          throw new ExoClickError('bad_response', `ExoClick ${method} ${clean} returned a body that is not JSON.`, { status: res.status, path: clean })
         }
         return json
       }
       const kind: ExoErrorKind = res.status === 401 || res.status === 403 ? 'token_rejected' : res.status === 429 ? 'rate_limited' : 'api_error'
-      throw new ExoClickError(kind, redact(`ExoClick GET ${clean} refused: ${messageFrom(json, res.status)}`), { status: res.status, path: clean })
+      throw new ExoClickError(kind, redact(`ExoClick ${method} ${clean} refused: ${messageFrom(json, res.status)}`), { status: res.status, path: clean })
     }
   }
+
+  const get = (path: string, params: ExoParams = {}) => request('GET', path, params, undefined, maxRetries)
+  const write = (method: Exclude<ExoMethod, 'GET'>) => (path: string, body?: unknown, opts: ExoWriteOptions = {}) =>
+    request(method, path, {}, body, opts.retries ?? maxRetries)
 
   return {
     session,
     get,
+    post: write('POST'),
+    put: write('PUT'),
+    del: write('DELETE'),
     reset() {
       cached = null
     },

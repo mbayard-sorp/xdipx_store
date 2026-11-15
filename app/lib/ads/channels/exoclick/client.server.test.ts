@@ -146,4 +146,52 @@ describe('createExoClient', () => {
     const c = createExoClient({ fetchImpl: f.fetchImpl, apiKey: () => KEY })
     await expect(c.session()).rejects.toMatchObject({ kind: 'bad_response' })
   })
+
+  describe('writes', () => {
+    it('post, put and del send the method, a JSON body and the bearer', async () => {
+      const f = fakeFetch(() => jsonRes(200, { ok: true }))
+      const c = createExoClient({ fetchImpl: f.fetchImpl, apiKey: () => KEY, now: () => 0 })
+      expect(await c.put('campaigns/pause', { campaign_ids: [1] })).toEqual({ ok: true })
+      await c.post('campaigns/1/blocked/sites', ['a.com', 'b.com'])
+      await c.del('campaigns/1/blocked/sites', ['a.com'])
+      const writes = f.calls.filter(x => !x.url.endsWith('/login'))
+      expect(writes.map(x => x.method)).toEqual(['PUT', 'POST', 'DELETE'])
+      expect(writes.map(x => JSON.parse(x.body!))).toEqual([{ campaign_ids: [1] }, ['a.com', 'b.com'], ['a.com']])
+      expect(writes.every(x => x.auth === 'Bearer tok-1')).toBe(true)
+    })
+
+    it('reads an empty 2xx body as {}', async () => {
+      const f = fakeFetch(() => new Response(null, { status: 204 }))
+      const c = createExoClient({ fetchImpl: f.fetchImpl, apiKey: () => KEY, now: () => 0 })
+      expect(await c.put('campaigns/play', { campaign_ids: [1] })).toEqual({})
+    })
+
+    it('re-logs in once on a 401 and sends the write again with the new token', async () => {
+      const f = fakeFetch((_u, auth) => (auth === 'Bearer tok-1' ? jsonRes(401, {}) : jsonRes(200, { done: 1 })))
+      const c = createExoClient({ fetchImpl: f.fetchImpl, apiKey: () => KEY, now: () => 0 })
+      expect(await c.put('campaigns/pause', { campaign_ids: [1] })).toEqual({ done: 1 })
+      expect(f.logins()).toBe(2)
+    })
+
+    it('retries a 5xx by default and not at all with retries: 0', async () => {
+      const answers = [jsonRes(503, {}), jsonRes(200, { ok: 1 })]
+      const f = fakeFetch(() => answers.shift()!)
+      const c = createExoClient({ fetchImpl: f.fetchImpl, apiKey: () => KEY, now: () => 0, sleep: async () => {} })
+      expect(await c.put('campaigns/pause', {})).toEqual({ ok: 1 })
+
+      const g = fakeFetch(() => jsonRes(503, { message: 'down' }))
+      const d = createExoClient({ fetchImpl: g.fetchImpl, apiKey: () => KEY, now: () => 0, sleep: async () => {} })
+      await expect(d.post('campaigns', { name: 'x' }, { retries: 0 })).rejects.toMatchObject({ kind: 'api_error', detail: { status: 503 } })
+      expect(g.calls.filter(x => x.method === 'POST' && !x.url.endsWith('/login'))).toHaveLength(1)
+    })
+
+    it('never puts the key or the token in a write error', async () => {
+      const f = fakeFetch(() => jsonRes(400, { message: `bad tok-1 ${KEY}` }))
+      const c = createExoClient({ fetchImpl: f.fetchImpl, apiKey: () => KEY, now: () => 0 })
+      const err = (await c.post('campaigns', {}).catch(e => e)) as ExoClickError
+      expect(err.message).not.toContain('tok-1')
+      expect(err.message).not.toContain(KEY)
+      expect(err.message).toContain('POST campaigns refused')
+    })
+  })
 })

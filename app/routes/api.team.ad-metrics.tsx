@@ -26,6 +26,19 @@
  * { op: 'backfill', fromDay: 'YYYY-MM-DD' }
  *   Roll every day with metrics since fromDay up into ad_spend.
  *
+ * { op: 'placements', campaignIds: string[], dateFrom, dateTo, minImpressions?, maxRows? }
+ *   Read only, live from ExoClick (the key stays in production). Per-site
+ *   stats summed over the campaigns, paged to the end, plus the balance.
+ *   -> { window, balanceCents, siteCount, sites, truncated }
+ *
+ * { op: 'exoclick-brakes', campaignIds: string[], dryRun?: boolean (default true),
+ *   dateFrom?, dateTo?, arrivals?: number | Record<campaignId, number> | null }
+ *   Reads live ExoClick stats, runs the kill rules (exoclick/kill-rules-core.ts)
+ *   and pulls the brakes: block sites, pause campaigns. Brakes only. A dry run
+ *   returns the plan and writes nothing. A real run goes through the ledger and
+ *   returns not_enabled for every action while exoclick_operator_enabled is off.
+ *   R-EXO calls this hourly.
+ *
  * { op: 'channel', platform: string, sinceDay: 'YYYY-MM-DD' }
  *   Read only. The mirror's entities and spend for one channel, so a routine
  *   can watch a channel without holding its key.
@@ -107,8 +120,38 @@ export async function action({ request }: ActionFunctionArgs) {
       return Response.json(await readChannelMirror(platform, since))
     }
 
+    if (op === 'placements' || op === 'exoclick-brakes') {
+      const ids = b['campaignIds']
+      if (!Array.isArray(ids) || ids.length === 0 || ids.length > 50 || !ids.every(i => (typeof i === 'string' || typeof i === 'number') && /^\d+$/.test(String(i)))) {
+        return bad('campaignIds must be 1 to 50 numeric ids')
+      }
+      const campaignIds = ids.map(String)
+      const from = b['dateFrom']
+      const to = b['dateTo']
+      if (from !== undefined && (typeof from !== 'string' || !DAY_RE.test(from))) return bad('dateFrom must be YYYY-MM-DD')
+      if (to !== undefined && (typeof to !== 'string' || !DAY_RE.test(to))) return bad('dateTo must be YYYY-MM-DD')
+      if (op === 'placements') {
+        if (typeof from !== 'string' || typeof to !== 'string') return bad('placements needs dateFrom and dateTo')
+        const { readPlacements } = await import('~/lib/ads/channels/exoclick/placements.server')
+        const minImpressions = typeof b['minImpressions'] === 'number' ? b['minImpressions'] : undefined
+        const maxRows = typeof b['maxRows'] === 'number' ? b['maxRows'] : undefined
+        return Response.json(await readPlacements({ campaignIds, dateFrom: from, dateTo: to }, { ...(minImpressions !== undefined ? { minImpressions } : {}), ...(maxRows !== undefined ? { maxRows } : {}) }))
+      }
+      const arrivals = b['arrivals']
+      const arrivalsOk = arrivals === undefined || arrivals === null || (typeof arrivals === 'number' && arrivals >= 0)
+        || (typeof arrivals === 'object' && !Array.isArray(arrivals) && Object.values(arrivals as Record<string, unknown>).every(v => typeof v === 'number' && v >= 0))
+      if (!arrivalsOk) return bad('arrivals must be a number, an object of campaign id to number, or null')
+      // Only an explicit false sends anything.
+      const { runExoclickBrakes } = await import('~/lib/ads/channels/exoclick/brakes.server')
+      return Response.json(await runExoclickBrakes({
+        campaignIds, dryRun: b['dryRun'] === false ? false : true,
+        ...(typeof from === 'string' ? { dateFrom: from } : {}), ...(typeof to === 'string' ? { dateTo: to } : {}),
+        arrivals: (arrivals ?? null) as number | Record<string, number> | null,
+      }))
+    }
+
     if (op === 'import-preview' || op === 'import-commit') return bad('imports are multipart/form-data with file and source')
-    return bad('op must be daily, import-preview, import-commit, summary, backfill or channel')
+    return bad('op must be daily, import-preview, import-commit, summary, backfill, channel, placements or exoclick-brakes')
   } catch (err) {
     if (err instanceof AdMetricsError) return bad(err.message, err.code === 'not_configured' ? 501 : 400)
     return apiError('team-ad-metrics', err, 'ad-metrics op failed')

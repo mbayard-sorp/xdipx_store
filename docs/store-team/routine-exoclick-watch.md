@@ -8,6 +8,15 @@ Trigger `trig_01WREZzWdEmXuRMPX5vKQVoq`, `20 */4 * * *` UTC. The trigger prompt 
 
 Read only, notify only. It never pauses, starts, edits or funds a campaign, never changes a price, and starts no team run row. Pausing stays the owner's call.
 
+## Brakes (ticket #19412, off until the owner flips two settings)
+
+The site now has a write path for ExoClick, and the routine can pull brakes through it without holding the key. Nothing below changes the Limits above until the owner sets `exoclick_operator_enabled` (missing row is off) in `pipeline_settings`. `exoclick_total_cap_cents` (missing row is 0) bounds anything that can raise spend.
+
+- `POST /api/team/ad-metrics {op:'placements', campaignIds, dateFrom, dateTo}` reads per-site stats live, paged to the end, plus the account balance.
+- `POST /api/team/ad-metrics {op:'exoclick-brakes', campaignIds, dryRun}` runs the kill rules and applies the brakes. `dryRun` defaults to true. Rules and thresholds are named constants in `app/lib/ads/channels/exoclick/kill-rules-core.ts`.
+- Brakes are pause, block a site (additive only) and lower a budget. Gas (resume, create, raise a budget, upload a banner) is not exposed to the routine at all.
+- Pass `arrivals` (a total, or an object of campaign id to count) from GA4 sessions when the routine has them. Without it the arrivals rule is skipped.
+
 ## What it watches
 
 Campaigns 8774050, 8774052, 8774054, 8774056, 8774058 and 8774060 in group 367506. Combined cap $130, bid 75 cents CPM, daily limit $20 each. It reads ExoClick through the site's mirror (`team/ad-metrics` op `channel`), because the cloud environment deliberately has no ExoClick key. Entities refresh every 6 hours and spend hourly. The mirror holds no account balance or bid, so the routine does not watch those.

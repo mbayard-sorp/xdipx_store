@@ -25,6 +25,7 @@ export type MutationRefusalCode =
   | 'not_configured'
   | 'spend_disabled'
   | 'already_applied'
+  | 'total_cap_exceeded'
 
 /**
  * Thrown by an adapter's mutate when it refuses a change before calling the

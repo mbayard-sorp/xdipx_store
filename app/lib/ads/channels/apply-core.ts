@@ -15,7 +15,7 @@ import type { EntityLevel, EntityRef } from './types'
  */
 export type DispatchVerb =
   | 'pause' | 'resume' | 'set_budget' | 'update_creative' | 'halt_all'
-  | 'scale' | 'brake'
+  | 'scale' | 'brake' | 'block_placement'
 
 /** The budget fields a set_budget compares. Cents, as the mirror stores them. */
 export interface BudgetValues {
@@ -54,7 +54,8 @@ export function budgetChangeOf(params: unknown, before: Record<string, unknown> 
  * Spend-decreasing is auto, spend-increasing is approve, everything else is
  * owner (plan §5).
  *
- * - pause, halt_all: auto. Stopping delivery cannot raise spend.
+ * - pause, halt_all, block_placement: auto. Stopping or narrowing delivery
+ *   cannot raise spend.
  * - resume: approve. Restarting delivery raises spend.
  * - set_budget: auto when the new amount is below the current one, approve
  *   when above. Equal, or a side that cannot be read, is owner: the
@@ -72,6 +73,7 @@ export function classifyTier(
   switch (verb) {
     case 'pause':
     case 'halt_all':
+    case 'block_placement':
       return 'auto'
     case 'resume':
     case 'scale':
