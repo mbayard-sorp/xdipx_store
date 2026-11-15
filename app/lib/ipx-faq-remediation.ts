@@ -28,8 +28,13 @@
  * can prove every stale answer is flagged and every replacement is clean.
  * IP-code framing matches the per-SKU stance the #1006 fixer already established:
  * IPX4/5/6 = splash or jet resistance (sink rinse/cleanup only, no shower or
- * bath claim, never submerge); IPX7 = immersion to 1m/30min (shower and bath
- * fine). None of these 24 SKUs is IPX7.
+ * bath claim, never submerge); IPX7 covers immersion only, one metre for thirty
+ * minutes — running water and jets carry their own ratings, those ratings do
+ * not stack onto an IPX7 mark, so an IPX7 code on its own comes with no promise
+ * about a shower or a tap (house wording, docs/store-team/routine-content-daily.md
+ * §IP ratings; corrected 2026-11-14, ticket #21947 — this comment previously
+ * read "IPX7 = immersion to 1m/30min (shower and bath fine)", the stance the
+ * house wording was rewritten to retire). None of these 24 SKUs is IPX7.
  */
 
 /** Positive grants of shower / bath / submersion use. */
