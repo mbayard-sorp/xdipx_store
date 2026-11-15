@@ -25,7 +25,7 @@ function fakeClient(campaigns: Row[]) {
       if (one) {
         const c = campaigns.find(x => String(x['id']) === one[1])
         if (!c) throw new ExoClickError('api_error', 'not found', { status: 404 })
-        return { result: { campaign: c } }
+        return { result: { campaign: c, sites: { targeted: [], blocked: (c['_blocked'] as string[] | undefined ?? []).map(url => ({ url })) } } }
       }
       if (path === 'campaigns') return { result: Object.fromEntries(campaigns.map(c => [String(c['id']), c])) }
       return { result: [] }
@@ -78,6 +78,19 @@ describe('brakes', () => {
     expect(writes).toHaveLength(1)
     expect(writes[0]).toMatchObject({ method: 'POST', path: 'campaigns/1/blocked/sites', body: ['rat.xxx', 'hog.tv'] })
     expect(r.applied).toBe(true)
+  })
+
+  it('block_placement sends only hostnames not already on the block list', async () => {
+    const some = build([campaignRow(1, { _blocked: ['rat.xxx'] })], ON_NO_CAP)
+    const r = await some.m.mutate(req('block_placement', '1', { hostnames: ['rat.xxx', 'hog.tv'] }))
+    expect(some.writes).toHaveLength(1)
+    expect(some.writes[0]).toMatchObject({ method: 'POST', path: 'campaigns/1/blocked/sites', body: ['hog.tv'] })
+    expect(r.warning).toMatch(/1 were already blocked/)
+
+    const all = build([campaignRow(1, { _blocked: ['rat.xxx', 'hog.tv'] })], ON_NO_CAP)
+    const none = await all.m.mutate(req('block_placement', '1', { hostnames: ['rat.xxx', 'hog.tv'] }))
+    expect(all.writes).toHaveLength(0)
+    expect(none.after).toMatchObject({ blockedHostnames: [], alreadyBlocked: 2 })
   })
 
   it('block_placement reports entries it dropped and refuses an empty or oversized list', async () => {

@@ -30,7 +30,7 @@
 import { ChannelNotEnabledError, MutationRefusedError, type MutationRefusalCode } from '../errors'
 import type { ChannelId, CreatedRefs, MutationRequest, MutationResult } from '../types'
 import { ExoClickError, exoClient, type ExoClient } from './client.server'
-import { campaignFromRow, listCampaigns, readCampaign, type ExoCampaignRead } from './campaign-read.server'
+import { campaignFromRow, listCampaigns, readBlockedSites, readCampaign, type ExoCampaignRead } from './campaign-read.server'
 import {
   EXO_MIN_BUDGET_CENTS, MAX_BLOCK_HOSTNAMES_PER_CALL, classifyExoVerb, evaluateExoGate, normalizeHostname, projectTotalSpendCents,
   type ExoCampaignMoney, type ExoGate, type ExoOperatorSettings, type ExoVerbKind,
@@ -253,13 +253,23 @@ export function createExoclickMutate(deps: ExoMutateDeps = {}) {
         if (hostnames.length > MAX_BLOCK_HOSTNAMES_PER_CALL) {
           refuse('bad_params', `block_placement takes at most ${MAX_BLOCK_HOSTNAMES_PER_CALL} hostnames per call; got ${hostnames.length}.`)
         }
+        // ExoClick refuses the whole array with "already blocked" when any one
+        // hostname is on the list (seen live 2026-11-15), so only new ones go out.
+        const already = new Set(await readBlockedSites(client, id))
+        const fresh = hostnames.filter(h => !already.has(h))
+        const skipped = hostnames.length - fresh.length
         // POST adds to the block list. PUT would replace it and DELETE would remove from it.
-        const writes: ExoWrite[] = [{ method: 'POST', path: `campaigns/${encodeURIComponent(id)}/blocked/sites`, body: hostnames }]
+        const writes: ExoWrite[] = fresh.length > 0
+          ? [{ method: 'POST', path: `campaigns/${encodeURIComponent(id)}/blocked/sites`, body: fresh }]
+          : []
         const responses = await send(writes, dryRun)
         // Entries that were duplicates or not plain hostnames are dropped and reported, not sent.
         const rejected = raw.length - hostnames.length
-        const result = await done(writes, responses, { blockedHostnames: hostnames }, before)
-        return rejected > 0 ? { ...result, warning: `${rejected} of ${raw.length} entries were duplicates or not plain hostnames and were not sent.` } : result
+        const result = await done(writes, responses, { blockedHostnames: fresh, alreadyBlocked: skipped }, before)
+        const notes: string[] = []
+        if (rejected > 0) notes.push(`${rejected} of ${raw.length} entries were duplicates or not plain hostnames and were not sent.`)
+        if (skipped > 0) notes.push(`${skipped} were already blocked on this campaign and were not sent again.`)
+        return notes.length > 0 ? { ...result, warning: notes.join(' ') } : result
       }
       case 'update_creative':
         return uploadBanner(m, id, reading, dryRun)

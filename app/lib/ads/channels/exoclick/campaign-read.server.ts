@@ -88,6 +88,25 @@ export async function readCampaign(client: ExoClient, id: string): Promise<ExoCa
   }
 }
 
+/**
+ * Hostnames already on a campaign's block list, lowercased. GET /campaigns/{id}
+ * carries them at result.sites.blocked as [{ url }], beside result.campaign.
+ * Empty when the campaign or the list is absent.
+ */
+export async function readBlockedSites(client: ExoClient, id: string): Promise<string[]> {
+  const json = await client.get(`campaigns/${encodeURIComponent(id)}`)
+  const result = json['result']
+  const sites = result && typeof result === 'object' ? (result as Json)['sites'] : null
+  const blocked = sites && typeof sites === 'object' ? (sites as Json)['blocked'] : null
+  if (!Array.isArray(blocked)) return []
+  const out: string[] = []
+  for (const b of blocked) {
+    const url = b && typeof b === 'object' ? (b as Json)['url'] : b
+    if (typeof url === 'string' && url.trim()) out.push(url.trim().toLowerCase())
+  }
+  return out
+}
+
 /** Account balance in cents, from GET /user result.balance (dollars). Null when absent. */
 export async function readBalanceCents(client: ExoClient): Promise<number | null> {
   const json = await client.get('user')
