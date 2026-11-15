@@ -27,6 +27,23 @@ $23.67 is the profit per order before ads, at $69.99 with $9.00 fulfillment. The
 
 A Results notice is a prompt to check traffic first, never a verdict on the product. The order of checks and the 300-arrival bar are in `sales-pages.md`, "Reading a paid test".
 
+## Runaway impressions
+
+Owner direction 2026-11-01 and again 2026-11-15, verbatim: "You have to watch for runaway impressions with no clicks." Ticket #19413.
+
+Every run reads impressions and clicks per campaign and per banner from the mirror and raises an issue when any of these holds:
+
+| Issue | Trigger |
+|---|---|
+| Dead banner | A banner with 5,000 impressions and no clicks |
+| Dead campaign | A campaign with 20,000 impressions at under 0.03% CTR |
+| Dead placement | A site or zone with 2,000 impressions and no clicks, or 5,000 at under 0.02% CTR |
+| Runaway pace | A campaign that spent more than $5 since the last hourly read |
+
+The mirror has no per-site rows yet, so Dead placement starts when the placement read from ticket #19412 is deployed. Until then the routine says in its closing line that placements were not checked. It does not stay silent about it.
+
+While a test cell is live the trigger runs hourly for the first 24 hours, then every 4 hours. The thresholds and the actions that follow them are in `exoclick-program.md`, section 5. This routine stays notify-only until the write path is merged and `exoclick_operator_enabled` is on; after that it applies the brakes first and reports after.
+
 ## How the owner hears
 
 Each new issue sends a phone push and files an `exoclick-watch-<issue>` owner blocker. Push is the alert that reaches him: `owner_queue_enabled` is on (owner, 2026-09-02), so the blocker email reports `suppressed`, as it did on the first test run. A clean run stays silent. The hourly ads pager also files rejected entities from the mirror.
