@@ -488,6 +488,20 @@ git fetch origin main >/dev/null && git grep -n "<file/flag/symbol from the tick
    guardrail prose, `code=null` because the real brief stated the code inline, `handles=[]` because it
    listed Nalpac SKUs not `/products/` links).
 
+3d-2. **A detector/predicate fix whose DONE WHEN makes a live-corpus claim runs the actual script
+   against the live corpus, not only synthetic unit tests (ticket #21979).** When a ticket's DONE
+   WHEN cites a live-data result ("returns zero findings against the current corpus", "no longer
+   fires on the named reproduction"), run the detector script against the real corpus as part of
+   the ticket's own stated verification — before/after (`git checkout origin/main -- <changed
+   detector file>`, run the script, diff against the after-fix run) — not just targeted unit-test
+   reproductions. Ticket #21947/PR #1969 fixed `self-consistency.ts` with two unit-test
+   reproductions and all existing tests green, but never ran
+   `scripts/audit-published-self-consistency.ts` against the live Sanity corpus; QA ran it and found
+   the named false-positive symptom still reproduced against a different sentence pairing, plus an
+   unreported side effect on the live corpus (`crossPost` conflicting-instruction count rose from 33
+   to 126). Running the live-corpus check as part of implementation, not leaving it for QA to
+   discover, is what this rule changes.
+
 3e. **sms-v2 stage handlers act on or route foreign intents, never silently re-run their script.**
    (#3220, standing owner-directed rule; originating incident tickets 3214/3215/3217.) Any handler in
    `app/lib/sms-v2/stages/` MUST do one of two things with a classified intent that is foreign to
