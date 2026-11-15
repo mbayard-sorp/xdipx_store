@@ -98,7 +98,8 @@ export function exoCents(v: unknown): number {
 function dailyBudgetCents(row: Json): number | null {
   if (num(row['daily_limit_type']) !== 1) return null
   const cap = num(row['max_daily_budget_reset']) || num(row['max_daily_budget'])
-  return cap > 0 ? Math.round(cap * 100) : null
+  // Campaign budgets arrive in cents already (a $20 daily cap reads 2000).
+  return cap > 0 ? Math.round(cap) : null
 }
 
 export function normalizeExoCampaign(accountId: string, row: Json): NormalizedEntity {
@@ -116,7 +117,7 @@ export function normalizeExoCampaign(accountId: string, row: Json): NormalizedEn
     effectiveStatus: effectiveFromCalculated(calculatedStatus(row)) ?? status,
     objective: null,
     dailyBudgetCents: dailyBudgetCents(row),
-    lifetimeBudgetCents: lifetime > 0 ? Math.round(lifetime * 100) : null,
+    lifetimeBudgetCents: lifetime > 0 ? Math.round(lifetime) : null,
     bidStrategy: pricing ? (PRICING_MODEL[String(pricing)] ?? String(pricing)) : null,
     reviewFeedback: null,
     raw: row,
@@ -284,8 +285,11 @@ export function createExoclickAdapter(deps: ExoclickAdapterDeps = {}): ChannelAd
     const out: Json[] = []
     for (let page = 0; page < MAX_PAGES; page++) {
       const json = await client.get(path, { ...params, limit: PAGE_LIMIT, offset: page * PAGE_LIMIT })
-      const rows = json[key]
-      if (!Array.isArray(rows)) throw new ExoClickError('bad_response', `ExoClick GET ${path} returned no ${key} array.`, { path })
+      // The live API answers `campaigns?detailed=true` with an object keyed by
+      // campaign id, not a list (seen 2026-11-15, when every sync failed on it).
+      const raw = json[key]
+      const rows = Array.isArray(raw) ? raw : raw && typeof raw === 'object' ? Object.values(raw as Json) : null
+      if (!rows) throw new ExoClickError('bad_response', `ExoClick GET ${path} returned no ${key} array.`, { path })
       for (const r of rows) if (r && typeof r === 'object') out.push(r as Json)
       if (rows.length < PAGE_LIMIT) return out
     }
