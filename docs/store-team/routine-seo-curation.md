@@ -237,6 +237,17 @@ backlog); say so in the event. One `step` event (`phase:'planning'`) listing slu
 plus per-slot coverage (Mon/Wed/Sat/Sun: filled with which category, or unfilled) per the weekday
 slot map above.
 
+**Re-queue or expire a stale `seoContentBrief` before planning the week (ticket #21949).** Before
+creating new briefs, read the existing `status:'queued'` queue for any row whose `plannedFor` has
+passed by more than 14 days. A brief that old sat through at least two weekly planning passes
+without being claimed, which means either its slot keeps getting filled some other way (re-queue it:
+clear `plannedFor` and re-slot it against this week's weekday map) or it no longer matches a live
+slot (`status:'expired'` with a one-line reason). Left alone, stale rows pile up at the head of the
+queue and crowd out the current week's per-slot planning, which is exactly what skewed the queue to
+5 wellness-basics + 1 comparisons with zero guides/real-talk/care/podcast-notes briefs on 2026-11-13
+and 2026-11-14. Report the re-queued/expired count in the Step 5 planning event alongside per-slot
+coverage.
+
 ## Step 6: Report + finish
 
 Compute and post the weekly report as ONE **run event** (`POST /api/team/event`), not a suggestion
