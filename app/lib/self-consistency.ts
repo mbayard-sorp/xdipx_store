@@ -134,8 +134,12 @@ const ACTION_BUCKETS: ActionBucket[] = [
 // submerge it": the negation on "shower" sits in "keep it out of the", which
 // no prior cue matched, so the checker read a forbidding sentence as an
 // ALLOW and flagged a false cross-post conflict (ticket #20643).
+// `neither` covers the live-corpus regression shape "IPX5 and IPX6 mean
+// water jets... and neither of them covers immersion" (#21947 bounce,
+// what-makes-a-vibrator-body-safe): a correlative negation with no bare
+// "not"/"never" for the window to catch.
 const NEGATION_RE =
-  /\b(never|cannot|can't|do not|don't|does not|doesn't|should not|shouldn't|avoid|without|out of|not|no)\b/i
+  /\b(never|cannot|can't|do not|don't|does not|doesn't|should not|shouldn't|avoid|without|out of|neither|not|no)\b/i
 
 export type InstructionPolarity = 'allow' | 'forbid'
 
@@ -148,33 +152,166 @@ function polarityBefore(sentence: string, matchIndex: number): InstructionPolari
 }
 
 /**
- * Scans EVERY occurrence of a bucket's action word in the sentence, not just
- * the first, and reads the whole bucket as `forbid` if any occurrence's
- * local window is negated (#21947, reproduced on what-makes-a-great-g-spot-
- * rabbit-vibrator and the frozen "no promise about a shower or a tap"
- * wording). A single-match `exec` picks whichever occurrence comes FIRST in
- * the string, which is not necessarily the one that actually governs the
- * token being scored: "Running water and jets carry their own ratings...
- * and an IPX7 toy therefore comes with no promise about a shower or a tap"
- * matches "Running water" at index 0 (empty window before it, so it reads
- * `allow`) even though the sentence's real claim — "no promise about a
- * shower" — forbids it. The identical sentence, read elsewhere in the same
- * or a sibling post, then collides with itself as a false
- * `conflicting-instruction`. Preferring `forbid` whenever any occurrence is
- * negated matches the safety-conservative posture already used for the
- * neighbour-water-instruction check below.
+ * Negated copula or auxiliary sitting directly after a match ("the shower
+ * IS NOT", "the shower ISN'T", "the shower CANNOT") — anchored at the start
+ * of the post-match text (through at most a comma/"and"/"but" joiner), not a
+ * generic word-count window. A look-behind window alone misses negation that
+ * TRAILS the matched word instead of preceding it (#21947 bounce: what-
+ * makes-a-great-g-spot-rabbit-vibrator's "...so the bath is settled for it
+ * and the shower is not." negates "shower" with "is not" sitting right
+ * after it). The anchor matters: a wide, unanchored word-count window over-
+ * fires on a LATER, unrelated negated clause in the same sentence — "...for
+ * a running tap, and the two do not imply each other..." (what-makes-a-
+ * vibrator-body-safe, live-corpus regression) must NOT read as forbidding
+ * "running tap" just because "do not" shows up a few words later about a
+ * completely different subject ("the two"). The trailing bare `off` (an
+ * IPX4 cleaning line, live-corpus regression: "dampen a cloth... keeping
+ * running water off it") mirrors the already-established `out of`/`without`
+ * preposition-negation shape (ticket #20643) reversed — "running water off
+ * it" negates "running water" the same way "keep it out of the shower"
+ * negates "shower" — so it is anchored the same tight way as the rest of
+ * this regex, not added to the general look-behind NEGATION_RE window.
+ *
+ * Deliberately limited to a negated COPULA ("is/was/are/were not",
+ * "isn't"/"wasn't"/etc) rather than also matching a negated action verb
+ * ("does not", "cannot") right after an "and"/"but" joiner: a copula
+ * restates the subject just mentioned ("the shower... and the shower IS
+ * NOT [covered]"), but a negated action verb after a conjunction routinely
+ * introduces a NEW clause with its own object — "IPX5 covers the shower
+ * AND DOES NOT COVER immersion" negates "immersion" (the object of the
+ * second clause), not "shower" (the object of the first). Allowing the
+ * conjunction-joined "does not"/"cannot" forms here matched that second
+ * clause's negation onto the FIRST clause's "shower" instead (live-corpus
+ * regression, how-do-you-choose-the-right-wand-massager) — a real sentence
+ * that correctly allows the shower now misread as forbidding it.
  */
-function bucketPolarity(bucket: ActionBucket, sentence: string): InstructionPolarity | null {
-  const flags = bucket.re.flags.includes('g') ? bucket.re.flags : `${bucket.re.flags}g`
-  const globalRe = new RegExp(bucket.re.source, flags)
-  let sawMatch = false
+const TRAILING_NEGATED_COPULA_RE =
+  /^[\s,]*(?:and|but|or)?[\s,]*(?:is|was|are|were)\s+not\b|^[\s,]*(?:isn'?t|wasn'?t|aren'?t|weren'?t)\b|^[\s,]*off\b/i
+
+/** Looks immediately after an action match for a negated copula/auxiliary attached to it. */
+function polarityAfter(sentence: string, matchEndIndex: number): InstructionPolarity {
+  const after = sentence.slice(matchEndIndex)
+  return TRAILING_NEGATED_COPULA_RE.test(after) ? 'forbid' : 'allow'
+}
+
+/**
+ * Restriction phrasing that scopes or denies DIRECT-SPRAY-type coverage
+ * (shower/jet/running-tap) WITHOUT using a classic negation word anywhere
+ * nearby — "the jet needs its own rating" and "written instruction from the
+ * maker" read as a restriction to a person, but neither contains
+ * not/never/cannot/etc for polarityBefore or polarityAfter's windows to
+ * catch (#21947 bounce: the live-corpus regression on how-do-couples-use-a-
+ * prostate-massager-together and how-do-you-use-a-clitoral-suction-toy,
+ * both carrying this exact "needs a rating" / "does not cover jets"
+ * phrasing misread as `allow`). Ported from the house restriction
+ * vocabulary already validated against the live corpus in
+ * ipx7-water-grant.ts's RESTRICTS_IPX7_RE (content run 2021).
+ *
+ * Deliberately NOT applied to a submersion/immersion match: every phrase
+ * here ("immersion only" chief among them) SCOPES coverage to immersion
+ * while restricting everything else — it is a grant of submersion, not a
+ * denial of it, so forcing `forbid` onto a submersion match too flips a
+ * correct `allow` ("IPX7 covers immersion only: one metre, thirty minutes.",
+ * egg-vibrator-vs-bullet-vibrator) into a false conflict against every other
+ * post that also correctly allows immersion. "rather than from the code" is
+ * a second live-corpus restriction phrasing (what-makes-a-vibrator-body-
+ * safe: "the shower comes from Womanizer rather than from the code") — a
+ * single-token sentence, so no multi-token misattribution risk the way
+ * MULTI_CODE_INDEPENDENT_RE below guards against.
+ */
+const RESTRICTION_PHRASE_RE =
+  /immersion only|does not cover jets|carr(?:y|ies) (?:their|its) own ratings?|do(?:es)? not stack|needs? its own rating|written instruction from the maker|rather than from the (?:code|rating)|(?:toy|maker|manufacturer|brand)'?s own (?:instructions?|manual|care guide|directions)/i
+
+/**
+ * A sentence naming TWO OR MORE distinct ingress codes that explicitly says
+ * they are independent of each other ("the two do not imply each other")
+ * cannot be safely read as a single allow/forbid for any one of those
+ * codes with this module's per-sentence (not per-clause) token<->instruction
+ * model: which code a given water-contact word actually binds to differs
+ * per code, so forcing one polarity for the whole sentence misattributes it
+ * to the WRONG code about half the time. Live-corpus regression (#21947
+ * bounce, what-makes-a-vibrator-body-safe): "IPX7 for a basin and IPX5 or
+ * IPX6 for a running tap, and the two do not imply each other" was read as
+ * an unscoped ALLOW of "running tap" for IPX7 too, when the sentence's
+ * entire point is that IPX7 does NOT get running tap. Safer to drop the
+ * sentence's instructions entirely (both tokens, below) than to guess which
+ * code each clause was actually about.
+ */
+const MULTI_CODE_INDEPENDENT_RE = /\bdo(?:es)? not imply each other\b/i
+
+/**
+ * Matches a word a bucket/water-contact scan found when that word itself
+ * names a submersion/immersion-type action, so callers can skip
+ * RESTRICTION_PHRASE_RE for it (see that regex's own doc comment for why).
+ * Deliberately wider than ACTION_BUCKETS' `submersion` bucket — includes
+ * "bath", which `findNeighbourWaterInstructionFindings` matches via
+ * WATER_CONTACT_RE but no ACTION_BUCKETS entry does — because the same
+ * "grants immersion, restricts everything else" reasoning applies to a bath
+ * instruction too.
+ */
+const SUBMERSION_LIKE_WORD_RE = /submerge[sd]?|submersion|immers(?:e[sd]?|ion)|dunk(?:ed|ing)?|soak(?:ed|ing)?|bath/i
+
+/**
+ * Full local-polarity read for one occurrence of an action/water-contact
+ * word: `forbid` if the sentence carries a no-negation-word restriction
+ * phrase (RESTRICTION_PHRASE_RE — skipped when the matched word itself is
+ * submersion/immersion-like, see that regex's own doc comment), or if a
+ * classic negation cue sits in the ~6-word look-behind window, or a negated
+ * copula sits directly after the match. Looking only behind the match (the
+ * original `polarityBefore`-only read) missed every trailing-negation
+ * sentence; see the helpers' own doc comments for the named incidents,
+ * including the live-corpus regressions a looser first attempt at this fix
+ * introduced.
+ */
+function localPolarity(
+  sentence: string,
+  matchIndex: number,
+  matchText: string,
+): InstructionPolarity {
+  if (!SUBMERSION_LIKE_WORD_RE.test(matchText) && RESTRICTION_PHRASE_RE.test(sentence)) return 'forbid'
+  if (polarityBefore(sentence, matchIndex) === 'forbid') return 'forbid'
+  if (polarityAfter(sentence, matchIndex + matchText.length) === 'forbid') return 'forbid'
+  return 'allow'
+}
+
+/**
+ * Scans EVERY occurrence of a pattern in the sentence, not just the first,
+ * and reads it as `forbid` if any occurrence's local polarity is negated
+ * (#21947, reproduced on what-makes-a-great-g-spot-rabbit-vibrator and the
+ * frozen "no promise about a shower or a tap" wording). A single-match
+ * `exec` picks whichever occurrence comes FIRST in the string, which is not
+ * necessarily the one that actually governs the sentence's real claim:
+ * "Running water and jets carry their own ratings... and an IPX7 toy
+ * therefore comes with no promise about a shower or a tap" matches "Running
+ * water" at index 0 (empty window before it, so it reads `allow`) even
+ * though the sentence's real claim — "no promise about a shower" — forbids
+ * it. The identical sentence, read elsewhere in the same or a sibling post,
+ * then collides with itself as a false `conflicting-instruction`.
+ * Preferring `forbid` whenever any occurrence is negated is the same
+ * safety-conservative posture both callers below need: ACTION_BUCKETS for
+ * the in-document/cross-post check, and WATER_CONTACT_RE for the
+ * neighbour-water-instruction check, which used to take WATER_CONTACT_RE's
+ * single first match only — "Wipe or rinse the head, keep the body out of
+ * standing water, and submerge nothing" matched just "rinse" (correctly
+ * `allow`) and never saw "submerge nothing" (`forbid`) later in the same
+ * sentence (live-corpus regression, how-do-you-choose-a-cordless-wand-
+ * vibrator).
+ */
+function scanAllPolarity(re: RegExp, sentence: string): { match: RegExpExecArray; polarity: InstructionPolarity } | null {
+  const flags = re.flags.includes('g') ? re.flags : `${re.flags}g`
+  const globalRe = new RegExp(re.source, flags)
+  let first: RegExpExecArray | null = null
   let match: RegExpExecArray | null
   while ((match = globalRe.exec(sentence))) {
-    sawMatch = true
-    if (polarityBefore(sentence, match.index) === 'forbid') return 'forbid'
+    first ??= match
+    if (localPolarity(sentence, match.index, match[0]) === 'forbid') return { match, polarity: 'forbid' }
     if (match[0].length === 0) globalRe.lastIndex++
   }
-  return sawMatch ? 'allow' : null
+  return first ? { match: first, polarity: 'allow' } : null
+}
+
+function bucketPolarity(bucket: ActionBucket, sentence: string): InstructionPolarity | null {
+  return scanAllPolarity(bucket.re, sentence)?.polarity ?? null
 }
 
 interface TokenSentence {
@@ -196,10 +333,15 @@ function scanIngressSentence(
   if (tokens.size === 0) return []
 
   const isDefiner = DEFINER_RE.test(sentence)
+  // A sentence naming 2+ codes that explicitly declares them independent
+  // can't be safely attributed to either one — see MULTI_CODE_INDEPENDENT_RE.
+  const unscopeable = tokens.size > 1 && MULTI_CODE_INDEPENDENT_RE.test(sentence)
   const instructions: { bucket: string; polarity: InstructionPolarity }[] = []
-  for (const bucket of ACTION_BUCKETS) {
-    const polarity = bucketPolarity(bucket, sentence)
-    if (polarity) instructions.push({ bucket: bucket.name, polarity })
+  if (!unscopeable) {
+    for (const bucket of ACTION_BUCKETS) {
+      const polarity = bucketPolarity(bucket, sentence)
+      if (polarity) instructions.push({ bucket: bucket.name, polarity })
+    }
   }
 
   return Array.from(tokens).map(token => ({
@@ -236,6 +378,25 @@ const MANUFACTURER_DIRECTION_RE =
   /\b(manufacturer|the brand'?s? (?:instructions|guide|care guide|directions)|per the (?:brand|manufacturer)|check (?:with|the) (?:brand|manufacturer))\b/i
 
 /**
+ * A sentence that names a marketing term (shower-ready, splashproof,
+ * waterproof, water-friendly...) ONLY to say the term itself carries no
+ * fixed meaning is a disclaimer about vocabulary, not an instruction about
+ * water exposure — it explicitly says it ISN'T one. House wording reused
+ * near-verbatim across several posts (live-corpus regression, #21947
+ * bounce): "Splashproof and shower-ready are marketing words with no fixed
+ * meaning" (egg-vibrator-vs-bullet-vibrator), "Splashproof, shower-ready,
+ * and water-friendly are marketing language" (how-do-you-use-a-sex-toy-
+ * safely), "Shower-ready, splashproof and waterproof are label language
+ * with no fixed definition behind them" (do-you-need-a-sex-toy-cleaner) —
+ * each was being read as an unconditional ALLOW of "shower" purely because
+ * the word "shower-ready" appears, which collided with every correctly-
+ * forbidding ingress block nearby once the forbid side stopped being
+ * misread (see RESTRICTION_PHRASE_RE and TRAILING_NEGATED_COPULA_RE above).
+ */
+const MARKETING_DISCLAIMER_RE =
+  /\b(?:marketing (?:language|words?)|label language|no fixed (?:meaning|definition))\b/i
+
+/**
  * A block's OPENING sentence can explicitly scope the whole block to a
  * different product class than the one the nearby ingress rating describes
  * — a mains-powered wand instead of the battery toy carrying the code — in
@@ -262,8 +423,8 @@ const DEFAULT_NEIGHBOUR_WATER_WINDOW = 2
  * For every block carrying an ingress-code instruction, scans the blocks
  * within `windowSize` before and after it for an UNCONDITIONAL water-contact
  * instruction — one that names no rating of its own and does not defer to
- * the manufacturer — whose polarity (the same negation-window read
- * `polarityBefore` already does) is the opposite of the ingress block's.
+ * the manufacturer — whose polarity (the same `localPolarity` read used for
+ * the in-document check above) is the opposite of the ingress block's.
  * Same shape as the in-document `conflicting-instruction` check, except the
  * second site is found by PROXIMITY rather than by the code appearing twice.
  */
@@ -288,9 +449,20 @@ function findNeighbourWaterInstructionFindings(
       for (const sentence of neighbourSentences) {
         if (INGRESS_TEST_RE.test(sentence)) continue // scoped by its own rating
         if (MANUFACTURER_DIRECTION_RE.test(sentence)) continue // defers to the manufacturer
-        const m = WATER_CONTACT_RE.exec(sentence)
-        if (!m) continue
-        const waterPolarity = polarityBefore(sentence, m.index)
+        if (MARKETING_DISCLAIMER_RE.test(sentence)) continue // disclaims the term, not an instruction
+        // A question ("Can you use one in the shower or the bath?") is not an
+        // instruction at all — it carries no polarity of its own, it is the
+        // heading the surrounding paragraph then answers. Treating it as an
+        // "unconditional ALLOW" was always wrong; it was simply masked while
+        // the forbid side of the real instruction nearby was itself misread
+        // as `allow` (#21947 bounce, live-corpus regression on
+        // how-do-you-use-a-clitoral-suction-toy: once the real instruction
+        // correctly reads `forbid`, it now collides with this FAQ heading on
+        // every surrounding sentence instead of the one real neighbour).
+        if (sentence.trim().endsWith('?')) continue
+        const waterMatch = scanAllPolarity(WATER_CONTACT_RE, sentence)
+        if (!waterMatch) continue
+        const { polarity: waterPolarity } = waterMatch
 
         for (const instr of mention.instructions) {
           if (instr.polarity === waterPolarity) continue // agree, not a conflict

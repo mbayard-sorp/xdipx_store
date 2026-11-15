@@ -182,6 +182,95 @@ describe('neighbour-water-instruction (run 2004 shape, ticket #21738)', () => {
     ])
     expect(report.findings.some(f => f.kind === 'neighbour-water-instruction')).toBe(false)
   })
+
+  // Live-corpus regression (#21947 bounce, how-do-you-choose-a-cordless-
+  // wand-vibrator): WATER_CONTACT_RE's single first-match `exec` picked
+  // "rinse" (correctly allow) and never saw "submerge nothing" later in the
+  // same sentence (correctly forbid).
+  it('scans every water-contact word in the neighbour sentence, not just the first', () => {
+    const report = analyzeParagraphs([
+      {
+        section: 'Water ratings',
+        text: "This toy's IPX7 rating means you can use it right in the shower.",
+      },
+      {
+        section: 'Care',
+        text: 'Wipe or rinse the head, keep the body out of standing water, and submerge nothing.',
+      },
+    ])
+    const hit = report.findings.find(f => f.kind === 'neighbour-water-instruction')
+    expect(hit).toBeDefined()
+  })
+
+  // Live-corpus regression (#21947 bounce, how-do-you-use-a-clitoral-
+  // suction-toy): an FAQ heading like "Can you use one in the shower or the
+  // bath?" is a question, not an instruction, but WATER_CONTACT_RE matched
+  // it anyway and read it as an unconditional ALLOW.
+  it('does not treat a question heading as an unconditional water-contact instruction', () => {
+    const report = analyzeParagraphs([
+      {
+        section: 'FAQ',
+        text: 'The shower needs its own rating, because IPX7 does not cover jets.',
+      },
+      {
+        section: 'FAQ',
+        text: 'Can you use one in the shower or the bath?',
+      },
+    ])
+    expect(report.findings.some(f => f.kind === 'neighbour-water-instruction')).toBe(false)
+  })
+
+  // Live-corpus regression (#21947 bounce, egg-vibrator-vs-bullet-vibrator /
+  // how-do-you-use-a-sex-toy-safely / do-you-need-a-sex-toy-cleaner): a
+  // sentence that names a marketing term ONLY to say the term has no fixed
+  // meaning is a vocabulary disclaimer, not a water-contact instruction.
+  it('does not treat a marketing-term disclaimer as an unconditional water-contact instruction', () => {
+    const report = analyzeParagraphs([
+      {
+        section: 'Water ratings',
+        text: 'An IPX7 mark comes with no promise about a shower, so never run it under the tap.',
+      },
+      {
+        section: 'Labels',
+        text: 'Splashproof and shower-ready are marketing words with no fixed meaning.',
+      },
+    ])
+    expect(report.findings.some(f => f.kind === 'neighbour-water-instruction')).toBe(false)
+  })
+})
+
+describe('multi-code independence (#21947 bounce: what-makes-a-vibrator-body-safe)', () => {
+  // A sentence naming TWO codes and explicitly saying they don't imply each
+  // other can't be safely attributed as a single allow/forbid to either
+  // code with this module's per-sentence model: "IPX7 for a basin and IPX5
+  // or IPX6 for a running tap, and the two do not imply each other" was read
+  // as an unscoped ALLOW of "running tap" for IPX7 too, when the sentence's
+  // whole point is that IPX7 does NOT get running tap.
+  it('does not extract a bucket instruction from a sentence declaring two codes independent', () => {
+    const report = analyzeParagraphs([
+      {
+        section: 'Water ratings',
+        text: 'IPX7 for a basin and IPX5 or IPX6 for a running tap, and the two do not imply each other, so read the code the toy actually carries.',
+      },
+      {
+        section: 'FAQ',
+        text: "This toy's IPX7 rating comes with no promise about a shower, so never run it under the tap.",
+      },
+    ])
+    expect(report.findings.some(f => f.kind === 'conflicting-instruction')).toBe(false)
+  })
+
+  it('still extracts instructions from a single-code sentence with the same wording nearby', () => {
+    const report = analyzeParagraphs([
+      { section: 'Water ratings', text: 'An IPX7 rating covers immersion, so it does not imply each other rating.' },
+      { section: 'FAQ', text: "This toy's IPX7 rating means you can use it right in the shower." },
+    ])
+    // Only one code is named here, so MULTI_CODE_INDEPENDENT_RE's guard
+    // never applies and the sentence still contributes its submersion
+    // instruction normally — this just proves the guard is keyed on the
+    // 2+ distinct codes condition, not the phrase alone.
+    expect(report.findings.some(f => f.kind === 'conflicting-instruction')).toBe(false)
+  })
 })
 
 describe('numbered enumerations: count-mismatch across sites (run 327 / run 626 shape)', () => {
@@ -395,6 +484,111 @@ describe('negation cues: "out of" and "without" (run 1911 shape, ticket #20643)'
     expect(conflicts[0]?.priorPolarity).toBe('allow')
   })
 })
+
+describe('trailing negation (#21947 bounce: what-makes-a-great-g-spot-rabbit-vibrator)', () => {
+  // The named reproduction: "shower" sits BEFORE its negation ("is not")
+  // instead of after it, which the old look-behind-only polarityBefore
+  // window could never see.
+  const trailingNegationSentence =
+    'Of the three here, only the Nova 2 prints a code at all, and We-Vibe prints IPX7, ' +
+    'so the bath is settled for it and the shower is not.'
+
+  it('reads "the shower is not" as forbidding direct spray, not allowing it', () => {
+    const report = analyzeParagraphs([
+      { section: 'Comparison table', text: trailingNegationSentence },
+      { section: 'Water ratings', text: "The toy's IPX7 rating means you can use it right in the shower." },
+    ])
+    const hit = report.findings.find(f => f.kind === 'conflicting-instruction')
+    expect(hit).toBeDefined()
+    expect(hit?.sites.map(s => s.sentence)).toContain(trailingNegationSentence)
+  })
+
+  it('does not flag a conflict against a sentence that also forbids the shower', () => {
+    const report = analyzeParagraphs([
+      { section: 'Comparison table', text: trailingNegationSentence },
+      {
+        section: 'Water ratings',
+        text: "The toy's IPX7 rating comes with no promise about a shower, so never run it under the tap.",
+      },
+    ])
+    expect(report.findings.some(f => f.kind === 'conflicting-instruction')).toBe(false)
+  })
+
+  // Live-corpus regression (#21947 bounce, what-makes-a-vibrator-body-safe):
+  // "IPX5 covers the shower AND DOES NOT COVER immersion" negates
+  // "immersion" (the second clause's own object), not "shower" (the first
+  // clause's object) — a wider trailing window matched the second clause's
+  // negation onto the first clause's "shower" and misread a correct ALLOW
+  // as a FORBID.
+  it('does not let a coordinated clause\'s negation attach to an earlier, unrelated object', () => {
+    const report = analyzeParagraphs([
+      { section: 'Water ratings', text: 'IPX5 covers the shower and does not cover immersion.' },
+      {
+        section: 'FAQ',
+        text: 'A full charge takes about ninety minutes and holds roughly two hours of use, the motor stays whisper quiet, and the IPX5 rating covers the shower and a rinse under the tap.',
+      },
+    ])
+    expect(report.findings.some(f => f.kind === 'conflicting-instruction' && f.token === 'IPX5')).toBe(false)
+  })
+
+  // Live-corpus regression (#21947 bounce, what-makes-a-vibrator-body-safe):
+  // "neither of them covers immersion" is a correlative negation with no
+  // bare not/never/cannot for the look-behind window to catch.
+  it('reads "neither...covers immersion" as forbidding submersion', () => {
+    const report = analyzeParagraphs([
+      {
+        section: 'Water ratings',
+        text: 'IPX5 and IPX6 mean water jets, which is what a shower and a running tap are, and neither of them covers immersion.',
+      },
+      { section: 'FAQ', text: 'IPX5 can be fully submerged in a basin for a quick clean.' },
+    ])
+    const hit = report.findings.find(f => f.kind === 'conflicting-instruction' && f.token === 'IPX5')
+    expect(hit).toBeDefined()
+  })
+})
+
+describe(
+  'restriction phrasing with no negation word (#21947 bounce: how-do-couples-use-a-' +
+    'prostate-massager-together / how-do-you-use-a-clitoral-suction-toy)',
+  () => {
+    // Neither phrase contains not/never/cannot/etc, so the pre-fix
+    // polarityBefore-only window (and even a naive before-or-after negation
+    // window) misread both as ALLOW, which collided with the frozen house
+    // wording's now-correct `forbid` read and produced brand-new same-document
+    // false positives on these two posts' own pages.
+    it('reads "needs its own rating" as forbidding direct spray', () => {
+      const report = analyzeParagraphs([
+        { section: 'Water ratings', text: 'An IPX7 rating covers immersion, but a direct jet needs its own rating.' },
+        {
+          section: 'Water ratings',
+          text: "The toy's IPX7 rating comes with no promise about a jet, so never aim a direct spray at it.",
+        },
+      ])
+      expect(report.findings.some(f => f.kind === 'conflicting-instruction')).toBe(false)
+    })
+
+    it('reads "does not cover jets" as forbidding direct spray', () => {
+      const report = analyzeParagraphs([
+        { section: 'Water ratings', text: 'The IPX7 code does not cover jets, so stick to a still bath instead.' },
+        {
+          section: 'Water ratings',
+          text: "The toy's IPX7 rating comes with no promise about a jet, so never aim a direct spray at it.",
+        },
+      ])
+      expect(report.findings.some(f => f.kind === 'conflicting-instruction')).toBe(false)
+    })
+
+    it('still flags a genuine conflict between a restriction phrase and an unrelated allow', () => {
+      const report = analyzeParagraphs([
+        { section: 'Water ratings', text: 'An IPX7 rating covers immersion, but a direct jet needs its own rating.' },
+        { section: 'FAQ', text: "The toy's IPX7 rating means you can use it right in the shower." },
+      ])
+      const hit = report.findings.find(f => f.kind === 'conflicting-instruction')
+      expect(hit).toBeDefined()
+      expect(hit?.token).toBe('IPX7')
+    })
+  },
+)
 
 describe('analyzeDraft — portable text structure, including the FAQ block', () => {
   it('counts a cross-site mismatch when one site lands only in the FAQ block', () => {
