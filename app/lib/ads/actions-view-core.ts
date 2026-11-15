@@ -61,4 +61,5 @@ export const VERB_LABELS: Readonly<Record<AdActionVerb, string>> = {
   halt_all: 'Halt everything',
   create_paused: 'Create paused draft',
   audience_sync: 'Refresh exclusion audiences',
+  block_placement: 'Block sites',
 }

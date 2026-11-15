@@ -49,7 +49,7 @@ const CHANNELS: readonly ChannelEntry[] = [
   },
   {
     id: 'adult:exoclick', label: 'ExoClick', policyState: 'allowed', adapter: exoclickAdapter,
-    policyNote: 'Adult network, allowed (docs/ads-policy.md, Adult ad networks row): copy at register 10, the charter nudity definition is the imagery ceiling, and every banner URL must carry utm_source, utm_medium, utm_campaign and utm_content. The adapter reads and pulls insights; mutate stays empty until the checklist is green.',
+    policyNote: 'Adult network, allowed (docs/ads-policy.md, Adult ad networks row): copy at register 10, the charter nudity definition is the imagery ceiling, and every banner URL must carry utm_source, utm_medium, utm_campaign and utm_content. The adapter reads and pulls insights, and writes only through exoclick/mutate.server.ts: nothing is sent until the owner turns on exoclick_operator_enabled, and anything that can raise spend also needs exoclick_total_cap_cents.',
     // 'adnetwork' is the utm_source ad-export/common.ts stamps on every adult-lane banner.
     sourceAliases: ['exoclick', 'adnetwork'],
   },

@@ -50,11 +50,11 @@ describe('loadChannels', () => {
     }))
     const exo = page.channels.find(c => c.id === 'adult:exoclick')
     expect(exo).toMatchObject({ label: 'ExoClick', policyState: 'allowed', hasAdapter: true })
-    expect(exo?.capabilities).toEqual({ read: true, insights: true, mutate: [], audiences: 'none', preview: false })
+    expect(exo?.capabilities).toEqual({ read: true, insights: true, audiences: 'none', preview: false, mutate: ['pause', 'resume', 'set_budget', 'update_creative', 'block_placement'] })
     expect(exo?.token?.state).toBe('ok')
     expect(exo?.checklist).toHaveLength(9)
     expect(exo?.mutate.mutateBlocked).toBe(true)
-    expect(exo?.mutate.reasons).toContain('the adapter has no mutate verbs')
+    expect(exo?.mutate.reasons).toContain('9 of 9 checklist items open')
   })
 
   it('joins token health, sync and pull freshness by platform', async () => {

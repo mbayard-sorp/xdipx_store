@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { ChannelNotEnabledError } from '../errors'
 import type { PolicyMirrorRow } from '../types'
 import { EXO_BASE, createExoClient } from './client.server'
+import type { ExoclickMutate } from './mutate.server'
 import {
   createExoclickAdapter, exoConversions, exoDays, exoclickPolicyCheck, normalizeExoCampaign, normalizeExoVariation,
   parseExoStatsPage,
@@ -28,7 +29,7 @@ function jsonRes(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
 }
 
-function adapterWith(route: (path: string, qs: URLSearchParams) => unknown) {
+function adapterWith(route: (path: string, qs: URLSearchParams) => unknown, extra: { mutate?: ExoclickMutate } = {}) {
   const paths: string[] = []
   const fetchImpl = vi.fn(async (input: string | URL | Request) => {
     const u = new URL(String(input))
@@ -38,7 +39,7 @@ function adapterWith(route: (path: string, qs: URLSearchParams) => unknown) {
     return jsonRes(200, route(path, u.searchParams))
   })
   const client = createExoClient({ fetchImpl: fetchImpl as unknown as typeof fetch, apiKey: () => 'k', now: () => NOW.getTime() })
-  return { adapter: createExoclickAdapter({ client, now: () => NOW, accountId: async () => '1014762' }), paths }
+  return { adapter: createExoclickAdapter({ client, now: () => NOW, accountId: async () => '1014762', ...extra }), paths }
 }
 
 describe('normalizeExoCampaign', () => {
@@ -214,12 +215,30 @@ describe('health', () => {
 })
 
 describe('mutations', () => {
-  it('has no mutate verbs, and mutate and createPaused throw ChannelNotEnabledError', async () => {
-    const { adapter } = adapterWith(() => ({}))
-    expect(adapter.capabilities).toEqual({ read: true, insights: true, mutate: [], audiences: 'none', preview: false })
-    await expect(adapter.mutate({ verb: 'pause', target: { platform: 'adult:exoclick', level: 'campaign', externalId: '1' }, params: {} }))
-      .rejects.toBeInstanceOf(ChannelNotEnabledError)
-    await expect(adapter.createPaused({})).rejects.toBeInstanceOf(ChannelNotEnabledError)
+  const target = { platform: 'adult:exoclick' as const, level: 'campaign' as const, externalId: '8774050' }
+
+  it('advertises the five verbs and routes mutate and createPaused through the write path', async () => {
+    const mutate = vi.fn(async () => ({ applied: true }))
+    const createPaused = vi.fn(async () => ({ campaignId: '99', requests: [], dryRun: false }))
+    const { adapter } = adapterWith(() => ({}), { mutate: { mutate, createPaused, readGate: vi.fn() } as never })
+    expect(adapter.capabilities).toEqual({
+      read: true, insights: true, audiences: 'none', preview: false,
+      mutate: ['pause', 'resume', 'set_budget', 'update_creative', 'block_placement'],
+    })
+    expect(await adapter.mutate({ verb: 'pause', target, params: {} })).toEqual({ applied: true })
+    expect(mutate).toHaveBeenCalledTimes(1)
+    expect(await adapter.createPaused({ body: {} })).toEqual({ campaignId: '99' })
+  })
+
+  it('throws ChannelNotEnabledError and sends nothing while the operator switch is off', async () => {
+    const posts = vi.fn()
+    const client = { get: vi.fn(), put: posts, post: posts, del: posts, session: vi.fn(), reset: vi.fn() } as never
+    const { createExoclickMutate } = await import('./mutate.server')
+    const mutate = createExoclickMutate({ client, settings: async () => ({ operatorEnabled: false, totalCapCents: 99999 }) })
+    const adapter = createExoclickAdapter({ client, mutate, now: () => NOW })
+    await expect(adapter.mutate({ verb: 'pause', target, params: {} })).rejects.toBeInstanceOf(ChannelNotEnabledError)
+    await expect(adapter.createPaused({ body: {}, dailyBudgetCents: 2000 })).rejects.toBeInstanceOf(ChannelNotEnabledError)
+    expect(posts).not.toHaveBeenCalled()
   })
 })
 

@@ -83,8 +83,10 @@ export interface DateRange {
 /**
  * halt_all pauses every ACTIVE campaign in the account as one ledger action.
  * It is not listed in capabilities.mutate, which names per-entity verbs.
+ * block_placement adds sites to a campaign's block list (ExoClick today). It
+ * only ever adds, and it cannot raise spend, so it is a brake.
  */
-export type MutationVerb = 'pause' | 'resume' | 'set_budget' | 'update_creative' | 'halt_all'
+export type MutationVerb = 'pause' | 'resume' | 'set_budget' | 'update_creative' | 'halt_all' | 'block_placement'
 
 /** The ad_actions row a mutation is applying, as the dispatcher saw it. */
 export interface MutationLedgerContext {

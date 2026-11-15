@@ -2599,8 +2599,9 @@ export const adActions = pgTable('ad_actions', {
  * create_paused (phase 6a): an owner-tier paused draft, before null, after the created ids.
  * audience_sync (ticket #16687): the weekly M8 exclusion audience refresh, tier auto,
  * target level 'audience'. Never reaches the applier.
+ * block_placement: add sites to an ExoClick campaign's block list, tier auto, a brake.
  */
-export type AdActionVerb = 'pause' | 'resume' | 'set_budget' | 'update_creative' | 'halt_all' | 'create_paused' | 'audience_sync'
+export type AdActionVerb = 'pause' | 'resume' | 'set_budget' | 'update_creative' | 'halt_all' | 'create_paused' | 'audience_sync' | 'block_placement'
 export type AdActionTier = 'auto' | 'approve' | 'owner'
 export type AdActionStatus =
   | 'proposed' | 'dry_run' | 'approved' | 'applied' | 'failed' | 'rejected' | 'expired'

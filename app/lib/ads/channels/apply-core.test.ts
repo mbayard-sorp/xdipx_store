@@ -10,6 +10,7 @@ describe('classifyTier: the one invariant', () => {
   it('spend-decreasing verbs are auto', () => {
     expect(classifyTier('pause', null, null)).toBe('auto')
     expect(classifyTier('halt_all', null, null)).toBe('auto')
+    expect(classifyTier('block_placement', { hostnames: ['a.com'] }, null)).toBe('auto')
     expect(classifyTier('set_budget', { dailyBudgetCents: 700 }, budget(1000))).toBe('auto')
     expect(classifyTier('brake', { dailyBudgetCents: 700 }, budget(1000))).toBe('auto')
     expect(classifyTier('brake', null, null)).toBe('auto')

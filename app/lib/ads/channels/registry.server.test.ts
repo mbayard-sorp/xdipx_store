@@ -36,10 +36,10 @@ describe('channel registry', () => {
     expect(listChannels().filter(c => c.hasAdapter).map(c => c.id)).toEqual(['meta', 'microsoft', 'adult:exoclick'])
   })
 
-  it('lists ExoClick as allowed with read and insights, no mutations, and the adult-lane source aliases', () => {
+  it('lists ExoClick as allowed with read, insights and its five write verbs, and the adult-lane source aliases', () => {
     const exo = listChannels().find(c => c.id === 'adult:exoclick')
     expect(exo).toMatchObject({ policyState: 'allowed', hasAdapter: true, label: 'ExoClick' })
-    expect(exo?.capabilities).toEqual({ read: true, insights: true, mutate: [], audiences: 'none', preview: false })
+    expect(exo?.capabilities).toEqual({ read: true, insights: true, audiences: 'none', preview: false, mutate: ['pause', 'resume', 'set_budget', 'update_creative', 'block_placement'] })
     expect(exo?.policyNote).toMatch(/docs\/ads-policy\.md/)
     expect(exo?.policyNote).toMatch(/register 10/)
     expect(exo?.policyNote).toMatch(/nudity definition/)

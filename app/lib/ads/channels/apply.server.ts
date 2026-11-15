@@ -63,7 +63,7 @@ import {
   type DispatchGate, type DispatchVerb, type MirrorBudgetRow,
 } from './apply-core'
 import { ChannelNotEnabledError, MutationRefusedError } from './errors'
-import type { ChannelAdapter, ChannelId, CreatedRefs, EntityRef, MutationResult } from './types'
+import type { ChannelAdapter, ChannelId, CreatedRefs, EntityRef, MutationResult, MutationVerb } from './types'
 
 /** Plan §9.4: at most 3 automatic pauses a day; the 4th waits and pages the owner. */
 export const AUTO_PAUSE_CAP_PER_DAY = 3
@@ -85,6 +85,8 @@ export interface DispatchRequest {
   budgetFactor?: number | undefined
   /** set_budget: the new daily budget. */
   newDailyBudgetCents?: number | undefined
+  /** block_placement: the hostnames to add to the target campaign's block list. */
+  hostnames?: string[] | undefined
   /** rule:R5, agent:paid-media-buyer, owner, or the admin's email. */
   proposedBy: string
   reason?: string | null | undefined
@@ -224,7 +226,7 @@ async function defaultFileBlocker(input: BlockerInput) {
 
 const LEDGER_VERB: Record<DispatchVerb, AdActionVerb> = {
   pause: 'pause', resume: 'resume', set_budget: 'set_budget', update_creative: 'update_creative',
-  halt_all: 'halt_all', scale: 'set_budget', brake: 'set_budget',
+  halt_all: 'halt_all', scale: 'set_budget', brake: 'set_budget', block_placement: 'block_placement',
 }
 
 const BUDGET_VERBS = new Set<DispatchVerb>(['scale', 'brake', 'set_budget'])
@@ -312,6 +314,26 @@ function autoPauseCapBlocker(day: string, count: number, target: EntityRef, prop
 // dispatch
 // ---------------------------------------------------------------------------
 
+const EXOCLICK_VERBS: ReadonlySet<DispatchVerb> = new Set(['pause', 'resume', 'set_budget', 'block_placement'])
+
+async function dispatchToExoclick(req: DispatchRequest, target: EntityRef): Promise<DispatchResult> {
+  if (!EXOCLICK_VERBS.has(req.verb)) return skipped(`No ledger row: ExoClick does not take ${req.verb}.`)
+  const params: Record<string, unknown> | null =
+    req.verb === 'set_budget' ? { dailyBudgetCents: req.newDailyBudgetCents ?? null }
+    : req.verb === 'block_placement' ? { hostnames: req.hostnames ?? [] }
+    : null
+  const { dispatchExoclickAction } = await import('./exoclick/operator.server')
+  const out = await dispatchExoclickAction({
+    verb: req.verb as MutationVerb, target, params, proposedBy: req.proposedBy, reason: req.reason ?? null,
+    ruleEventId: req.ruleEventId ?? null, now: req.now,
+  })
+  return {
+    status: out.status === 'not_enabled' ? 'dry_run' : out.status,
+    tier: out.tier, actionId: out.actionId, inserted: out.actionId != null, applied: out.applied, error: out.error,
+    note: out.note, target,
+  }
+}
+
 export async function dispatch(req: DispatchRequest, deps: ApplyDeps = {}): Promise<DispatchResult> {
   const store = deps.store ?? defaultStore
   const now = req.now ?? new Date()
@@ -337,6 +359,11 @@ export async function dispatch(req: DispatchRequest, deps: ApplyDeps = {}): Prom
     target = { platform, level: 'ad', externalId: adId }
   }
   if (!target) return skipped('No ledger row: no target.')
+
+  // ExoClick has its own switch and cap (exoclick_operator_enabled and
+  // exoclick_total_cap_cents), not ads_spend_enabled, so it never takes the
+  // generic gates below. See exoclick/operator.server.ts.
+  if (target.platform === 'adult:exoclick') return dispatchToExoclick(req, target)
 
   const targetRow = chain.find(r => r.externalId === target!.externalId)
     ?? (await store.mirrorRows([target.externalId]))[0]
