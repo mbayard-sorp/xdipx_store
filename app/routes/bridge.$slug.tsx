@@ -16,11 +16,13 @@
  * host root path `/<slug>` and the client router matches the URL it hydrates.
  */
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from 'react-router'
 import { data, redirect, useActionData, useLoaderData, useRouteError, useRouteLoaderData } from 'react-router'
 import { Analytics } from '~/components/store/Analytics'
 import { CookieConsent } from '~/components/store/CookieConsent'
+import { arrivalDay, recordArrivalRequest } from '~/lib/ad-arrivals.server'
+import { fireSalesArrivalBeacon } from '~/lib/sales-arrival-beacon.client'
 import { BRIDGE_404, STOREFRONT_404, isBridgeError } from '~/lib/bridge-error'
 import { plainHeadline, splitHeadline } from '~/lib/ad-bridge-copy'
 import { buildBridgeDestination, getAdBridgePage, pickBridgePackshot } from '~/lib/ad-bridge.server'
@@ -251,8 +253,16 @@ function loadUpgrades(page: SalesPage): Promise<(Product | null)[]> {
 
 /** Shopify data for a sales page's one product. A product that fails to load is a 404, never faked. */
 async function salesLoaderData(request: Request, page: SalesPage, preview: boolean) {
-  const step = parseAddOnStep(new URL(request.url).searchParams.get('addon'), page.addOns.length)
+  const url = new URL(request.url)
+  const step = parseAddOnStep(url.searchParams.get('addon'), page.addOns.length)
   if (step !== null) return salesAddOnLoaderData(request, page, step, preview)
+
+  // Arrival counting (ticket #19434): awaited before the response, since
+  // Vercel discards any work started after it. A request with a fresh
+  // utm_content (exoclid included) already misses the CDN cache, so this
+  // loader runs on every real ad click, not just the first one.
+  const utmSource = url.searchParams.get('utm_source')
+  if (utmSource) await recordArrivalRequest(arrivalDay(), utmSource, url.searchParams.get('utm_content') ?? '')
 
   const [product, settings, upgrades, smsOptin] = await Promise.all([
     getProductByHandle(page.productHandle).catch(() => null),
@@ -605,6 +615,13 @@ export default function BridgeRoute() {
 
   const rootData = useRouteLoaderData('root') as { ENV?: { GA4_ID?: string } } | undefined
   const ga4Id = rootData?.ENV?.GA4_ID ?? ''
+
+  // Arrival counting's client half (ticket #19434): fires once after
+  // hydration, so the server request count minus this beacon's count is
+  // visitors whose browser never ran this script.
+  useEffect(() => {
+    if (d.kind === 'sales') fireSalesArrivalBeacon()
+  }, [d.kind])
 
   return (
     <main className="min-h-[100svh] bg-paper text-ink">

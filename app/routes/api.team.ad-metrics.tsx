@@ -43,10 +43,19 @@
  *   Read only. The mirror's entities and spend for one channel, so a routine
  *   can watch a channel without holding its key.
  *   -> { platform, sinceDay, entities, insights: { level, totals, byExternalId } }
+ *
+ * { op: 'arrivals', utmSource: string, utmContent?: string, day?: 'YYYY-MM-DD' }
+ *   Read only (ticket #19434). The sales-page arrival counters written by
+ *   app/lib/ad-arrivals.server.ts: `requests` from the loader (every hit
+ *   carrying this utm_source/utm_content), `beacons` from the client beacon
+ *   fired after hydration. `requests - beacons` is visitors whose browser
+ *   never ran the page's JavaScript. `day` defaults to today UTC.
+ *   -> { day, utmSource, utmContent, requests, beacons }
  */
 import type { ActionFunctionArgs } from 'react-router'
 import { assertTeamAuth } from '~/lib/team.server'
 import { apiError } from '~/lib/api-error.server'
+import { arrivalDay, getArrivalCounts } from '~/lib/ad-arrivals.server'
 import {
   AdMetricsError, backfillAdSpend, creativeSummaries, importGoogleAdsCsv, importShopCampaignsCsv, runDailyMetrics,
 } from '~/lib/ad-metrics.server'
@@ -150,8 +159,19 @@ export async function action({ request }: ActionFunctionArgs) {
       }))
     }
 
+    if (op === 'arrivals') {
+      const utmSource = b['utmSource']
+      if (typeof utmSource !== 'string' || !utmSource) return bad('utmSource required')
+      const utmContent = typeof b['utmContent'] === 'string' ? b['utmContent'] : ''
+      const day = b['day']
+      if (day !== undefined && (typeof day !== 'string' || !DAY_RE.test(day))) return bad('day must be YYYY-MM-DD')
+      const resolvedDay = typeof day === 'string' ? day : arrivalDay()
+      const counts = await getArrivalCounts(resolvedDay, utmSource, utmContent)
+      return Response.json({ day: resolvedDay, utmSource, utmContent, ...counts })
+    }
+
     if (op === 'import-preview' || op === 'import-commit') return bad('imports are multipart/form-data with file and source')
-    return bad('op must be daily, import-preview, import-commit, summary, backfill, channel, placements or exoclick-brakes')
+    return bad('op must be daily, import-preview, import-commit, summary, backfill, channel, placements, exoclick-brakes or arrivals')
   } catch (err) {
     if (err instanceof AdMetricsError) return bad(err.message, err.code === 'not_configured' ? 501 : 400)
     return apiError('team-ad-metrics', err, 'ad-metrics op failed')
