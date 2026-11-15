@@ -25,7 +25,7 @@ import { SITE_ORIGIN } from '~/lib/social-meta'
 import { MetaPageViews } from '~/components/store/MetaPageViews'
 import { captureUTM, captureExoClickId, captureFbClickId, captureGoogleClickId, captureMicrosoftClickId } from '~/lib/attribution.server'
 import { resolveGa4 } from '~/lib/ga4-config.server'
-import { analyticsOnByDefault, consentDefaultScript } from '~/lib/analytics-default'
+import { analyticsOnByDefault, consentDefaultScript, ga4DirectConfigScript, ga4ScriptTagLoad } from '~/lib/analytics-default'
 import { isBridgeHost, requestHost } from '~/lib/bridge-host.server'
 import { isQaAgeBypassRequest } from '~/lib/qa-preview.server'
 import { isPermanentlyUnindexableStatus } from '~/lib/seo'
@@ -223,14 +223,17 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
   // Analytics loads in two stages. The bootstrap runs inline before first
   // paint: consent-mode defaults (denied until the banner grants, except
-  // analytics for US visitors on curious.xdipx.com, see analytics-default.ts) plus the
-  // gtag and fbq queue stubs, so every event or consent update fired from app
-  // code is queued from the start. The heavy third-party payloads (gtm.js /
-  // gtag.js / fbevents.js, ~265KB combined) load only on first interaction or
+  // analytics for US visitors on curious.xdipx.com, see analytics-default.ts),
+  // the gtag and fbq queue stubs, and (direct-GA4 path only) the 'js'/'config'
+  // calls, so every event fired from app code — including a page_view from a
+  // mount effect, which can run before the user ever interacts — has an
+  // active config to attach to in the dataLayer array gtag.js replays on
+  // load. Only the heavy third-party script tags themselves (gtm.js /
+  // gtag.js / fbevents.js, ~265KB combined) load on first interaction or
   // post-load idle — loaded eagerly in <head> they compete with the
   // render-blocking stylesheet and LCP hero image for bandwidth on throttled
-  // mobile connections. Queued dataLayer/fbq calls replay when the scripts
-  // arrive, so nothing is lost.
+  // mobile connections. An 'event' queued ahead of 'config' is not safely
+  // queued; gtag.js drops it rather than sending a hit (ticket #19435).
   //
   // GA4 loads directly only when GTM is NOT present: with a gtmId the GTM
   // container owns the GA4 config tag, and loading gtag/js here too would pull
@@ -242,6 +245,23 @@ export function Layout({ children }: { children: React.ReactNode }) {
     (ga4Id || gtmId)
       ? `window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}${consentDefaultScript(analyticsOn)}`
       : '',
+    // 'js'/'config' queue in the SAME synchronous tick as the stub above,
+    // not deferred behind interaction/idle/8s like the actual script tag
+    // below. gtag.js replays the dataLayer array in push order on load, and
+    // an 'event' command pushed ahead of its own 'config' command has no
+    // measurement ID to attach to, so gtag.js drops it rather than sending a
+    // hit. Analytics.tsx fires an 'event','page_view' call from a mount
+    // effect, which used to win that race against the deferred 'config'
+    // call below — confirmed live on curious.xdipx.com (ticket #19435):
+    // dataLayer held page_view queued before config, and the only network
+    // hit to google-analytics.com all session was the later, correctly-
+    // ordered web_vitals event. This is the whole site's bug, not just the
+    // bridge host's; it is just measurable there because ExoClick's billed
+    // click count is an independent ground truth to compare page_view
+    // against. Queuing 'config' here costs nothing (one line, no network
+    // request); only the (large) gtag.js script tag itself stays deferred
+    // for TBT, same as before.
+    (!gtmId && ga4Id) ? ga4DirectConfigScript(ga4Id) : '',
     // Mint _fbp ourselves before the fbq stub. fbevents.js is the only other
     // writer and it boots consent-revoked and deferred behind first
     // interaction, which left _fbp coverage at 1.6% and Event Match Quality at
@@ -269,9 +289,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
     gtmId
       ? `window.dataLayer.push({'gtm.start':new Date().getTime(),event:'gtm.js'});inject('https://www.googletagmanager.com/gtm.js?id=${gtmId}');`
       : '',
-    (!gtmId && ga4Id)
-      ? `inject('https://www.googletagmanager.com/gtag/js?id=${ga4Id}');gtag('js',new Date());gtag('config','${ga4Id}',{send_page_view:false});`
-      : '',
+    (!gtmId && ga4Id) ? ga4ScriptTagLoad(ga4Id) : '',
   ].join('')
 
   // fbevents.js (ticket #13339, split from #13146): 110KB and a 226ms long
