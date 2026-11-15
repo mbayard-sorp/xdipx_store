@@ -73,7 +73,9 @@ export function bridgeSlugFromPath(pathname: string): string | null {
  */
 // '/api/meta-event' is the server copy of the bridge page's own PageView
 // (ticket #16688); without it the curious host 404s the beacon.
-const SUPPORT_PATHS = new Set(['/__manifest', '/api/consent', '/api/lead', '/api/meta-event'])
+// '/api/sales-arrival-beacon' is the client half of the sales-page arrival
+// counter (ticket #19434); same reason — without it the curious host 404s it.
+const SUPPORT_PATHS = new Set(['/__manifest', '/api/consent', '/api/lead', '/api/meta-event', '/api/sales-arrival-beacon'])
 
 export function bridgeHostSupportPath(pathname: string): boolean {
   return SUPPORT_PATHS.has(pathname.replace(/\.data$/i, ''))
