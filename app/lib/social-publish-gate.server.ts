@@ -52,7 +52,7 @@
  * `runDeterministicPublishChecks` below.
  */
 
-import { allMediaAreGeneratedSocialAssets, isGeneratedSocialAsset, isRenderedCardAsset } from './social-media.server'
+import { allMediaAreGeneratedSocialAssets, isGeneratedSocialAsset, isRehostedPhotoAsset, isRenderedCardAsset } from './social-media.server'
 import { X_CAPTION_MAX, T_CO_LENGTH, weightedTweetLength } from './social-publish/x-limits'
 import { VISION_CHECK_NAMES, type VisionCheckName, type VisionVerdict } from './social-vision-gate.server'
 import { jpegImageUrl } from './social-publish/instagram.server'
@@ -1111,9 +1111,17 @@ export async function runDeterministicPublishChecks(
     // make (see `isRenderedCardAsset`'s own doc comment). The anatomy/exposure
     // checks just above still ran and still gate; only this classification
     // stands aside.
+    //
+    // `isUnretouchedPhoto` (ticket #21149's real-photo hardware-branding
+    // hedge carve-out) is `true` for anything `isGeneratedSocialAsset` does
+    // NOT recognize, OR for a rehosted Notebook hero photo (ticket #22122):
+    // `isGeneratedSocialAsset`'s `social-` prefix check reads a rehost
+    // (`social-notebook-*`) as pipeline-generated art, but it is real camera
+    // pixels copied byte-for-byte from the content lane's own published hero,
+    // not an AI model's own baked-in text.
     const textClass = isRenderedCardAsset(u)
       ? 'none'
-      : classifyLegibleText(verdict.legibleText, !isGeneratedSocialAsset(u))
+      : classifyLegibleText(verdict.legibleText, !isGeneratedSocialAsset(u) || isRehostedPhotoAsset(u))
     if (textClass === 'packaging' || textClass === 'caption-or-watermark' || textClass === 'unclassified') {
       const why = textClass === 'packaging'
         ? 'reads as packaging junk (barcode, label, carton or ingredient text)'

@@ -1743,6 +1743,44 @@ describe('real-photo hardware-branding hedge carve-out (ticket #21149)', () => {
   })
 })
 
+// Ticket #22122, social row 590 (we-vibe-sync-2-rechargeable-remote-control-
+// couples-vibrator-green-velvet, the content lane's own published Notebook
+// hero, rehosted via `POST /api/team/social-image op:rehost`, asset id 1826):
+// #21149's carve-out above never fired for an actual rehost, because
+// `rehostSocialImage` names the file `social-notebook-{slug}...`, which
+// `isGeneratedSocialAsset`'s `social-` prefix check reads as pipeline-
+// generated art -- flipping `isUnretouchedPhoto` to `false` and skipping the
+// hedge carve-out entirely. #21149's own fixture used a filename with no
+// `social-` prefix, which is not what the rehost path actually writes.
+describe('rehosted real-photo carve-out (ticket #22122)', () => {
+  const isLibraryMember = async () => true
+  const REHOSTED_MEDIA = [
+    `${CDN}/social-notebook-we-vibe-sync-2-rechargeable-remote-control-couples-vibrator-green-velvet-20261115.jpg`,
+  ]
+  const run = (legibleText: string | null) => runRaw(
+    { caption: CLEAN, mediaUrls: REHOSTED_MEDIA, postCreatedAt: null },
+    { getVisionVerdict: async () => ({ ...PASSING_VERDICT, legibleText }), isLibraryMember },
+  )
+
+  it('row 590: a rehosted real photo no longer blocks on the hedged hardware-branding mark', async () => {
+    const r = await run(
+      'Partially-legible, mostly-finger-occluded embossed We-Vibe wordmark appears to read "we-vibe" on the product control cluster.',
+    )
+    expect(checks(r)).not.toContain('vision-legible-text')
+    expect(r.blocked).toBe(false)
+  })
+
+  it('a rehosted real photo still blocks packaging junk and non-hedge unclassified text', async () => {
+    const packaging = await run('barcode 8 712345 678905, NET WT 3.4 FL OZ')
+    expect(checks(packaging)).toContain('vision-legible-text')
+    expect(packaging.blocked).toBe(true)
+
+    const garbled = await run('wOVae (brand wordmark on product body); additional control markings visible')
+    expect(checks(garbled)).toContain('vision-legible-text')
+    expect(garbled.blocked).toBe(true)
+  })
+})
+
 // Ticket #13368: the New-in carousel's packshot card and the typographic
 // plate render real copy on purpose (`renderSocialCard`,
 // `app/lib/og-card.server.ts`), under a `social-card-*` filename. The text

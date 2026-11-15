@@ -301,6 +301,31 @@ export function isRenderedCardAsset(url: string): boolean {
   return basename.startsWith(RENDERED_CARD_PREFIX)
 }
 
+/** Filename prefix `rehostSocialImage` writes for a rehosted Notebook hero photo. */
+const REHOSTED_PHOTO_PREFIX = 'social-notebook-'
+
+/**
+ * Is this media url a rehosted real photograph (ticket #22122), as opposed to
+ * pipeline-generated art? `rehostSocialImage` (`POST /api/team/social-image`
+ * `op:rehost`) copies an already-published Notebook hero photo's own pixels
+ * (optionally cropped) onto Shopify Files under this prefix. That filename
+ * satisfies `isGeneratedSocialAsset`'s `social-` prefix check, which is correct
+ * for THAT check's purpose (the asset is a recognized, publishable library
+ * member) but wrong for a caller that uses `isGeneratedSocialAsset` as a
+ * proxy for "this is an AI generation, not a real photo" -- a rehosted hero is
+ * real camera pixels, factory-molded hardware lettering and all, same as any
+ * other unretouched photo. Ticket #21149's own test fixture for "the real
+ * Notebook-hero photo" used a filename with no `social-` prefix at all, which
+ * is not what `rehostSocialImage` actually writes, so that fix never covered
+ * the asset it was named for.
+ */
+export function isRehostedPhotoAsset(url: string): boolean {
+  if (!url) return false
+  const path = url.split(/[?#]/)[0] ?? ''
+  const basename = (path.split('/').pop() ?? '').toLowerCase()
+  return basename.startsWith(REHOSTED_PHOTO_PREFIX)
+}
+
 /**
  * Generate a cast-in-hand composite: an approved cast member holding and
  * showing the REAL product (owner ruling 2026-08-12).
