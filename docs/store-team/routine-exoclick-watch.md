@@ -6,11 +6,11 @@ Trigger `trig_01WREZzWdEmXuRMPX5vKQVoq`, `20 */4 * * *` UTC. The trigger prompt 
 
 ## Limits
 
-Read only, notify only. It never pauses, starts, edits or funds a campaign, never changes a price, and starts no team run row. Pausing stays the owner's call.
+Brakes only, through the site. Since 2026-11-15 it runs `exoclick-brakes` with `dryRun` false on every run, so it can pause a dead campaign, block a dead site and lower a budget, then report. It never resumes or creates a campaign, never raises a budget or a bid, never uploads a banner, never adds funds, never changes a price or a setting, and starts no team run row. If the op reports `operatorEnabled` false, the routine goes back to read only and notify only.
 
-## Brakes (ticket #19412, off until the owner flips two settings)
+## Brakes (ticket #19412, on since 2026-11-15)
 
-The site now has a write path for ExoClick, and the routine can pull brakes through it without holding the key. Nothing below changes the Limits above until the owner sets `exoclick_operator_enabled` (missing row is off) in `pipeline_settings`. `exoclick_total_cap_cents` (missing row is 0) bounds anything that can raise spend.
+The site now has a write path for ExoClick, and the routine can pull brakes through it without holding the key. The owner approved both settings on 2026-11-15, verbatim: "Approved add true and 17000". `exoclick_operator_enabled` is `true` and `exoclick_total_cap_cents` is `17000` ($170), written with actor `owner` in `settings_audit_log`. Setting the first back to `false` returns the routine to notify-only. The cap bounds anything that can raise spend.
 
 - `POST /api/team/ad-metrics {op:'placements', campaignIds, dateFrom, dateTo}` reads per-site stats live, paged to the end, plus the account balance.
 - `POST /api/team/ad-metrics {op:'exoclick-brakes', campaignIds, dryRun}` runs the kill rules and applies the brakes. `dryRun` defaults to true. Rules and thresholds are named constants in `app/lib/ads/channels/exoclick/kill-rules-core.ts`.
@@ -19,7 +19,7 @@ The site now has a write path for ExoClick, and the routine can pull brakes thro
 
 ## What it watches
 
-Campaigns 8774050, 8774052, 8774054, 8774056, 8774058 and 8774060 in group 367506. Combined cap $130, bid 75 cents CPM, daily limit $20 each. It reads ExoClick through the site's mirror (`team/ad-metrics` op `channel`), because the cloud environment deliberately has no ExoClick key. Entities refresh every 6 hours and spend hourly. The mirror holds no account balance or bid, so the routine does not watch those.
+Campaigns 8774050, 8774052, 8774054, 8774056, 8774058 and 8774060 in group 367506. All six have been paused since 2026-11-02 at $27.66 spent. Any other campaign that appears in the mirror is watched too. The account cap is $170. It reads ExoClick through the site's mirror (`team/ad-metrics` op `channel`), because the cloud environment deliberately has no ExoClick key. Entities refresh every 6 hours and spend hourly. The brakes op returns the account balance, and the routine flags it under $20 while a campaign is running.
 
 | Issue | Trigger |
 |---|---|
@@ -27,6 +27,7 @@ Campaigns 8774050, 8774052, 8774054, 8774056, 8774058 and 8774060 in group 36750
 | Funds | A campaign showing No Funds |
 | Offer | Price not $69.99 or compare-at not $89.99, because the banners read 22% OFF |
 | Product | Not active, or under 100 units |
+| Pulse Solo | Price not $119.99, a compare-at present, under 40 units, or `curious.xdipx.com/pulse-solo` not returning 200 with $119.99 |
 | Landing | `curious.xdipx.com/gawk-gawk-3000` not returning 200 with $69.99 on the page |
 | Settings | Total spend above $135 |
 | Blind spot | The mirror missing the campaigns after 2026-11-01 12:00 UTC, or more than 13 hours stale |
@@ -49,9 +50,9 @@ Every run reads impressions and clicks per campaign and per banner from the mirr
 | Dead placement | A site or zone with 2,000 impressions and no clicks, or 5,000 at under 0.02% CTR |
 | Runaway pace | A campaign that spent more than $5 since the last hourly read |
 
-The mirror has no per-site rows yet, so Dead placement starts when the placement read from ticket #19412 is deployed. Until then the routine says in its closing line that placements were not checked. It does not stay silent about it.
+Dead placement is read live by the brakes op, which pages every site. A block that names a site already on the campaign's list is skipped and reported as such (PR #1976). The first live run, 2026-11-15, found the 11 round-one sites already blocked on all six campaigns and sent nothing.
 
-While a test cell is live the trigger runs hourly for the first 24 hours, then every 4 hours. The thresholds and the actions that follow them are in `exoclick-program.md`, section 5. This routine stays notify-only until the write path is merged and `exoclick_operator_enabled` is on; after that it applies the brakes first and reports after.
+While a test cell is live the trigger runs hourly for the first 24 hours, then every 4 hours. The thresholds and the actions that follow them are in `exoclick-program.md`, section 5. The routine applies the brakes first and reports after. Anything the rules wanted but the site cannot do yet comes back under `unsupported` and is filed for the owner; pausing a single banner is one of those. Runaway pace is checked only where the data shows hours; otherwise the closing line says pace was not checked.
 
 ## How the owner hears
 
