@@ -141,6 +141,7 @@ Verbatim, in answer to the plan:
 - "yes write whatever code is needed". The write path is being built as one PR on `claude/exoclick-write-path`, attached to #19412. It touches protected paths, so the owner merges it.
 - "These ads run on Exoclick so there are no rules about what we can and can't show, but I don't think that was the problem before." ExoClick banners are not held to the nudity ceiling in `ads-policy.md`. This covers banners on ExoClick only. Sales pages on curious.xdipx.com, the site, email and every other channel keep their rules. ExoClick still reviews every banner itself, and a rejection there stops the offer until it is fixed.
 - "You're free to create offers that have profitable potential". The rules in section 4 are the standing envelope. The team picks products and deals inside them without asking per offer. Creating a Shopify discount code is still a store change and is reported the day it is made.
+- "Yes, raise pulse solo to $119". Set in Shopify the same hour: $119.99, the maker's price, compare-at cleared. Nothing holds it there yet. The daily pricing batch at 07:00 UTC recomputes it unless Hot Octopuss goes into `pricing_map_brands`, which would also move the Atom Plus and Pulse Queen from $88.99 to their $99 MAP.
 
 ## 9. Round-one placement lists
 
@@ -149,4 +150,3 @@ Built 2026-11-15 from `statistics/a/site`, all six campaigns, 2026-10-30 to 2026
 Block before any new spend (the section 5 rule applied to round one, $10.84 of the $27.66): m.youjizz.com (already blocked), thisvid.com, tnaflix.com, eporner.com, xxxmom.pro, letsporn.com, xxxtapes.net, voyeurhit.com, perfectgirls.xxx, sexient.com, rat.xxx.
 
 Start cell 1 on the sites that clicked. xvideos.com gave 63 clicks at $0.135 each; 3xxx.pro gave 14 at $0.036.
-- "Yes, raise pulse solo to $119". Set in Shopify the same hour: $119.99, the maker's price, compare-at cleared. Nothing holds it there yet. The daily pricing batch at 07:00 UTC recomputes it unless Hot Octopuss goes into `pricing_map_brands`, which would also move the Atom Plus and Pulse Queen from $88.99 to their $99 MAP.
