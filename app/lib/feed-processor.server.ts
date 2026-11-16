@@ -514,6 +514,87 @@ export async function runDiscontinuedSweep(): Promise<{
   return { discontinuedSkus: disc, discontinuedSweep, state }
 }
 
+export interface FeedQtyShortfall {
+  sku: string
+  productId: string
+  feedQty: number
+  shopifyQty: number
+}
+
+/**
+ * Pure decision for ticket #22337: a carried SKU is an oversell risk when the
+ * supplier's live feed quantity is below what Shopify is still willing to
+ * sell, even when neither side is zero (e.g. feed 179 vs Shopify 739 — far
+ * from sold out on either count, but the store can still take ~560 orders
+ * the supplier cannot fill). The discontinued sweep's archive step only
+ * catches the all-zero case; this is the narrower in-between gap.
+ *
+ * Null/undefined feed qty means "cannot tell" (the SKU wasn't in this feed
+ * pull), never "zero" — same absence-is-not-zero convention the rest of this
+ * module and `feed-eligibility.ts` use — so it is never reported as a
+ * shortfall.
+ */
+export function isFeedQtyShortfall(feedQty: number | null | undefined, shopifyQty: number): boolean {
+  if (feedQty === null || feedQty === undefined) return false
+  return feedQty < shopifyQty
+}
+
+/**
+ * Reporting-only reconciliation (ticket #22337, extending #20827's homepage
+ * pick-surface eligibility filter). Lists every carried SKU where the feed
+ * quantity is below Shopify's sellable quantity, including the in-between
+ * cases #20827 does not cover. Does NOT write Shopify inventory — clamping
+ * or zeroing a live quantity is an inventory-ops decision the ticket
+ * explicitly leaves to the strategist, so this only reports.
+ *
+ * Read-only and best-effort per batch, same shape as the stock read in
+ * `runDiscontinuedSweep`: a failed batch is logged and skipped rather than
+ * failing the whole sweep.
+ */
+export async function findFeedQtyShortfalls(): Promise<FeedQtyShortfall[]> {
+  const { fetchAllNalpacFeeds } = await import('./nalpac-feeds.server')
+  const { adminGraphQL } = await import('./shopify.server')
+
+  const feeds = await fetchAllNalpacFeeds()
+  if (feeds.snapshots.size === 0) return []
+
+  const carriedRows = await db
+    .select({ sku: dealHistory.sku, productId: dealHistory.shopifyProductId, status: dealHistory.status })
+    .from(dealHistory)
+  const productBySku = new Map<string, string>()
+  for (const r of carriedRows) {
+    if (r.status !== 'archived' && r.productId) productBySku.set(r.sku, r.productId)
+  }
+
+  const skus = [...productBySku.keys()].filter(sku => feeds.snapshots.has(sku))
+  const shortfalls: FeedQtyShortfall[] = []
+
+  for (let i = 0; i < skus.length; i += 50) {
+    const batch = skus.slice(i, i + 50)
+    const ids = batch.map(sku => `gid://shopify/Product/${productBySku.get(sku)!.replace('gid://shopify/Product/', '')}`)
+    try {
+      const data = await adminGraphQL<{ nodes: Array<{ id: string; status: string; variants: { nodes: Array<{ inventoryQuantity: number | null }> } } | null> }>(`
+        query FeedQtyShortfall($ids: [ID!]!) {
+          nodes(ids: $ids) { ... on Product { id status variants(first: 50) { nodes { inventoryQuantity } } } }
+        }`, { ids })
+      data.nodes.forEach((node, idx) => {
+        const sku = batch[idx]!
+        if (!node || node.status === 'ARCHIVED') return
+        const shopifyQty = node.variants.nodes.reduce((sum, v) => sum + Math.max(0, v.inventoryQuantity ?? 0), 0)
+        const feedQty = feeds.snapshots.get(sku)?.qty ?? null
+        if (isFeedQtyShortfall(feedQty, shopifyQty)) {
+          shortfalls.push({ sku, productId: productBySku.get(sku)!, feedQty: feedQty as number, shopifyQty })
+        }
+      })
+    } catch (err) {
+      console.error('[feed-processor] feed-qty shortfall read failed (ignored):', err)
+    }
+  }
+
+  console.info(`[feed-processor] feed-qty shortfall report: ${shortfalls.length} carried SKU(s) below feed qty`)
+  return shortfalls
+}
+
 /**
  * For each SKU flagged as discontinued by the latest Nalpac feed, look up the
  * product in dealHistory + Shopify and archive it. Idempotent — products that
