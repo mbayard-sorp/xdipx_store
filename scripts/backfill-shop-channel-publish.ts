@@ -209,10 +209,12 @@ async function main(): Promise<number> {
   return 0
 }
 
-main().then(
-  (code) => process.exit(code),
-  (err) => {
-    process.stderr.write(`ERROR: ${(err as Error).message}\n`)
-    process.exit(2)
-  },
-)
+if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
+  main().then(
+    (code) => process.exit(code),
+    (err) => {
+      process.stderr.write(`ERROR: ${(err as Error).message}\n`)
+      process.exit(2)
+    },
+  )
+}
