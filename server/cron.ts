@@ -284,7 +284,28 @@ export function createCronRoutes() {
         reconcile = { error: String(err) }
       }
 
-      res.json({ ok: true, ...result.discontinuedSweep, state: result.state, reconcile })
+      // Report-only, ticket #22337: carried SKUs where the Nalpac feed quantity
+      // is below what Shopify still sells, catching the oversell-risk gap
+      // between "fully in stock" and "zero everywhere" the archive step above
+      // does not see. Never writes Shopify inventory. Best-effort: a read
+      // failure here must not fail the discontinued sweep.
+      let feedQtyShortfalls: unknown = null
+      try {
+        const { findFeedQtyShortfalls } = await import('../app/lib/feed-processor.server.js')
+        const shortfalls = await findFeedQtyShortfalls()
+        if (shortfalls.length > 0) {
+          console.warn(
+            `[cron:discontinued-sweep] feed-qty shortfall: ${shortfalls.length} carried SKU(s) below feed qty — ` +
+            shortfalls.map(s => `${s.sku} (feed ${s.feedQty} vs Shopify ${s.shopifyQty})`).join(', '),
+          )
+        }
+        feedQtyShortfalls = shortfalls
+      } catch (err) {
+        console.error('[cron:discontinued-sweep] feed-qty shortfall report failed (ignored):', err)
+        feedQtyShortfalls = { error: String(err) }
+      }
+
+      res.json({ ok: true, ...result.discontinuedSweep, state: result.state, reconcile, feedQtyShortfalls })
     } catch (err) {
       console.error('[cron:discontinued-sweep]', err)
       res.status(500).json({ error: String(err) })
