@@ -70,7 +70,7 @@ describe('runPromoExecutionPass', () => {
     const deps = makeDeps()
     const result = await runPromoExecutionPass(deps, BEFORE_TEST_WINDOW)
 
-    expect(result).toEqual({ total: 2, minted: 2, refused: 0, skipped: 0 })
+    expect(result).toEqual({ total: 2, minted: 2, refused: 0, skipped: 0, failed: 0 })
     expect(deps.createDiscount).toHaveBeenCalledTimes(2)
     expect(listSuggestionsMock).toHaveBeenCalledWith(
       expect.objectContaining({ team: 'strategy', kinds: ['promo'], statuses: ['approved'] }),
@@ -84,7 +84,7 @@ describe('runPromoExecutionPass', () => {
     const deps = makeDeps()
     const result = await runPromoExecutionPass(deps)
 
-    expect(result).toEqual({ total: 1, minted: 0, refused: 0, skipped: 1 })
+    expect(result).toEqual({ total: 1, minted: 0, refused: 0, skipped: 1, failed: 0 })
     expect(deps.createDiscount).not.toHaveBeenCalled()
   })
 
@@ -93,7 +93,7 @@ describe('runPromoExecutionPass', () => {
 
     const result = await runPromoExecutionPass(makeDeps())
 
-    expect(result).toEqual({ total: 0, minted: 0, refused: 0, skipped: 0 })
+    expect(result).toEqual({ total: 0, minted: 0, refused: 0, skipped: 0, failed: 0 })
   })
 
   it('counts a refusal separately from a mint', async () => {
@@ -103,6 +103,59 @@ describe('runPromoExecutionPass', () => {
     const deps = makeDeps({ resolveProductGids: vi.fn(async () => []) })
     const result = await runPromoExecutionPass(deps)
 
-    expect(result).toEqual({ total: 1, minted: 0, refused: 1, skipped: 0 })
+    expect(result).toEqual({ total: 1, minted: 0, refused: 1, skipped: 0, failed: 0 })
+  })
+
+  // Ticket #22341: row #20830 (LUBE15) failed its first mint attempt on
+  // Shopify's 100-product limit, and the old handled-note regex treated ANY
+  // "mint FAILED" note as handled forever, so /cron/promo-execute silently
+  // skipped it on every later pass with no retry and no `failed` count.
+  describe('transient mint-failure retry (ticket #22341)', () => {
+    it('retries a row carrying one prior transient shopify-error note', async () => {
+      listSuggestionsMock.mockResolvedValue([{ id: 20830, suggestion: CLEAN_BRIEF }])
+      executeMock.mockResolvedValue([{ ref: 'Promo mint FAILED (shopify-error: 429 Too Many Requests). No code created.' }])
+
+      const deps = makeDeps()
+      const result = await runPromoExecutionPass(deps, BEFORE_TEST_WINDOW)
+
+      expect(result).toEqual({ total: 1, minted: 1, refused: 0, skipped: 0, failed: 0 })
+      expect(deps.createDiscount).toHaveBeenCalledOnce()
+    })
+
+    it('stops retrying once a row has burned 3 transient shopify-error attempts', async () => {
+      listSuggestionsMock.mockResolvedValue([{ id: 20830, suggestion: CLEAN_BRIEF }])
+      executeMock.mockResolvedValue([
+        { ref: 'Promo mint FAILED (shopify-error: 429). No code created.' },
+        { ref: 'Promo mint FAILED (shopify-error: 429). No code created.' },
+        { ref: 'Promo mint FAILED (shopify-error: 429). No code created.' },
+      ])
+
+      const deps = makeDeps()
+      const result = await runPromoExecutionPass(deps, BEFORE_TEST_WINDOW)
+
+      expect(result).toEqual({ total: 1, minted: 0, refused: 0, skipped: 1, failed: 0 })
+      expect(deps.createDiscount).not.toHaveBeenCalled()
+    })
+
+    it('never retries a row carrying a terminal shopify-user-error note', async () => {
+      listSuggestionsMock.mockResolvedValue([{ id: 51, suggestion: CLEAN_BRIEF }])
+      executeMock.mockResolvedValue([{ ref: 'Promo mint FAILED (shopify-user-error: Code must be unique). No code created.' }])
+
+      const deps = makeDeps()
+      const result = await runPromoExecutionPass(deps, BEFORE_TEST_WINDOW)
+
+      expect(result).toEqual({ total: 1, minted: 0, refused: 0, skipped: 1, failed: 0 })
+      expect(deps.createDiscount).not.toHaveBeenCalled()
+    })
+
+    it('counts a fresh mint failure under `failed`, not `skipped`', async () => {
+      listSuggestionsMock.mockResolvedValue([{ id: 20830, suggestion: CLEAN_BRIEF }])
+      executeMock.mockResolvedValue([])
+
+      const deps = makeDeps({ createDiscount: vi.fn(async () => { throw new Error('503') }) })
+      const result = await runPromoExecutionPass(deps, BEFORE_TEST_WINDOW)
+
+      expect(result).toEqual({ total: 1, minted: 0, refused: 0, skipped: 0, failed: 1 })
+    })
   })
 })

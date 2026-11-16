@@ -34,6 +34,10 @@ import { suggestionLinks } from '../../db/schema'
 /** Valve key. Read via the generic pipeline-settings getter. Default OFF. */
 export const PROMO_EXECUTE_VALVE = 'promo_execute_enabled'
 
+/** Shopify's own ceiling on `customerGets.items.products.productsToAdd` for
+ *  `discountCodeBasicCreate` (ticket #22341, row #20830/LUBE15 at 124 products). */
+export const SHOPIFY_DISCOUNT_PRODUCT_LIMIT = 100
+
 /**
  * MAP verdict detection, in two halves, both fail-closed.
  *
@@ -635,6 +639,37 @@ async function refuse(
 }
 
 /**
+ * Ticket #22341: a Shopify-side mint failure (transport error or a mutation
+ * userError) never reached the owner's inbox, unlike a guard refusal
+ * (`refuse()` above) — the row's only trace was a note nobody is paged to
+ * read. Reuses `buildPromoOwnerEmail`'s existing 'refused' shape rather than
+ * a second template, since "not minted, here is why" is the same message
+ * whether a guard or Shopify itself is the reason.
+ */
+async function emailOwnerMintFailed(
+  row: { id: number },
+  parsed: ParsedPromo,
+  productCount: number,
+  reason: string,
+  deps: PromoExecuteDeps,
+): Promise<boolean> {
+  const mail = buildPromoOwnerEmail({
+    suggestionId: row.id,
+    outcome: 'refused',
+    code: parsed.code,
+    percentage: parsed.percentage,
+    startsAt: parsed.startsAt,
+    endsAt: parsed.endsAt,
+    productCount,
+    reason,
+    discountId: null,
+    body: parsed.body,
+  })
+  const sent = await deps.sendOwnerEmail(mail.subject, mail.html, { escalation: 'owner-decision', fromName: 'xdipx promo' })
+  return sent.sent
+}
+
+/**
  * Execute one approved promo brief. Valve-gated: with the valve off this returns
  * immediately and touches nothing. With the valve on it runs the fail-closed
  * guard, resolves the eligible products, mints the code, emails the owner, and
@@ -661,6 +696,16 @@ export async function executeApprovedPromo(
     // eligible product is not actionable, per the promo-manager bound-the-reach rule.
     return refuse(row, parsed, 'no-eligible-products', 0, deps)
   }
+  if (productGids.length > SHOPIFY_DISCOUNT_PRODUCT_LIMIT) {
+    // Ticket #22341: row #20830 (LUBE15) resolved 124 eligible products and
+    // Shopify's discountCodeBasicCreate rejects productsToAdd past 100,
+    // throwing into the shopify-error branch below on every retry forever
+    // (the handled-note regex then marked it permanently handled). Refuse
+    // loudly and up front instead, so the owner is emailed with a reason
+    // that actually names the fix (narrow the brief's product selector)
+    // rather than minting never being attempted at all.
+    return refuse(row, parsed, 'too-many-products', productGids.length, deps)
+  }
 
   // decidePromo(ok) guarantees code, percentage, and the window are present.
   const variables = buildDiscountVariables({
@@ -679,15 +724,17 @@ export async function executeApprovedPromo(
     result = await deps.createDiscount(variables)
   } catch (err) {
     const reason = `shopify-error: ${err instanceof Error ? err.message : String(err)}`
+    const ownerEmailed = await emailOwnerMintFailed(row, parsed, productGids.length, reason, deps)
     await deps.addNote(row.id, `Promo mint FAILED (${reason}). No code created.`)
-    return { minted: false, reason }
+    return { minted: false, reason, ownerEmailed }
   }
 
   if (result.userErrors.length > 0 || !result.id) {
     const detail = result.userErrors.map(e => e.message).join('; ') || 'no discount id returned'
     const reason = `shopify-user-error: ${detail}`
+    const ownerEmailed = await emailOwnerMintFailed(row, parsed, productGids.length, reason, deps)
     await deps.addNote(row.id, `Promo mint FAILED (${reason}). No code created.`)
-    return { minted: false, reason }
+    return { minted: false, reason, ownerEmailed }
   }
 
   const mail = buildPromoOwnerEmail({
@@ -732,14 +779,41 @@ export async function executeApprovedPromo(
 // implementation, callable from both the daily cron (server/cron.ts) and the
 // script (which stays a thin wrapper for the manual/weekly path).
 
-const PROMO_HANDLED_NOTE_RE = /discount code minted|REFUSED \(|mint FAILED/i
+// Ticket #22341: row #20830 (LUBE15) and row #51's predecessor (2026-09-08,
+// "Code must be unique") both hit a mint failure once and then stayed
+// `approved` forever, because the old regex below treated ANY "mint FAILED"
+// note as handled. The two failure shapes are not the same kind of problem:
+// a `shopify-error` (thrown exception: timeout, 429, transient 5xx) is worth
+// retrying on the next daily pass, since nothing about the brief was wrong.
+// A `shopify-user-error` (the mutation's own userErrors, e.g. "Code must be
+// unique") is a defect in the brief itself that will not fix itself by
+// running again, so it stays terminal exactly as before.
+const PROMO_TERMINAL_NOTE_RE = /discount code minted|REFUSED \(|mint FAILED \(shopify-user-error/i
+const PROMO_TRANSIENT_FAILURE_RE = /mint FAILED \(shopify-error/i
+/** Give a transient Shopify-side failure this many daily passes before it is
+ *  left alone rather than retried forever; `emailOwnerMintFailed` above
+ *  already pages the owner on every one of those attempts. */
+const PROMO_MAX_TRANSIENT_ATTEMPTS = 3
 
-async function promoAlreadyHandled(id: number): Promise<boolean> {
+interface PromoHandling {
+  /** True when the row is done for good: minted, guard-refused, or a
+   *  non-retryable Shopify userError. */
+  terminal: boolean
+  /** How many prior transient `shopify-error` mint attempts this row has
+   *  already burned. */
+  transientAttempts: number
+}
+
+async function promoHandling(id: number): Promise<PromoHandling> {
   const links = await db
     .select({ ref: suggestionLinks.ref })
     .from(suggestionLinks)
     .where(and(eq(suggestionLinks.suggestionId, id), eq(suggestionLinks.kind, 'note')))
-  return links.some(l => PROMO_HANDLED_NOTE_RE.test(l.ref ?? ''))
+  const refs = links.map(l => l.ref ?? '')
+  return {
+    terminal: refs.some(r => PROMO_TERMINAL_NOTE_RE.test(r)),
+    transientAttempts: refs.filter(r => PROMO_TRANSIENT_FAILURE_RE.test(r)).length,
+  }
 }
 
 export interface PromoExecutionPassResult {
@@ -747,6 +821,9 @@ export interface PromoExecutionPassResult {
   minted: number
   refused: number
   skipped: number
+  /** Transient Shopify-side mint failures this pass (ticket #22341): never
+   *  counted toward `skipped`, since the row is still retryable next pass. */
+  failed: number
 }
 
 /**
@@ -772,8 +849,10 @@ export async function runPromoExecutionPass(
   let minted = 0
   let refused = 0
   let skipped = 0
+  let failed = 0
   for (const row of rows) {
-    if (await promoAlreadyHandled(row.id)) {
+    const handling = await promoHandling(row.id)
+    if (handling.terminal || handling.transientAttempts >= PROMO_MAX_TRANSIENT_ATTEMPTS) {
       skipped++
       console.log(`[promo-execute] #${row.id} already handled. Skipping.`)
       continue
@@ -786,10 +865,11 @@ export async function runPromoExecutionPass(
       refused++
       console.log(`[promo-execute] #${row.id} refused: ${res.reason}.`)
     } else {
+      failed++
       console.log(`[promo-execute] #${row.id} not minted: ${res.reason}.`)
     }
   }
 
-  console.log(`[promo-execute] done. minted=${minted} refused=${refused} skipped=${skipped} of ${rows.length}.`)
-  return { total: rows.length, minted, refused, skipped }
+  console.log(`[promo-execute] done. minted=${minted} refused=${refused} skipped=${skipped} failed=${failed} of ${rows.length}.`)
+  return { total: rows.length, minted, refused, skipped, failed }
 }
