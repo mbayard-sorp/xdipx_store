@@ -282,6 +282,21 @@ describe('publish-gate mix-report scoping (ticket #13114)', () => {
     expect(PUBLISH_GATE_SYSTEM).toContain('nothing in the publish\n  path blocks on a breached cap, and nothing should')
     expect(PUBLISH_GATE_SYSTEM).toContain('never the §3.2a stop list, which still BLOCKs exactly as before')
   })
+
+  // Ticket #22367: row 594 gated REVISE three calls running under a
+  // self-named "wide-ceiling-frame-delivery" check with byte-identical
+  // reasoning across a real image and two text-only edits that changed
+  // nothing the draft claimed — the model invented a new check slug keyed
+  // to the mix report's own ceiling/wideCeiling band state rather than to
+  // anything in the submitted draft, which is the same breach-as-gate
+  // reading #13114 already forbids, just not closed off for a check name
+  // outside too-tame/close-crop.
+  it('forbids a self-named check (e.g. a "ceiling"/"wideCeiling" check) from keying its verdict off the report\'s band state', async () => {
+    const { PUBLISH_GATE_SYSTEM } = await import('./team-gates.server')
+    expect(PUBLISH_GATE_SYSTEM).toContain('No other check name may key its verdict off the report')
+    expect(PUBLISH_GATE_SYSTEM).toContain('wide-ceiling-frame-delivery')
+    expect(PUBLISH_GATE_SYSTEM).toContain('a band being open or closed is never\n  itself a finding')
+  })
 })
 
 describe('publish-gate limb-tracing anatomy calibration (ticket #13501)', () => {

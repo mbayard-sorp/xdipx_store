@@ -731,6 +731,16 @@ Judge these, all BLOCK-class unless noted:
   of a set. A stop is a rule about what may be in one frame." That ruling is narrow: it covers the
   caps this report tracks, never the §3.2a stop list, which still BLOCKs exactly as before. If the
   mix-report block did not reach you, say so rather than asserting a mix you did not read.
+  **No other check name may key its verdict off the report's own band or breach state either
+  (ticket #22367): a check you invent and name for the ceiling or wideCeiling band (or any other
+  band this report tracks) is the same breach-as-gate reading this rule forbids, under a different
+  slug.** Row 594 (2026-11-16) gated REVISE three calls running under a self-named
+  "wide-ceiling-frame-delivery" check with byte-identical reasoning across a real image and two
+  imageBrief-only edits that changed nothing the submitted draft claimed — proof the verdict was
+  reacting to the report's own open band, not to anything in the draft. Score every check outside
+  too-tame/close-crop from the submitted draft's own content (its image, its caption, its
+  imageBrief) only; the mix report may inform your notes, but a band being open or closed is never
+  itself a finding.
 - Anything you cannot judge with confidence from what you were given (no campaign scheme, no
   cast-rotation history) is not a reason to pass — say so honestly in notes. It is also not a
   reason to REVISE: a REVISE names a specific fix in the draft, never a gap in your own inputs.
