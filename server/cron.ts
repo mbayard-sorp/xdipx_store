@@ -2029,7 +2029,7 @@ export function createCronRoutes() {
         countUnfinishedTerminalRuns,
         pruneCronRuns,
       } = await import('../app/lib/cron-runs.server.js')
-      const { readUnwatchedLanes } = await import('../app/lib/ticket-janitor.server.js')
+      const { readUnwatchedLanes, backfillBlockClasses } = await import('../app/lib/ticket-janitor.server.js')
 
       const expectations = await syncCronExpectations()
       const liveness = await readCronLiveness()
@@ -2052,6 +2052,22 @@ export function createCronRoutes() {
         unwatched = await readUnwatchedLanes()
       } catch (err) {
         console.error('[cron:janitor-sweep] unwatched-lane read failed (ignored):', err)
+      }
+
+      // Block-class backfill (ticket #22351, self-healing e1-blocked). The
+      // one-off script (PR #1931, #20829 applied) classified the 38 rows that
+      // predated migration 089, but nothing ever re-ran it, so the pile had
+      // already drifted back up to 38 of 128 unclassed two weeks later.
+      // Wrapped like every other best-effort step here: a classification bug
+      // must never fail the liveness sweep this route primarily exists for.
+      let blockClassBackfill: Awaited<ReturnType<typeof backfillBlockClasses>> = { scanned: 0, written: 0, unclassified: [] }
+      try {
+        blockClassBackfill = await backfillBlockClasses()
+        if (blockClassBackfill.unclassified.length > 0) {
+          console.warn(`[cron:janitor-sweep] UNCLASSIFIED block_class: ${blockClassBackfill.unclassified.join(', ')}`)
+        }
+      } catch (err) {
+        console.error('[cron:janitor-sweep] block-class backfill failed (ignored):', err)
       }
 
       // Credential liveness. Nothing in this estate has ever probed whether the
@@ -2240,6 +2256,7 @@ export function createCronRoutes() {
         credentialBlockers,
         paidUnfulfilled,
         pruned,
+        blockClassBackfill,
       })
     } catch (err) {
       console.error('[cron:janitor-sweep]', err)

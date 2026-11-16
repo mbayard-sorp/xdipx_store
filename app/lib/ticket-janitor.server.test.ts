@@ -27,6 +27,11 @@ vi.mock('~/lib/github.server', () => ({
 // runWithOutOfBandReconcile wrapper.
 const transitionSuggestionMock = vi.hoisted(() => vi.fn(async () => ({})))
 const reconcileScopeDepth = vi.hoisted(() => ({ current: 0, seenInside: [] as number[] }))
+// Shape-compatible stand-ins for TICKET_BLOCK_CLASSES/inferBlockClassFromNote
+// (each has its own tests in team.server.test.ts), needed because
+// block-class-backfill.ts imports them from this same module and this file's
+// mock would otherwise leave them undefined.
+const MOCK_BLOCK_CLASSES = vi.hoisted(() => ['protected-path', 'needs-split', 'superseded', 'duplicate', 'no-code-work', 'owner-env', 'dependency'])
 vi.mock('~/lib/team.server', () => ({
   transitionSuggestion: (...args: unknown[]) => {
     reconcileScopeDepth.seenInside.push(reconcileScopeDepth.current)
@@ -39,6 +44,12 @@ vi.mock('~/lib/team.server', () => ({
     } finally {
       reconcileScopeDepth.current -= 1
     }
+  },
+  TICKET_BLOCK_CLASSES: MOCK_BLOCK_CLASSES,
+  inferBlockClassFromNote: (text: string | null | undefined) => {
+    if (!text) return null
+    const match = /\[([a-z-]+)\]/.exec(text.slice(0, 200))
+    return match && MOCK_BLOCK_CLASSES.includes(match[1] ?? '') ? match[1] : null
   },
 }))
 
@@ -69,6 +80,7 @@ import {
   extractCitedPrNumbers,
   parsePrNumber,
   pickReplacementAdoptions,
+  backfillBlockClasses,
   type ConflictCandidate,
   type JanitorTicketRow,
   type OrphanCandidate,
@@ -884,5 +896,78 @@ describe('reconcileOrphanedTickets', () => {
 
     expect(res.applied).toEqual([])
     expect(res.errors).toEqual([])
+  })
+})
+
+// Ticket #22351 (self-healing e1-blocked): the one-off script PR #1931
+// classified the 38 then-NULL rows, but nothing ever re-ran it, so this
+// makes the same classification a step of the janitor sweep.
+describe('backfillBlockClasses', () => {
+  it('classifies and writes block_class for a row whose note carries a bracket tag', async () => {
+    executeMock.mockReset()
+    executeMock
+      .mockResolvedValueOnce({ rows: [{ id: 100, suggestion: 'investigate the thing', last_error: null }] }) // SELECT blocked rows
+      .mockResolvedValueOnce({ rows: [{ ref: '[owner-env] needs SENTRY_AUTH_TOKEN' }] }) // SELECT notes for #100
+      .mockResolvedValueOnce({ rows: [{ id: 100 }] }) // UPDATE ... RETURNING id
+
+    const res = await backfillBlockClasses()
+
+    expect(res).toEqual({ scanned: 1, written: 1, unclassified: [] })
+    expect(executeMock).toHaveBeenCalledTimes(3)
+  })
+
+  it('leaves a row NULL and reports it when no rule can classify the row', async () => {
+    executeMock.mockReset()
+    executeMock
+      .mockResolvedValueOnce({ rows: [{ id: 101, suggestion: 'escalating for more evidence', last_error: null }] })
+      .mockResolvedValueOnce({ rows: [{ ref: 'Escalating to the owner for a judgment call; no single cause stated.' }] })
+
+    const res = await backfillBlockClasses()
+
+    expect(res).toEqual({ scanned: 1, written: 0, unclassified: [101] })
+    // No UPDATE is issued for an unclassifiable row: 2 calls, not 3.
+    expect(executeMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('is idempotent: a sweep that finds nothing NULL writes nothing', async () => {
+    executeMock.mockReset()
+    executeMock.mockResolvedValueOnce({ rows: [] }) // SELECT finds no block_class IS NULL rows left
+
+    const res = await backfillBlockClasses()
+
+    expect(res).toEqual({ scanned: 0, written: 0, unclassified: [] })
+    expect(executeMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('never double-counts a row raced closed between the read and the write', async () => {
+    // Something else (another sweep, a hand classification) wrote
+    // block_class for this row between this sweep's SELECT and its UPDATE.
+    // The UPDATE's own `WHERE block_class IS NULL` guard then matches zero
+    // rows, and this must not count as written.
+    executeMock.mockReset()
+    executeMock
+      .mockResolvedValueOnce({ rows: [{ id: 102, suggestion: 'PROTECTED PATH touched', last_error: null }] })
+      .mockResolvedValueOnce({ rows: [] }) // no notes
+      .mockResolvedValueOnce({ rows: [] }) // UPDATE matched 0 rows: raced closed already
+
+    const res = await backfillBlockClasses()
+
+    expect(res).toEqual({ scanned: 1, written: 0, unclassified: [] })
+  })
+
+  it('scans every blocked-with-no-class row independently, in order', async () => {
+    executeMock.mockReset()
+    executeMock
+      .mockResolvedValueOnce({ rows: [
+        { id: 200, suggestion: 'duplicate of #50', last_error: null },
+        { id: 201, suggestion: 'something unclassifiable', last_error: null },
+      ] })
+      .mockResolvedValueOnce({ rows: [] }) // notes for #200
+      .mockResolvedValueOnce({ rows: [{ id: 200 }] }) // UPDATE #200
+      .mockResolvedValueOnce({ rows: [] }) // notes for #201
+
+    const res = await backfillBlockClasses()
+
+    expect(res).toEqual({ scanned: 2, written: 1, unclassified: [201] })
   })
 })

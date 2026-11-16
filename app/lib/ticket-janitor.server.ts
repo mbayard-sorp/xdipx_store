@@ -67,6 +67,7 @@ import {
   type PullRequestSummary,
 } from '~/lib/github.server'
 import { runWithOutOfBandReconcile, transitionSuggestion } from '~/lib/team.server'
+import { classifyBlockClass } from '~/lib/block-class-backfill'
 
 /* ── SLA thresholds ────────────────────────────────────────────────────────── */
 
@@ -1119,6 +1120,77 @@ export async function computeTicketLoopHealth(): Promise<TicketLoopHealth> {
   }
 
   return health
+}
+
+/* ── Block-class backfill (ticket #22351, self-healing e1-blocked) ─────────── */
+
+/**
+ * The one-off script PR #1931 (#20829 applied) classified and wrote
+ * `block_class` for the 38 rows that predated migration 089, but nobody has
+ * run it since: `block_class IS NULL` on a `blocked` row was still 38 of 128
+ * two weeks later, unchanged. This makes the same classification self-
+ * executing, as a step of the `/cron/janitor-sweep` pass, so a row blocked
+ * through any path that skips `inferBlockClassFromNote` at block time never
+ * sits unclassed waiting for someone to remember to re-run a script.
+ *
+ * Same idempotence contract as `scripts/backfill-block-class.ts`: the read is
+ * scoped to `block_class IS NULL`, the write repeats that guard
+ * (`WHERE id = ... AND block_class IS NULL`) so a row classified or re-opened
+ * by anything else between the read and the write is never clobbered, and a
+ * sweep that finds the column already filled in simply writes nothing. A row
+ * neither `classifyBlockClass` nor a human note can place (e.g. #12481,
+ * #19549) is left NULL and reported, never guessed.
+ */
+export interface BlockClassBackfillResult {
+  /** Blocked rows read with `block_class IS NULL`. */
+  scanned: number
+  /** Rows whose `block_class` this sweep actually wrote. */
+  written: number
+  /** Scanned rows no rule could classify; still NULL, for manual review. */
+  unclassified: number[]
+}
+
+async function fetchBlockedNullClassRows(): Promise<Array<{ id: number; suggestion: string; lastError: string | null }>> {
+  const res = await db.execute(sql`
+    SELECT id, suggestion, last_error
+      FROM homepage_team_suggestions
+     WHERE status = 'blocked' AND block_class IS NULL`)
+  return ((res.rows ?? []) as Array<Record<string, unknown>>).map(r => ({
+    id: Number(r['id'] ?? 0),
+    suggestion: String(r['suggestion'] ?? ''),
+    lastError: r['last_error'] == null ? null : String(r['last_error']),
+  }))
+}
+
+async function fetchNoteRefsNewestFirst(suggestionId: number): Promise<string[]> {
+  const res = await db.execute(sql`
+    SELECT ref FROM suggestion_links
+     WHERE suggestion_id = ${suggestionId} AND kind = 'note'
+     ORDER BY created_at DESC`)
+  return ((res.rows ?? []) as Array<Record<string, unknown>>).map(r => String(r['ref'] ?? ''))
+}
+
+export async function backfillBlockClasses(): Promise<BlockClassBackfillResult> {
+  const rows = await fetchBlockedNullClassRows()
+  let written = 0
+  const unclassified: number[] = []
+
+  for (const row of rows) {
+    const notes = await fetchNoteRefsNewestFirst(row.id)
+    const result = classifyBlockClass({ notes, lastError: row.lastError, suggestion: row.suggestion })
+    if (!result) {
+      unclassified.push(row.id)
+      continue
+    }
+    const updateRes = await db.execute(sql`
+      UPDATE homepage_team_suggestions
+         SET block_class = ${result.blockClass}
+       WHERE id = ${row.id} AND block_class IS NULL
+       RETURNING id`)
+    if (((updateRes.rows ?? []) as unknown[]).length > 0) written++
+  }
+
+  return { scanned: rows.length, written, unclassified }
 }
 
 /* ── Reconcile: refresh stale pr-link states ───────────────────────────────── */
