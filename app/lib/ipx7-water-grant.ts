@@ -13,14 +13,16 @@
  * tap, jet, or running-water coverage, which IPX7 does not certify.
  *
  * Validated against the live corpus (content run 2021, dedupeKey
- * ipx-water-grant-detector): run against all 120 published posts as they
- * stood after that run's slice 3/4 rewrites, the equivalent prototype
- * returned 3 hits, every one reviewed as correct text rather than a
- * defect — two still-bath readings that stay inside the stated 1m/30min
- * bound, and one what-makes-a-vibrator-body-safe block whose own
- * non-stacking line sits elsewhere in the same block, outside the single
- * sentence this checker scores. See scripts/audit-ipx7-water-grant.ts for
- * the live sweep this module powers.
+ * ipx-water-grant-detector): a prototype run against all 120 published posts
+ * returned 3 hits, every one reviewed as correct text. The SHIPPED version
+ * (PRs #1969, #1962) did not actually implement the paragraph above: it
+ * treated a bare `bath`/`basin` mention as a grant needing its own
+ * restriction clause, contradicting its own stated design, and measured
+ * against the corpus on 2026-11-16 at 8 of 8 findings, every one a false
+ * positive on already-corrected safety text (ticket #22377, bus row
+ * #21540's note). `GRANTS_WATER_RE` no longer includes `bath`/`basin`,
+ * which is the fix. See scripts/audit-ipx7-water-grant.ts for the live
+ * sweep this module powers.
  *
  * ── Limit ──────────────────────────────────────────────────────────────────
  * A reusable-token checker, the same shape and the same limit as
@@ -41,27 +43,42 @@ export type { DraftInput, DraftParagraph }
 
 const MENTIONS_IPX7_RE = /\bIPX7\b/i
 
-/** A plain grant of shower, bath, tap, jet, or running-water use. */
-const GRANTS_WATER_RE = /\bshower\b|\bbath\b|\btap\b|\bjets?\b|running water|\bbasin\b/i
+/**
+ * A plain grant of shower, running-tap, jet, or unqualified running-water
+ * use. Still-water immersion — bath, basin, soaking, submersion — is exactly
+ * what an IPX7 mark certifies, so it is never itself a grant that needs a
+ * restriction clause; `bath`/`basin` were dropped from this list 2026-11-16
+ * (ticket #22377) after they produced 8 of 8 false positives on already-
+ * corrected text, a 0 percent precision rate measured against the live
+ * corpus (see #21540's note on the same corpus).
+ */
+const GRANTS_WATER_RE = /\bshower\b|\btap\b|\bjets?\b|running water/i
 
 /**
  * The house restriction wording and its accepted paraphrases: immersion-only
- * scoping, the non-stacking rule, and a handoff to the maker's own
- * instruction (ticket #21947's own list). Tight by design, the same bar
- * self-consistency.ts's closed vocabularies use — add a phrase here only
- * once a second real incident names it, not because a hit "feels" like it
- * should be excluded.
+ * scoping, the non-stacking rule, a handoff to the maker's own instruction
+ * (ticket #21947's own list), plus three more paraphrases added 2026-11-16
+ * (ticket #22377) from real corpus sentences that distinguish a permitted
+ * still-water claim from a shower/tap/jet claim without using any phrase
+ * already on this list: "do not imply each other" (a non-stacking
+ * paraphrase), "rather than under/from/in/at the <surface>" (redirecting the
+ * water-safe action away from the flagged surface), and a flagged surface
+ * immediately negated in the same sentence ("the shower is not"). Tight by
+ * design, the same bar self-consistency.ts's closed vocabularies use — add a
+ * phrase here only once a second real incident names it, not because a hit
+ * "feels" like it should be excluded.
  */
 const RESTRICTS_IPX7_RE =
-  /immersion only|does not cover jets|carr(?:y|ies) (?:their|its) own ratings?|do(?:es)? not stack|needs? its own rating|written instruction from the maker|(?:toy|maker|manufacturer|brand)'?s own (?:instructions?|manual|care guide|directions)/i
+  /immersion only|does not cover jets|carr(?:y|ies) (?:their|its) own ratings?|do(?:es)? not stack|do(?:es)? not imply (?:each other|one another)|needs? its own rating|written instruction from the maker|(?:toy|maker|manufacturer|brand)'?s own (?:instructions?|manual|care guide|directions)|rather than (?:under|from|in|at) the (?:tap|shower|jets?|code|rating)|\b(?:shower|taps?|jets?|running water)\s+(?:is|are) not\b/i
 
 /**
- * True when a single sentence names IPX7 and grants shower/bath/tap/jet/
+ * True when a single sentence names IPX7 and grants shower/tap/jet/
  * running-water use with no restriction clause anywhere in that same
- * sentence. A false positive here is cheap — whoever reads the sweep output
- * reads one more sentence that turns out fine; a missed instance is a live
- * safety overreach, so this stays deliberately over-inclusive rather than
- * clever.
+ * sentence. A bare bath or basin claim never qualifies — still-water
+ * immersion is what IPX7 certifies. A false positive here is cheap —
+ * whoever reads the sweep output reads one more sentence that turns out
+ * fine; a missed instance is a live safety overreach, so this stays
+ * deliberately over-inclusive rather than clever.
  */
 export function sentenceGrantsUnrestrictedIpx7Water(sentence: string | null | undefined): boolean {
   if (!sentence) return false
