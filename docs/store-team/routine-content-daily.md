@@ -381,16 +381,11 @@ Create the `blogPost` idempotently: doc `_id` is `blogPost-${slug}`, `createIfNo
   post's publishing category, (b) point at the §0 **hero router** in
   `docs/notebook-team/image-brief.md`, which is binding: guides/comparisons/care/wellness-basics
   posts get the §0-P product hero (subject = one of the post's `blogProductEmbed` handles via its
-  real Shopify photo as ref image); real-talk/podcast-notes posts get the §0-H **human hero**;
+  real Shopify photo as ref image); real-talk/podcast-notes posts get the §0-H **human hero**; and
   (c) tell media-manager to pass `--feature content-blog` on every `gen-notebook-art.ts` call for
   this hero (ticket #11100). Without it the call defaults to `--feature notebook-images`, which is
   correct for a masthead/category/series asset but silently splits a daily post's hero spend away
-  from `content-blog`, the feature `api_token_log` totals this routine's own cost under; and
-  (d) require `--run-id <contentRunId>` on every `gen-notebook-art.ts` call for the hero surface,
-  generate AND upload (ticket #22137). Without it, a content-run-scheduled hero generation sees
-  itself as the blocking sibling run and the anatomy gate fails closed on every candidate — a
-  silent false negative whose symptom (HTTP 403, `--preflight` reporting `dependency:"anatomy"`
-  unhealthy) reads exactly like a real missing or invalid credential.
+  from `content-blog`, the feature `api_token_log` totals this routine's own cost under.
   On §0-H posts the hero request is a **structured payload**, not "category plus a pointer to
   the router" (owner direction 2026-08-11, ticket #2748). It carries all six fields:
   - `headline`: the post's title, verbatim (the hero stages this question);
@@ -801,13 +796,6 @@ taught the three ways the pass goes wrong. Guard against each one:
   changed what the sentence claimed. Re-read every sentence that carries an attribution.
 - **It leaves the corrective negative.** "Does not diagnose it", "nothing further", and "no warning
   on its own" survived both passes. Say the point positively when you can.
-- **It adds a trust or no-incentive argument.** On a flat, plain-fact sentence the pass can insert
-  a new claim about Emma's incentives, neutrality, shelf, or stake that was not in the original
-  ("I have no shelf to push", "no stake in your answer") — the charter Emma section bans exactly
-  this, and a no-incentive claim is indefensible on its own terms since the product scorer weights
-  profitability at 35 percent. This is new content, not a rephrasing, so diff the humanized version
-  for anything it ADDED about our incentives, neutrality, shelf, or stake and delete it before the
-  gate.
 
 Run this pre-flight before the solidarity count below, so that count catches anything the pass
 removed. Record the tell count before and after in the Step 4 `step` event summary
@@ -1289,10 +1277,6 @@ or as an owner blocker, per the Step 1 preflight rule above, never as `process`:
 executor for an environment defect and a row filed that way just ages at `approved` (this is exactly
 what happened to #13309). The `process` row described in the paragraph above, which points a future
 run at a held slug so it can resume without re-drafting, is a different thing and stays as written.
-**Before filing a hero 403 or an anatomy-dependency failure as a credential blocker, re-test with
-`--run-id <contentRunId>` on the same call (ticket #22137):** the identical symptom is also what a
-content-run-scheduled hero generation sees when `--run-id` was omitted and it mistook itself for its
-own blocking sibling run, which is not a credential fault at all and needs no owner or `code` row.
 
 **A gate BLOCK is different: do not re-queue it to `'queued'` (ticket #94).** First confirm you are
 even entitled to be here: since 2026-09-04 a post reaches this paragraph only after Step 5 item 4's
