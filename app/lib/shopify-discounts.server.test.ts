@@ -11,6 +11,7 @@ import {
   buildDiscountVariables,
   executeApprovedPromo,
   PROMO_EXECUTE_VALVE,
+  SHOPIFY_DISCOUNT_PRODUCT_LIMIT,
   type PromoExecuteDeps,
 } from './shopify-discounts.server'
 
@@ -645,6 +646,24 @@ describe('executeApprovedPromo', () => {
     expect(deps.createDiscount).not.toHaveBeenCalled()
   })
 
+  // Ticket #22341, row #20830 (LUBE15): 124 resolved products hit Shopify's
+  // own ceiling on discountCodeBasicCreate's productsToAdd and threw into the
+  // shopify-error branch on every retry, which the old handled-note regex
+  // then marked permanently handled. Refusing loudly up front, before ever
+  // calling createDiscount, both emails the owner with a fixable reason and
+  // never burns a retry attempt on a brief that cannot succeed as scoped.
+  it('refuses loudly, never minting, when more products resolve than Shopify allows per code', async () => {
+    const tooMany = Array.from({ length: SHOPIFY_DISCOUNT_PRODUCT_LIMIT + 24 }, (_, i) => `gid://shopify/Product/${i + 1}`)
+    const deps = makeDeps({ resolveProductGids: vi.fn(async () => tooMany) })
+    const res = await executeApprovedPromo({ id: 20830, suggestion: CLEAN_BRIEF }, deps, BEFORE_ALL_TEST_WINDOWS)
+    expect(res.minted).toBe(false)
+    expect(res.refused).toBe(true)
+    expect(res.reason).toBe('too-many-products')
+    expect(res.ownerEmailed).toBe(true)
+    expect(deps.createDiscount).not.toHaveBeenCalled()
+    expect(deps.sendOwnerEmail).toHaveBeenCalledOnce()
+  })
+
   // Ticket #10737 regression: #9321 (BULLETWEEK20) and #9322 (COUPLESCONTROL20)
   // were refused 'no-eligible-products' — every one of their SKUs is a real,
   // live, resolvable product, but extractSkus's old labelled-list-only pattern
@@ -721,21 +740,28 @@ describe('executeApprovedPromo', () => {
     expect(deps.sendOwnerEmail).toHaveBeenCalledOnce()
   })
 
-  it('reports a Shopify userError without throwing and does not claim a mint', async () => {
+  // Ticket #22341: a mint failure used to leave no trace in the owner's
+  // inbox at all, unlike a guard refusal just above — the row's only trace
+  // was a note nobody is paged to read. Both failure branches now email the
+  // owner via the same buildPromoOwnerEmail 'refused' shape.
+  it('reports a Shopify userError without throwing, does not claim a mint, and emails the owner', async () => {
     const deps = makeDeps({
       createDiscount: vi.fn(async () => ({ id: null, userErrors: [{ message: 'Code has already been taken' }] })),
     })
     const res = await executeApprovedPromo({ id: 53, suggestion: CLEAN_BRIEF }, deps, BEFORE_ALL_TEST_WINDOWS)
     expect(res.minted).toBe(false)
     expect(res.reason).toContain('shopify-user-error')
+    expect(res.ownerEmailed).toBe(true)
     expect(deps.addNote).toHaveBeenCalledOnce()
-    expect(deps.sendOwnerEmail).not.toHaveBeenCalled()          // not a mint, not a guard refusal
+    expect(deps.sendOwnerEmail).toHaveBeenCalledOnce()
   })
 
-  it('reports a thrown Shopify error', async () => {
+  it('reports a thrown Shopify error and emails the owner', async () => {
     const deps = makeDeps({ createDiscount: vi.fn(async () => { throw new Error('429') }) })
     const res = await executeApprovedPromo({ id: 54, suggestion: CLEAN_BRIEF }, deps, BEFORE_ALL_TEST_WINDOWS)
     expect(res.minted).toBe(false)
     expect(res.reason).toContain('shopify-error')
+    expect(res.ownerEmailed).toBe(true)
+    expect(deps.sendOwnerEmail).toHaveBeenCalledOnce()
   })
 })
