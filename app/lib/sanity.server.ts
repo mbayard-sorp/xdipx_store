@@ -2263,6 +2263,28 @@ export async function getBlogPostsForSitemap(): Promise<{ slug: string; publishe
   }
 }
 
+/**
+ * Every published blogPost's body, for corpus-wide detectors that need to
+ * flatten the full Portable Text (ticket #22426 — the IPX7 water-grant sweep
+ * in notebook-healthcheck.server.ts). Mirrors the query
+ * scripts/audit-ipx7-water-grant.ts already runs via a standalone
+ * @sanity/client, through the shared server client instead, per the Oxygen
+ * seam rule in CLAUDE.md. Same degrade-to-[] convention as the getter above.
+ */
+export async function getPublishedBlogPostBodies(): Promise<{ slug: string; title: string | null; body: unknown }[]> {
+  if (!projectId) return []
+  try {
+    const client = getClient()
+    if (!client) return []
+    return await client.fetch(
+      `*[_type == "blogPost" && status == "published"]{title, "slug": slug.current, body}`,
+    )
+  } catch (err) {
+    console.error('[sanity] getPublishedBlogPostBodies error:', err)
+    return []
+  }
+}
+
 // ─── Comparisons ("X vs Y") ──────────────────────────────────────────────────
 // BOFU answer surface at /compare/{slug}. New additive doc type; every getter
 // degrades to null/[] when Sanity is unconfigured or the fetch fails, so the

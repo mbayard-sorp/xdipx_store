@@ -14,8 +14,10 @@
  * Server-only.
  */
 import { Sentry } from '~/lib/sentry.server'
-import { getBlogPostsForSitemap, getBlogCategories } from '~/lib/sanity.server'
+import { getBlogPostsForSitemap, getBlogCategories, getPublishedBlogPostBodies } from '~/lib/sanity.server'
 import { sweepStrandedBriefs, type StrandedBrief } from '~/lib/notebook-brief-sweep.server'
+import { draftToParagraphs } from '~/lib/aphorism-closer'
+import { findIpx7WaterGrants } from '~/lib/ipx7-water-grant'
 
 const FETCH_TIMEOUT_MS = 12_000
 const MIN_BODY_BYTES = 1000
@@ -43,6 +45,10 @@ export interface NotebookHealthResult {
   strandedBriefs?: StrandedBrief[]
   /** Ticket ids filed for stranded briefs (0 = deduped/failed). */
   strandedTicketsFiled?: number[]
+  /** Published posts carrying an IPX7 water-grant hit (ticket #22426). */
+  ipx7WaterGrantPosts?: number
+  /** Ticket ids filed for IPX7 water-grant hits (0 = deduped/failed). */
+  ipx7TicketsFiled?: number[]
 }
 
 function siteOrigin(): string {
@@ -186,6 +192,56 @@ async function openHealthcheckIssue(
   }
 }
 
+/**
+ * Report-only daily sweep for the IPX7 water-grant safety defect (ticket
+ * #22426, following #22377's precision fix). Runs findIpx7WaterGrants over
+ * every published blogPost body and files one deduped detection ticket per
+ * post carrying a hit. Independent of page render health, same as
+ * sweepStrandedBriefs just above it: a hit here is a content-safety finding
+ * for the content lane, not a render outage, so it must never flip the
+ * `healthy`/`hard` verdict or the P1 issue/email path below.
+ */
+export async function sweepIpx7WaterGrants(): Promise<{ postsWithHits: number; ticketsFiled: number[] }> {
+  const posts = await getPublishedBlogPostBodies().catch(() => [])
+  let postsWithHits = 0
+  const ticketsFiled: number[] = []
+
+  for (const post of posts) {
+    const paragraphs = draftToParagraphs({ title: post.title, body: post.body })
+    const hits = findIpx7WaterGrants(paragraphs)
+    if (hits.length === 0) continue
+    postsWithHits++
+    try {
+      const { fileDetectionTicket, makeDedupeKey, priorityFromSeverity } =
+        await import('~/lib/detection-tickets.server')
+      ticketsFiled.push(
+        await fileDetectionTicket({
+          detector: 'ipx7-water-grant-sweep',
+          dedupeKey: makeDedupeKey('ipx7-water-grant', post.slug),
+          priority: priorityFromSeverity('P1'),
+          category: 'content-safety',
+          kind: 'code',
+          targetTeam: 'content',
+          suggestion:
+            `IPX7 water-grant sweep found ${hits.length} sentence(s) on "${post.slug}" that grant shower/tap/jet/`
+            + 'running-water use with no restriction clause:\n\n'
+            + hits.map(h => `- [${h.section}] "${h.sentence}"`).join('\n')
+            + '\n\nDetected by /cron/notebook-healthcheck (sweepIpx7WaterGrants, app/lib/ipx7-water-grant.ts). '
+            + "Before editing, read that file's own header for the known false-positive shapes (a bath/basin "
+            + 'mention alone, a redirect like "rather than under the tap", or a non-stacking paraphrase are all '
+            + 'permitted, not a defect) — a real hit replaces the sentence with the frozen house wording in '
+            + 'docs/emma-voice.md and routes through emma-empathy-reviewer and sex-wellness-reviewer to PASS, '
+            + 'same as #21540/#21516.',
+        }),
+      )
+    } catch (err) {
+      console.error('[notebook-healthcheck] ipx7 ticket filing failed (ignored):', err)
+    }
+  }
+
+  return { postsWithHits, ticketsFiled }
+}
+
 export async function runNotebookHealthcheck(): Promise<NotebookHealthResult> {
   // Resolve a live post + category so the check follows the real content set.
   const [posts, categories] = await Promise.all([
@@ -213,6 +269,7 @@ export async function runNotebookHealthcheck(): Promise<NotebookHealthResult> {
   // stranded brief is queue hygiene, not a render outage), so it must not feed
   // `healthy`/`hard` or the P1 issue/email path.
   const sweep = await sweepStrandedBriefs()
+  const ipx7Sweep = await sweepIpx7WaterGrants()
 
   const healthy = checks.every((c) => c.ok)
   if (healthy) {
@@ -222,6 +279,8 @@ export async function runNotebookHealthcheck(): Promise<NotebookHealthResult> {
       alerted: false,
       strandedBriefs: sweep.stranded,
       strandedTicketsFiled: sweep.ticketsFiled,
+      ipx7WaterGrantPosts: ipx7Sweep.postsWithHits,
+      ipx7TicketsFiled: ipx7Sweep.ticketsFiled,
     }
   }
 
@@ -243,6 +302,8 @@ export async function runNotebookHealthcheck(): Promise<NotebookHealthResult> {
     alerted: true,
     strandedBriefs: sweep.stranded,
     strandedTicketsFiled: sweep.ticketsFiled,
+    ipx7WaterGrantPosts: ipx7Sweep.postsWithHits,
+    ipx7TicketsFiled: ipx7Sweep.ticketsFiled,
   }
 
   // Ticket each failing page onto the improvement bus. Same pattern as the
