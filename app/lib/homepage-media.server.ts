@@ -29,10 +29,46 @@
 import { generateImage, type GenerateImageOpts } from '~/lib/generate-image.server'
 import { uploadBufferToSanity, sanityImageRef, updateCmsBlock, updateCmsTileImage, updateCmsPromoImage } from '~/lib/sanity.server'
 import { gateImageBuffer } from '~/lib/vision-gate-buffer.server'
+import { classifyLegibleText } from '~/lib/social-publish-gate.server'
 
 /** Matches the Notebook hero path's own budget (gen-notebook-art.ts's HERO_VISION_MAX_ATTEMPTS)
  *  and generateWithVisionGate's default, so vision-gate behavior is consistent across surfaces. */
 const HOMEPAGE_VISION_MAX_ATTEMPTS = 2
+
+/**
+ * Charter-banned branding words (ticket #22339, design-critic runs 1837 and
+ * 1967): docs/emma-voice.md bans "sex"/"sexy" as a branding adjective in
+ * customer-facing copy, and a wayfinder door label rendered into the image is
+ * customer-facing copy wearing a picture. `classifyLegibleText`'s own
+ * 'brand-mark' bucket exists to let a real product wordmark (e.g.
+ * "Womanizer") through a short, punctuation-free string, so it would wave a
+ * door reading "SEX" through as a brand mark; this check runs first and
+ * blocks regardless of that classification.
+ */
+const BANNED_IMAGE_TEXT_WORDS = /\bsexy?\b/i
+
+/**
+ * The homepage path's own legible-baked-in-text check (ticket #22339), reusing
+ * `legibleText`/`classifyLegibleText` from the social vision gate
+ * (social-publish-gate.server.ts) rather than a second implementation. Every
+ * homepage-generated image is an editorial scene, never a real product
+ * packshot, so there is no real-photo hardware-branding carve-out to pass
+ * through here (`classifyLegibleText`'s default `isUnretouchedPhoto: false`
+ * is always correct for this caller). Returns a block reason, or `null` when
+ * the image carries no text the doctrine or charter objects to.
+ */
+export function homepageImageTextBlockReason(legibleText: string | null | undefined): string | null {
+  const t = (legibleText ?? '').trim()
+  if (!t) return null
+  if (BANNED_IMAGE_TEXT_WORDS.test(t)) {
+    return `charter-banned branding word baked into the image: "${t}" (docs/emma-voice.md)`
+  }
+  const textClass = classifyLegibleText(t)
+  if (textClass === 'packaging' || textClass === 'caption-or-watermark' || textClass === 'unclassified') {
+    return `text baked into the image (${textClass}): "${t}" (docs/design-doctrine.md section 4)`
+  }
+  return null
+}
 
 export type HomepageMediaTarget =
   | { kind: 'blockImage'; blockKey: string }
@@ -109,9 +145,10 @@ export async function generateAndPlaceHomepageImage(
     return { provider: res.provider, model: res.model, target: opts.target, alt: opts.alt, placed: false }
   }
 
-  // Anatomy / imagery-ceiling vision gate (ticket #10483): every candidate is
-  // checked before it can reach Sanity, closing the gap where this chokepoint
-  // had no code-enforced gate at all despite .claude/agents/homepage-art-director.md
+  // Anatomy / imagery-ceiling vision gate (ticket #10483), plus the
+  // legible-baked-in-text check (ticket #22339): every candidate is checked
+  // before it can reach Sanity, closing the gap where this chokepoint had no
+  // code-enforced gate at all despite .claude/agents/homepage-art-director.md
   // claiming one. A failing verdict regenerates within the same two-attempt
   // budget the Notebook hero and social paths use; exhausting it holds the
   // surface unplaced rather than shipping an uncaught defect.
@@ -120,11 +157,14 @@ export async function generateAndPlaceHomepageImage(
   let gated = false
   for (let attempt = 1; attempt <= HOMEPAGE_VISION_MAX_ATTEMPTS; attempt++) {
     const verdict = await gateImageBuffer(candidate, undefined, opts.runId, 'homepage', 'homepage-media')
-    if (verdict.pass) {
+    const textReason = homepageImageTextBlockReason(verdict.legibleText)
+    if (verdict.pass && !textReason) {
       gated = true
       break
     }
-    rejectNotes = verdict.notes || 'vision gate rejected the candidate'
+    rejectNotes = !verdict.pass
+      ? (verdict.notes || 'vision gate rejected the candidate')
+      : textReason!
     console.error(`[homepage-media] vision gate rejected candidate on attempt ${attempt}/${HOMEPAGE_VISION_MAX_ATTEMPTS}: ${rejectNotes}`)
     if (attempt >= HOMEPAGE_VISION_MAX_ATTEMPTS) break
     res = await generateOnce()

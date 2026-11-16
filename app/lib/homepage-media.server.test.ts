@@ -161,4 +161,64 @@ describe('generateAndPlaceHomepageImage vision gate (ticket #10483)', () => {
 
     expect(gateImageBuffer).toHaveBeenCalledWith(expect.any(Buffer), undefined, undefined, 'homepage', 'homepage-media')
   })
+
+  // Ticket #22339: design-critic runs 1837/1967 both found the live Body
+  // wayfinder door carrying invented baked-in label text including the word
+  // "SEX" at display scale. The anatomy verdict alone (`verdict.pass`) never
+  // looked at `legibleText`, so a door image passing every anatomy check
+  // with a banned word baked into it sailed straight through to Sanity.
+  describe('legible-baked-in-text check (ticket #22339)', () => {
+    it('never uploads a candidate whose anatomy-clean verdict carries a charter-banned branding word', async () => {
+      generateImage.mockResolvedValue({ buffers: [Buffer.from('bad')], provider: 'fal', model: 'fal/flux-dev' })
+      gateImageBuffer.mockResolvedValue({ ...PASS_VERDICT, legibleText: 'SEX' })
+
+      const { generateAndPlaceHomepageImage } = await import('./homepage-media.server')
+      const manifest = await generateAndPlaceHomepageImage({ prompt: 'p', alt: 'a', target: TARGET })
+
+      expect(manifest.placed).toBe(false)
+      expect(manifest.provider).toBe('fal')
+      expect(manifest.reason).toContain('charter-banned branding word')
+      expect(uploadBufferToSanity).not.toHaveBeenCalled()
+    })
+
+    it('never uploads a candidate whose anatomy-clean verdict reads as baked-in junk text', async () => {
+      generateImage.mockResolvedValue({ buffers: [Buffer.from('bad')], provider: 'fal', model: 'fal/flux-dev' })
+      gateImageBuffer.mockResolvedValue({ ...PASS_VERDICT, legibleText: 'Find your way in, today only, tap to shop.' })
+
+      const { generateAndPlaceHomepageImage } = await import('./homepage-media.server')
+      const manifest = await generateAndPlaceHomepageImage({ prompt: 'p', alt: 'a', target: TARGET })
+
+      expect(manifest.placed).toBe(false)
+      expect(manifest.reason).toContain('text baked into the image')
+      expect(uploadBufferToSanity).not.toHaveBeenCalled()
+    })
+
+    it('regenerates past a text-blocked first candidate and places a clean second one', async () => {
+      generateImage
+        .mockResolvedValueOnce({ buffers: [Buffer.from('bad')], provider: 'fal', model: 'fal/flux-dev' })
+        .mockResolvedValueOnce({ buffers: [Buffer.from('good')], provider: 'fal', model: 'fal/flux-dev' })
+      gateImageBuffer
+        .mockResolvedValueOnce({ ...PASS_VERDICT, legibleText: 'SEXY' })
+        .mockResolvedValueOnce(PASS_VERDICT)
+      uploadBufferToSanity.mockResolvedValue({ assetId: 'asset-3', url: 'https://cdn.sanity.io/asset-3.png' })
+
+      const { generateAndPlaceHomepageImage } = await import('./homepage-media.server')
+      const manifest = await generateAndPlaceHomepageImage({ prompt: 'p', alt: 'a', target: TARGET })
+
+      expect(manifest.placed).toBe(true)
+      expect(uploadBufferToSanity).toHaveBeenCalledWith(Buffer.from('good'), expect.any(String), 'image/png')
+    })
+
+    it('still places a candidate carrying an allowed short product wordmark', async () => {
+      generateImage.mockResolvedValue({ buffers: [Buffer.from('img1')], provider: 'fal', model: 'fal/flux-dev' })
+      gateImageBuffer.mockResolvedValue({ ...PASS_VERDICT, legibleText: 'Womanizer' })
+      uploadBufferToSanity.mockResolvedValue({ assetId: 'asset-1', url: 'https://cdn.sanity.io/asset-1.png' })
+
+      const { generateAndPlaceHomepageImage } = await import('./homepage-media.server')
+      const manifest = await generateAndPlaceHomepageImage({ prompt: 'p', alt: 'a', target: TARGET })
+
+      expect(manifest.placed).toBe(true)
+      expect(uploadBufferToSanity).toHaveBeenCalled()
+    })
+  })
 })
