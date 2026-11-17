@@ -2456,6 +2456,77 @@ export async function getFeedCatalogProducts(): Promise<FeedCatalogProduct[]> {
   return out
 }
 
+export interface ProductCopySurfaces {
+  handle: string
+  title: string
+  /** Shopify product description, HTML. Stripped of markup by the caller before scanning. */
+  descriptionHtml: string | null
+  /** xdipx.tagline */
+  tagline: string | null
+  /** xdipx.full_story — Emma's take. */
+  fullStory: string | null
+}
+
+/**
+ * Ticket #22588: a lean, catalog-wide read of the three PDP copy surfaces
+ * the water-grant audit scans. Paged the same way getFeedCatalogProducts()
+ * is (available_for_sale:true, 250/page, 40-page headroom), but without
+ * that function's GMC-feed shape or description truncation, since the audit
+ * needs the full text to find a sentence-level defect rather than a lean
+ * per-item summary.
+ */
+export async function getCatalogProductCopySurfaces(): Promise<ProductCopySurfaces[]> {
+  const out: ProductCopySurfaces[] = []
+  let cursor: string | null = null
+  for (let page = 0; page < 40; page++) {
+    const data: {
+      products: {
+        pageInfo: { hasNextPage: boolean; endCursor: string | null }
+        edges: Array<{ node: {
+          handle: string
+          title: string
+          descriptionHtml: string
+          metafields: ({ namespace: string; key: string; value: string } | null)[]
+        } }>
+      }
+    } = await storefront(`
+      query CatalogProductCopy($first: Int!, $after: String) {
+        products(first: $first, after: $after, query: "available_for_sale:true") {
+          pageInfo { hasNextPage endCursor }
+          edges {
+            node {
+              handle
+              title
+              descriptionHtml
+              metafields(identifiers: [
+                { namespace: "xdipx", key: "tagline" }
+                { namespace: "xdipx", key: "full_story" }
+              ]) {
+                namespace key value
+              }
+            }
+          }
+        }
+      }
+    `, { first: 250, after: cursor })
+
+    for (const { node } of data.products.edges) {
+      out.push({
+        handle: node.handle,
+        title: node.title,
+        descriptionHtml: node.descriptionHtml || null,
+        tagline: parseMetafieldByNsKey(node.metafields, 'xdipx', 'tagline'),
+        fullStory: parseMetafieldByNsKey(node.metafields, 'xdipx', 'full_story'),
+      })
+    }
+
+    if (!data.products.pageInfo.hasNextPage) break
+    cursor = data.products.pageInfo.endCursor
+    if (!cursor) break
+  }
+  return out
+}
+
 export type CollectionSort = 'manual' | 'newest' | 'price-asc' | 'price-desc'
 
 function sortToStorefront(sort: CollectionSort): { sortKey: string; reverse: boolean } {
