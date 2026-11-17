@@ -1687,8 +1687,31 @@ export async function resolveTicketForPr(pr: PullRequestSummary): Promise<Ticket
     .orderBy(desc(suggestionLinks.createdAt))
     .limit(20)
 
-  const match = direct.find((l) => prNumberFromRef(l.ref) === pr.number)
-  if (match) return loadTicketFacts(match.suggestionId)
+  const candidates = direct.filter((l) => prNumberFromRef(l.ref) === pr.number)
+  if (candidates.length > 0) {
+    // #22577: a suggestion that merely CITES another ticket's PR number in
+    // its own text can end up with its own pr-kind link to that same PR,
+    // filed after the real implementer's link -- and recency-only matching
+    // then resolves this PR to the citing ticket forever, never to the one
+    // that actually implements it. Confirmed live on PR #1987: ticket #22423
+    // (an unrelated CI-guard ticket that only cited "PR #1987" as the
+    // originating incident in its own prose) got a pr-kind link to #1987 at
+    // its own creation time, newer than #22350's real link to the PR it
+    // actually opened, so every cycle resolved #1987 to #22423 instead of
+    // #22350 -- bouncing #22423 on a false head-moved mismatch while #22350
+    // could never resolve and merge at all. When more than one candidate
+    // links this PR number, prefer whichever one's own verified head sha
+    // actually matches the PR's current head, checked in recency order;
+    // fall back to the most-recently-linked candidate (the original,
+    // single-candidate behavior) when none match.
+    let mostRecent: TicketFacts | null = null
+    for (const candidate of candidates) {
+      const facts = await loadTicketFacts(candidate.suggestionId)
+      if (mostRecent === null) mostRecent = facts
+      if (facts?.verifiedHeadSha && facts.verifiedHeadSha === pr.headSha) return facts
+    }
+    return mostRecent
+  }
 
   const titleId = parseTicketRefFromTitle(pr.title)
   if (titleId === null) return null
