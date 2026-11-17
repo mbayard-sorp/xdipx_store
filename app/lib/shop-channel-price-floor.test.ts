@@ -23,6 +23,7 @@ const PUBLICATIONS = [
   { id: 'gid://shopify/Publication/5', name: 'Google & YouTube' },
   { id: 'gid://shopify/Publication/6', name: 'ChatGPT' },
   { id: 'gid://shopify/Publication/7', name: 'Point of Sale' },
+  { id: 'gid://shopify/Publication/8', name: 'Facebook & Instagram' },
 ]
 
 function respond(body: unknown) {
@@ -93,5 +94,18 @@ describe('Shop channel price floor (#16390)', () => {
     await publishProductToXdipxChannels('gid://shopify/Product/557')
     const publish = mutationInput(calls, 'PublishProduct')
     expect(publish).toContain('gid://shopify/Publication/180118913195')
+  })
+})
+
+describe('Facebook & Instagram channel stays empty (owner direction 2026-11-17)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('never publishes to the channel and unpublishes from it on every import', async () => {
+    const calls = stubFetch('49.00')
+    await publishProductToXdipxChannels('gid://shopify/Product/558')
+    expect(mutationInput(calls, 'PublishProduct')).not.toContain('gid://shopify/Publication/8')
+    expect(mutationInput(calls, 'UnpublishProduct')).toContain('gid://shopify/Publication/8')
   })
 })
