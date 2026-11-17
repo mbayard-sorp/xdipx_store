@@ -106,6 +106,51 @@ const INGRESS_TEST_RE = /\bIPX?\d{1,2}\b/i
 const DEFINER_RE =
   /\b(means|stands for|is rated (?:for|to)|rated (?:for|to)|indicates|guarantees|covers|certifies|defines)\b/i
 
+/**
+ * A plain-English gloss of what a rating covers, introduced as a noun phrase
+ * ("a jet rating", "a splash rating") rather than DEFINER_RE's verb cues.
+ */
+const RATING_GLOSS_RE = /\b(?:a|an)\s+[a-z]+(?:\s+[a-z]+){0,2}\s+ratings?\b/i
+
+/** How many characters back from a code occurrence to look for an apposed gloss. */
+const APPOSITION_WINDOW = 40
+
+/**
+ * Only commas, "or"/"and", whitespace, and other ingress codes may sit
+ * between the gloss and the code it introduces — a true apposition
+ * ("a jet rating, IPX5 or IPX6"), not merely a rating mention somewhere
+ * upstream of an unrelated later clause ("a great rating, and the IPX5
+ * model..." must NOT count: "and the ... model" is a new clause, not a
+ * joiner).
+ */
+const APPOSITION_JOINER_RE = /^[\s,]*(?:(?:or|and)[\s,]*)*$/i
+
+/**
+ * True when every ingress-code occurrence in the sentence sits within a
+ * short apposition of a "a/an ___ rating(s)" gloss — "...whose maker prints
+ * a jet rating, IPX5 or IPX6" (ticket #22587, live false positive on
+ * air-pulse-vs-clitoral-suction). DEFINER_RE's verb cues (means/is rated
+ * for/...) miss this shape because the code is introduced as an APPOSITION
+ * to the gloss, not as its subject or object. Tight by design, the same bar
+ * this module's other closed vocabularies use: the gloss must be a short,
+ * generic "rating" noun phrase sitting immediately before the code, joined
+ * only by punctuation/"or"/"and"/other codes — not any mention of the word
+ * "rating" within the window with other words in between.
+ */
+function hasApposedRatingGloss(sentence: string): boolean {
+  for (const m of sentence.matchAll(INGRESS_RE)) {
+    const windowStart = Math.max(0, m.index! - APPOSITION_WINDOW)
+    const before = sentence.slice(windowStart, m.index!)
+    const gloss = RATING_GLOSS_RE.exec(before)
+    if (!gloss) return false
+    const between = before
+      .slice(gloss.index + gloss[0].length)
+      .replace(/\bIPX?\d{1,2}\b/gi, '')
+    if (!APPOSITION_JOINER_RE.test(between)) return false
+  }
+  return true
+}
+
 interface ActionBucket {
   name: string
   re: RegExp
@@ -332,7 +377,7 @@ function scanIngressSentence(
   for (const m of sentence.matchAll(INGRESS_RE)) tokens.add(m[0].toUpperCase())
   if (tokens.size === 0) return []
 
-  const isDefiner = DEFINER_RE.test(sentence)
+  const isDefiner = DEFINER_RE.test(sentence) || hasApposedRatingGloss(sentence)
   // A sentence naming 2+ codes that explicitly declares them independent
   // can't be safely attributed to either one — see MULTI_CODE_INDEPENDENT_RE.
   const unscopeable = tokens.size > 1 && MULTI_CODE_INDEPENDENT_RE.test(sentence)
@@ -498,6 +543,23 @@ const ENUM_NOUNS = [
   'red flags?', 'symptoms?', 'tiers?', 'categories?', 'criteria', 'factors?',
   'benefits?', 'risks?',
 ]
+
+/**
+ * Nouns too generic to treat as the SAME tracked enumeration across
+ * different sites in a document purely by matching this noun. "thing" is
+ * reused for unrelated enumerations throughout a post ("three things decide
+ * whether one reaches the G-spot at all" vs "two things keep a rabbit safe
+ * to own"), which the cross-site count check otherwise conflates into a
+ * false conflict (ticket #22587, bus row #21540's other reported false
+ * positive, live on what-makes-a-great-g-spot-rabbit-vibrator). Every other
+ * ENUM_NOUNS entry names a specific enough category ("red flags", "steps")
+ * that two independent sites naming it really are talking about the same
+ * promise; "thing" alone is not. Still tracked for the SAME-SENTENCE inline
+ * list-mismatch check below, where the promise and its own list are
+ * necessarily about the one enumeration they're both inside, so there is no
+ * cross-topic conflation risk there.
+ */
+const CROSS_SITE_EXCLUDED_NOUNS = new Set(['thing'])
 
 const NUMBER_PATTERN = `(?:${Object.keys(NUMBER_WORD_MAP).join('|')}|\\d{1,2})`
 const PROMISE_RE = new RegExp(`\\b(${NUMBER_PATTERN})\\s+(${ENUM_NOUNS.join('|')})\\b`, 'i')
@@ -770,6 +832,7 @@ export function analyzeParagraphs(paragraphs: DraftParagraph[]): SelfConsistency
     byNoun.set(site.nounPhrase, list)
   }
   for (const [noun, sites] of byNoun) {
+    if (CROSS_SITE_EXCLUDED_NOUNS.has(noun)) continue
     const numbers = new Set(sites.map(s => s.number))
     if (numbers.size > 1) {
       findings.push({

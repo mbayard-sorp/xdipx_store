@@ -27,6 +27,32 @@ describe('ingress codes: undefined-token', () => {
     ])
     expect(report.findings.some(f => f.kind === 'undefined-token')).toBe(false)
   })
+
+  // Live false positive, ticket #22587: a jet-rating gloss introduced as an
+  // apposition ("a jet rating, IPX5 or IPX6") rather than DEFINER_RE's verb
+  // cues (means/is rated for/...), reproduced live on air-pulse-vs-
+  // clitoral-suction's FAQ block.
+  it('does not flag a code defined by an inline apposition rather than a verb cue', () => {
+    const report = analyzeParagraphs([
+      {
+        section: 'Frequently asked questions',
+        text: 'A shower is jetted water, so the toy that can go in with you is the one whose maker prints a jet rating, IPX5 or IPX6.',
+      },
+    ])
+    expect(report.findings.some(f => f.kind === 'undefined-token')).toBe(false)
+  })
+
+  it('still flags a code with no gloss at all, even near an unrelated "rating" mention', () => {
+    const report = analyzeParagraphs([
+      {
+        section: 'Reviews',
+        text: 'Reviewers give this toy a great rating, and the IPX5 model handles a shower fine.',
+      },
+    ])
+    const hit = report.findings.find(f => f.kind === 'undefined-token')
+    expect(hit).toBeDefined()
+    expect(hit?.token).toBe('IPX5')
+  })
 })
 
 describe('ingress codes: conflicting-instruction (run 1239, defect #4 shape)', () => {
@@ -301,6 +327,33 @@ describe('numbered enumerations: count-mismatch across sites (run 327 / run 626 
       { section: 'FAQ', text: 'The three red flags to watch for are fever, redness, and swelling.' },
     ])
     expect(report.findings.some(f => f.kind === 'count-mismatch' && f.token === 'red flag')).toBe(false)
+  })
+
+  // Live false positive, ticket #22587, bus row #21540's other reported
+  // false positive on what-makes-a-great-g-spot-rabbit-vibrator: two
+  // completely unrelated enumerations (what makes reach work vs what keeps
+  // a rabbit vibrator safe to own) both happened to use the generic noun
+  // "things", which the cross-site check conflated into a false conflict.
+  it('does not flag two unrelated enumerations that both use the generic noun "thing"', () => {
+    const report = analyzeParagraphs([
+      {
+        section: 'Intro',
+        text: 'Three things decide whether one reaches the G-spot at all: an upward curve firm enough to hold pressure against the front wall, an outer arm that flexes far enough to sit on your clitoris without dragging the tip off target, and a low rumbling motor in place of a high buzz.',
+      },
+      {
+        section: 'How do you keep a rabbit vibrator body-safe and clean?',
+        text: 'Two things keep a rabbit safe to own, and I would not let either one slide.',
+      },
+    ])
+    expect(report.findings.some(f => f.kind === 'count-mismatch' && f.token === 'thing')).toBe(false)
+  })
+
+  it('still flags a named enumeration (not the generic "thing") with mismatched counts', () => {
+    const report = analyzeParagraphs([
+      { section: 'Body', text: 'There are four steps to clean it properly.' },
+      { section: 'FAQ', text: 'The three steps are rinse, dry, and store it in its pouch.' },
+    ])
+    expect(report.findings.some(f => f.kind === 'count-mismatch' && f.token === 'step')).toBe(true)
   })
 })
 
