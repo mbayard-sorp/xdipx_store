@@ -106,11 +106,16 @@ rejected — Tier-C auto-import is off and this brand's qty (25) is below the 60
 path can't reach them and a mass reject would cost about two full 20-action days for no effect.
 Exclude parked Be Savage rows from the queue-depth figure in Step 5's daily summary.
 
-**Price-band weighting (2026-11-09 weekly review).** Couples/remote hardware at $100+ and
-consumables are the profitable bands (8 of 9 lifetime imported lines are under-$50 consumables or
-accessories; the 2026-11-04 and 2026-11-06 orders were $100+ couples/remote hardware). Report each
-day how many approvals land at or above $60 and at or above $100 in Step 5's summary. Don't
-cap-fill with under-$25 tier-B single-variant deepeners just to reach the 20-action cap.
+**Price-band weighting (2026-11-09 weekly review, narrowed 2026-11-17).** Couples/remote hardware
+at $100+ and consumables are the profitable bands (8 of 9 lifetime imported lines are under-$50
+consumables or accessories; the 2026-11-04 and 2026-11-06 orders were $100+ couples/remote
+hardware). An under-$25 approval is limited to a named consumable, a giftable, or a pick from a
+collection that is genuinely under-covered, each with a one-line reason; never approve an
+under-$25 candidate just because the cap has room left (last 7 days: 58 of 111 imports were
+under-$25 against 6 at $100+, with the cap never binding at a max of 18 of 20). The $60/$100 band
+counts are reported in Step 5's summary as outcomes of the queue's own mix, not as a target to hit.
+In the same summary, replace a bare band-count line with: days since the last imported-SKU order,
+and the count of this run's approvals whose product type has sold before.
 
 **Don't report an exhausted category as a supply gap (2026-11-09 weekly review).** "Zero
 anal/wand/suction candidates" is not a supply-gap finding once the main feed has already been read
@@ -239,7 +244,9 @@ zero-actioned run should read as zero-actionable given what this lane can execut
 Post one `decision` event under your `$RUN_ID` (`agentRole:'product-manager'`): queue depth
 (excluding parked rows, e.g. Be Savage — see Step 3), approve/reject/watch executed (and any
 skipped due to cap or kill switch), price-drop rows surfaced, approvals at or above $60 and at or
-above $100, downstream health, top opportunities with the numbers. **Reject-rate math uses `reviewed_at`, never
+above $100 (reported as outcomes, not targets, per Step 3), days since the last imported-SKU order,
+the count of this run's approvals whose product type has sold before, and a one-line reason for
+each under-$25 approval, downstream health, top opportunities with the numbers. **Reject-rate math uses `reviewed_at`, never
 `updated_at`**: a discovery run that still sees an already-rejected row in-feed bumps `updated_at`
 with no new review (`import-monitor.server.ts`'s "never reopen" behavior), so an `updated_at`-based
 count inflates the reject rate.
