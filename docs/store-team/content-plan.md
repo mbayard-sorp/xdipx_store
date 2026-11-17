@@ -305,6 +305,7 @@ extend freely — additions need a slug, problem, and target query):
 | 34 | why-does-a-toy-feel-different-on-different-days | The same toy that produced a reliable result last week does almost nothing tonight, and the reader reads the variance as the toy failing (so they shop for a stronger one) or their own body breaking (so they stop), when the usual move, escalating intensity in the moment, widens the gap † | "why does my vibrator feel different some days" |
 | 35 | is-it-ok-to-give-your-partner-a-sex-toy-as-a-gift | Someone wants to give their partner a sex toy and freezes, because a wrapped gift arrives finished, with an occasion attached and a social script that says the first correct response is thank you, so the honest answer and the polite answer are not the same answer and the receiver pays for "no" on the spot | "is it ok to give your partner a sex toy as a gift" |
 | 36 | why-using-a-remote-control-vibrator-together-feels-awkward | A couple buys a remote-control toy specifically to share it, and the handover breaks the feedback loop in both directions: the person holding the remote is operating someone else's sensation blind, with nothing to read but a face, so they keep changing the setting hunting for a visible reaction, while the person wearing it stops feeling and starts producing a reaction so the other one knows it is working. Both end up doing a job, the usual escalation (more patterns, more intensity, a better toy) makes it worse because more settings means more guessing, and the couple reads the result as "we are bad at this" | "why does using a remote control vibrator with a partner feel awkward" |
+| 37 | is-it-normal-to-only-orgasm-with-a-vibrator | The reader orgasms reliably, and only with a vibrator. Hands, a mouth and penetration do not get them there, nothing hurts, nothing has changed, and nothing is absent. They have privately ranked the orgasm they do have as a lesser one because a device delivered it, and the feared consequence is having ruined themselves for "real" sex, or being dependent on a machine | "is it normal to only be able to orgasm with a vibrator" |
 
 † = health-adjacent; the "worth seeing a clinician if…" line, with its tier, is mandatory (see above).
 
@@ -396,6 +397,44 @@ vibrations from a toy worn during penetration, which gives the REMOTE-HOLDER a f
 than giving the wearer control) and the two posts now cross-link instead of competing. A future run
 picking a product that already appears in a published post should expect the collision checker to miss
 it when the handles differ by colorway.
+
+Row 37 is the seventh (authored by content run 2074, 2026-11-17). By that run the bank was spent for the SIXTH
+time: rows 1-14, 16-24, 27, 28 and 30-36 all had published posts, rows 25, 26 and 29 are retired, row 15 is still
+parked, and the `seoContentBrief` queue again held no `real-talk` brief at all (its seven queued rows were five
+`wellness-basics`, one `guides` and one `comparisons`). Row 37 targets the LEGITIMACY question about a body that
+already works, which no row covered: the orgasm is reliable and the reader has ranked it as a lesser one. It is
+distinct from row 17 and the published `can-a-vibrator-make-you-less-sensitive` (nerve adaptation after heavy
+strong vibration, a damage question about sensation going quiet), from row 10 and
+`why-cant-i-finish-with-a-partner` (the alone-works/together-stalls context gap, where this reader cannot get
+there by hand or mouth even alone), from the published `what-to-do-if-you-have-never-had-an-orgasm` (absence, and
+primary anorgasmia), from row 16 (a rising threshold with age) and from row 34 (variance between two nights a
+week apart). Those are about damage, context, absence or a direction of travel; row 37 is about a value judgment
+applied to a working result. `check-slug-precheck.ts` returned slug-free, `check-topic-collision.ts` was clean
+against 20 prior posts on heading, title and shared-embed surfaces, and `check-self-consistency.ts` cross-post
+pass was clean against all 122 published posts.
+
+Two findings from this row worth carrying forward, because both cost a gate cycle and neither is visible to any
+checker. **First, the honest answer to a "is it normal" row may not be "yes", and the source has to be read for
+the subtype before the capsule is drafted.** Run 2074 drafted a flat "Yes" with the full ISSM definition behind
+it, and the accuracy gate BLOCKed the post in part because the same ISSM page names a *situational* type ("the
+ability to orgasm only in specific situations or with certain partners") and lists "trouble reaching orgasm in
+certain situations" among the symptoms. The draft's "nothing in its criteria asks what you were holding" was
+therefore an overclaim, and so was the "Yes". The repaired post states outright that the pattern can sit inside
+the clinical description where the rest of the criteria are met and it distresses you, and that the page does not
+settle whether a hand counts as "sufficient stimulation", which is the phrase the whole definition turns on. The
+voice gate was asked directly whether losing the bold "Yes" made the post read as evasive against the max-authority
+register, and ruled it honest and confident. **On a † row whose title is a yes/no question, read the source's own
+TYPOLOGY and symptom list, not just its definition sentence, before writing the capsule.**
+**Second, a repair written to satisfy one gate can create a worse safety defect than the string it replaced.** The
+voice gate BLOCKed a clinician-tier sentence for assuming the reader's situation; the repair made tier selection
+turn on the reader's history, and the accuracy gate BLOCKed that, because the appointment-soon tier also holds new
+loss of genital sensation and pain or broken skin, which apply whatever the history, so a reader with a lifelong
+pattern could have used the repair to dismiss a red flag. All six deterministic checkers exited 0 on it. The fix
+that passed: structure the block per-trigger rather than per-reader, isolate the single history-dependent trigger
+in its own sentence, say the others are history-independent in so many words, and add a second same-day sentence
+for heavy or continuing bleeding, severe pain, or a toy that cannot be removed (bleeding then comes out of the
+"soon" tier entirely so the two cannot conflict). Filed as suggestion #22591; third occurrence of the #21314
+class.
 
 A COVERED row (15, 25, 26, 29) is not a permanent dead entry: retire it by
 striking it from the working rotation once a genuinely distinct angle is found or the cluster is
