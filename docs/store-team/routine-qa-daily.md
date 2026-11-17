@@ -370,6 +370,12 @@ order landed in the last 24h, it has a resolved ledger row; (3) `POST /cron/purc
 not a failure on a day with zero orders; this check is orders-versus-reported, never an absolute
 count.
 
+**Sub-check (2) has no dedicated route, unlike (1) and (3).** There is no per-order ledger-row
+query exposed to this routine. Accept (1)'s zero-unresolved-count result as (2)'s evidence too: a
+paid order with no resolved ledger row would surface as an unresolved `meta_capi_failures` or
+`ga4_purchase_failures` row, which (1) already checks. Record the verdict as covering both (1) and
+(2) rather than re-deriving a separate per-order check each pass.
+
 **Known limitation: sub-check (3) is intermittently denied in this cloud QA sandbox, not blocked
 outright.** `POST /cron/purchase-reconcile` with `dryRun:true` was denied by the auto-mode tool
 classifier (reason: "Modify Shared Resources") on run 1745 (2026-10-30 16:30 pass), but the
