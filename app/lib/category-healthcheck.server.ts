@@ -371,38 +371,82 @@ export async function runCategoryHealthcheck(): Promise<CategoryHealthResult> {
     const { fileDetectionTicket, makeDedupeKey, priorityFromSeverity } =
       await import('~/lib/detection-tickets.server')
     result.ticketsFiled = []
+
+    // #22551: group failures that share the exact same `problems` signature
+    // into a single ticket naming every affected path, instead of one ticket
+    // per path. Incident: three independent category paths all failed with
+    // the identical ["fetch error: <AbortError message>"] signature in the
+    // same run (2026-11-17 00:01 UTC), confirmed healthy minutes later on
+    // manual re-check — one transient blip, not three page defects, but it
+    // cost three full triage cycles. A path whose problems differ from its
+    // peers' still files on its own, exactly as before.
+    const bySignature = new Map<string, CategoryPageCheck[]>()
     for (const c of failed) {
+      const sig = JSON.stringify(c.problems)
+      const group = bySignature.get(sig)
+      if (group) group.push(c)
+      else bySignature.set(sig, [c])
+    }
+
+    for (const group of bySignature.values()) {
+      if (group.length === 1) {
+        const c = group[0]!
+        result.ticketsFiled.push(
+          await fileDetectionTicket({
+            detector: 'category-healthcheck',
+            dedupeKey: makeDedupeKey('category-page', c.path),
+            priority: priorityFromSeverity(c.hardFail ? 'P1' : 'P3'),
+            category: 'other',
+            kind: 'code',
+            suggestion:
+              `Merchandised-page healthcheck failing on ${c.path} (HTTP ${c.status}).\n\n`
+              + `Problems:\n${c.problems.map((p) => `- ${p}`).join('\n')}\n\n`
+              + `Detected inside /cron/homepage-healthcheck against ${siteOrigin()}. `
+              + (c.surface === 'deck'
+                // The deck fails for reasons a category masthead never does, and
+                // the generic advice below actively misdirected (#8414): it sent
+                // readers to the category resolver and offered "unpublish the
+                // doc" as a rollback for a surface whose two real failure modes
+                // are a dropped render slot and an empty row set, neither of
+                // which unpublishing fixes.
+                ? 'This is the homepage panel deck, not a category masthead. The sweep only '
+                  + 'asserts data-panel= when resolveBandOrder() gives the deck a slot AND '
+                  + 'singleton.panelDeck has at least one non-empty row, so both preconditions '
+                  + 'already held and the deck still did not reach the HTML. Check, in order: '
+                  + 'the published singleton.storefrontHome layout still carries an enabled '
+                  + 'panelDeckSection; the payload blob is not stale (POST /cron/warm-homepage-b '
+                  + 'and re-run); then PanelDeck/PanelSquareRow rendering. Do NOT unpublish '
+                  + 'singleton.panelDeck: that removes the navigation layer instead of '
+                  + 'restoring it.'
+                : 'If the masthead marker is missing, the live Sanity doc is not reaching the page: '
+                  + 'check the category resolver logs, then the doc itself. Unpublishing the doc '
+                  + '(status back to draft) is the rollback. Re-run the cron to confirm.'),
+            links: [{ kind: 'url', ref: `${siteOrigin()}${c.path}`, state: 'failed' }],
+          }),
+        )
+        continue
+      }
+
+      const hard = group.some((c) => c.hardFail)
+      const paths = group.map((c) => c.path)
       result.ticketsFiled.push(
         await fileDetectionTicket({
           detector: 'category-healthcheck',
-          dedupeKey: makeDedupeKey('category-page', c.path),
-          priority: priorityFromSeverity(c.hardFail ? 'P1' : 'P3'),
+          dedupeKey: makeDedupeKey('category-page-correlated', JSON.stringify([...paths].sort())),
+          priority: priorityFromSeverity(hard ? 'P1' : 'P3'),
           category: 'other',
           kind: 'code',
           suggestion:
-            `Merchandised-page healthcheck failing on ${c.path} (HTTP ${c.status}).\n\n`
-            + `Problems:\n${c.problems.map((p) => `- ${p}`).join('\n')}\n\n`
-            + `Detected inside /cron/homepage-healthcheck against ${siteOrigin()}. `
-            + (c.surface === 'deck'
-              // The deck fails for reasons a category masthead never does, and
-              // the generic advice below actively misdirected (#8414): it sent
-              // readers to the category resolver and offered "unpublish the
-              // doc" as a rollback for a surface whose two real failure modes
-              // are a dropped render slot and an empty row set, neither of
-              // which unpublishing fixes.
-              ? 'This is the homepage panel deck, not a category masthead. The sweep only '
-                + 'asserts data-panel= when resolveBandOrder() gives the deck a slot AND '
-                + 'singleton.panelDeck has at least one non-empty row, so both preconditions '
-                + 'already held and the deck still did not reach the HTML. Check, in order: '
-                + 'the published singleton.storefrontHome layout still carries an enabled '
-                + 'panelDeckSection; the payload blob is not stale (POST /cron/warm-homepage-b '
-                + 'and re-run); then PanelDeck/PanelSquareRow rendering. Do NOT unpublish '
-                + 'singleton.panelDeck: that removes the navigation layer instead of '
-                + 'restoring it.'
-              : 'If the masthead marker is missing, the live Sanity doc is not reaching the page: '
-                + 'check the category resolver logs, then the doc itself. Unpublishing the doc '
-                + '(status back to draft) is the rollback. Re-run the cron to confirm.'),
-          links: [{ kind: 'url', ref: `${siteOrigin()}${c.path}`, state: 'failed' }],
+            `Merchandised-page healthcheck failing on ${group.length} paths with the IDENTICAL problem `
+            + `signature in this one run, which is a correlated blip, not ${group.length} independent page `
+            + `defects: ${paths.join(', ')}.\n\n`
+            + `Shared problems:\n${group[0]!.problems.map((p) => `- ${p}`).join('\n')}\n\n`
+            + `Detected inside /cron/homepage-healthcheck against ${siteOrigin()}. Re-check each path by `
+            + 'hand before investigating a page-specific defect: this exact shape (the same fetch/abort '
+            + 'symptom across multiple category paths in a single run, all healthy again minutes later) '
+            + 'has already been observed as a transient blip, not a rendering regression. Only escalate to '
+            + 'per-surface remediation if the failure reproduces on a clean re-check.',
+          links: paths.map((p) => ({ kind: 'url', ref: `${siteOrigin()}${p}`, state: 'failed' })),
         }),
       )
     }

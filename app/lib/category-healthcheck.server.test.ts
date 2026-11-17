@@ -242,4 +242,51 @@ describe('runCategoryHealthcheck', () => {
     // deletes the navigation layer instead of rolling anything back.
     expect(filed.suggestion).not.toContain('Unpublishing the doc')
   })
+
+  // ── #22551: correlated multi-page failures file one ticket, not N ─────────
+  it('groups failures sharing the identical problems signature into one ticket naming every path', async () => {
+    sanityFetch.mockResolvedValue({ categories: ['play', 'pleasure', 'on-sale'], drops: [] })
+    fetchMock.mockRejectedValue(new DOMException('This operation was aborted', 'AbortError'))
+
+    const result = await runCategoryHealthcheck()
+
+    expect(result.ok).toBe(false)
+    expect(result.checks).toHaveLength(3)
+    expect(fileDetectionTicket).toHaveBeenCalledOnce()
+    expect(result.ticketsFiled).toEqual([42])
+
+    const filed = fileDetectionTicket.mock.calls[0]?.[0] as {
+      suggestion: string
+      links: { ref: string }[]
+    }
+    expect(filed.links).toHaveLength(3)
+    for (const p of ['/collections/play', '/collections/pleasure', '/collections/on-sale']) {
+      expect(filed.links.some((l) => l.ref.includes(p))).toBe(true)
+    }
+    expect(filed.suggestion).toContain('3 paths')
+    expect(filed.suggestion).toContain('correlated blip')
+    expect(filed.suggestion).toContain('/collections/play')
+    expect(filed.suggestion).toContain('/collections/pleasure')
+    expect(filed.suggestion).toContain('/collections/on-sale')
+  }, 20_000)
+
+  it('still files a path with a different problems signature on its own, not folded into the group', async () => {
+    sanityFetch.mockResolvedValue({ categories: ['play', 'pleasure'], drops: [] })
+    fetchMock.mockImplementation(async (url: unknown) => {
+      if (String(url).includes('/collections/play')) {
+        throw new DOMException('This operation was aborted', 'AbortError')
+      }
+      // pleasure: a different, page-specific defect (missing masthead marker).
+      return new Response(`<html><body>${'x'.repeat(2000)}</body></html>`, { status: 200 })
+    })
+
+    const result = await runCategoryHealthcheck()
+
+    expect(result.ok).toBe(false)
+    expect(fileDetectionTicket).toHaveBeenCalledTimes(2)
+    const suggestions = fileDetectionTicket.mock.calls.map((c) => (c[0] as { suggestion: string }).suggestion)
+    expect(suggestions.some((s) => s.includes('correlated blip'))).toBe(false)
+    expect(suggestions.some((s) => s.includes('/collections/play'))).toBe(true)
+    expect(suggestions.some((s) => s.includes('/collections/pleasure'))).toBe(true)
+  }, 20_000)
 })
