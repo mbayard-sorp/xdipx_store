@@ -69,6 +69,17 @@ routine's to raise (Preconditions, above); do not treat a bigger budget as the f
 | VERIFY, never skip | 7 | An unverified publish is worse than no publish (runs 8/10 lesson, cited in #2165's retro). Run it even if nothing below starts. |
 | OPTIONAL, after Step 7 verifies | 1c (Monday only — recon/theme run FIRST on Mondays, since Step 3 needs the theme), 2 (GA4/Nalpac/imports depth), 2b, 2d, 2e, 3.5 (a full scheme; the mandatory path uses a minimal one), 5b deep-refresh pair, 5c, 7.5, retro extras | Running out of turns here is a successful run that shipped its mandatory surfaces. Name what was skipped and why in the Step 8 summary — silence is the failure, not the skip. |
 
+**A named lane re-point is the first write inside Step 3, ahead of any other pick.** When a prior
+brief or retro directive names a specific lane/rail that must carry specific product handles (a
+"re-point," as distinct from the day's ordinary minimal picks), write that lane first, before any
+optional-tier step and before the rest of Step 3's picks. A re-point that has already slipped one
+run (named in a prior run's summary or a filed suggestion) does not get to slip a second time to
+cold-start pressure (#22338: `made-for-two` sat unpointed a full extra week this way). Book the
+cold-start cost (clone, `git reset`, `npm install`, the mandatory charter/brief/doctrine reads)
+explicitly as its own line in the run's turn plan before Step 3 starts, so the plan's own numbers
+show the re-point write landing inside the turns that remain, rather than discovering the shortfall
+only after Step 3 fails to reach it.
+
 **Cheaper mandatory reads.**
 
 - Voice charter: run `npx tsx scripts/print-emma-voice-marketing.ts` instead of reading the raw
