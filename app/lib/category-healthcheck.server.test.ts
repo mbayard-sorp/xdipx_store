@@ -270,6 +270,34 @@ describe('runCategoryHealthcheck', () => {
     expect(filed.suggestion).toContain('/collections/on-sale')
   }, 20_000)
 
+  // ── #22611: the deck never gets folded into a same-signature category group ──
+  it('still gives the deck its own ticket and deck-shaped remediation when it shares a fetch-abort signature with category pages', async () => {
+    sanityFetch.mockResolvedValue({ categories: ['play', 'pleasure'], drops: [] })
+    readPayload.mockResolvedValue(LIVE_DECK)
+    fetchMock.mockRejectedValue(new DOMException('This operation was aborted', 'AbortError'))
+
+    const result = await runCategoryHealthcheck()
+
+    expect(result.ok).toBe(false)
+    // Two groups: the 2-path category/drop correlated blip, and the deck alone.
+    expect(fileDetectionTicket).toHaveBeenCalledTimes(2)
+
+    const calls = fileDetectionTicket.mock.calls.map(
+      (c) => c[0] as { suggestion: string; links: { ref: string }[] },
+    )
+    const deckCall = calls.find((c) => c.links.some((l) => l.ref.includes('?variant=b')))
+    const categoryCall = calls.find((c) => c !== deckCall)
+
+    expect(deckCall).toBeDefined()
+    expect(deckCall?.links).toHaveLength(1)
+    expect(deckCall?.suggestion).toContain('homepage panel deck, not a category masthead')
+    expect(deckCall?.suggestion).not.toContain('correlated blip')
+
+    expect(categoryCall).toBeDefined()
+    expect(categoryCall?.links).toHaveLength(2)
+    expect(categoryCall?.suggestion).toContain('correlated blip')
+  }, 20_000)
+
   it('still files a path with a different problems signature on its own, not folded into the group', async () => {
     sanityFetch.mockResolvedValue({ categories: ['play', 'pleasure'], drops: [] })
     fetchMock.mockImplementation(async (url: unknown) => {
