@@ -2308,7 +2308,13 @@ that pool and generate only what it is missing.
   Compositing straight from a Shopify packshot puts a legible manufacturer carton in the presenter's
   hand. Never skip the plate.
 - **No baked-in text in any generated image.** On-slide typography is rendered per the design
-  doctrine.
+  doctrine. **Recurring finding (ticket #22443, rows 590/592):** `vision-legible-text` BLOCKed
+  generated candidates before any judgment pass ran, meaning the generation prompt itself is not
+  reliably excluding baked-in text. Until `scripts/gen-social-image.ts`'s prompt carries an
+  explicit no-baked-in-text reinforcement or a pre-flight OCR self-check (a code-lane fix, not a
+  docs one), treat any candidate with visible lettering, a wordmark, or packaging text baked into
+  the pixels as unusable before it reaches the gate, and regenerate rather than submitting it on
+  the chance it passes.
 - Every asset must clear Step 4b question 3 before it ships.
 
 **How to generate an Instagram asset: `scripts/gen-social-image.ts`.** This is the generation path
@@ -2382,6 +2388,22 @@ ate the room. `bodyZone`/`contactMode`/`cropScale` ride along too, on every fram
 **`castSlugs` rides along on every product draft as well**, because §3.7 clause (a) is only
 checkable when the row names who the skin belongs to. A product row written without these is a run
 defect: report it in the run summary by row id rather than letting it land as a null nobody reads.
+
+**"Every frame that touches skin" names every Instagram and X format, not only `campaign`
+(ticket #22340, second strike).** Two consecutive weeks measured `body_zone` present on every
+`campaign` row and null on every `notebook_echo`, `new_in`, `new-in-carousel`, and `carousel` row,
+because the frame-brief step only asked for the on-skin treatment on the cast/campaign path. The
+§3.2c standing order (every post is a bodyscape post) does not exempt a product-card or batch
+format: a Notebook-echo product shot, a New-in single pick, the New-in carousel's slide 1 (already
+on-skin per Step 2.9a), and any other carousel hero all carry a body zone the same way a campaign
+row does. When briefing any of these formats, set `bodyZone`, `contactMode`, and `cropScale` on the
+draft call exactly as on a campaign row; there is no format on this list that is exempt. **A format
+that genuinely cannot carry an on-skin frame must say why** (a no-product education beat, a
+typographic-only slide with no image subject at all) by naming the reason in the row's draft event
+summary rather than leaving `body_zone` null with no explanation — the same discipline the
+pairing-presence self-check already holds toy-featuring drafts to. A dedicated `bodyZoneNoneReason`
+column that the publish gate itself can read, mirroring `pairingNoneReason` (migration 100), is a
+separate schema + gate change for the code lane, not something this docs-only pass can add.
 
 **`shopifyProductId` rides along on every product draft, and it is the one field on this list that
 has a money consequence when it is missing.** It is the Shopify product gid
