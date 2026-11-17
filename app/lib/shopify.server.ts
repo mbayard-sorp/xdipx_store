@@ -4269,9 +4269,16 @@ const XDIPX_PUBLICATION_NAMES = [
 /**
  * Channels we never want products on. Point of Sale auto-attaches new products
  * at the store level, so we explicitly unpublish from it.
+ *
+ * Facebook & Instagram: owner direction 2026-11-17. The channel syncs whatever
+ * is published to it into Meta catalog 1551461513373481, and the owner had all
+ * 652 products pulled off it that day. Imports never published here, but
+ * listing it makes the rule explicit: an import or re-enrich also clears a
+ * product that reached the channel some other way (a bulk action in admin).
  */
 const XDIPX_EXCLUDED_PUBLICATION_NAMES = [
   'Point of Sale',
+  'Facebook & Instagram',
 ]
 
 /**

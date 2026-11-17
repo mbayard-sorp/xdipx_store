@@ -263,6 +263,12 @@ What follows from this:
 - **Do not hand-delete rejected items in Commerce Manager.** The catalog's only data source is the
   Shopify partner integration, so deletions are re-created on the next sync. Unpublish from the
   Facebook & Instagram channel in Shopify instead.
+- **The channel is empty since 2026-11-17 (owner direction).** All 652 products then published to
+  Facebook & Instagram were unpublished, so the sync has nothing to send and the Meta catalog drains
+  as it runs. The channel and its connection stay installed. `publishProductToXdipxChannels`
+  (`app/lib/shopify.server.ts`) lists the channel in `XDIPX_EXCLUDED_PUBLICATION_NAMES`, so every
+  import and re-enrich unpublishes from it. Putting products back is an owner decision. The verdict
+  counts above describe the channel before that date.
 
 Re-verify the counts before citing them. They move as Meta works through the review queue.
 
