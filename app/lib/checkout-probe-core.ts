@@ -32,6 +32,23 @@ export interface FetchCheck {
 const BOT_WALL_STATUSES = new Set([401, 403, 429])
 
 /**
+ * Statuses the HTTP tier's idempotent GET checks (homepage, pdp) retry once
+ * before failing the step. This is the exact symptom `release-engine.server.ts`
+ * already retries around on post-deploy smoke: a PDP answers 503 when a single
+ * Storefront lookup times out (`_layout.products.$slug.tsx` turns that timeout
+ * into a deliberate 503 + Retry-After so a slow Shopify response never reads as
+ * a dead page to Google). All five smoke rollbacks from 2026-09-09 to
+ * 2026-10-01 (cron_runs 3006, 5265, 5702, 6160, 13045) carried this identical
+ * evidence, two of them on docs-only deploys that could not have caused it.
+ * The checkout probe is the one signal allowed to page the owner by SMS, so a
+ * single-shot check on this same transient blip pages for nothing — this set
+ * gives it the same one-retry tolerance the smoke check already has, without
+ * loosening what counts as a real failure (a second miss still fails the
+ * step).
+ */
+export const RETRYABLE_GATEWAY_STATUSES = new Set([502, 503, 504])
+
+/**
  * Decide what a checkout-page response means. Pure, so it can be tested without
  * a network — this is the only signal in the estate permitted to page the owner
  * by SMS, and its decision rule should not live only inside a fetch.
