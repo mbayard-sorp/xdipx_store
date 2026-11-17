@@ -380,9 +380,19 @@ export async function runCategoryHealthcheck(): Promise<CategoryHealthResult> {
     // manual re-check — one transient blip, not three page defects, but it
     // cost three full triage cycles. A path whose problems differ from its
     // peers' still files on its own, exactly as before.
+    //
+    // #22611: the grouping key also partitions by `surface`. A fetch-level
+    // abort is surface-agnostic text, so a category/drop path and the deck
+    // can share the identical `problems` signature while needing different
+    // remediation — the deck's own warning a few lines below (do NOT
+    // unpublish `singleton.panelDeck`) must never be swallowed by the
+    // generic correlated-blip text a same-signature category group gets.
+    // Partitioning by surface keeps the deck filing on its own, with its own
+    // deck-shaped remediation, even when its problems text happens to match
+    // a correlated category/drop blip in the same run.
     const bySignature = new Map<string, CategoryPageCheck[]>()
     for (const c of failed) {
-      const sig = JSON.stringify(c.problems)
+      const sig = JSON.stringify({ surface: c.surface, problems: c.problems })
       const group = bySignature.get(sig)
       if (group) group.push(c)
       else bySignature.set(sig, [c])
