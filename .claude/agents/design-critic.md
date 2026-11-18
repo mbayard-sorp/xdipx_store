@@ -76,6 +76,14 @@ names a specific SKU or product, spot-check it against a live data query (Shopif
 available to you) before it goes into the ranked defect list. Implementing a fix for a non-defect on
 a live storefront page risks a real visual regression for zero benefit — this check is cheap next to
 that cost.
+
+**When you have a screenshot in hand, measure it with `scripts/design-crop.ts` rather than eyeballing
+or hand-rolling a one-off script (ticket #22811).** It has `measure`/`crop` from the original build,
+plus `probe px|rows|cols|region|uniq` for a point reading, a luminance profile along a row or column,
+a region's mean color, or a top-colour histogram, and `grounds <png> --x <px>` for the full
+band-ground sequence down one column as nearest-v3-token hexes. Doctrine section 1's "grounds
+alternate" rule has no other mechanical check, so `grounds` is the fastest way to confirm or refute a
+spacing/color-discipline finding before it goes into the ranked defect list.
 </verification>
 
 <verdicts>
