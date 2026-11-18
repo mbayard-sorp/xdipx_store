@@ -268,6 +268,34 @@ const RESTRICTION_PHRASE_RE =
   /immersion only|does not cover jets|carr(?:y|ies) (?:their|its) own ratings?|do(?:es)? not stack|needs? its own rating|written instruction from the maker|rather than from the (?:code|rating)|(?:toy|maker|manufacturer|brand)'?s own (?:instructions?|manual|care guide|directions)/i
 
 /**
+ * A REQUIREMENT-shaped restriction NAMES the condition that satisfies it —
+ * "needs a/the rating that covers jets", "a written instruction from the
+ * maker that this toy CAN go under a shower" — rather than flatly denying
+ * coverage. The house sentence this guards lists several codes with
+ * DIFFERENT conditions in one breath ("IPX5 or IPX6 or a DUAL IPX6 and IPX7
+ * mark"): IPX5 and IPX6 are each plainly sufficient alone, but IPX7 only
+ * counts paired with IPX6. This module's per-sentence (not per-token or
+ * per-clause) model has no way to grant IPX5/IPX6 while leaving IPX7
+ * unresolved, so — same remedy as MULTI_CODE_INDEPENDENT_RE and
+ * PER_CODE_CERTIFIES_ONLY_RE below — it is safer to attribute NO instruction
+ * at all for this bucket than to guess, which a flat `forbid` (the original
+ * bug) or a flat `allow` (a tried-and-reverted first fix, see git history)
+ * both do. RESTRICTION_PHRASE_RE's vaguer, bare phrasing ("needs its own
+ * rating" with nothing said about what satisfies it, a lone "written
+ * instruction from the maker" with no stated outcome) is a true restriction
+ * and is unaffected by this regex, which only matches the narrower shape
+ * that actually spells out the satisfying condition (#22827 live-corpus
+ * false positive: the sentence above was misread as flatly forbidding
+ * IPX5/IPX6/IPX7, producing 30 of 34 false `conflicting-instruction`
+ * findings in one live-corpus audit against every other post's correct
+ * "IPX5/IPX6 mean water jets" definition of the same codes; forcing a flat
+ * `allow` instead just traded those for 5 new false positives against posts
+ * correctly stating that IPX7 ALONE does not cover the shower).
+ */
+const REQUIREMENT_GRANT_RE =
+  /\bneeds?\s+(?:a|the)\s+ratings?\s+that\s+covers?\b|\bwritten instructions?\s+from the maker\s+that\b[^.!?]{0,60}\bcan\b/i
+
+/**
  * A sentence naming TWO OR MORE distinct ingress codes that explicitly says
  * they are independent of each other ("the two do not imply each other")
  * cannot be safely read as a single allow/forbid for any one of those
@@ -283,6 +311,33 @@ const RESTRICTION_PHRASE_RE =
  * code each clause was actually about.
  */
 const MULTI_CODE_INDEPENDENT_RE = /\bdo(?:es)? not imply each other\b/i
+
+/**
+ * A sentence giving each of 2+ distinct ingress codes its OWN "<CODE>
+ * certifies <X> only" clause describes DIFFERENT codes' DIFFERENT scopes in
+ * one sentence — the same per-sentence-not-per-clause misattribution risk
+ * MULTI_CODE_INDEPENDENT_RE above already guards, a second shape of it
+ * (#22827 live-corpus false positive: "IPX4 certifies protection against
+ * splashing only, so a toy carrying that code stays out of the shower and
+ * never goes under water, and IPX7 certifies immersion only, ... which
+ * comes with no promise about a shower or a tap" — IPX4's own negated
+ * clause, "never goes under water", uses no word this module's submersion
+ * vocabulary recognizes, so the sentence's only submersion-bucket match is
+ * IPX7's "immersion", correctly read `allow` under SUBMERSION_LIKE_WORD_RE's
+ * "immersion only grants, doesn't deny" rule — and that single sentence-wide
+ * read then gets misattributed onto IPX4 too, reporting IPX4 as ALLOWING
+ * submersion when the sentence says the opposite). Safer to drop the
+ * sentence's instructions entirely, exactly like MULTI_CODE_INDEPENDENT_RE,
+ * than to teach this module to split clauses it doesn't model.
+ */
+const PER_CODE_CERTIFIES_ONLY_RE = /\b(IPX?\d{1,2})\b\s+certifies\s+[a-z]+(?:\s+[a-z]+){0,4}\s+only\b/gi
+
+/** Distinct ingress codes that each get their own "<CODE> certifies ... only" clause in the sentence. */
+function distinctCertifiesOnlyCodes(sentence: string): Set<string> {
+  const codes = new Set<string>()
+  for (const m of sentence.matchAll(PER_CODE_CERTIFIES_ONLY_RE)) codes.add(m[1]!.toUpperCase())
+  return codes
+}
 
 /**
  * Matches a word a bucket/water-contact scan found when that word itself
@@ -378,9 +433,17 @@ function scanIngressSentence(
   if (tokens.size === 0) return []
 
   const isDefiner = DEFINER_RE.test(sentence) || hasApposedRatingGloss(sentence)
-  // A sentence naming 2+ codes that explicitly declares them independent
-  // can't be safely attributed to either one — see MULTI_CODE_INDEPENDENT_RE.
-  const unscopeable = tokens.size > 1 && MULTI_CODE_INDEPENDENT_RE.test(sentence)
+  // A sentence naming 2+ codes that explicitly declares them independent, or
+  // that gives each of 2+ codes its own "<CODE> certifies ... only" clause,
+  // can't be safely attributed to either one — see MULTI_CODE_INDEPENDENT_RE
+  // and PER_CODE_CERTIFIES_ONLY_RE. A requirement-shaped sentence
+  // (REQUIREMENT_GRANT_RE) has the same problem whenever it lists codes with
+  // different conditions ("IPX5 or IPX6 or a dual IPX6 and IPX7 mark") — see
+  // that regex's own doc comment.
+  const unscopeable =
+    REQUIREMENT_GRANT_RE.test(sentence) ||
+    (tokens.size > 1 &&
+      (MULTI_CODE_INDEPENDENT_RE.test(sentence) || distinctCertifiesOnlyCodes(sentence).size > 1))
   const instructions: { bucket: string; polarity: InstructionPolarity }[] = []
   if (!unscopeable) {
     for (const bucket of ACTION_BUCKETS) {

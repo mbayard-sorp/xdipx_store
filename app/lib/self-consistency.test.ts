@@ -643,6 +643,102 @@ describe(
   },
 )
 
+describe('requirement-shaped restriction phrasing (#22827 live-corpus false positive)', () => {
+  // The frozen house sentence from how-do-couples-use-a-prostate-massager-together
+  // and how-do-you-use-a-clitoral-suction-toy: it lists IPX5 and IPX6 as each
+  // plainly sufficient alone, but IPX7 only paired with IPX6 ("a dual IPX6 and
+  // IPX7 mark"). This module has no per-token attribution, so it cannot grant
+  // IPX5/IPX6 while leaving IPX7 unresolved — it drops the instruction
+  // entirely for this bucket rather than guessing (same remedy as the
+  // multi-code tests below). Pre-fix, a flat `forbid` collided with 15 other
+  // posts' correct "IPX5/IPX6 mean water jets" definitions as 30 false
+  // conflicting-instruction findings; a flat `allow` (tried and reverted)
+  // traded those for 5 new false positives against posts correctly stating
+  // IPX7 alone does not cover the shower.
+  const houseSentence =
+    'The shower needs a rating that covers jets, IPX5 or IPX6 or a dual IPX6 and IPX7 mark, ' +
+    'or a written instruction from the maker that this toy can go under a shower.'
+
+  it('attributes no direct-spray instruction to any code in the requirement sentence', () => {
+    const report = analyzeParagraphs([{ section: 'Water ratings', text: houseSentence }])
+    expect(report.findings.some(f => f.kind === 'undefined-token')).toBe(false)
+  })
+
+  it('does not read the requirement sentence as forbidding the codes it names as sufficient', () => {
+    const report = analyzeParagraphs([
+      { section: 'Water ratings', text: houseSentence },
+      { section: 'Water ratings', text: 'IPX5 and IPX6 mean water jets, which is what a running tap is.' },
+    ])
+    expect(report.findings.some(f => f.kind === 'conflicting-instruction')).toBe(false)
+  })
+
+  it('does not flag a cross-post conflict against a post defining the same named codes', () => {
+    const draftParagraphs = [{ section: 'Water ratings', text: houseSentence }]
+    const priors = [
+      {
+        slug: 'what-makes-a-vibrator-body-safe',
+        paragraphs: [{ section: 'Water ratings', text: 'IPX5 and IPX6 mean water jets, which is what a running tap is.' }],
+      },
+    ]
+    expect(findCrossPostIngressConflicts(draftParagraphs, priors)).toHaveLength(0)
+  })
+
+  it('does not flag a cross-post conflict against a post correctly forbidding IPX7 alone', () => {
+    // IPX7 is only named as part of the "dual IPX6 and IPX7" condition, so a
+    // post correctly stating IPX7 alone does not cover the shower must not
+    // collide with the requirement sentence either (the regression a flat
+    // `allow` fix introduced).
+    const draftParagraphs = [{ section: 'Water ratings', text: houseSentence }]
+    const priors = [
+      {
+        slug: 'what-makes-a-vibrator-body-safe',
+        paragraphs: [
+          { section: 'Water ratings', text: 'IPX7 on its own gets you the basin, and the shower comes from Womanizer rather than from the code.' },
+        ],
+      },
+    ]
+    expect(findCrossPostIngressConflicts(draftParagraphs, priors)).toHaveLength(0)
+  })
+})
+
+describe('multi-code "<CODE> certifies ... only" clauses (#22827 live-corpus false positive)', () => {
+  // Live house sentence from what-makes-a-great-g-spot-rabbit-vibrator: IPX4's
+  // own clause ("never goes under water") uses no word the submersion bucket
+  // recognizes, so pre-fix the sentence's only submersion match was IPX7's
+  // "immersion" (correctly `allow`), misattributed onto IPX4 too — reporting
+  // IPX4 as ALLOWING submersion when the sentence says the opposite.
+  const houseSentence =
+    'IPX4 certifies protection against splashing only, so a toy carrying that code stays out of the ' +
+    'shower and never goes under water, and IPX7 certifies immersion only, a metre for half an hour, ' +
+    'which comes with no promise about a shower or a tap.'
+
+  it('does not attribute IPX7s clause onto IPX4 in the same sentence', () => {
+    const report = analyzeParagraphs([
+      { section: 'Water ratings', text: houseSentence },
+      { section: 'FAQ', text: 'Keep an IPX4 toy out of the shower and never submerge it.' },
+    ])
+    expect(report.findings.some(f => f.kind === 'conflicting-instruction' && f.token === 'IPX4')).toBe(false)
+  })
+
+  it('does not flag a cross-post conflict for IPX4 against a post that correctly forbids it', () => {
+    const draftParagraphs = [{ section: 'Water ratings', text: houseSentence }]
+    const priors = [
+      { slug: 'other-post', paragraphs: [{ section: 'FAQ', text: 'Keep an IPX4 toy out of the shower and never submerge it.' }] },
+    ]
+    expect(findCrossPostIngressConflicts(draftParagraphs, priors)).toHaveLength(0)
+  })
+
+  it('still flags a genuine single-code restriction, unaffected by the multi-code unscopeable guard', () => {
+    const report = analyzeParagraphs([
+      { section: 'Water ratings', text: 'IPX7 covers immersion only, so never run it under a shower or a direct tap.' },
+      { section: 'FAQ', text: "The toy's IPX7 rating means you can use it right in the shower." },
+    ])
+    const hit = report.findings.find(f => f.kind === 'conflicting-instruction')
+    expect(hit).toBeDefined()
+    expect(hit?.token).toBe('IPX7')
+  })
+})
+
 describe('analyzeDraft — portable text structure, including the FAQ block', () => {
   it('counts a cross-site mismatch when one site lands only in the FAQ block', () => {
     const report = analyzeDraft({
