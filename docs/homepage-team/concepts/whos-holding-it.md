@@ -12,6 +12,33 @@
 > `concepts/either-or.md`, `concepts/how-you-arrive.md`, `concepts/the-next-step.md`,
 > `concepts/first-tap.md`, `concepts/curiosity-echo.md`.
 
+## RETIRED — 2026-11-11, Routine B run 1967 (ticket #12610)
+
+**This concept is retired. Do not build it, and do not count it against the
+banked-concept ceiling.**
+
+The retirement decision and its full reasoning were recorded by run 1967 in the
+stance-tag audit appended at the END of this file; read that section for the
+measurements. This header exists because the decision was only ever written
+there, in the body of an appended audit inside a 39 KB file, while the other two
+retired concepts (`sensation-map.md`, `how-you-arrive.md`) each carry a
+top-level `## RETIRED` header like this one.
+
+Why that mattered enough to fix: the banked-concept ceiling (#11085) is a
+STATED DECISION keyed to a COUNT, and the cheap, obvious way to take that count
+is to read the top of each concept doc. Done that way this file read as live,
+returning six banked concepts instead of five and firing the ceiling spuriously.
+Routine B run 2093 hit exactly that and added this header. A decision recorded
+only where the next reader will not look is a decision that un-makes itself.
+
+The one-line reason, so this header is self-contained: the concept's two axes
+were built on the `In-Charge` / `Surrendered` mood tags, and the audit found
+those tags are a product category wearing a feeling's name rather than an
+independent stance axis, so the stance question could only ever return a shelf
+instead of an answer. The stance premise was the whole concept.
+
+---
+
 ## 1. The idea in one line, and the job it serves
 
 **Who is in the room, and who is holding it.** One band asks the visitor for two

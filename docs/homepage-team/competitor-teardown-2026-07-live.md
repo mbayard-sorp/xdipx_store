@@ -2939,3 +2939,334 @@ exactly two. The retired-route denylist is untouched.
 Traffic remains far below the 300-sessions/week weighting threshold, so the
 proof, discretion and nav items above stay banked as design capital, and this
 cycle spent its build budget on one cheap, measured, certain defect.
+
+## Delta, 2026-11-18 (Routine B run 2093)
+
+### Sourcing
+
+Five live fetches this run, 2026-11-18. Four returned content and are the only
+outside sites reported below.
+
+- `lovense.com` **200**, read. Partial read, and worth stating: the page is
+  217,605 characters and the fetch returned the first 100,000. The header
+  countdown is inside that window; anything below it was not read.
+- `getmaude.com/products/vibe` **200**, read in full. First PDP capture on this
+  bench.
+- `getmaude.com/blogs/the-maudern` **200**, read in full. First editorial-index
+  capture on this bench.
+- `dame.com/products/eva` **301** to `dameproducts.com/products/eva-ii`, which
+  **301**'d back to `dame.com/products/eva-ii`. Followed both hops manually and
+  read the third URL. The round trip is a live redirect loop between their own
+  two domains, recorded as an observation and not a finding.
+- `xdipx.com/products/tantus-p-spot-vibrating-dildo-onyx` **200**, our own page,
+  read in full.
+
+Not fetched and therefore not reported: `lovehoney.com` (403 last week, not
+re-attempted this run, so the bench still has no fresh Lovehoney read),
+Spectrum's or TooTimid's PDPs, Honey Play Box, and the register bench
+(Aesop, Glossier, Apple, Arket, Vush). No competitor copy is quoted from memory
+anywhere below. Every quoted string is text a fetch actually returned.
+
+Deliberate change of aim this run, per brief 22: the store's biggest search
+surface is no longer the homepage. A PDP at 309 impressions and a Notebook care
+post at 256 outrank it four to one, and organic search is the only lane that
+grew. So this is the first delta in the series that weights **PDP and editorial**
+over competitor homepages. Three of the four outside reads were PDP or editorial.
+
+### Lovense countdown: still running, bench still 9 of 10
+
+Verified, not re-derived. The header still carries the label
+`Discount Ends in:` beside the cart, digits still rendered in script and absent
+from the fetch. Run 1967's correction holds a week later and needs no further
+checking next cycle unless someone wants to argue the premise again.
+
+New this run, and small: Lovense product cards carry `55% OFF`, `60% OFF`,
+`70% OFF` and `New` badges, and **no star rating or review count at all**. That
+makes five of seven bench retailers now observed running a full homepage with no
+rating surface. See the reviews finding below, because the PDP picture is the
+opposite.
+
+### The finding that matters: our top organic entry page is a dead end, and it is a dead end by a rule that was written for the in-stock case
+
+`/products/tantus-p-spot-vibrating-dildo-onyx` is the store's single biggest
+search surface at 309 impressions. Fetched live today it renders:
+
+- Price `$51.99`, status `Sold out`.
+- One action: `Notify me when it returns ♥`. No add to cart.
+- **Zero onward product path.** No "Pairs great with", no "Complete the set",
+  no recently browsed, no alternatives of any kind.
+
+The three Notebook links are there and they are good ones, topic-matched rather
+than generic. The product path is the part that is missing.
+
+This is not a bug, which is what makes it a design decision rather than a defect
+report. `app/routes/_layout.products.$slug.tsx` builds `fbtCrossLinks` from two
+real sources only, co-purchase rows and curated pairing overflow, and the
+in-file comment for ticket #3447 states the reasoning plainly: a same-tag,
+same-vendor cold-start fallback "recommended SUBSTITUTES for the product the
+visitor was about to buy directly under the buy button", so it was removed, and
+"an empty rail here is correct, not a gap."
+
+That reasoning is right, and it is exactly inverted when the product cannot be
+bought. A substitute under the buy button of a buyable product is
+cannibalisation. A substitute under a `Notify me` button is the only useful
+thing left on the page. The sold-out branch of the buy box renders the waitlist
+button and nothing else, so a visitor who arrived from the store's
+highest-impression search result has two choices: leave an email, or leave.
+
+The bench confirms the shape of the fix without us having to invent it. Maude's
+PDP runs a related-products rail (`vibe mini`, `vibe`) at position 9 of 13.
+Dame seats a finder at the buy box itself: `Not sure which one's right?` with a
+`TAKE A QUIZ` button, sitting directly below the purchase buttons. Neither of
+those is a sold-out treatment, but both prove the field puts an onward choice at
+the decision moment rather than below the specs.
+
+### The second finding: we hold the strongest trust facts in the field and we place them worst
+
+Our PDP's trust facts, read live today:
+
+> Your statement reads XDIPX
+> Ships in plain packaging
+> Free US shipping over $99
+> Ships from Michigan and Arizona. Most orders arrive in two to three days.
+> 30-day returns
+> Always genuine
+> Body-safe materials
+
+Seven facts, mechanism-first, no adjective doing the work, and the Michigan and
+Arizona line is more concrete than anything either bench PDP carries. They
+render at position 11 of 14, below the specs. In the route file the trust bar is
+at line 1277 and the primary CTA is at line 1135, so roughly 140 lines of JSX
+sit between the button and the reassurance.
+
+What the two bench PDPs put at the button:
+
+- **Dame:** one line, `60 Day Returns + Discreet Shipping`, plus four attribute
+  badges above the price (`Stays in place`, `3 Intensity Levels`,
+  `Couple Friendly`, `100% Body-safe`). Its cart drawer adds `60-Day Returns`,
+  `3-Year Warranty`, `Free Shipping`.
+- **Maude:** nothing. Rating and review count only. Its one shipping line
+  (`Free U.S. shipping on orders $85+`) lives in the site header.
+
+So the honest count is one of two, not two of two, and the one that does it is
+the category-adjacent brand rather than the register match. That is weaker
+evidence than backlog item 9 has been assumed to rest on, and it still points the
+same way, because our own substance is richer than Dame's single line and is
+sitting eleven sections down the page. Item 9 does not need more proof from the
+field. It needs the move.
+
+**One thing this finding turned up that is not a placement question at all.**
+The `Free US shipping over $99` above is the PDP's wording. The same strip on
+every collection page reads `Free US shipping over $59`, because collection
+pages fall through to `TRUST_STRIP_FALLBACK`, which interpolates
+`FREE_SHIPPING_THRESHOLD` (currently 59), while the published Sanity block the
+homepage and PDP render hardcodes `$99`. Two different free-shipping promises
+are live on the same site and at least one of them is wrong. That is a money
+claim, not a design question, and it is owner blocker **#7184** (P1), not an
+item on this list.
+
+### Reviews: the field skips them on homepage cards and runs them hard at the buy box
+
+Run 1967 found four of six bench retailers shipping no rating surface on
+homepage product cards and concluded item 8's dependency was loosening. Lovense
+makes that five of seven today. The PDP reads invert it completely:
+
+- Maude: `4.8 Rated 4.8 out of 5 stars`, `1,443 Reviews`, printed three times on
+  one page (top, mid-page, and `Based on 1,443 reviews` in the review section).
+- Dame: `4.5 Rated 4.5 out of 5 stars`, `1,221 Reviews`, at the top beside the
+  title.
+
+Both put it adjacent to the price and the add-to-cart. Our PDP shows none, which
+is correct per doctrine §6 and the `reviews_pdp_enabled` valve, since the data is
+not there. Nothing to ship. What changes is the aim of item 8: the slot that the
+field actually treats as table stakes is the **PDP buy box**, not the homepage
+card. When real review data exists, it goes there first and to homepage cards
+second. Written down so the next cycle does not spend item 8's first build on the
+wrong surface.
+
+### Editorial: the bench's care content is a traffic asset, and so is ours
+
+First look at this bench's editorial layer, and it is the surface our own traffic
+is actually landing on.
+
+Maude runs `the maudern®`, described on its own index as
+`weekly dispatches by maude® on modern intimacy through the arts, culture,
+science, and relationships`. Structure worth noting:
+
+- **No author bylines anywhere on the index.** No names, no credentials, no bios.
+- Topic menus: Culture, Film, History, Relationships, Sex Education, Design,
+  plus a Partnerships menu (Brooklinen, SURI, Stripes Beauty and others).
+- Card labels are inconsistently cased across the same grid (`dating`,
+  `Relationships`, `sex education`), and two labels (`dating`, `Science`) appear
+  on cards without existing in the topic menu.
+- Cover art is mostly photographic, with filenames indicating Pexels and
+  Unsplash stock mixed with credited studio shots.
+- No buy buttons inside article cards. Product names appear inside copy
+  (`shine aloe or shine silicone`).
+- Email capture present: `Sign up to receive updates from the maudern,
+  promotions, and early access to new products.`
+- The PDP carries a `the maudern®` carousel at position 12 with a `View all`
+  link, so editorial and PDP link both directions.
+
+Dame keeps its editorial as three separate footer doors (`About Dame`,
+`Lab`, `Blog`, the last described as `Guides on pleasure, intimacy and sexual
+wellness`) with nothing surfaced on the PDP body.
+
+Care content, which is the thing a care post ranks for:
+
+- **Maude, three separate placements on one PDP.** A `cleaning` details tab
+  (`Clean your device before and after every use`), a dedicated `care` section
+  covering storage, lubricant compatibility and water contact plus
+  `not for medical use`, and the FAQ again. Materials in a `composition` tab:
+  `Phthalate- and latex-free, soft-touch, 100% platinum-grade silicone exterior
+  (REACH passed / FDA grade)`.
+- **Dame, none.** No cleaning or care instructions appeared anywhere in the
+  captured PDP. Materials are one badge, `Medical Grade Silicone`, and a
+  `100% Body-safe` chip.
+- **Ours, two placements plus specs.** A `Care Instructions` section at position
+  8, care FAQs, and specs carrying `100% Ultra-Premium Silicone`, hypoallergenic,
+  `Boilable, bleachable, dishwasher safe`, and `Wash with mild soap and warm
+  water after each use`.
+
+We are ahead of Dame and roughly level with Maude on care, and ahead of both on
+editorial honesty, since Emma is a named guide with a stated nature and neither
+of them puts any name on an article at all. Protect both. On the week where
+organic is the only growing lane and a care post is the number two impression
+surface, this is the part of the page that is working, and the finding is that it
+needs defending rather than rebuilding.
+
+### One thing the fetch could not verify, stated rather than filled in
+
+The fetch of our PDP reported the `How it feels` block rendering six labels
+(Beginner friendliness, Insertable size, Tapered fit, Base security, Firmness,
+Vibration intensity) with "no values shown", which reads like a live empty-data
+defect. It is not, as far as can be established from markup alone, and the
+reasoning is recorded so nobody files it: `SensationDial.tsx` filters out any
+item whose `value > 0` is false and returns `null` when nothing survives, so
+labels rendering implies values exist. The bars are `div`s whose only text
+equivalent is an `aria-label` that markdown extraction drops. The bar fills were
+not confirmed visually, because the teardown pass had no rendered screenshot of
+a PDP. The homepage hero's own dial WAS confirmed this run from the served HTML,
+rendering three items with real values (`Hands-free wear: 4 of 5`,
+`Partner sensation: 5 of 5`, `Adjustability: 4 of 5`), which is evidence for the
+same conclusion on a different surface but not proof for the PDP.
+
+### Adopted
+
+1. **Backlog item 9 (PDP evidence surfaces) is re-scoped around the sold-out
+   case and moves ahead of the remaining P0 homepage items for this cycle.**
+   The reason is traffic, not taste: item 9's surface is where the store's
+   inbound search traffic lands, and items 3, 4 and 7 are homepage items on a
+   page that now ranks fourth. Two named slices, in order:
+
+   **9a, the cheap and certain one, and this cycle's build.** When `!inStock`,
+   the sold-out branch of the buy box gains one onward link beside
+   `Notify me when it returns ♥`, pointing at the product's own category
+   collection, resolved from the breadcrumb data the loader already returns
+   (`loaderData.breadcrumbs`, already used elsewhere in the same route). No new
+   query, no new data source, no new URL:
+   `app/routes/_layout.collections.$handle.tsx` already serves it. Label from
+   the whitelist, cleared by `emma-empathy-reviewer` before ship. `[shell-PR]`,
+   `rr7-engineer`.
+
+   **9b, banked, not this cycle.** A substitute rail on the sold-out branch only,
+   under its own honest heading rather than `Complete the set`. This is the
+   fallback #3447 deleted, revived with the stock condition #3447 never
+   considered, and it needs a query that does not currently exist. It is a
+   follow-up with its own ticket, and the #3447 comment should be amended in the
+   same PR so the next reader finds the scope rather than re-deriving it.
+
+   **9c, the trust duo, stays where item 9 already had it,** now with live
+   evidence rather than field inference: lift `Your statement reads XDIPX`,
+   `Ships in plain packaging` and `30-day returns` to a hairline-framed line
+   directly under the primary CTA, leaving the full seven-item bar where it is at
+   position 11. Deliberately not bundled with 9a, so 9a stays a low-blast-radius
+   diff.
+
+2. **Item 8's target surface is corrected to the PDP buy box.** Five of seven
+   bench retailers run no rating on homepage cards; both bench PDPs run rating
+   plus exact count beside the price. When real data exists it ships at the buy
+   box first. No change to the suppression rule, no change to priority, and
+   nothing ships now.
+
+3. **Item 5 keeps the mechanism-first target shape run 1967 gave it, and the PDP
+   trust bar is now the proof that we can already write that way.** Seven live
+   facts, none of them leaning on the word discreet. The remaining gap in item 5
+   is the trust strip on the homepage, which still runs the adjective, and the
+   guarantee name and terms, which still wait on the owner. Unchanged otherwise.
+
+4. **Care and editorial depth are promoted to protect-list items.** Two care
+   placements plus specs beats one of two bench PDPs outright and matches the
+   other. Named-guide editorial beats both, since neither bylines anything. No
+   build. Recorded so a future tidy-up does not thin the care sections on the one
+   surface that is growing.
+
+### Rejected, with reasons, so they are not re-proposed
+
+1. **Lovense's `Discount Ends in:` header clock, and its `55% OFF` / `70% OFF`
+   card badges.** Charter-banned, and our MAP rules make a percent badge a
+   per-product legal question regardless. Field fact, never an option. Third
+   delta running for the discount-badge half.
+2. **Maude's `subscribe & save Save 100%` purchase option.** Rejected on
+   correctness, not register: the label contradicts their own site banner
+   (`Save up to 15% off!`) on the same page. A subscription frame on
+   consumables is a merchandising conversation worth having one day; this
+   particular execution is an argument for not rushing it.
+3. **Dame's buy-box quiz entry (`Not sure which one's right?` plus
+   `TAKE A QUIZ`).** Tempting, and it is the single best idea read this week,
+   and it is still rejected for now. Taking it means a third `/discover` link,
+   and the two-link cap stands. It also argues against itself: item 11 was
+   lowered by run 1837 and kept low by run 1967 for billing guided selling in the
+   nav, and Dame billing its quiz at the **buy box** rather than the nav is more
+   evidence for that ranking, not less. Banked as a note on item 11: the eventual
+   right home for a finder entry is the decision moment, and 9a is the
+   cheapest honest version of it, because a sold-out dead end is the one place a
+   finder link costs no in-stock click.
+4. **Maude's three-placement care redundancy.** We already run two placements
+   plus specs. A third is duplicate content on a page whose care section is
+   already ranking, and the thing to do with a working surface is leave it alone.
+5. **Maude's untagged, unbyline editorial index.** Inconsistent card casing and
+   labels that do not exist in their own topic menu. Our Notebook has a named
+   guide and consistent labels. Nothing to take.
+6. **Anything requiring generated imagery** (items 3 and 4). Still gated on
+   asset-generation spend, still unmeasurable at roughly 94 sessions per week
+   against the 300 gate, and the homepage is now the fourth-biggest search
+   surface, so homepage imagery is the worst-targeted spend on the board this
+   week.
+
+### Banked-concept ceiling (#11085): does NOT fire, with the arithmetic
+
+An earlier draft of this delta asserted the ceiling was "long past five." That
+is wrong and is corrected here rather than carried forward. The live banked
+bench is **exactly five**: `curiosity-echo`, `either-or`, `first-tap`,
+`nothing-in-the-way`, `the-next-step`. Three are retired and not countable:
+`how-you-arrive` and `sensation-map` (both 2026-10-07, run 1298) and
+`whos-holding-it` (run 1967, whose stance premise the tag audit removed). The
+ceiling fires only ABOVE five, so at five it does not fire and this cycle owes
+no "why not the cheapest banked concept" statement.
+
+It is worth saying what made the miscount easy, because the next cycle will
+count the same way. `how-you-arrive.md` and `sensation-map.md` both carry a
+top-level `## RETIRED` header; `whos-holding-it.md` carried its retirement only
+in the body of an appended audit at the very end of a 39 KB file, with no header.
+Counting the bench by header, which is the cheap and obvious way to count it,
+returned six and would have fired the ceiling spuriously. Run 2093 added the
+missing header in the same PR as this delta.
+
+### IA fence check
+
+No new section type. No Sanity schema change, additive or otherwise. No new URL
+and no new route, so nothing goes to `tech-architect`: 9a links to
+`/collections/{handle}`, served today by
+`app/routes/_layout.collections.$handle.tsx`. The locked Nº 01 to Nº 11 homepage
+shell is untouched, and every proposal here is on the PDP route, which sits
+outside that shell and adds no band to it. The two-link `/discover` cap is
+unchanged and is the stated reason Dame's buy-box quiz entry is in the Rejected
+list rather than the Adopted one. The retired-route denylist is untouched.
+Adopted items 2, 3 and 4 change claims and rankings in this document and ship no
+surface.
+
+Traffic remains far below the 300-sessions-per-week weighting threshold, so the
+proof, trust-placement and finder items above stay banked as design capital, and
+this cycle spends its build budget on one cheap, bounded, certain fix on the page
+our actual visitors arrive at.
