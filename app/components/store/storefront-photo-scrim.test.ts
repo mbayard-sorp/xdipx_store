@@ -118,4 +118,41 @@ describe('StorefrontHome.tsx — every photo scrim goes through the shared const
     const usages = source.match(/background:\s*PHOTO_SCRIM_STYLE/g) ?? []
     expect(usages).toHaveLength(2)
   })
+
+  // ── Placement, added by run 2093 ──────────────────────────────────────────
+  //
+  // The assertions above pin the scrim's ALPHA FLOOR and its USAGE COUNT. They
+  // do not pin WHERE it is painted, and that gap was not theoretical: ticket
+  // #21294 is precisely a scrim painted in the wrong place, and run 2093
+  // confirmed the hole by restoring the defect (moving the promo's scrim back
+  // onto an `absolute inset-0` div) and watching all eight assertions in this
+  // file stay green.
+  //
+  // The causal trace: `absolute inset-0` + this gradient covers the WHOLE
+  // photo, so the top of the frame is darkened to roughly 18% of white, where
+  // doctrine §3 wants the top 40-45% untouched. design-critic measured exactly
+  // that on the live promo band (mean luminance 57.8 at 1440, 65.9 at 375, top
+  // of frame 47.0) against the already-fixed couples band at 109.1 on the same
+  // page. Painting the gradient on the TEXT COLUMN instead covers only what the
+  // copy occupies, which is why the alpha floor above can stay exactly as it is:
+  // the fix shrinks the covered AREA, never the floor, so the #8417 regression
+  // (wrapped CMS copy past a `transparent 55%` stop, plum emphasis at 1.03:1)
+  // cannot come back through this door.
+  it('never paints the scrim across a whole image via an inset-0 overlay', () => {
+    // Both orderings, since the style prop can precede or follow the className.
+    expect(source).not.toMatch(/absolute inset-0[^>]*?PHOTO_SCRIM_STYLE/s)
+    expect(source).not.toMatch(/PHOTO_SCRIM_STYLE[^>]*?absolute inset-0/s)
+  })
+
+  it('paints both scrims on a text column that bleeds its own box', () => {
+    // The negative-margin/padding pair is what extends coverage past the
+    // glyphs without resizing the column in its flex row. A usage without it
+    // is a scrim clamped to the text's tight bounding box, which clips.
+    const bleeds = source.match(/-my-5 rounded-\[var\(--radius-lg\)\] py-5 md:-my-7 md:py-7/g) ?? []
+    expect(bleeds).toHaveLength(2)
+    // Each scrim is applied conditionally on that band actually having a photo,
+    // so a photo-less band keeps its paper ground rather than a dark plate.
+    const conditional = source.match(/style=\{has(?:Promo)?Image \? \{ background: PHOTO_SCRIM_STYLE \} : undefined\}/g) ?? []
+    expect(conditional).toHaveLength(2)
+  })
 })

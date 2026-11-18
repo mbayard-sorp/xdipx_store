@@ -31,6 +31,27 @@ export const TRUST_STRIP_FALLBACK: TrustStripItem[] = [
   { headline: 'Hand-checked, not auto-listed' },
 ]
 
+/**
+ * Both variants lay their items on a 2-column grid below `md`, so an ODD item
+ * count leaves the last item alone in column 1 with an empty cell beside it.
+ * Spanning it full width below `md` closes that gap; at `md` the real 5-column
+ * grid gives it its own cell anyway, so the override has to stop there.
+ *
+ * This lives in one place because it did not, and that cost a live defect.
+ * design-critic run 1967 measured the orphan on the homepage `band` variant
+ * and the fix was applied to `band` alone; run 2093 then measured the IDENTICAL
+ * void on every collection page, which renders the `card` variant, at
+ * 141 x 37 px enclosed by that variant's own border (so it reads as a missing
+ * fifth item rather than a ragged wrap). The `card` case is also the worse of
+ * the two: collection pages pass no `trustBar`, so they always get the
+ * five-item fallback below, making the orphan deterministic rather than
+ * dependent on what the team published. One helper means a third variant
+ * cannot be added without it.
+ */
+export function orphanSpanClass(index: number, count: number): string {
+  return index === count - 1 && count % 2 === 1 ? 'col-span-2 md:col-span-1' : ''
+}
+
 /** Published trust items win; drop null/inactive refs, then fall back to the
  *  shell array when nothing usable survives (never render an empty strip). */
 export function trustStripItems(block?: TrustBarBlock | undefined): TrustStripItem[] {
@@ -71,8 +92,8 @@ export function TrustStrip({
         className={`rounded-2xl border border-line bg-paper px-4 py-3.5 md:px-6 ${className ?? ''}`}
       >
         <div className="grid grid-cols-2 gap-x-6 gap-y-3 md:grid-cols-5 md:items-start md:gap-x-8">
-          {items.map(item => (
-            <div key={item.headline} className="flex items-start gap-2.5 text-[13px] text-ink-3" style={BODY}>
+          {items.map((item, i) => (
+            <div key={item.headline} className={`flex items-start gap-2.5 text-[13px] text-ink-3 ${orphanSpanClass(i, items.length)}`} style={BODY}>
               <span className="mt-px shrink-0 text-sage" aria-hidden="true">♥</span>
               <span>
                 {item.headline}
@@ -91,15 +112,10 @@ export function TrustStrip({
     <Reveal variant="fade" as="div" className={`border-t border-line ${className ?? ''}`}>
       <div className="mx-auto grid max-w-[1320px] grid-cols-2 gap-x-6 gap-y-3.5 px-6 py-[18px] md:grid-cols-5 md:items-start md:gap-x-8 md:px-16">
         {items.map((item, i) => {
-          // At 375 this is a 2-col grid: an odd item count otherwise orphans
-          // the last item alone in column 1 with an empty cell beside it
-          // (design-critic run 1967, five fallback items). Span it full width
-          // below md, where the real 5-col grid gives it its own cell anyway.
-          const isOrphan = i === items.length - 1 && items.length % 2 === 1
           return (
             <div
               key={item.headline}
-              className={`flex items-start gap-2.5 text-[13.5px] text-ink-3 ${isOrphan ? 'col-span-2 md:col-span-1' : ''}`}
+              className={`flex items-start gap-2.5 text-[13.5px] text-ink-3 ${orphanSpanClass(i, items.length)}`}
               style={BODY}
             >
               <span className="mt-px shrink-0 text-sage" aria-hidden="true">♥</span>
