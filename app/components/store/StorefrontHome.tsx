@@ -956,19 +956,43 @@ function FindYourWayIn({ block }: { block?: WayfinderMosaicBlock | undefined } =
                     sizes="100vw"
                     className="absolute inset-0 h-full w-full object-cover"
                   />
-                  {/* Ink scrim so the label stays legible over any promo photo,
-                      mirroring PhotoBand. Without it the ink text sat directly on
-                      the image (mission-brief §2 legibility rule). Shared
-                      PHOTO_SCRIM_STYLE, not a hand-typed gradient — see its
-                      definition above for the contrast-floor math (#8417). */}
-                  <div
-                    className="absolute inset-0"
-                    style={{ background: PHOTO_SCRIM_STYLE }}
-                    aria-hidden="true"
-                  />
                 </>
               )}
-              <div className="relative z-[1] flex-1 basis-[320px]">
+              <div
+                className={[
+                  'relative z-[1] flex-1 basis-[320px]',
+                  // Scrim scoped to the text's own box, not the whole image.
+                  // This is PhotoBand's treatment (ticket #21294), ported here
+                  // by run 2093 because only one of the two full-bleed bands
+                  // ever got it. The full-`inset-0` overlay this replaces
+                  // darkened the entire promo photo: design-critic measured the
+                  // live band at mean luminance 57.8 (#463136) at 1440 and 65.9
+                  // at 375, with the TOP of the frame already at 47.0, where
+                  // doctrine §3 wants the top 40-45% untouched. Un-compositing
+                  // the ink put the asset underneath at roughly rgb(235,70,88),
+                  // a bright warm frame, so this was the renderer destroying the
+                  // art rather than bad art. The already-ported couples band
+                  // measured 109.1 on the same page on the same night, which is
+                  // the evidence this treatment is the right one.
+                  //
+                  // Still the exact shared PHOTO_SCRIM_STYLE gradient (#8417),
+                  // so the alignment-agnostic 0.78-0.85 floor that protects
+                  // variable-length CMS copy is untouched: only the covered
+                  // AREA shrank, never the floor. That is what makes this safe
+                  // where doctrine §3's literal `transparent 55-60%` gradient
+                  // would not be, since #8417 exists because wrapped copy grew
+                  // past that stop and put the plum emphasis word at 1.03:1.
+                  // Where a doctrine example and a doctrine rule conflict, the
+                  // rule wins.
+                  //
+                  // The coral CTA pill is a flex sibling outside this column, so
+                  // it now sits on bare photo. That is fine and deliberate: it
+                  // is its own solid ground at 5.51:1, and the couples band has
+                  // shipped exactly that arrangement since #21294.
+                  hasPromoImage ? '-my-5 rounded-[var(--radius-lg)] py-5 md:-my-7 md:py-7' : '',
+                ].join(' ')}
+                style={hasPromoImage ? { background: PHOTO_SCRIM_STYLE } : undefined}
+              >
                 <p
                   className="mb-3.5 text-[11px] uppercase tracking-[0.18em]"
                   style={{ ...MONO, color: hasPromoImage ? 'white' : 'var(--color-plum)' }}

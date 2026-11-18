@@ -1,6 +1,6 @@
 import { Suspense, useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import type { LoaderFunctionArgs, MetaFunction } from 'react-router'
-import { Await, data, useLoaderData, useOutletContext, useFetcher, useSearchParams, useRouteLoaderData } from 'react-router'
+import { Await, data, Link, useLoaderData, useOutletContext, useFetcher, useSearchParams, useRouteLoaderData } from 'react-router'
 import type { loader as layoutLoader } from '~/routes/_layout'
 import { ProductImageGallery, type GalleryItem } from '~/components/store/ProductImageGallery'
 import { ReviewList } from '~/components/reviews/ReviewList'
@@ -11,6 +11,7 @@ import {
   StorefrontUnavailableError,
 } from '~/lib/shopify.server'
 import { normalizeProductHandles } from '~/lib/product-handles'
+import { productShelfCrumb } from '~/lib/product-shelf'
 import { resolveBreadcrumbs, type BreadcrumbCrumb } from '~/lib/breadcrumbs.server'
 import { getProductPageBlocks, getProductFaqs, getPdpTrustBar, getNotebookPostsForProduct, getNotebookPostsForProductType, getBlogPosts, isPreviewRequest } from '~/lib/sanity.server'
 import { isInLane } from '~/lib/ad-lane-subset.server'
@@ -867,6 +868,10 @@ function ProductPage() {
     multiVariant,
     dealQty: deal.qty,
   })
+  /** The shelf this product sits on, for the sold-out branch's one onward
+   *  link. Undefined when the breadcrumb trail offers nothing more specific
+   *  than Home, in which case the link is not rendered at all. */
+  const shelf = productShelfCrumb(loaderData.breadcrumbs)
   // Stock count for the StockIndicator trust signal. Prefer the selected
   // variant's real count over the stale deal-level qty on multi-variant
   // products; fall back to deal.qty only when no variant is resolved yet.
@@ -1177,8 +1182,48 @@ function ProductPage() {
                 </div>
               </fetcher.Form>
             ) : (
-              <div className="flex-1 min-w-0">
+              <div className="flex-1 min-w-0 space-y-2.5">
                 <WaitlistButton productHandle={deal.handle} />
+                {/* Until run 2093 the sold-out branch was this waitlist button
+                    and nothing else, so a visitor could leave an email or
+                    leave. That matters more than it sounds: the store's single
+                    biggest search surface is a SOLD-OUT product page (309 GSC
+                    impressions, four times the homepage's), and organic search
+                    is currently the only growing acquisition lane.
+
+                    One link, to the product's own shelf, built from breadcrumb
+                    data the loader already returns. No new query and no new
+                    route.
+
+                    Rendered ONLY on this branch, deliberately. Ticket #3447
+                    removed a same-tag fallback rail from the buy box because
+                    it "recommended SUBSTITUTES for the product the visitor was
+                    about to buy directly under the buy button", and that
+                    reasoning is right and inverts exactly here: a substitute
+                    under a buyable product's button is cannibalisation, a
+                    substitute under a waitlist button is the only useful thing
+                    left on the page. #3447 never considered the stock
+                    condition, so its comment forbids more than its decision
+                    did. The fuller substitute rail is ticket #22802.
+
+                    Copy is plain-warm, not the selling register: the product
+                    cannot be sold, so a desire-forward line here would be a
+                    tease over a closed door. "Sold out right now" states the
+                    fact and forecasts nothing, where "for now" and "between
+                    restocks" both implied a restock this store cannot promise
+                    (emma-empathy-reviewer, run 2093). Backlog item 9a. */}
+                {shelf && (
+                  <p className="text-[13px] text-ink-3" style={{ fontFamily: 'var(--font-body)' }}>
+                    Sold out right now.{' '}
+                    <Link
+                      to={shelf.href}
+                      className="link-coral"
+                      aria-label={`Take a peek at ${shelf.label}`}
+                    >
+                      Take a peek →
+                    </Link>
+                  </p>
+                )}
               </div>
             )}
           </div>
