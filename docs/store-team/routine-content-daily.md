@@ -982,6 +982,22 @@ Two reviewers, both binding, sequenced so a cheap voice failure never spends the
      re-read every string the repair ADDED against that list, not just against the rest of the
      document. Naming the list is the point: the writer holding six just-deleted time figures in
      mind is exactly who writes a seventh.
+   - **Tiered-safety-block scoping scan (part of the same pre-resubmit self-check, ticket
+     #22591).** A repair can introduce a SAFETY defect while asserting no spec, comparative,
+     frequency, or outcome, so none of the scans above have anything to catch it with. THIRD
+     OCCURRENCE of the #21314 defect class, and the first where a VOICE repair produced an
+     ACCURACY block rather than a claim: run 2074 (2026-11-17) made tier selection conditional on
+     the reader's history to fix a voice-gate block for assuming the reader's situation, and the
+     accuracy gate then blocked the repair because the tier it touched also holds triggers (new
+     loss of genital sensation, pain or broken skin with toy use) that apply regardless of
+     history, so a reader with a lifelong pattern could have used the repair sentence to dismiss a
+     red flag. When a repair touches a TIERED SAFETY BLOCK, re-read every trigger against the tier
+     it now sits in and confirm that no qualifier added to satisfy a gate (a history condition, a
+     duration, a severity word, a scoping clause) narrows a trigger that is unconditional; state
+     explicitly which triggers the qualifier governs and which it must not. The pattern that fixed
+     run 2074: restructure the block per-trigger rather than per-reader, isolating the single
+     history-dependent trigger in its own sentence and stating the others as history-independent
+     in so many words.
    - **Whole-document aphorism recount:** before resubmitting, re-run your own whole-document
      aphorism-as-closer count on the REWRITTEN draft (not just the changed strings), and separately
      count any newly added first-person sentences.
