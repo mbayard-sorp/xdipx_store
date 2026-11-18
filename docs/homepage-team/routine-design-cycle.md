@@ -426,6 +426,14 @@ doctrine, not written from memory of the pixels.
   complete comfortably where the first attempt had trouble. Crop to the band or module actually under
   review before the gate call, and keep the crop/measure helpers in `scripts/` rather than rebuilding
   them by hand each run.
+  **Measuring a specific pixel/region claim, or checking doctrine §1 ground alternation, also belongs
+  in `scripts/`, not a hand-rolled script (ticket #22811).** Run 2093's gate wrote throwaway
+  `probe.ts`/`grounds.ts` files to answer exactly these questions and both are now subcommands of
+  `design-crop.ts`, so the next gate finds them instead of re-deriving them: `probe px|rows|cols`
+  for a point or line reading, `probe region` for a region's mean color, `probe uniq` for a top-colour
+  histogram, and `grounds <png> --x <px>` for the full band-ground sequence down one column as
+  nearest-v3-token hexes — the fastest doctrine §1 check available, and the one to reach for before
+  scoring "spacing"/ground-alternation by eye.
 - **Emma voice gate** — `emma-empathy-reviewer` signs off on all customer-facing copy against
   `docs/emma-voice.md` (the canonical voice charter).
 - `seo-pdp-auditor` + `aeo-geo-auditor` — when the change affects rendering, JSON-LD, canonical, the
