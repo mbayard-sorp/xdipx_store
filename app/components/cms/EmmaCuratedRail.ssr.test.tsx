@@ -88,6 +88,40 @@ describe('emmaCuratedRail SSR output carries the v3 doctrine treatment', () => {
     expect(html).not.toContain('max-w-6xl')
   })
 
+  it('renders the Emma aside in the doctrine pull-quote treatment: Newsreader, sage, display scale (ticket #22809)', () => {
+    const html = render(block({ emmaAside: 'Picked for pacing, not power.' }))
+    expect(html).toContain('text-[1.05rem] italic')
+    expect(html).toContain('text-sage')
+    expect(html).toContain('font-family:var(--font-display)')
+    // The old treatment this replaces, so a revert is caught here too.
+    expect(html).not.toContain('text-sm italic')
+    expect(html).not.toContain('text-ink-3')
+  })
+
+  it('swaps the Emma aside to text-coral-2 on a dark rail, never text-sage on bg-sage (ticket #22809)', () => {
+    // bgStyle 'purple' resolves to `bg-sage`; text-sage on bg-sage is invisible.
+    const html = render(block({ emmaAside: 'Picked for pacing, not power.', bgStyle: 'purple' }))
+    expect(html).toContain('text-coral-2')
+    expect(html).not.toContain('text-sage')
+  })
+
+  it('cancels the rail band-open padding under the aside by exactly 16px, not a new padding scale (ticket #22809)', () => {
+    // Equal 85px/84px band-open vs. pre-heading gaps (design-critic run 2093
+    // item C) made the aside read as bound to neither edge. The fix is a
+    // negative margin on the wrapper around ProductCarousel, not a second
+    // padding value, so band-rhythm.test.ts's single-rhythm guard stays green.
+    const html = render(block({ emmaAside: 'Picked for pacing, not power.' }))
+    expect(html).toContain('-mt-12 md:-mt-16')
+  })
+
+  it('leaves the rail band-open padding alone when there is no Emma aside', () => {
+    const full = block()
+    const { emmaAside: _a, ...bare } = full
+    const html = render(bare as EmmaCuratedRailBlock)
+    expect(html).not.toContain('-mt-12')
+    expect(html).not.toContain('-mt-16')
+  })
+
   it('sets the See-all CTA in DM Sans at the Nº 03 grid size', () => {
     const html = render(block())
     expect(html).toMatch(/text-\[15px\] font-medium[^"]*text-ink link-coral/)
