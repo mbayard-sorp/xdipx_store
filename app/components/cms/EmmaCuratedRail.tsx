@@ -40,9 +40,7 @@ export function EmmaCuratedRail({ block, products, ground }: EmmaCuratedRailProp
             This is ticket #8418's defect one level up: that ticket moved the
             RAIL off the legacy py-12 and onto the doctrine rhythm, and the
             aside band added later by #12340 arrived with a fresh off-scale
-            value. The rail's own `py-16 md:py-20` below still supplies the
-            gap between this line and the heading it introduces, so this
-            changes where the band OPENS and nothing else. */
+            value. */
         <div className={`${bgClass} pt-16 md:pt-20`}>
           <div className="mx-auto max-w-[1320px] px-6 md:px-16">
             <p
@@ -51,25 +49,53 @@ export function EmmaCuratedRail({ block, products, ground }: EmmaCuratedRailProp
               // (minus padding), which design-doctrine.md section 2 caps body
               // text at ~60ch — measured live at ~175 characters per line
               // across four published rails before this fix.
-              className={`max-w-[46ch] text-sm italic ${dark ? 'text-white/70' : 'text-ink-3'}`}
-              style={{ fontFamily: 'var(--font-body)' }}
+              //
+              // text-[1.05rem] italic + Newsreader + sage/coral ♥ (ticket
+              // #22809, design-critic run 2093 item B): doctrine §6 names
+              // exactly one Emma-aside/pull-quote treatment and this line
+              // instead carried `text-sm italic text-ink-3`/`text-white/70` in
+              // DM Sans, a second, different treatment for the same motif on
+              // the same page (StorefrontHome.tsx's own aside at line ~1084
+              // already renders the doctrine-correct one). `text-coral-2` on
+              // a dark rail matches this codebase's existing light/dark coral
+              // swap convention (BonusDeal.tsx, BonusDealSection.tsx) rather
+              // than `text-sage`, which is illegible on the `purple` bgStyle's
+              // own `bg-sage` ground.
+              className={`max-w-[46ch] text-[1.05rem] italic ${dark ? 'text-coral-2' : 'text-sage'}`}
+              style={{ fontFamily: 'var(--font-display)' }}
             >
               ♥ <span>{block.emmaAside}</span>
             </p>
           </div>
         </div>
       )}
-      <ProductCarousel
-        chrome="storefront"
-        heading={block.heading}
-        {...(ground !== undefined ? { ground } : {})}
-        {...(block.eyebrow  !== undefined ? { eyebrow:  block.eyebrow }  : {})}
-        {...(block.ctaLink  !== undefined ? { ctaLink:  block.ctaLink }  : {})}
-        {...(block.ctaLabel !== undefined ? { ctaLabel: block.ctaLabel } : {})}
-        {...(block.bgStyle  !== undefined ? { bgStyle:  block.bgStyle }  : {})}
-        {...(block.layout   !== undefined ? { layout:   block.layout }   : {})}
-        products={products}
-      />
+      <div
+        // Cancels exactly the rail's own `pt-16 md:pt-20` band-open padding
+        // below (ticket #22809, design-critic run 2093 item C) when — and
+        // only when — the Emma aside band above already opened the band: with
+        // both paddings in effect, the aside text landed exactly as far from
+        // the band's top edge (measured 85px at 1440) as from the heading it
+        // introduces (measured 84px), reading as equidistant from both and
+        // binding to neither. `-mt-12 md:-mt-16` is a deliberate 16px short of
+        // the rail's own `pt-16 md:pt-20` (not a new padding scale — see
+        // band-rhythm.test.ts), leaving one consistent 16px lead-in gap at
+        // every breakpoint so the aside now visually introduces the heading
+        // instead of floating between two equal margins. No `emmaAside`, no
+        // change: the rail still opens the band itself exactly as before.
+        className={block.emmaAside ? '-mt-12 md:-mt-16' : undefined}
+      >
+        <ProductCarousel
+          chrome="storefront"
+          heading={block.heading}
+          {...(ground !== undefined ? { ground } : {})}
+          {...(block.eyebrow  !== undefined ? { eyebrow:  block.eyebrow }  : {})}
+          {...(block.ctaLink  !== undefined ? { ctaLink:  block.ctaLink }  : {})}
+          {...(block.ctaLabel !== undefined ? { ctaLabel: block.ctaLabel } : {})}
+          {...(block.bgStyle  !== undefined ? { bgStyle:  block.bgStyle }  : {})}
+          {...(block.layout   !== undefined ? { layout:   block.layout }   : {})}
+          products={products}
+        />
+      </div>
     </div>
   )
 }
