@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { classifyCheckoutStatus } from '~/lib/checkout-probe-core'
+import { classifyCheckoutStatus, RETRYABLE_GATEWAY_STATUSES } from '~/lib/checkout-probe-core'
 
 const CHECKOUT = 'https://xdipx.com/checkouts/cn/abc123?key=x'
 const at = (status: number, over: Partial<{ finalUrl: string; body: string }> = {}) =>
@@ -69,5 +69,24 @@ describe('what a checkout response means', () => {
     const v = at(200, { body: '<html>something else</html>' })
     expect(v.ok).toBe(true)
     expect(v.detail).toMatch(/browser tier/)
+  })
+})
+
+describe('which statuses the HTTP tier retries once on homepage/pdp', () => {
+  it('retries the known transient-gateway trio', () => {
+    // 503 is the documented symptom (a PDP's own Storefront-lookup timeout,
+    // `_layout.products.$slug.tsx`); 502/504 are the same class of upstream
+    // gateway blip. A second miss on any of these still fails the step — this
+    // only buys one retry, it does not change what counts as a real failure.
+    expect([...RETRYABLE_GATEWAY_STATUSES].sort()).toEqual([502, 503, 504])
+  })
+
+  it('does not retry the bot wall or a real client/dead-page status', () => {
+    // The bot wall (401/403/429) already means "healthy" on the checkout step
+    // and is irrelevant here; 404/410 are real, final answers that a retry
+    // would only delay reporting.
+    for (const s of [401, 403, 404, 410, 429]) {
+      expect(RETRYABLE_GATEWAY_STATUSES.has(s), `status ${s}`).toBe(false)
+    }
   })
 })

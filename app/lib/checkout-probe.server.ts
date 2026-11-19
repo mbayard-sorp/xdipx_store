@@ -16,7 +16,7 @@
  *
  * Server-only.
  */
-import { classifyCheckoutStatus, type FetchCheck } from '~/lib/checkout-probe-core'
+import { classifyCheckoutStatus, RETRYABLE_GATEWAY_STATUSES, type FetchCheck } from '~/lib/checkout-probe-core'
 import { Sentry } from '~/lib/sentry.server'
 import { db } from '~/lib/db.server'
 import { checkoutProbeRuns } from '../../db/schema'
@@ -50,15 +50,7 @@ function baseUrl(override?: string): string {
 export type { FetchCheck } from '~/lib/checkout-probe-core'
 export { classifyCheckoutStatus } from '~/lib/checkout-probe-core'
 
-/**
- * GET a URL with a timeout and assert status 200, a minimum body size, and that
- * the body contains every required marker. Returns a structured result rather
- * than throwing so the caller can record a clean failed step.
- *
- * Exported so seo-daily.server.ts reuses the same fetch discipline (timeout,
- * realistic UA, redirect handling) rather than growing a parallel one.
- */
-export async function checkUrl(url: string, opts: { markers?: string[]; minBytes?: number } = {}): Promise<FetchCheck> {
+async function checkUrlOnce(url: string, opts: { markers?: string[]; minBytes?: number }): Promise<FetchCheck> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
   try {
@@ -82,6 +74,34 @@ export async function checkUrl(url: string, opts: { markers?: string[]; minBytes
   } finally {
     clearTimeout(timer)
   }
+}
+
+/**
+ * GET a URL with a timeout and assert status 200, a minimum body size, and that
+ * the body contains every required marker. Returns a structured result rather
+ * than throwing so the caller can record a clean failed step.
+ *
+ * Exported so seo-daily.server.ts reuses the same fetch discipline (timeout,
+ * realistic UA, redirect handling) rather than growing a parallel one. Those
+ * callers get `retries: 0` (the default) and see no behavior change.
+ *
+ * `retries` is opt-in per call because the known false-positive this retries
+ * (see `RETRYABLE_GATEWAY_STATUSES`) only applies to an idempotent GET; the
+ * HTTP-tier probe passes it for the `homepage` and `pdp` steps and leaves the
+ * cart/checkout steps (which mutate state) on the original single-shot path.
+ */
+export async function checkUrl(
+  url: string,
+  opts: { markers?: string[]; minBytes?: number; retries?: number; retryDelayMs?: number } = {},
+): Promise<FetchCheck> {
+  const retries = opts.retries ?? 0
+  const retryDelayMs = opts.retryDelayMs ?? 5000
+  let result = await checkUrlOnce(url, opts)
+  for (let attempt = 0; attempt < retries && !result.ok && RETRYABLE_GATEWAY_STATUSES.has(result.status); attempt++) {
+    await new Promise(resolve => setTimeout(resolve, retryDelayMs))
+    result = await checkUrlOnce(url, opts)
+  }
+  return result
 }
 
 /**
@@ -160,9 +180,10 @@ export async function runCheckoutProbe(opts: { baseUrl?: string } = {}): Promise
     return { ok: !failed, failedStep: failed?.step ?? null, steps, durationMs: Date.now() - start }
   }
 
-  // 1. Homepage renders.
+  // 1. Homepage renders. One retry on a transient gateway status (see
+  // RETRYABLE_GATEWAY_STATUSES) before failing the step.
   let t = Date.now()
-  if (!record('homepage', await checkUrl(`${base}/`), t)) return finish()
+  if (!record('homepage', await checkUrl(`${base}/`, { retries: 1 }), t)) return finish()
 
   // 2. Resolve a probe product handle (explicit override, else the live deal).
   t = Date.now()
@@ -173,9 +194,13 @@ export async function runCheckoutProbe(opts: { baseUrl?: string } = {}): Promise
   }
   steps.push(mkStep('resolve-handle', true, Date.now() - t, { detail: handle }))
 
-  // 3. PDP renders with an add-to-cart form.
+  // 3. PDP renders with an add-to-cart form. One retry on a transient gateway
+  // status: this is the documented Storefront-lookup-timeout 503
+  // (`_layout.products.$slug.tsx`), the same symptom already retried around
+  // in `release-engine.server.ts`'s post-deploy smoke (see
+  // RETRYABLE_GATEWAY_STATUSES for the incident history).
   t = Date.now()
-  if (!record('pdp', await checkUrl(`${base}/products/${handle}`, { markers: ['name="variantId"'] }), t)) return finish()
+  if (!record('pdp', await checkUrl(`${base}/products/${handle}`, { markers: ['name="variantId"'], retries: 1 }), t)) return finish()
 
   // 4. Storefront cart mutation yields a checkout URL.
   t = Date.now()
