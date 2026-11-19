@@ -352,6 +352,17 @@ full test suite instead, stated explicitly rather than guessed. This mirrors the
 environment, not a defect in the fix under review. Say so explicitly in the verdict rather than
 treating the gap as a surprise each time.
 
+**Known limitation: `preview-fetch` cannot render any `curious.xdipx.com` bridge page on a Vercel
+preview deployment (ticket #22954).** `app/routes/bridge.$slug.tsx` (gawk-gawk-3000, the `/hello`
+lead funnel, advent sales pages, ad-bridge pages) is gated by `app/lib/bridge-host.server.ts`'s
+`isBridgeHostRequest()`, which only accepts the `?bridgeHost=1` dev override when
+`NODE_ENV!==production`; Vercel preview deployments run with `NODE_ENV=production`, so hitting
+`/bridge/<slug>?bridgeHost=1` on a preview URL always 404s regardless of the diff under review.
+Confirmed on PR #2012 (run 2101, ticket #22937): both `/bridge/gawk-gawk-3000?bridgeHost=1` and
+`/bridge/hello?bridgeHost=1` 404'd on an otherwise-clean, fully-verified PR. Fall back to reading the
+diff plus grepping the compiled build/server output for the expected or removed strings, as done for
+#22937, rather than treating the 404 as a regression.
+
 **The lighthouse check.** Per `.github/workflows/lighthouse.yml`, "Lighthouse stays NON-required for
 merge": it is informational, not a gate. (a) If the PR diff has no rendering surface, no
 `app/components` or `app/routes` changes touching markup or styles, a failing lighthouse check
