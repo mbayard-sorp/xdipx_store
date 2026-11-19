@@ -468,6 +468,15 @@ green, the guard is measuring a neighbour of the defect, not the defect.
 
 ### 5. Open a PR — the routine never merges
 
+**Mark the PR ready for review as soon as it opens, not later (ticket #22820).** A PR opened from a
+cloud session is a draft by default. Leaving it draft does two kinds of harm at once: the release
+engine's own gate returns `skip / code:'draft'` before it evaluates anything else, so a fully-green
+PR waits forever; and a same-run follow-up ticket that needs to stack on this PR's tip for early
+review (per `routine-dev-daily.md`'s file-overlap guidance) finds a draft PR it cannot safely build
+on, so it has to defer instead. Run 2093's build branch stayed open and in draft while two of that
+same run's other banked items needed exactly this PR's files, and both had to be deferred rather than
+built. `gh pr ready <PR number>` in the same step that opens the PR.
+
 Push the branch and open a PR against `main`. Record the PR URL on the run:
 
 ```bash
