@@ -7,7 +7,7 @@
     "build": "tsx scripts/apply-additive-migrations.ts --build && react-router build && node scripts/build-vercel.mjs",
     "start": "cross-env NODE_ENV=production node --import tsx/esm server/index.ts",
     "typecheck": "react-router typegen && tsc",
-    "test": "tsx scripts/check-tts-normalize-sync.ts && vitest run",
+    "test": "tsx scripts/check-tts-normalize-sync.ts && tsx scripts/check-script-main-guard.ts && vitest run",
     "test:watch": "vitest",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
