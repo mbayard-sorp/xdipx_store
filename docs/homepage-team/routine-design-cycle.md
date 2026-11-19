@@ -434,6 +434,33 @@ doctrine, not written from memory of the pixels.
   histogram, and `grounds <png> --x <px>` for the full band-ground sequence down one column as
   nearest-v3-token hexes — the fastest doctrine §1 check available, and the one to reach for before
   scoring "spacing"/ground-alternation by eye.
+**When a fix touches a component that has variants, enumerate the variants by name before calling it
+done (ticket #22810).** The run-1298 rule above already says a guard spans every FILE the surface
+spans. Run 2093 found the gap one level finer: both of run 1967's design fixes were applied to only
+one of two siblings inside a single file, and neither the gates nor the tests could see it.
+`TrustStrip.tsx` exports a `band` variant and a `card` variant over one shared five-item fallback;
+the orphan fix went onto `band` and `card` kept the defect for a week, on every collection page.
+`StorefrontHome.tsx` has two full-bleed bands sharing `PHOTO_SCRIM_STYLE`; the text-box scrim went
+onto `PhotoBand`, whose comment cites ticket #21294 by number, while the sibling promo band 200
+lines above kept the overlay the ticket was about. In both cases the twin was a dozen to a couple
+hundred lines away in the file already open. Before a design fix is called done, grep the
+component's own exports and conditional branches, list the variants, and say in one line which ones
+the fix reaches and which it deliberately does not. A fix that cites a ticket number in a comment
+while a sibling still has the ticket's defect is the specific shape to watch for, because the
+comment makes the file read as fixed.
+
+**A guard that pins a value and a count still does not pin a placement, and placement is often the
+whole defect (ticket #22810).** `storefront-photo-scrim.test.ts` is a good test: it pins every alpha
+stop at or above 0.78, four contrast floors against a worst-case pure-white pixel, that
+`PHOTO_SCRIM_STYLE` is defined exactly once, and that the constant is used exactly twice. Run 2093
+restored the exact #21294 defect, moving the promo's scrim back onto an absolute `inset-0` div, and
+all eight assertions stayed green, because moving a scrim changes neither its alpha nor the usage
+count. The defect #21294 describes is purely a question of WHERE the gradient is painted, and the
+guard had no opinion on that. When writing or reviewing a guard over a visual rule, state which of
+WHAT, HOW MUCH, HOW MANY, and WHERE it actually binds, and add the missing axis if the defect lives
+on it. The cheap test: re-introduce the original defect and confirm the guard goes red. If it stays
+green, the guard is measuring a neighbour of the defect, not the defect.
+
 - **Emma voice gate** — `emma-empathy-reviewer` signs off on all customer-facing copy against
   `docs/emma-voice.md` (the canonical voice charter).
 - `seo-pdp-auditor` + `aeo-geo-auditor` — when the change affects rendering, JSON-LD, canonical, the
