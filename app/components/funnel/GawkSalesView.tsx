@@ -204,7 +204,7 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
               ) : null}
               <FreeBadge />
             </div>
-            <Cta spot="hero" size={20} width="max-w-[480px]">{offer ? `See it spin, ${offer.label} →` : 'See it spin →'}</Cta>
+            <Cta spot="hero" size={20} width="max-w-[480px]">{offer ? `I'll take it, ${offer.label} ♥` : "I'll take it ♥"}</Cta>
             <div className={TRUST_LINE}>
               <span>✓ Discreet plain box</span><span>✓ Billed as XDIPX</span><span>✓ 30-day returns</span>
             </div>
@@ -462,7 +462,7 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
       <section data-screen-label="14 In action" className={SECTION + ' bg-white'}>
         <div className={COL + ' flex flex-col gap-10'}>
           <div className="flex max-w-[780px] flex-col gap-3.5">
-            <Kicker>See it in action</Kicker>
+            <Kicker>Up close</Kicker>
             <h2 className={H2}>This is what it looks like <Em>going down.</Em></h2>
             <p className={BODY}>No guessing from a product shot. Clear cup, so you can see exactly how the lips take you in, how the sleeve wraps the shaft, and how it all ends.</p>
           </div>
@@ -513,7 +513,7 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
             </div>
             <h2 className="m-0 font-display text-[clamp(34px,4.4vw,48px)] font-medium leading-[1.04] tracking-[-0.015em] [text-wrap:balance]">Soft lips spin <Em>360°</Em> around your cock until you cum.</h2>
             <PriceRow />
-            <Cta spot="cta-16" width="">See it spin →</Cta>
+            <Cta spot="cta-16" width="">I'll take it ♥</Cta>
           </div>
         </div>
       </section>
@@ -524,7 +524,7 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
           <div className={STACK}>
             <Kicker>Do the math</Kicker>
             <h2 className={H2}>{p} once. <Em>Head every night after.</Em></h2>
-            <p className={BODY}>Less than a nice dinner. Less than a few months of the premium sites you're on right now. And unlike those, this one actually touches you.</p>
+            <p className={BODY}>Less than a nice dinner. Less than a few months of a premium subscription. And unlike those, this one actually touches you.</p>
             <div className={'flex flex-col border-t-[3px] border-coral ' + GAP_GRID}>
               {[
                 ...(offer ? [{ k: 'Regular price', v: <span className="text-[#6B625C] line-through">{money(offer.was)}</span> }] : []),
@@ -594,7 +594,7 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
         <div className={COL + ' flex flex-col gap-5'}>
           <Kicker>Nobody's business</Kicker>
           <h2 className={H2}>Nobody knows <Em>but you.</Em></h2>
-          <p className="m-0 max-w-[620px] text-[18px] leading-[1.55] text-[#3E3732] [text-wrap:pretty]">It shows up looking like nothing. Your bank sees four letters. Your roommate, your wife, your mailman see a brown box.</p>
+          <p className="m-0 max-w-[620px] text-[18px] leading-[1.55] text-[#3E3732] [text-wrap:pretty]">It ships in a plain box with no logo on the outside. Your statement reads XDIPX.</p>
           <Cta spot="discreet" width="max-w-[420px]">Ship it discreetly →</Cta>
         </div>
       </section>
@@ -770,6 +770,9 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
       <footer className="flex flex-col items-center gap-2.5 bg-[#1A1616] px-5 py-8 text-center text-[13px] text-[#BDB4AD]">
         {d.logo ? <img src={d.logo.src} alt={d.logo.alt} className="block h-6 w-auto bg-white px-2 py-1 box-content" /> : null}
         <span>© 2026 xdipx · You must be 18 or older to shop · Plain packaging · Billed as XDIPX</span>
+        <span>
+          Sold by XD Inc. · <a href="https://xdipx.com/pages/privacy-policy" className="underline">Privacy policy</a> · <a href="https://xdipx.com/pages/terms-of-service" className="underline">Terms</a> · <a href="mailto:hello@xdipx.com" className="underline">hello@xdipx.com</a>
+        </span>
       </footer>
 
       {/* Pinned buy bar, server-rendered and always on, so it never waits on JS. */}

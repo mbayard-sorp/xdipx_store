@@ -253,6 +253,9 @@ export function LeadFunnelView({
       </section>
 
       <p className="mt-6 font-body text-xs text-ink-4">For adults, 18 and over. Billing reads XDIPX.</p>
+      <p className="mt-2 font-body text-xs text-ink-4">
+        xdipx.com is run by XD Inc. <a href="https://xdipx.com" className="underline">Visit the store</a> · <a href="https://xdipx.com/pages/privacy-policy" className="underline">Privacy policy</a> · <a href="https://xdipx.com/pages/terms-of-service" className="underline">Terms</a> · hello@xdipx.com
+      </p>
     </div>
   )
 }
