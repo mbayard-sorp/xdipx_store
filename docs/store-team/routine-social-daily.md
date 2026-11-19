@@ -2500,7 +2500,19 @@ the [X] thing you [verb]?") and rewrite any hit before `op:'draft'`. id141 (a re
 "tell me below" a day after row 133 spent it in the same campaign. Both checks are draft-time
 catches for the exact failure mode the voice gate misses (it reads a caption in isolation, not
 against posted history) and the publish gate catches at the cost of a full rework cycle.
-**Tenth check, X weighted length (ticket #10435), X drafts only:** before calling `op:'draft'` on
+**Tenth check, product-free/educational hook structure (ticket #22906).** Run 2100 (2026-11-18
+evening) spent 4 of 5 voice-gate iterations on one product-free/educational post because the
+wanting-beat clause sat after a setup/inventory clause instead of opening the sentence, and a
+fact-paragraph aside was written in flat third person ("the one people skip") instead of Emma's
+first-person direct address. The fifth and seventh checks above already require a wanting-beat
+opener and a threaded anticipation beat, but phrased generally enough that an educational/clinical
+draft did not self-apply them before the first voice-gate call. Before the first `op:draft` call on
+a product-free/educational post specifically: (a) confirm the wanting-beat clause is the FIRST
+clause of the hook sentence, not a trailing clause, by checking its character offset is under
+~100; and (b) confirm at least one sentence in the body is first-person direct address (Emma
+speaking to "you"), not a third-person ("people"/"folks") observation.
+
+**Eleventh check, X weighted length (ticket #10435), X drafts only:** before calling `op:'draft'` on
 a `platform:'x'` row, compute the caption's weighted length the way X (and the publish gate) does:
 every URL counts at t.co width, 23 characters, regardless of its real length
 (`app/lib/social-publish/x-limits.ts`), not `String.length`. Trim or rewrite if the weighted total
