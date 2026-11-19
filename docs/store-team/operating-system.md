@@ -206,6 +206,17 @@ the row text and its links are the only carriers, so the conventions are the con
    #1083 as a duplicate/conflict) and #7615 (the same PR #1082, filed later with a deeper root-cause
    pass) were never linked, so run 698 spent two separate R-DEV claims on one condition and the
    second re-covered ground the first had already diagnosed.
+   **The same convention covers a run's own retro-banked follow-ups, not only separately-filed
+   tickets (ticket #22820).** When a run's retro banks several items that build on the run's own
+   earlier work in the same pass (a substitute rail that builds on a just-opened PR's helper, a
+   responsive fix that needs to coordinate with that PR's own helper in the same file), set
+   `blockedById` against the lead ticket at filing time, the same as for two independently-filed
+   tickets. Concrete instance: run 2093 banked ticket #22802 (builds on #22803's
+   `app/lib/product-shelf.ts` and the PDP route's `!inStock` branch) and ticket #22809 item A (needs
+   to coordinate with #22803's orphan-cell helper in the same file) without this link, so R-DEV's
+   next pass discovered both dependencies only after claiming them, with #22803's own build branch
+   still open and in draft, and had to defer both rather than build them. Filing the dependency up
+   front costs nothing at filing time and saves a wasted claim at claim time.
 3. **Tag design-gated and cross-agent-epic rows.** (#1909) A row that defers to a design decision,
    needs a visual-regression judgment no scheduled pass can run, or is a self-described multi-agent
    epic is either split into single-agent scoped tickets before filing, or tagged at the head of its

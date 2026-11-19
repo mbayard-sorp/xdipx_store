@@ -135,17 +135,17 @@ when the overlap is heavy or the earlier ticket's PR is still open, so a pass ne
 edit on a region that has not landed. Do not let two overlapping tickets proceed to `pr_open` as if
 they were independent.
 
-**Serializing means basing on `main`, not stacking the branch, until #12463 ships.** Until the
-release engine validates a PR's base ref (#12463, filed 2026-09-29), it will silently squash-merge a
-follow-up PR into whatever branch it was opened against rather than `main`, marking the ticket
-`applied` while the change never reaches production. Ticket #12455/PR #1413 hit exactly this: it
-was correctly identified as a direct follow-up to #12097/PR #1412 and deliberately based on
-`ticket/12097` for early review, and QA had to bounce it. The safe pattern for a same-file/same-table
-follow-up ticket today is: set `blockedById` on the follow-up against the lead ticket (already
-required by `operating-system.md` filing rule 2) **and** branch the follow-up from `main` directly,
-waiting to open its PR until the lead ticket's PR has actually merged, rather than stacking it for
-early review. Once #12463 ships, branching off the earlier ticket's tip for early review is safe
-again and this paragraph goes stale.
+**#12463 has shipped: stacking a follow-up for early review is safe again, but `blockedById` is
+still mandatory (ticket #22820).** The release engine now validates a PR's base ref before merging
+(confirmed live, `app/lib/release-engine.server.ts`: `evaluatePullRequest` compares `facts.baseRef`
+against `main` and refuses a mismatch), so the squash-into-the-wrong-branch failure this paragraph
+used to warn about (ticket #12455/PR #1413) cannot recur. That removes the reason to avoid stacking,
+not the reason to link the dependency: set `blockedById` on the follow-up against the lead ticket
+(`operating-system.md` filing rule 2) **at filing time**, before the follow-up is ever claimed, so
+the claim filter sees the dependency up front. Skipping this step still costs a wasted claim even
+with base-ref validation fixed: run 2093 banked two follow-up tickets against its own just-opened PR
+with no `blockedById` link, and R-DEV's next pass discovered the collision only after claiming both,
+not before.
 
 **On the 20:00 pass, work bounced tickets first.** A bounced ticket is one sitting in
 `in_progress` with a `last_error` and an `attempt_count` above zero, assigned to you. It is already
