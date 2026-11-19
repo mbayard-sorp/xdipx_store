@@ -405,7 +405,7 @@ async function videoEpisodesNotPending(arg: string): Promise<ProbeVerdict> {
   const ids = arg.split(',').map(s => parseInt(s.trim(), 10)).filter(n => Number.isFinite(n))
   if (ids.length === 0) return null
   const res = await db.execute(sql`
-    SELECT id, production_status FROM video_episodes WHERE id = ANY(${ids})`)
+    SELECT id, production_status FROM video_episodes WHERE id = ANY(${sql.param(ids)}::int[])`)
   const rows = (res.rows ?? []) as Record<string, unknown>[]
   if (rows.length !== ids.length) return null // at least one id not found: could not ask
   return rows.every(r => String(r['production_status'] ?? '') !== 'pending_approval')

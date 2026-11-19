@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   MONTHLY_PROFIT_GOAL_USD,
@@ -332,5 +332,50 @@ describe('the money verdict', () => {
     })
     expect(v).toContain('$240.00')
     expect(v).toContain('$93.31')
+  })
+})
+
+describe('gatherMoney (ticket #23026: ANY() array binding)', () => {
+  afterEach(() => { vi.doUnmock('~/lib/db.server'); vi.resetModules() })
+
+  // Same bug as owner-blockers.server.ts's video_episodes_not_pending probe:
+  // drizzle's sql`` tag expands an interpolated JS array into a row-constructor
+  // list (`ANY(($1, $2))`), which Postgres rejects. `sql.param(sources)::text[]`
+  // binds the whole array as one parameter instead.
+  it('renders a single bound array parameter for the subscription-sources ANY(), never a row-constructor list', async () => {
+    const seen: unknown[] = []
+    const executeMock = vi.fn(async (query: unknown) => {
+      seen.push(query)
+      return { rows: [] }
+    })
+    vi.doMock('~/lib/db.server', () => ({ db: { execute: executeMock } }))
+    vi.resetModules()
+    const { gatherMoney: gatherMoneyMocked } = await import('~/lib/owner-queue.server')
+    await gatherMoneyMocked([])
+
+    const { PgDialect } = await import('drizzle-orm/pg-core')
+    const dialect = new PgDialect()
+    const rendered = seen.map((q) => dialect.sqlToQuery(q as Parameters<InstanceType<typeof PgDialect>['sqlToQuery']>[0]).sql)
+    const anyQuery = rendered.find((s) => s.includes('source = ANY'))
+    expect(anyQuery).toBeDefined()
+    expect(anyQuery).not.toMatch(/ANY\(\(/)
+    expect(anyQuery).toMatch(/ANY\(\$\d+::text\[\]\)/)
+  })
+
+  it('does not push a gap when the subscription-sources query succeeds', async () => {
+    const executeMock = vi.fn(async (query: unknown) => {
+      const { PgDialect } = await import('drizzle-orm/pg-core')
+      const built = new PgDialect().sqlToQuery(query as Parameters<InstanceType<typeof PgDialect>['sqlToQuery']>[0])
+      if (built.sql.includes('source = ANY')) {
+        return { rows: [{ model: 'claude-sonnet-5', inp: 100, outp: 50, cc: 0, cr: 0 }] }
+      }
+      return { rows: [] }
+    })
+    vi.doMock('~/lib/db.server', () => ({ db: { execute: executeMock } }))
+    vi.resetModules()
+    const { gatherMoney: gatherMoneyMocked } = await import('~/lib/owner-queue.server')
+    const gaps: string[] = []
+    await gatherMoneyMocked(gaps)
+    expect(gaps).not.toContain('subscription-rated-spend')
   })
 })

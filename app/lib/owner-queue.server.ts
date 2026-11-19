@@ -452,7 +452,7 @@ export function moneyVerdict(m: Omit<MoneyBlock, 'verdict'>): string {
 // gatherers — each fails soft to null, and null means "unknown", never "fine"
 // ---------------------------------------------------------------------------
 
-async function gatherMoney(gaps: string[]): Promise<MoneyBlock> {
+export async function gatherMoney(gaps: string[]): Promise<MoneyBlock> {
   let ordersLast7: number | null = null
   let revenueLast7Usd: number | null = null
   let profitLast30Usd: number | null = null
@@ -513,7 +513,7 @@ async function gatherMoney(gaps: string[]): Promise<MoneyBlock> {
              COALESCE(SUM(cache_read_tokens), 0)::bigint     AS cr
         FROM api_token_log
        WHERE ts >= now() - INTERVAL '30 days'
-         AND source = ANY(${sources})
+         AND source = ANY(${sql.param(sources)}::text[])
        GROUP BY model`)
     let total = 0
     let unknown = 0

@@ -288,6 +288,65 @@ describe('instagram_token_healthy probe (ticket #13153)', () => {
   })
 })
 
+describe('video_episodes_not_pending probe (ticket #23026: ANY() array binding)', () => {
+  afterEach(() => { vi.doUnmock('~/lib/db.server'); vi.resetModules() })
+
+  // drizzle's sql`` tag expands an interpolated JS array into a parenthesised
+  // list of individual params (`ANY(($1, $2, $3))`), which Postgres rejects as
+  // a row constructor where ANY() requires an array. `sql.param(ids)::int[]`
+  // binds the whole array as one parameter instead.
+  it('renders a single bound array parameter for ANY(), never a row-constructor list', async () => {
+    const executeMock = vi.fn(async (query: unknown) => {
+      const { PgDialect } = await import('drizzle-orm/pg-core')
+      const built = new PgDialect().sqlToQuery(query as Parameters<InstanceType<typeof PgDialect>['sqlToQuery']>[0])
+      expect(built.sql).not.toMatch(/ANY\(\(/)
+      expect(built.sql).toMatch(/ANY\(\$\d+::int\[\]\)/)
+      return { rows: [{ id: 8, production_status: 'approved' }] }
+    })
+    vi.doMock('~/lib/db.server', () => ({ db: { execute: executeMock } }))
+    vi.resetModules()
+    const { PROBES } = await import('./owner-blockers.server')
+    await PROBES['video_episodes_not_pending']!.run('8')
+    expect(executeMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('clears once every named id has moved off pending_approval (blocker #552)', async () => {
+    const executeMock = vi.fn(async () => ({
+      rows: [
+        { id: 8, production_status: 'approved' },
+        { id: 9, production_status: 'needs_changes' },
+      ],
+    }))
+    vi.doMock('~/lib/db.server', () => ({ db: { execute: executeMock } }))
+    vi.resetModules()
+    const { PROBES } = await import('./owner-blockers.server')
+    expect(await PROBES['video_episodes_not_pending']!.run('8,9')).toBe(true)
+  })
+
+  it('answers false while any named id is still pending_approval', async () => {
+    const executeMock = vi.fn(async () => ({
+      rows: [
+        { id: 8, production_status: 'approved' },
+        { id: 9, production_status: 'pending_approval' },
+      ],
+    }))
+    vi.doMock('~/lib/db.server', () => ({ db: { execute: executeMock } }))
+    vi.resetModules()
+    const { PROBES } = await import('./owner-blockers.server')
+    expect(await PROBES['video_episodes_not_pending']!.run('8,9')).toBe(false)
+  })
+
+  it('answers null (could not ask) when a named id is missing from the table entirely', async () => {
+    const executeMock = vi.fn(async () => ({
+      rows: [{ id: 8, production_status: 'approved' }],
+    }))
+    vi.doMock('~/lib/db.server', () => ({ db: { execute: executeMock } }))
+    vi.resetModules()
+    const { PROBES } = await import('./owner-blockers.server')
+    expect(await PROBES['video_episodes_not_pending']!.run('8,9')).toBeNull()
+  })
+})
+
 describe('the vocabulary and the runners cannot drift apart', () => {
   it('gives every runner a description, or it is silently not a probe at all', async () => {
     // Caught in the act, 2026-09-02. `PROBES` is built by filtering
