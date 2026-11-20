@@ -143,6 +143,12 @@ Verbatim, in answer to the plan:
 - "You're free to create offers that have profitable potential". The rules in section 4 are the standing envelope. The team picks products and deals inside them without asking per offer. Creating a Shopify discount code is still a store change and is reported the day it is made.
 - "Yes, raise pulse solo to $119". Set in Shopify the same hour: $119.99, the maker's price, compare-at cleared. He then said "Yes, pin it": Hot Octopuss was added to `pricing_map_brands` (audited, actor owner) and the product's `xdipx.map_price` set to 119.99, which the batch needs before the brand entry binds. The Atom Plus and Pulse Queen should move from $88.99 to their $99 MAP at the next 07:00 UTC batch. Unverified until that batch runs; a feed sync that rewrites `map_price` to 0 would undo the pin.
 
+### Rulings, 2026-11-19
+
+- "Start both now", then "Start the native campaign too". Cell 1 is live on the Pulse Solo: 8809618 (300x250), 8809620 (300x100) and 8824192 (native), group 368354, CPC at 12 cents, mobile US, 56 whitelisted sites, $20 each. The team built them paused through the API and he started each one.
+- "When you say \"come\" it should be \"cum\"", and of the landing page: "Yes, it should be everywhere. These are men watching porn so that's all they want to do". Applied to the ExoClick ads and to the sales pages they land on. The voice charter is unchanged, because he has not said "codify", so the main store, email and social still follow it.
+- "If we aren't getting sales, don't hesitate to create multiple offers targeting these types of customers." Standing direction. When a live offer reaches 150 counted arrivals with no order, the team builds the next offers without asking: product pick inside the section 4 envelope, sales page, banners and native ads, and the campaigns created paused. Several offers may be built at once. Starting a campaign spends money and stays his word, as do raising a bid or budget and adding funds. The audience is men on adult tube sites, so offers are for-him toys first.
+
 ## 9. Round-one placement lists
 
 Built 2026-11-15 from `statistics/a/site`, all six campaigns, 2026-10-30 to 2026-11-03. 1,898 sites served the ads. 58 of them produced all 186 clicks for $13.63. The other 1,840 produced none and cost $14.02.
