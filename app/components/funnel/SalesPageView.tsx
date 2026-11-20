@@ -17,7 +17,7 @@ import { showDiscountBadge } from '~/lib/discount-badge'
 import { trackFbViewContent } from '~/lib/meta-pixel.client'
 import { sanityImageUrl } from '~/lib/sanity-image'
 import { shopifyImageUrl } from '~/lib/shopify-image'
-import type { SalesImage, SalesPage, SalesSection, SalesTone } from '~/lib/sales-page'
+import type { SalesFreeGiftView, SalesImage, SalesPage, SalesSection, SalesTone } from '~/lib/sales-page'
 
 export interface SalesVariant {
   id: string
@@ -44,6 +44,8 @@ export interface SalesViewData {
   shop: SalesShopifyData
   /** With add-ons the buy button leads to them, so begin_checkout waits for the last screen. */
   hasAddOns: boolean
+  /** Set only while the gift is buyable, so the page never claims one it will not add. */
+  freeGift: SalesFreeGiftView | null
   logo: { src: string; alt: string } | null
   preview: boolean
   error: string | null
@@ -262,6 +264,11 @@ export function SalesPageView({ d }: { d: SalesViewData }) {
               </>
             ) : null}
           </div>
+          {d.freeGift ? (
+            <p className="m-0 text-[15px] font-semibold text-coral">
+              Free with it: {d.freeGift.label}, {money(d.freeGift.value)} value.
+            </p>
+          ) : null}
 
           {shop.variants.length > 1 ? (
             <fieldset>

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { addOnHandles, bulkUnitPrice, nextAddOnStep, normalizeBulkOffers, normalizeSalesPage, normalizeSection, parseAddOnStep, salesCtaAttr } from './sales-page'
+import { addOnHandles, bulkUnitPrice, nextAddOnStep, normalizeBulkOffers, normalizeFreeGift, normalizeSalesPage, normalizeSection, parseAddOnStep, salesCtaAttr, screenAvailability } from './sales-page'
 
 const base = {
   slug: 'quiet-pulse',
@@ -182,5 +182,57 @@ describe('salesCtaAttr', () => {
     expect(salesCtaAttr('')).toEqual([])
     expect(salesCtaAttr('<script>')).toEqual([])
     expect(salesCtaAttr('x'.repeat(41))).toEqual([])
+  })
+})
+
+describe('free gift', () => {
+  it('parses a valid gift and trims the label', () => {
+    expect(normalizeSalesPage({ ...base, freeGift: { productHandle: 'jo-4oz', label: '  Free lube  ' } })!.freeGift).toEqual({ productHandle: 'jo-4oz', label: 'Free lube' })
+  })
+
+  it('is null when missing, so a page without it behaves as before', () => {
+    expect(normalizeSalesPage(base)!.freeGift).toBeNull()
+    expect(normalizeSalesPage({ ...base, freeGift: null })!.freeGift).toBeNull()
+    expect(normalizeSalesPage({ ...base, freeGift: 'jo-4oz' })!.freeGift).toBeNull()
+  })
+
+  it('defaults the label to empty', () => {
+    expect(normalizeSalesPage({ ...base, freeGift: { productHandle: 'jo-4oz' } })!.freeGift).toEqual({ productHandle: 'jo-4oz', label: '' })
+  })
+
+  it('rejects a bad handle', () => {
+    expect(normalizeFreeGift({ productHandle: 'Bad Handle' }, 'quiet-pulse-wand')).toBeNull()
+    expect(normalizeFreeGift({ productHandle: '' }, 'quiet-pulse-wand')).toBeNull()
+    expect(normalizeFreeGift({ productHandle: 42 }, 'quiet-pulse-wand')).toBeNull()
+  })
+
+  it('rejects the gift being the page product itself', () => {
+    expect(normalizeSalesPage({ ...base, freeGift: { productHandle: 'quiet-pulse-wand' } })!.freeGift).toBeNull()
+  })
+
+  it('strips dashes from the label', () => {
+    expect(normalizeFreeGift({ productHandle: 'jo-4oz', label: 'Free \u2014 lube' }, 'x')!.label).toBe('Free, lube')
+  })
+})
+
+describe('screenAvailability', () => {
+  const lube = { productHandle: 'jo-4oz', headline: '', pitch: 'p', tiers: [{ productHandle: 'jo-4oz', label: 'A', blurb: '' }, { productHandle: 'jo-8oz', label: 'B', blurb: '' }], bulkLine: '', bulkOffers: [] }
+  const cleaner = { productHandle: 'cleaner', headline: '', pitch: 'p', tiers: [], bulkLine: '', bulkOffers: [] }
+
+  it('matches plain stock when there is no gift', () => {
+    expect(screenAvailability([lube, cleaner], [true, false], null)).toEqual([true, false])
+  })
+
+  it('skips the screen that sells the gift, wherever it sits in the tiers', () => {
+    expect(screenAvailability([lube, cleaner], [true, true], 'jo-4oz')).toEqual([false, true])
+    expect(screenAvailability([lube, cleaner], [true, true], 'jo-8oz')).toEqual([false, true])
+  })
+
+  it('leaves other screens alone when the gift is unrelated', () => {
+    expect(screenAvailability([lube, cleaner], [true, true], 'something-else')).toEqual([true, true])
+  })
+
+  it('sends the Gawk page straight to checkout when the gift is the only add-on', () => {
+    expect(nextAddOnStep(screenAvailability([lube], [true], 'jo-4oz'), 0)).toBeNull()
   })
 })

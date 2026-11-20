@@ -107,6 +107,35 @@ export function addOnHandles(addOn: SalesAddOn): string[] {
 /** The schema caps add-ons at two; the normalizer enforces it again. */
 export const MAX_ADD_ONS = 2
 
+/**
+ * A product the page gives away with the page's own product. The cart gets the
+ * line, and a Shopify automatic discount takes it to $0. `label` is optional
+ * words for the view; the product's own title stands in when it is empty.
+ */
+export interface SalesFreeGift {
+  productHandle: string
+  label: string
+}
+
+/** What the view needs about a gift that is really buyable right now. */
+export interface SalesFreeGiftView {
+  title: string
+  /** The gift variant's live Shopify price. */
+  value: number
+  image: string | null
+  label: string
+}
+
+/**
+ * The add-on screens a visitor can reach: each screen needs something in stock,
+ * and a screen that sells the free gift is skipped so it is never sold twice.
+ * `giftHandle` is null unless the gift is configured AND buyable right now, so
+ * the loader and the action agree from page config plus stock alone.
+ */
+export function screenAvailability(addOns: SalesAddOn[], inStock: boolean[], giftHandle: string | null): boolean[] {
+  return addOns.map((a, i) => !!inStock[i] && !(giftHandle && addOnHandles(a).includes(giftHandle)))
+}
+
 export interface SalesPage {
   slug: string
   productHandle: string
@@ -123,6 +152,7 @@ export interface SalesPage {
   closer: string
   closerLine: string
   addOns: SalesAddOn[]
+  freeGift: SalesFreeGift | null
 }
 
 export function isValidSalesSlug(slug: string): boolean {
@@ -215,6 +245,15 @@ export function normalizeSection(raw: RawSection, index: number): SalesSection |
   }
 }
 
+/** A usable gift, or null: a bare handle that is not the page's own product. */
+export function normalizeFreeGift(raw: unknown, productHandle: string): SalesFreeGift | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  const handle = typeof r['productHandle'] === 'string' ? r['productHandle'] : ''
+  if (!HANDLE_RE.test(handle) || handle === productHandle) return null
+  return { productHandle: handle, label: clean(r['label']) }
+}
+
 /** Map a raw Sanity row to a page, or null when a required field is bad. */
 export function normalizeSalesPage(raw: Record<string, unknown> | null | undefined): SalesPage | null {
   if (!raw) return null
@@ -243,6 +282,7 @@ export function normalizeSalesPage(raw: Record<string, unknown> | null | undefin
     sections,
     closer: clean(raw['closer']) || headline,
     closerLine: clean(raw['closerLine']),
+    freeGift: normalizeFreeGift(raw['freeGift'], productHandle),
     addOns: rows(raw['addOns'], r => {
       const handle = typeof r['productHandle'] === 'string' ? r['productHandle'] : ''
       const pitch = clean(r['pitch'])

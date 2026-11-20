@@ -45,10 +45,10 @@ import {
 import { applyAttributionAttrs } from '~/lib/attribution-cart.server'
 import { getLeadFunnelPage, type FunnelUtm } from '~/lib/lead-funnel'
 import { mapAllowsDiscountDisplay } from '~/lib/discount-badge'
-import { addOnHandles, nextAddOnStep, parseAddOnStep, salesCtaAttr, type SalesPage } from '~/lib/sales-page'
+import { addOnHandles, nextAddOnStep, parseAddOnStep, salesCtaAttr, screenAvailability, type SalesFreeGiftView, type SalesPage } from '~/lib/sales-page'
 import { claimedExitCode, getExitOffer } from '~/lib/exit-offer.server'
 import { getSalesCartId, getSalesPage, setSalesCartCookie } from '~/lib/sales-page.server'
-import type { Product } from '~/types'
+import type { Cart, Product } from '~/types'
 import { isLeadSmsOptinEnabled } from '~/lib/lead-sms-optin.server'
 import { LEAD_OFFER } from '~/lib/lead-interests'
 import { getStoredUTM } from '~/lib/attribution.server'
@@ -56,7 +56,7 @@ import { trackCtaClick } from '~/lib/analytics.client'
 import { isBridgeHost, isBridgeHostRequest, requestHost, BRIDGE_HOST } from '~/lib/bridge-host.server'
 import { sanityImageUrl } from '~/lib/sanity-image'
 import { getSiteSettings, isPreviewRequest } from '~/lib/sanity.server'
-import { addCartDiscountCode, addLinesToCart, createCartWithLines, getCart, getProductByHandle } from '~/lib/shopify.server'
+import { addCartDiscountCode, addLinesToCart, createCartWithLines, getCart, getCartLineTotals, getProductByHandle, removeFromCart } from '~/lib/shopify.server'
 import { shopifyImageUrl } from '~/lib/shopify-image'
 import { useAgeVerified } from '~/lib/use-age-verified'
 
@@ -225,6 +225,29 @@ function loadAddOns(page: SalesPage): Promise<(Product | null)[][]> {
 const buyable = (p: Product | null): p is Product => !!p && p.variants.some(v => v.availableForSale)
 const screenBuyable = (products: (Product | null)[]) => products.some(buyable)
 
+/**
+ * The page's free gift product, only when it loads and has a variant in stock.
+ * Null means the page claims no gift and the cart gets none. A failed load
+ * never blocks a sale.
+ */
+async function loadGift(page: SalesPage): Promise<Product | null> {
+  if (!page.freeGift) return null
+  const gift = await getProductByHandle(page.freeGift.productHandle).catch(() => null)
+  return buyable(gift) ? gift : null
+}
+
+/** The view's gift: its live price is the value the page quotes. */
+function giftView(page: SalesPage, gift: Product | null): SalesFreeGiftView | null {
+  const variant = gift?.variants.find(v => v.availableForSale)
+  if (!page.freeGift || !gift || !variant) return null
+  return {
+    title: gift.title,
+    value: parseFloat(variant.price),
+    image: gift.images[0]?.url ?? null,
+    label: page.freeGift.label || gift.title,
+  }
+}
+
 /** Add-on screens depend on the visitor's cart, so the CDN must never keep them. */
 const NO_STORE = { 'Cache-Control': 'private, no-store' }
 
@@ -264,11 +287,12 @@ async function salesLoaderData(request: Request, page: SalesPage, preview: boole
   const utmSource = url.searchParams.get('utm_source')
   if (utmSource) await recordArrivalRequest(arrivalDay(), utmSource, url.searchParams.get('utm_content') ?? '')
 
-  const [product, settings, upgrades, smsOptin] = await Promise.all([
+  const [product, settings, upgrades, smsOptin, gift] = await Promise.all([
     getProductByHandle(page.productHandle).catch(() => null),
     getSiteSettings().catch(() => null),
     loadUpgrades(page),
     getExitOffer(page.slug) ? isLeadSmsOptinEnabled() : false,
+    loadGift(page),
   ])
   if (!product || product.variants.length === 0) throw data(BRIDGE_404, { status: 404 })
   const shop = salesShopData(product)
@@ -278,7 +302,9 @@ async function salesLoaderData(request: Request, page: SalesPage, preview: boole
     kind: 'sales' as const,
     page,
     shop,
-    hasAddOns: page.addOns.length > 0,
+    // A screen that sells the free gift is skipped, so it does not count here.
+    hasAddOns: screenAvailability(page.addOns, page.addOns.map(() => true), gift?.handle ?? null).some(Boolean),
+    freeGift: giftView(page, gift),
     smsOptin,
     upgrades: upgrades.flatMap(p => (p ? [{ handle: p.handle, shop: salesShopData(p) }] : [])),
     preview,
@@ -295,13 +321,14 @@ async function salesLoaderData(request: Request, page: SalesPage, preview: boole
 async function salesAddOnLoaderData(request: Request, page: SalesPage, step: number, preview: boolean) {
   const cartId = getSalesCartId(request)
   if (!cartId) throw redirect(pageUrl(request), { headers: NO_STORE })
-  const [cart, addOns, settings] = await Promise.all([
+  const [cart, addOns, settings, gift] = await Promise.all([
     getCart(cartId).catch(() => null),
     loadAddOns(page),
     getSiteSettings().catch(() => null),
+    loadGift(page),
   ])
   if (!cart) throw redirect(pageUrl(request), { headers: NO_STORE })
-  const available = addOns.map(screenBuyable)
+  const available = screenAvailability(page.addOns, addOns.map(screenBuyable), gift?.handle ?? null)
   if (!available[step - 1]) {
     const next = nextAddOnStep(available, step)
     throw redirect(next ? addOnStepUrl(request, next) : cart.checkoutUrl, { headers: NO_STORE })
@@ -370,6 +397,32 @@ function pickVariant(product: Product | null, wanted: string) {
 }
 
 /**
+ * The page called the gift free, so the cart has to agree. After the cart is
+ * final (exit code included), read what the gift line costs after discounts
+ * (`cost.totalAmount`). Anything above zero means the automatic discount did not
+ * fire: log it for Sentry and take the line off, so nobody is charged for it.
+ * Never throws; a sale is not blocked on the gift.
+ */
+async function dropGiftIfCharged(cart: Cart, slug: string, giftHandle: string): Promise<void> {
+  const lineId = cart.lines.find(l => l.merchandise.product.handle === giftHandle)?.id
+  if (!lineId) return
+  try {
+    const line = (await getCartLineTotals(cart.id))?.find(l => l.lineId === lineId)
+    // Free means a line total of zero after discounts. A missing line reads as gone already.
+    if (!line || Math.round(line.total * 100) <= 0) return
+    console.error('[sales-page] free gift did not discount', slug, giftHandle)
+  } catch (err) {
+    // Cannot confirm it is free, so it does not stay on the cart.
+    console.error('[sales-page] free gift check failed', slug, giftHandle, err)
+  }
+  try {
+    await removeFromCart(cart.id, [lineId])
+  } catch (err) {
+    console.error('[sales-page] free gift removal failed', slug, giftHandle, err)
+  }
+}
+
+/**
  * A sales page's forms post here.
  *
  * The buy buttons (no intent) build a one-line cart for the chosen variant of
@@ -395,9 +448,11 @@ async function salesAction(request: Request, slug: string) {
     const cartId = getSalesCartId(request)
     if (step === null || !cartId) return redirect(pageUrl(request))
     try {
-      const addOns = await loadAddOns(page)
+      const [addOns, gift] = await Promise.all([loadAddOns(page), loadGift(page)])
+      const available = screenAvailability(page.addOns, addOns.map(screenBuyable), gift?.handle ?? null)
       let cart = null
-      if (form.get('take') === '1') {
+      // A screen the gift skips cannot be bought from, even by a hand-built post.
+      if (form.get('take') === '1' && available[step - 1]) {
         // The variant must belong to one of this screen's own products.
         const variant = (addOns[step - 1] ?? []).map(p => pickVariant(p, wanted)).find(Boolean)
         if (!variant) return { error: 'That one just sold out. You can skip it and keep going.' }
@@ -410,7 +465,7 @@ async function salesAction(request: Request, slug: string) {
           console.error('[sales-page] bulk code did not apply', slug, offer.code)
         }
       }
-      const next = nextAddOnStep(addOns.map(screenBuyable), step)
+      const next = nextAddOnStep(available, step)
       if (next) return redirect(addOnStepUrl(request, next))
       cart ??= await getCart(cartId)
       return redirect(cart ? cart.checkoutUrl : pageUrl(request))
@@ -421,19 +476,28 @@ async function salesAction(request: Request, slug: string) {
   }
 
   try {
-    const [product, addOns, upgrades] = await Promise.all([getProductByHandle(page.productHandle), loadAddOns(page), loadUpgrades(page)])
+    const [product, addOns, upgrades, gift] = await Promise.all([getProductByHandle(page.productHandle), loadAddOns(page), loadUpgrades(page), loadGift(page)])
     // The variant must belong to this page's product or one it steps up to.
     const variant = [product, ...upgrades].map(p => pickVariant(p, wanted)).find(Boolean)
     if (!variant) return { error: 'That one just sold out. Pick another option above, or check back soon.' }
-    const cart = await createCartWithLines([{ variantId: variant.id, quantity: 1 }])
+    // The free gift rides with the page's own product only, never an upgrade.
+    const isOwnProduct = variant === pickVariant(product, wanted)
+    const giftVariant = isOwnProduct ? pickVariant(gift, '') : undefined
+    const cart = await createCartWithLines([
+      { variantId: variant.id, quantity: 1 },
+      ...(giftVariant ? [{ variantId: giftVariant.id, quantity: 1 }] : []),
+    ])
     await applyAttributionAttrs(cart.id, request, [{ key: '_landing', value: `curious/${page.slug}` }, ...salesCtaAttr(form.get('spot'))])
     // A claimed exit code goes on the cart here. It covers this page's own product only.
     const exitCode = claimedExitCode(request, page.slug)
-    if (exitCode && variant === pickVariant(product, wanted) && !(await addCartDiscountCode(cart.id, exitCode))) {
+    if (exitCode && isOwnProduct && !(await addCartDiscountCode(cart.id, exitCode))) {
       // The form promised this price, so a dead code has to reach Sentry.
       console.error('[sales-page] exit code did not apply', slug, exitCode)
     }
-    const next = nextAddOnStep(addOns.map(screenBuyable), 0)
+    if (giftVariant && gift) await dropGiftIfCharged(cart, slug, gift.handle)
+    // The skip follows the page config and the gift's stock, not this request, so
+    // the add-on loader reaches the same answer on every later request.
+    const next = nextAddOnStep(screenAvailability(page.addOns, addOns.map(screenBuyable), gift?.handle ?? null), 0)
     if (next) return redirect(addOnStepUrl(request, next), { headers: { 'Set-Cookie': setSalesCartCookie(cart.id) } })
     return redirect(cart.checkoutUrl)
   } catch (err) {
@@ -635,9 +699,9 @@ export default function BridgeRoute() {
         <LeadFunnelView page={d.page} utm={d.utm} terms={d.terms} smsOptin={d.smsOptin} />
       ) : d.kind === 'sales' ? (
         d.page.slug === GAWK_SALES_SLUG ? (
-          <GawkSalesView d={{ page: d.page, shop: d.shop, upgrades: d.upgrades, smsOptin: d.smsOptin, hasAddOns: d.hasAddOns, logo: d.logo, preview: d.preview, error: actionData?.error ?? null }} />
+          <GawkSalesView d={{ page: d.page, shop: d.shop, upgrades: d.upgrades, smsOptin: d.smsOptin, hasAddOns: d.hasAddOns, freeGift: d.freeGift, logo: d.logo, preview: d.preview, error: actionData?.error ?? null }} />
         ) : (
-          <SalesPageView d={{ page: d.page, shop: d.shop, hasAddOns: d.hasAddOns, logo: d.logo, preview: d.preview, error: actionData?.error ?? null }} />
+          <SalesPageView d={{ page: d.page, shop: d.shop, hasAddOns: d.hasAddOns, freeGift: d.freeGift, logo: d.logo, preview: d.preview, error: actionData?.error ?? null }} />
         )
       ) : d.kind === 'salesAddOn' ? (
         <SalesAddOnView d={{ ...d, error: actionData?.error ?? null }} />

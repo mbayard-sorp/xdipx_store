@@ -17,7 +17,6 @@ import {
   GAWK_BOX,
   GAWK_COMPARE_COLUMNS,
   GAWK_COMPARE_ROWS,
-  GAWK_FAQS,
   GAWK_IMAGES as IMG,
   GAWK_PATH,
   GAWK_REASONS,
@@ -27,6 +26,8 @@ import {
   GAWK_TICKER,
   GAWK_UPGRADES,
   GAWK_VERSUS,
+  gawkFaqs,
+  gawkKit,
   gawkOffer,
   gawkUpgradeGap,
 } from '~/lib/gawk-sales-page'
@@ -97,6 +98,10 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
   const price = variant?.price ?? 0
   const offer = gawkOffer(price, shop.showCompareAt ? (variant?.compareAtPrice ?? null) : null)
   const p = money(price)
+  // The free bottle and the kit it makes. Present only while the loader says the gift is buyable.
+  const gift = d.freeGift
+  const kit = gift ? gawkKit(price, shop.showCompareAt ? (variant?.compareAtPrice ?? null) : null, gift.value) : null
+  const kitLine = kit ? `${money(kit.value)} of kit for ${p}${kit.pct ? `, ${kit.pct}% off` : ''}` : ''
   const getIt = offer ? `Get it ${offer.label} →` : 'Get it →'
 
   // Only what's in stock and really costs more shows, so a sold-out Rose just drops off.
@@ -130,6 +135,20 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
       {children}
     </BuyForm>
   )
+
+  const GiftCard = ({ light }: { light?: boolean | undefined }) =>
+    gift && kit ? (
+      <div className={'flex w-full max-w-[480px] items-center gap-3 border-2 p-3 text-left ' + (light ? 'border-white/70 text-white' : 'border-plum bg-white text-[#1A1616]')}>
+        {gift.image ? (
+          <img src={shopifyImageUrl(gift.image, 120)} alt="" width={56} height={56} loading="lazy" className="h-14 w-14 flex-none bg-[#F2EFEB] object-contain" />
+        ) : null}
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <span className={'text-[13px] font-bold tracking-[0.04em] ' + (light ? 'text-white' : 'text-plum')}>+ FREE WITH YOUR GAWK</span>
+          <span className="text-[16px] font-bold leading-tight">{gift.label}</span>
+          <span className="text-[14px] leading-snug">{money(gift.value)} value, yours free. {kitLine}.</span>
+        </div>
+      </div>
+    ) : null
 
   const Struck = ({ light }: { light?: boolean | undefined }) =>
     offer ? <span className={'text-[18px] line-through ' + (light ? 'text-[#BDB4AD]' : 'text-[#6B625C]')}>{money(offer.was)}</span> : null
@@ -176,7 +195,7 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
             <Fill src={IMG.hero} alt="Gawk Gawk 3000" pos="50% 20%" eager />
             <div className="absolute left-4 top-4"><FreeBadge /></div>
             <div className="absolute bottom-0 right-0 flex flex-col items-end">
-              <span className="bg-plum px-3.5 py-2 text-[30px] font-bold text-white">{offer ? offer.label : p}</span>
+              <span className="bg-plum px-3.5 py-2 text-[30px] font-bold text-white">{offer ? offer.label : kit ? 'Free lube' : p}</span>
               <span className="bg-coral px-3.5 py-[5px] font-mono text-[12px] uppercase tracking-[0.08em] text-white">Plain box</span>
             </div>
           </div>
@@ -204,6 +223,7 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
               ) : null}
               <FreeBadge />
             </div>
+            <GiftCard />
             <Cta spot="hero" size={20} width="max-w-[480px]">{offer ? `I'll take it, ${offer.label} ♥` : "I'll take it ♥"}</Cta>
             <div className={TRUST_LINE}>
               <span>✓ Discreet plain box</span><span>✓ Billed as XDIPX</span><span>✓ 30-day returns</span>
@@ -292,9 +312,10 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
       {/* 05 CTA */}
       <section data-screen-label="05 CTA" className="bg-[#1A1616] px-5 py-16 text-white">
         <div className="mx-auto flex max-w-[900px] flex-col items-center gap-5 text-center">
-          <span className="bg-plum px-2.5 py-1 text-[16px] font-bold">{offer ? offer.label : 'Free shipping'}</span>
+          <span className="bg-plum px-2.5 py-1 text-[16px] font-bold">{offer ? offer.label : kit ? 'Free lube' : 'Free shipping'}</span>
           <h2 className={BIG}>It spins. <Em light>You cum.</Em></h2>
           <p className="m-0 max-w-[560px] text-[18px] leading-[1.5] text-[#D9D2CC] [text-wrap:pretty]">That's the whole pitch. {p}, shipped free{offer ? `, down from ${money(offer.was)}` : ''}.</p>
+          <GiftCard light />
           <Cta spot="cta-05" size={20} width="mx-auto max-w-[440px]">{getIt}</Cta>
           <span className="text-[14px] text-[#BDB4AD]">Free shipping · Plain box · Billed as XDIPX · 30-day returns</span>
         </div>
@@ -426,6 +447,7 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
             {offer ? <span className="text-[18px] line-through">{money(offer.was)}</span> : null}
             <FreeBadge light />
           </div>
+          <GiftCard light />
           <Cta spot="cta-12" size={20} width="mx-auto max-w-[440px]" tone="bg-[#1A1616] hover:bg-plum">{getIt}</Cta>
           <span className="text-[14px]">Plain box · Billed as XDIPX · 30-day returns</span>
         </div>
@@ -513,6 +535,7 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
             </div>
             <h2 className="m-0 font-display text-[clamp(34px,4.4vw,48px)] font-medium leading-[1.04] tracking-[-0.015em] [text-wrap:balance]">Soft lips spin <Em>360°</Em> around your cock until you cum.</h2>
             <PriceRow />
+            <GiftCard />
             <Cta spot="cta-16" width="">I'll take it ♥</Cta>
           </div>
         </div>
@@ -527,8 +550,15 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
             <p className={BODY}>Less than a nice dinner. Less than a few months of a premium subscription. And unlike those, this one actually touches you.</p>
             <div className={'flex flex-col border-t-[3px] border-coral ' + GAP_GRID}>
               {[
-                ...(offer ? [{ k: 'Regular price', v: <span className="text-[#6B625C] line-through">{money(offer.was)}</span> }] : []),
-                { k: offer ? 'Today' : 'Price', v: <span className="text-coral">{p}</span> },
+                ...(kit && gift
+                  ? [
+                      { k: gift.label, v: <span className="text-plum">Free, {money(gift.value)} value</span> },
+                      { k: 'Kit value', v: <span className="text-[#6B625C] line-through">{money(kit.value)}</span> },
+                    ]
+                  : offer
+                    ? [{ k: 'Regular price', v: <span className="text-[#6B625C] line-through">{money(offer.was)}</span> }]
+                    : []),
+                { k: offer || kit ? 'Today' : 'Price', v: <span className="text-coral">{p}</span> },
                 { k: 'Shipping', v: <span className="text-plum">Free</span> },
                 { k: 'Returns', v: '30 days' },
               ].map(r => (
@@ -538,6 +568,7 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
                 </div>
               ))}
             </div>
+            {kit ? <p className="m-0 text-[16px] font-bold text-plum">{kitLine}.</p> : null}
             <Cta spot="do-the-math">{offer ? `Lock in ${offer.label} →` : 'Lock it in →'}</Cta>
           </div>
           <div className={FRAME + ' aspect-square'}>
@@ -699,10 +730,11 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
       <section data-screen-label="22 Offer" className="bg-plum px-5 py-[72px] text-white">
         <div className="mx-auto flex max-w-[900px] flex-col items-center gap-[18px] text-center">
           <span className="font-mono text-[13px] uppercase tracking-[0.1em]">Free shipping · Plain box</span>
-          <div className="font-display text-[clamp(80px,14vw,160px)] font-medium leading-[0.9] tracking-[-0.03em]">{offer ? offer.label : p}</div>
+          <div className="font-display text-[clamp(80px,14vw,160px)] font-medium leading-[0.9] tracking-[-0.03em]">{offer ? offer.label : kit ? 'Free lube' : p}</div>
           <p className="m-0 max-w-[560px] text-[20px] leading-[1.45] [text-wrap:pretty]">
             The viral Gawk Gawk 3000, shipped free, for <strong>{p}</strong>{offer ? ` instead of ${money(offer.was)}` : ''}. You're already in the mood. Don't waste it.
           </p>
+          <GiftCard light />
           <Cta spot="offer" size={20} width="mx-auto max-w-[440px]" tone="bg-coral hover:bg-[#1A1616]">{offer ? `Claim ${offer.label} →` : 'Claim yours →'}</Cta>
           <div className="flex flex-wrap items-center justify-center gap-2.5 text-[14px]">
             <FreeBadge light /><span>Discreet · Billed as XDIPX · 30-day returns</span>
@@ -717,11 +749,11 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
             <Kicker>One last thing</Kicker>
             <p className="m-0 font-display text-[30px] leading-[1.25]">Look.</p>
             <p className={BODY}>You're here because something on your screen got you going and you clicked. Good instinct.</p>
-            <p className={BODY}>Right now the Gawk Gawk 3000 is <strong>{offer ? offer.label : p}</strong>, ships <strong>free</strong> in a plain box, and shows up on your statement as XDIPX. Nobody has to know. Change your mind before you open it and it can come back within 30 days.</p>
+            <p className={BODY}>Right now the Gawk Gawk 3000 is <strong>{offer ? offer.label : p}</strong>{gift ? <>, comes with a <strong>free {gift.label}</strong></> : null}, ships <strong>free</strong> in a plain box, and shows up on your statement as XDIPX. Nobody has to know. Change your mind before you open it and it can come back within 30 days.</p>
             <p className={BODY}>Or close this tab, go back to your hand, and keep wondering.</p>
             <div className="flex flex-col gap-2.5 border-l-[3px] border-plum pl-4">
               <p className="m-0 text-[17px] leading-[1.55]"><strong>P.S.</strong> The rotation is intense. Start on the lowest speed. Seriously.</p>
-              <p className="m-0 text-[17px] leading-[1.55]"><strong>P.P.S.</strong> Water-based lube only. You can add a bottle on the next screen, and two or more cost less each.</p>
+              <p className="m-0 text-[17px] leading-[1.55]"><strong>P.P.S.</strong> Water-based lube only. {gift ? 'Your free bottle comes with the Gawk.' : 'You can add a bottle on the next screen, and two or more cost less each.'}</p>
             </div>
             <Cta spot="ps">Okay, I'm in →</Cta>
           </div>
@@ -739,6 +771,7 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
               <span className="font-display text-[44px]">{p}</span>
               {offer ? <span className="text-[20px] text-[#6B625C] line-through">{money(offer.was)}</span> : null}
             </div>
+            <GiftCard />
             <Cta spot="final" size={20} width="max-w-[480px]">{getIt}</Cta>
             <div className={TRUST_LINE + ' items-center'}>
               <FreeBadge /><span>✓ Discreet plain box</span><span>✓ Billed as XDIPX</span><span>✓ 30-day returns</span>
@@ -753,7 +786,7 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
         <div className="mx-auto flex max-w-[820px] flex-col gap-7">
           <h2 className="m-0 font-display text-[clamp(34px,4.6vw,48px)] font-medium leading-[1.05] tracking-[-0.015em]">Straight <Em>answers.</Em></h2>
           <div className={'flex flex-col border-t-[3px] border-coral ' + GAP_GRID}>
-            {GAWK_FAQS.map((f, i) => (
+            {gawkFaqs(gift?.label ?? null).map((f, i) => (
               <details key={f.q} name="gawk-faq" open={i === 0} className="group bg-white">
                 <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-4 px-[22px] py-5 text-[17px] font-semibold [&::-webkit-details-marker]:hidden">
                   {f.q}
@@ -782,8 +815,15 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
             <img src={sanityImageUrl(IMG.packshot, { w: 96 })} alt="" width={44} height={44} className="h-11 w-11 flex-none bg-[#F2EFEB] object-contain" />
             <div className="flex min-w-0 flex-col">
               <span className="truncate text-[14px] font-bold">Gawk Gawk 3000 · <span className="text-coral">In stock</span></span>
-              <span className="text-[13px] text-[#3E3732]">
-                <strong>{p}</strong> {offer ? <span className="text-[#6B625C] line-through">{money(offer.was)}</span> : null} · <span className="font-bold text-plum">Free shipping</span>
+              <span className="truncate text-[13px] text-[#3E3732]">
+                <strong>{p}</strong>{' '}
+                {gift ? (
+                  <span className="font-bold text-plum">+ free {gift.label}</span>
+                ) : (
+                  <>
+                    {offer ? <span className="text-[#6B625C] line-through">{money(offer.was)}</span> : null} · <span className="font-bold text-plum">Free shipping</span>
+                  </>
+                )}
               </span>
             </div>
           </div>

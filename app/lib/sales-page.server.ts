@@ -26,6 +26,7 @@ const SALES_GROQ = `*[_type == "salesPage" && slug.current == $slug] | order(_up
     "image": image${IMG}
   },
   closer, closerLine,
+  freeGift{ productHandle, label },
   addOns[]{ productHandle, headline, pitch, tiers[]{ productHandle, label, blurb }, bulkLine, bulkOffers[]{ quantity, percent, code } }
 }`
 

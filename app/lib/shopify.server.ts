@@ -3319,6 +3319,31 @@ export async function removeFromCart(cartId: string, lineIds: string[]): Promise
   return rawCartToCart(data.cartLinesRemove.cart)
 }
 
+/**
+ * What each cart line costs after discounts (`cost.totalAmount`, which includes
+ * automatic discounts; `subtotalAmount` does not). Kept off CART_FRAGMENT so
+ * the shared cart reads stay as they were. Null when the cart is gone.
+ */
+export async function getCartLineTotals(cartId: string): Promise<{ lineId: string; handle: string; total: number }[] | null> {
+  const data = await storefront<{
+    cart: { lines: { edges: { node: { id: string; cost: { totalAmount: { amount: string } }; merchandise: { product?: { handle: string } } } }[] } } | null
+  }>(`
+    query CartLineTotals($id: ID!) {
+      cart(id: $id) {
+        lines(first: 50) {
+          edges { node { id cost { totalAmount { amount } } merchandise { ... on ProductVariant { product { handle } } } } }
+        }
+      }
+    }
+  `, { id: cartId })
+  if (!data.cart) return null
+  return data.cart.lines.edges.map(e => ({
+    lineId: e.node.id,
+    handle: e.node.merchandise.product?.handle ?? '',
+    total: parseFloat(e.node.cost.totalAmount.amount),
+  }))
+}
+
 export async function updateCartLine(cartId: string, lineId: string, quantity: number): Promise<Cart> {
   const data = await storefront<{ cartLinesUpdate: CartResponse }>(`
     mutation UpdateCartLine($cartId: ID!, $lines: [CartLineUpdateInput!]!) {

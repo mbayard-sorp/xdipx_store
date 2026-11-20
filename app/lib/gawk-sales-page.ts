@@ -54,6 +54,28 @@ export function gawkOffer(price: number, compareAt: number | null): GawkOffer | 
   return { label: `${pct}% OFF`, was: compareAt, save: Math.round((compareAt - price) * 100) / 100 }
 }
 
+export interface GawkKit {
+  /** Everything in the kit at full price: the Gawk's regular price plus the gift's value. */
+  value: number
+  save: number
+  /** "37% off", or null when the saving is under the store's badge floor. */
+  pct: number | null
+}
+
+/**
+ * The kit offer when a free gift rides with the Gawk. The regular price is the
+ * live compare-at when the MAP gate allows showing one (`compareAt` null when it
+ * does not), else the live price. The gift is its own live price. Null when
+ * there is no gift value to count.
+ */
+export function gawkKit(price: number, compareAt: number | null, giftValue: number): GawkKit | null {
+  if (!price || !giftValue || giftValue <= 0) return null
+  const regular = compareAt && compareAt > price ? compareAt : price
+  const value = Math.round((regular + giftValue) * 100) / 100
+  const pct = Math.round((1 - price / value) * 100)
+  return { value, save: Math.round((value - price) * 100) / 100, pct: showDiscountBadge(pct) ? pct : null }
+}
+
 /**
  * The other Male Roses this page steps up to, in the order they show. Specs come
  * from each product's `custom.original_description` metafield (the manufacturer's
@@ -234,3 +256,12 @@ export const GAWK_FAQS = [
   { q: 'How do I charge it?', a: 'USB. Plug it in before you want it.' },
   { q: "What if I don't like it?", a: "Unopened, it can come back within 30 days. Once it's been used, hygiene rules apply. If something's wrong with it, email hello@xdipx.com and we make it right." },
 ]
+
+/** The FAQ list. With a free gift the lube answer says the bottle is included. */
+export function gawkFaqs(giftName: string | null) {
+  return GAWK_FAQS.map(f =>
+    f.q === 'Which lube?' && giftName
+      ? { q: f.q, a: `Water-based, and be generous. A free ${giftName} comes with your Gawk, so you can start the day it lands.` }
+      : f,
+  )
+}
