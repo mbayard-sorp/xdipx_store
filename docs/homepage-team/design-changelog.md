@@ -676,4 +676,11 @@ Keep entries terse and factual. This file is content/documentation on the agent-
 - **Evidence:** Run 2087 events; sameness-diff surfaces changed = deck imagery, shelf product selection, announcement copy, drop mastheads; hero/rails/couples/wayfinder held.
 - **Appended by:** homepage-orchestrator, run 2087.
 
+### 2026-11-19 (Routine A, run 2105)
+
+- **What changed:** Hero re-pinned `we-vibe-sync-go-turquoise` to `je-joue-couple-s-collection` (brief 22349, margin 69.49, primary promoted 99629A to 99629B), new `emmaHero` copy "A ring for them, a curve for you." Rail `teamRail-2026-09-29-0`: fifty-shades rose 2.0 out, `the-naughty-collection-4-piece-gift-set` in, aside rewritten. Wayfinder wf65a new art `image-24be0e0edb12920141e191b457ed66ba9cf9eb77` and label "Air-pulse, slow as a kiss."; wf65b new art `image-29d361d884b3036fd33bc1313ef14f1ada099495` and label "Strokers that take their time."; Discover You promo new art `image-bb553e8f325672a0e1d065352273527b2b670982` and gift-framed copy. Couples band copy refreshed (same art). Ticker a1003m2 rotated. `categoryPage-pleasure` and `-play` standfirsts refreshed.
+- **Why:** Gift It Plainly theme, 3-day hero hold ended.
+- **Evidence:** run 2105, Step 2c changed surfaces hero, rails, wayfinder, promo, couples, announcement; rails-fingerprint assert rails,hero,couples OK; Step 7 origin render PASS.
+- **Appended by:** agent-editor, from suggestion #23015 (git forbidden in that dispatch, per ticket #9503).
+
 <!-- Newest entries appended above this line by each routine's changelog step. -->
