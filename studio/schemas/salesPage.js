@@ -365,6 +365,26 @@ export default {
       validation: Rule => Rule.max(240).custom(noDashes),
     },
 
+    // Free gift (additive, 2026-11-20)
+    {
+      name: 'freeGift',
+      title: 'Free gift',
+      type: 'object',
+      group: 'addons',
+      description:
+        'A product given free with the page\'s own product. The buy button puts it in the cart, and a Shopify automatic buy X get Y discount must take it to $0. If the gift is sold out or unavailable the page shows no gift. Any add-on screen selling the same product is skipped. Leave empty for no gift.',
+      fields: [
+        {
+          name: 'productHandle',
+          title: 'Gift product handle',
+          type: 'string',
+          validation: Rule =>
+            Rule.required().custom(v => (/^[a-z0-9][a-z0-9-]*$/.test(v ?? '') ? true : 'Bare handle only: lowercase letters, digits, hyphens')),
+        },
+        { name: 'label', title: 'Label', type: 'string', description: 'Optional name shown on the page. Empty uses the product title.' },
+      ],
+    },
+
     // Add-ons
     {
       name: 'addOns',

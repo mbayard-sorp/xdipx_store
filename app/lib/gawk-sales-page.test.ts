@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, it, expect } from 'vitest'
-import { GAWK_COMPARE_COLUMNS, GAWK_COMPARE_ROWS, GAWK_UPGRADES, gawkOffer, gawkUpgradeGap } from './gawk-sales-page'
+import { GAWK_COMPARE_COLUMNS, GAWK_FAQS, GAWK_COMPARE_ROWS, GAWK_UPGRADES, gawkFaqs, gawkKit, gawkOffer, gawkUpgradeGap } from './gawk-sales-page'
 
 describe('gawkUpgradeGap', () => {
   it('is the live price difference', () => {
@@ -59,5 +59,38 @@ describe('page copy', () => {
   it('makes no scarcity claims and hardcodes no price', () => {
     expect(copy).not.toMatch(/sold out everywhere|sell out|while (this batch|stock) lasts|limited offer|back in stock|before it's gone/i)
     expect(copy).not.toMatch(/\$(69|142)\.\d\d/)
+  })
+})
+
+describe('gawkKit', () => {
+  it('counts compare-at plus the gift against the price', () => {
+    expect(gawkKit(69.99, 89.99, 21.99)).toEqual({ value: 111.98, save: 41.99, pct: 37 })
+  })
+
+  it('uses the price when there is no compare-at', () => {
+    expect(gawkKit(69.99, null, 21.99)).toEqual({ value: 91.98, save: 21.99, pct: 24 })
+    expect(gawkKit(69.99, 69.99, 21.99)?.value).toBe(91.98)
+  })
+
+  it('has no kit without a gift value', () => {
+    expect(gawkKit(69.99, 89.99, 0)).toBeNull()
+    expect(gawkKit(0, null, 21.99)).toBeNull()
+  })
+
+  it('drops the percent below the badge floor but keeps the kit', () => {
+    expect(gawkKit(69.99, null, 2)).toMatchObject({ value: 71.99, pct: null })
+  })
+})
+
+describe('gawkFaqs', () => {
+  it('is unchanged with no gift', () => {
+    expect(gawkFaqs(null)).toEqual(GAWK_FAQS)
+  })
+
+  it('says the bottle is included when there is a gift, and drops the next-screen line', () => {
+    const a = gawkFaqs('System JO H2O 4 oz').find(f => f.q === 'Which lube?')!.a
+    expect(a).toContain('free System JO H2O 4 oz')
+    expect(a).not.toContain('next screen')
+    expect(a).not.toMatch(/[\u2013\u2014]/)
   })
 })
