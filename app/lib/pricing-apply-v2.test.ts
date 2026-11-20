@@ -9,6 +9,8 @@ import {
   mapAppliesToVendor,
   withDefaultMapBrands,
   isPartialBatchDay,
+  parsePricingHoldSkus,
+  isPriceHeld,
 } from './pricing-apply-v2.server'
 
 const BASE = {
@@ -301,5 +303,48 @@ describe('contractualMapFor', () => {
     expect(contractualMapFor('Doxy', 0, 149)).toBeNull()
     expect(contractualMapFor('Blush', 0, 30)).toBeNull()
     expect(contractualMapFor('Lovense', 0, null)).toBeNull()
+  })
+})
+
+describe('parsePricingHoldSkus', () => {
+  it('reads missing, null, empty, and blank as no holds', () => {
+    expect(parsePricingHoldSkus(undefined).size).toBe(0)
+    expect(parsePricingHoldSkus(null).size).toBe(0)
+    expect(parsePricingHoldSkus('').size).toBe(0)
+    expect(parsePricingHoldSkus('[]').size).toBe(0)
+  })
+
+  it('reads unparseable JSON as no holds', () => {
+    expect(parsePricingHoldSkus('{not json').size).toBe(0)
+  })
+
+  it('reads a non-array as no holds', () => {
+    expect(parsePricingHoldSkus('"NAL-1"').size).toBe(0)
+    expect(parsePricingHoldSkus('{"sku":"NAL-1"}').size).toBe(0)
+    expect(parsePricingHoldSkus('42').size).toBe(0)
+  })
+
+  it('keeps strings, drops non-strings and blanks', () => {
+    const holds = parsePricingHoldSkus('["NAL-1", 7, null, "", "   ", {"a":1}, "NAL-2"]')
+    expect([...holds].sort()).toEqual(['NAL-1', 'NAL-2'])
+  })
+
+  it('trims whitespace', () => {
+    expect(parsePricingHoldSkus('["  NAL-1  "]').has('NAL-1')).toBe(true)
+  })
+})
+
+describe('isPriceHeld', () => {
+  const holds = new Set(['NAL-1'])
+  it('matches exactly, trimmed, case-sensitive', () => {
+    expect(isPriceHeld('NAL-1', holds)).toBe(true)
+    expect(isPriceHeld(' NAL-1 ', holds)).toBe(true)
+    expect(isPriceHeld('nal-1', holds)).toBe(false)
+    expect(isPriceHeld('NAL-10', holds)).toBe(false)
+  })
+  it('never holds a missing SKU or an empty list', () => {
+    expect(isPriceHeld(null, holds)).toBe(false)
+    expect(isPriceHeld('', new Set())).toBe(false)
+    expect(isPriceHeld('NAL-1', new Set())).toBe(false)
   })
 })

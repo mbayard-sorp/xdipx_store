@@ -351,6 +351,52 @@ export async function getMapBrands(): Promise<string[]> {
 }
 
 /**
+ * Pure parse of the `pricing_hold_skus` setting (JSON array of SKU strings).
+ * Missing, empty, unparseable, or non-array reads as no holds. Non-string and
+ * blank entries are dropped; entries are trimmed. Matching is exact and
+ * case-sensitive on the trimmed SKU, so a hold never catches a neighbour.
+ */
+export function parsePricingHoldSkus(raw: string | null | undefined): Set<string> {
+  if (!raw) return new Set()
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return new Set()
+    const skus = parsed
+      .filter((s): s is string => typeof s === 'string')
+      .map(s => s.trim())
+      .filter(s => s.length > 0)
+    return new Set(skus)
+  } catch {
+    return new Set()
+  }
+}
+
+/** True when the SKU is on the hold list. Same trim rule as the parse. */
+export function isPriceHeld(sku: string | null | undefined, holds: ReadonlySet<string>): boolean {
+  return holds.size > 0 && holds.has((sku ?? '').trim())
+}
+
+/**
+ * Read the per-SKU price hold list (`pricing_hold_skus`). A held SKU keeps its
+ * Shopify price and compare-at exactly: no recompute, no audit row, no
+ * launch_price write. Read once per run and carried on RunContext. Written by
+ * the owner only; this code never writes the row. A failed read means no
+ * holds, same as the MAP brand reader's fall-through.
+ */
+export async function getPricingHoldSkus(): Promise<Set<string>> {
+  try {
+    const rows = await db
+      .select({ value: pipelineSettings.value })
+      .from(pipelineSettings)
+      .where(eq(pipelineSettings.key, 'pricing_hold_skus'))
+      .limit(1)
+    return parsePricingHoldSkus(rows[0]?.value)
+  } catch {
+    return new Set()
+  }
+}
+
+/**
  * Today's feed MAP for one SKU, from the snapshot cost-sync refreshes daily.
  * The product-level xdipx.map_price metafield cannot express per-size MAPs
  * (Gun Oil's 2oz and its largest bottle differ by $140), so a contractual
@@ -482,6 +528,8 @@ interface RunContext {
   ladder: ClearanceLadder
   /** Minimum markup over wholesale cost (monitor_p2_min_markup_pct); see enforceWholesaleFloor. */
   minMarkupPct: number
+  /** SKUs under a price hold (pricing_hold_skus); never repriced. */
+  holdSkus: ReadonlySet<string>
 }
 
 // Minimal variant/product data the compute core needs. Matches both the
@@ -520,7 +568,12 @@ async function recomputeFromData(
   feed: FeedCostSnapshot | null = null,
 ): Promise<RecomputeVariantResult> {
   const { variantId } = variant
-  const { trigger, mode, thresholds, mapBrands, msrpCeiling, ladder, minMarkupPct } = ctx
+  const { trigger, mode, thresholds, mapBrands, msrpCeiling, ladder, minMarkupPct, holdSkus } = ctx
+
+  // Price hold: first thing, before any compute, audit row, or launch_price write.
+  if (isPriceHeld(variant.sku, holdSkus)) {
+    return { status: 'skipped_no_change', auditId: null, applied: false, error: 'price hold' }
+  }
 
   // Prefer Shopify's native variant Cost per item (inventoryItem.unitCost),
   // falling back to the legacy xdipx.wholesale_cost metafield, unless the
@@ -889,10 +942,11 @@ export async function recomputeVariant(
   const msrpCeiling = await getMsrpCeilingEnabled()
   const ladder      = await getClearanceLadder()
   const minMarkupPct = await getMinMarkupPct()
+  const holdSkus    = await getPricingHoldSkus()
 
   const feed = (await loadFeedCosts([variant.sku])).get(variant.sku) ?? null
 
-  return recomputeFromData(product, variant, { trigger, mode, thresholds, mapBrands, msrpCeiling, ladder, minMarkupPct }, feed)
+  return recomputeFromData(product, variant, { trigger, mode, thresholds, mapBrands, msrpCeiling, ladder, minMarkupPct, holdSkus }, feed)
 }
 
 
@@ -962,6 +1016,7 @@ export async function dryRunRuleChange(opts: {
   const mapBrands = await getMapBrands()
   const msrpCeiling = await getMsrpCeilingEnabled()
   const ladder = await getClearanceLadder()
+  const holdSkus = await getPricingHoldSkus()
 
   const result: DryRunResult = {
     totalAffected: 0,
@@ -983,6 +1038,7 @@ export async function dryRunRuleChange(opts: {
     if (capped) break
     for (const variant of product.variants) {
       if (TEST_SKU_PREFIX.test(variant.sku ?? '')) continue
+      if (isPriceHeld(variant.sku, holdSkus)) continue
       if (processed >= DRY_RUN_CAP) { capped = true; break }
       processed++
 
@@ -1311,7 +1367,8 @@ export async function recomputeCatalog(opts: {
   const msrpCeiling = await getMsrpCeilingEnabled()
   const ladder      = await getClearanceLadder()
   const minMarkupPct = await getMinMarkupPct()
-  const ctx: RunContext = { trigger: opts.trigger, mode, thresholds, mapBrands, msrpCeiling, ladder, minMarkupPct }
+  const holdSkus    = await getPricingHoldSkus()
+  const ctx: RunContext = { trigger: opts.trigger, mode, thresholds, mapBrands, msrpCeiling, ladder, minMarkupPct, holdSkus }
 
   for (;;) {
     // Budget is checked at the page boundary, before fetching more work.
@@ -1331,6 +1388,7 @@ export async function recomputeCatalog(opts: {
     for (const product of page.products) {
       for (const variant of product.variants) {
         if (TEST_SKU_PREFIX.test(variant.sku ?? '')) continue
+        if (isPriceHeld(variant.sku, holdSkus)) continue
         counts.total++
         dayTotal++
         try {

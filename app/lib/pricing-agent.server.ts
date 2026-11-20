@@ -6,6 +6,7 @@ import { fetchAllNalpacFeeds } from './nalpac-feeds.server'
 import { bulkFetchProductsForPricing, updateVariantPricing, updateProductMetafield } from './shopify.server'
 import { computeTargetPrice } from './pricing-engine.server'
 import { enforceMapFloor } from './pricing-engine-v2.server'
+import { getPricingHoldSkus, isPriceHeld } from './pricing-apply-v2.server'
 import type { PricingSnapshot, PricingRules } from './pricing-engine.server'
 import { buildPricingReport, sendPricingReportEmail } from './pricing-report.server'
 import type { PricingChangeRecord } from './pricing-report.server'
@@ -242,6 +243,9 @@ export async function runDailyPriceReview(opts: RunOptions): Promise<RunResult> 
     type ChangeRow = typeof pricingChanges.$inferInsert
     const rows: ChangeRow[] = []
 
+    // Price hold (pricing_hold_skus): a held SKU gets no row and no write.
+    const holdSkus = await getPricingHoldSkus()
+
     let productsScanned = 0
     let variantsScanned = 0
 
@@ -254,6 +258,7 @@ export async function runDailyPriceReview(opts: RunOptions): Promise<RunResult> 
 
         // Resolve SKU: variant SKU takes priority, fall back to product-level nalpac_sku metafield
         const sku = variant.sku || productNalpacSku || ''
+        if (isPriceHeld(variant.sku, holdSkus) || isPriceHeld(sku, holdSkus)) continue
         const nalpacSnap = sku ? nalpacMap.get(sku) : undefined
 
         if (!nalpacSnap) {

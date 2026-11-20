@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs } from 'react-router'
 import { requireAdmin } from '~/lib/session.server'
 import { findVariantsBySkus, setVariantLaunchPrice } from '~/lib/shopify.server'
-import { recomputeVariant } from '~/lib/pricing-apply-v2.server'
+import { recomputeVariant, getPricingHoldSkus, isPriceHeld } from '~/lib/pricing-apply-v2.server'
 
 /**
  * Reset a variant's xdipx.launch_price to its current sell price (owner
@@ -23,6 +23,11 @@ export async function action({ request }: ActionFunctionArgs) {
   const matches = await findVariantsBySkus([sku])
   const match = matches.find(m => m.variant.sku === sku) ?? matches[0]
   if (!match) return Response.json({ ok: false, error: `No variant with SKU ${sku}` }, { status: 404 })
+
+  // Price hold: no launch_price write and no recompute for a held SKU.
+  if (isPriceHeld(match.variant.sku, await getPricingHoldSkus())) {
+    return Response.json({ ok: false, error: 'price hold' }, { status: 409 })
+  }
 
   await setVariantLaunchPrice(match.variant.variantId, match.variant.price)
   const result = await recomputeVariant({ variantId: match.variant.variantId, trigger: 'manual' })
