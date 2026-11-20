@@ -307,6 +307,8 @@ extend freely — additions need a slug, problem, and target query):
 | 36 | why-using-a-remote-control-vibrator-together-feels-awkward | A couple buys a remote-control toy specifically to share it, and the handover breaks the feedback loop in both directions: the person holding the remote is operating someone else's sensation blind, with nothing to read but a face, so they keep changing the setting hunting for a visible reaction, while the person wearing it stops feeling and starts producing a reaction so the other one knows it is working. Both end up doing a job, the usual escalation (more patterns, more intensity, a better toy) makes it worse because more settings means more guessing, and the couple reads the result as "we are bad at this" | "why does using a remote control vibrator with a partner feel awkward" |
 | 37 | is-it-normal-to-only-orgasm-with-a-vibrator | The reader orgasms reliably, and only with a vibrator. Hands, a mouth and penetration do not get them there, nothing hurts, nothing has changed, and nothing is absent. They have privately ranked the orgasm they do have as a lesser one because a device delivered it, and the feared consequence is having ruined themselves for "real" sex, or being dependent on a machine | "is it normal to only be able to orgasm with a vibrator" |
 
+| 38 | what-do-you-do-if-you-dont-like-a-sex-toy-you-bought | A toy the reader researched and paid for is wrong on first use: too strong, too weak, in the wrong place, too big, or simply flat. Hygiene rules keep a used intimate product from going back, so no action undoes the decision, and with nothing to do the reader converts a product mismatch into a verdict on themselves (they do not know what they like, their body is wrong, the money is gone). The toy goes into a drawer with nobody ever working out WHICH thing was wrong, and the next purchase repeats the blind guess by escalating intensity, which is the one variable a too-much result already ruled out † | "what do you do if you don't like a sex toy you bought" |
+
 † = health-adjacent; the "worth seeing a clinician if…" line, with its tier, is mandatory (see above).
 
 **When no writable row remains (added 2026-10-28, #18359).** The bank ran fully dry on 2026-10-27:
@@ -342,6 +344,33 @@ apart.
 `check-topic-collision.ts` was clean against 20 prior posts on heading, title and shared-embed
 surfaces, and `check-self-consistency.ts` cross-post pass was clean against all 112 published
 posts.
+
+Row 38 is the fifth (authored by content run 2130, 2026-11-20). By that run the bank was spent for
+the fourth time: rows 1-14, 16-24, 27, 28 and 30-37 all had published posts, rows 25, 26 and 29 are
+retired from the rotation, row 15 is still parked, and the `seoContentBrief` queue held no
+`real-talk` brief at all (its six queued rows were five `wellness-basics` and one `comparisons`).
+Row 38 targets the RETROSPECTIVE, post-purchase case, which no row covered: it is distinct from row
+6 (a toy that is too intense, where the single wrong variable is already known), from row 33 (a toy
+bought together whose first partnered use went badly, where the aftermath between two people is the
+subject), and from the guides post `what-should-you-expect-the-first-time-you-use-a-sex-toy`, which
+is prospective and pre-purchase. Row 38 is about sorting WHICH variable missed once the money is
+already spent and the toy cannot go back. `check-topic-collision.ts` was clean against 20 prior
+posts on heading, title and shared-embed surfaces, and `check-self-consistency.ts` cross-post pass
+was clean against all 125 published posts.
+
+Two drafting lessons from row 38 worth inheriting, both of which cost it gate cycles:
+
+- **A sorting frame must not read as the complete list of causes.** The post opened by saying a toy
+  that missed "got one of four things wrong", and the accuracy gate ruled that an exhaustive
+  diagnostic claim, because the post itself also names arousal level and lubrication as variables.
+  Frame a bank row's taxonomy as what is worth checking first, never as the full set.
+- **Broadening an axis mid-draft breaks downstream advice.** Axis one was widened from "too strong"
+  to "the wrong intensity" to close a taxonomy leak the voice gate found in an FAQ answer, and that
+  reframe left a later section telling an intensity result to "walk down the dial", which is the
+  wrong direction for the too-little half and silently assumed the reader owned a vibrator. This is
+  the `routine-content-daily.md` #19278 class (a split introduced by a repair leaves already-written
+  advice wrong without its own wording changing), and it is worth re-reading every downstream
+  instruction after widening any category a post has already used.
 
 Row 35 is the fifth (authored by content run 1947, 2026-11-10, serving calendar row 48, the Instagram
 "Two of You, Cuffing Season" couples campaign that opens that day and runs to 11-23, and landing ahead of
