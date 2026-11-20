@@ -575,6 +575,64 @@ describe('findUnsourcedSpecClaims', () => {
   })
 })
 
+// Ticket #23256 (content run 2130): a correct hero for
+// blogPost-what-do-you-do-if-you-dont-like-a-sex-toy-you-bought, whose only
+// embed is jo-h2o-original-water-based-lubricant-4-oz and whose hero depicts
+// exactly that bottle, was blocked twice by the same matcher bug — scoring a
+// catalog title against generic, lubricant-category-wide tokens ("water",
+// "based", "personal") and a figure word ("woman") the alt/prompt could not
+// avoid, plus a staging word ("natural", from "natural everyday hand-held
+// size") unrelated to any product name.
+describe('lubricant-category and figure-word false positives (#23256, content run 2130)', () => {
+  const JO_H2O: CatalogProduct = {
+    handle: 'jo-h2o-original-water-based-lubricant-4-oz',
+    title: 'System JO H2O Original Water-Based Personal Lubricant 4 oz',
+  }
+  const PJUR_WOMAN: CatalogProduct = {
+    handle: 'pjur-woman-waterbased-lube',
+    title: 'Woman Water-Based Personal Lubricant',
+  }
+  const ELIXIR_NATURAL: CatalogProduct = {
+    handle: 'elixir-natural-lubricant-1-7-oz',
+    title: 'Natural Water-Based Personal Lubricant 1.7 oz.',
+  }
+  const CATALOG_2130: CatalogProduct[] = [JO_H2O, PJUR_WOMAN, ELIXIR_NATURAL]
+
+  const post: AuditBlogPost = {
+    slug: 'what-do-you-do-if-you-dont-like-a-sex-toy-you-bought',
+    heroImageAlt:
+      "System JO H2O Original Water-Based Personal Lubricant resting in warm coral daylight beside a woman's hand",
+    imagePrompt:
+      "Editorial still life. A woman's hand reaches for the bottle, natural everyday hand-held " +
+      'size, warm coral daylight, soft shadow.',
+    embedHandles: ['jo-h2o-original-water-based-lubricant-4-oz'],
+  }
+
+  it('does not flag the Woman Water-Based lube on "water"/"based"/"personal"/"woman"', () => {
+    expect(findHeroEmbedMismatches([post], CATALOG_2130)).toEqual([])
+  })
+
+  it('does not flag the Natural lube on the staging word "natural"', () => {
+    // Isolated from PJUR_WOMAN so each false positive is pinned independently.
+    expect(findHeroEmbedMismatches([post], [JO_H2O, ELIXIR_NATURAL])).toEqual([])
+  })
+
+  it('both false positives together still clear, and the hero is recognized as naming its own embed', () => {
+    expect(findHeroEmbedMismatches([post], CATALOG_2130)).toEqual([])
+    expect(heroNamesAnyProduct(post, CATALOG_2130)).toBe(true)
+  })
+
+  it('a hero genuinely naming an unembedded lubricant by its real brand token still flags', () => {
+    const offEmbedPost: AuditBlogPost = {
+      ...post,
+      heroImageAlt: 'an Elixir bottle resting in warm coral daylight',
+      imagePrompt: null,
+    }
+    const hits = findHeroEmbedMismatches([offEmbedPost], CATALOG_2130)
+    expect(hits.map((h) => h.matchedHandle)).toContain('elixir-natural-lubricant-1-7-oz')
+  })
+})
+
 // Ticket #20122 (second occurrence of the #15618 class, this time for
 // MECHANISM tokens rather than packaging tokens): a Shopify title whose
 // distinctive tokens include a spec-shaped word made heroNamesAnyProduct and
