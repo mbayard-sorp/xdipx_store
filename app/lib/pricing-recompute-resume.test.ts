@@ -97,9 +97,12 @@ vi.mock('./pricing-engine-v2.server', () => ({
 // One page per call, so the walk's page boundaries are observable.
 const pages: Array<{ products: unknown[]; endCursor: string | null; hasNextPage: boolean }> = []
 const fetchCalls: Array<string | null | undefined> = []
+const priceWrites: unknown[][] = []
+const launchWrites: unknown[][] = []
 
 vi.mock('./shopify.server', () => ({
-  updateVariantPricing: async () => undefined,
+  updateVariantPricing: async (...args: unknown[]) => { priceWrites.push(args) },
+  setVariantLaunchPrice: async (...args: unknown[]) => { launchWrites.push(args) },
   normalizeMetafieldKey: (k: string) => k,
   fetchPricingProductsPage: async (opts?: { cursor?: string | null }) => {
     fetchCalls.push(opts?.cursor)
@@ -144,6 +147,8 @@ beforeEach(() => {
   auditRows.length = 0
   pages.length = 0
   fetchCalls.length = 0
+  priceWrites.length = 0
+  launchWrites.length = 0
   auditInsertFails = false
 })
 
@@ -176,6 +181,32 @@ describe('swallowed audit writes', () => {
 
     expect(result.auditWriteFailures).toBe(0)
     expect(auditRows).toHaveLength(3)
+  })
+})
+
+describe('price hold (pricing_hold_skus)', () => {
+  it('skips a held SKU: no audit row, no price write, no launch_price write', async () => {
+    settingsStore.set('pricing_hold_skus', JSON.stringify(['SKU-a-1']))
+    pages.push({ products: [product('a', 3)], endCursor: null, hasNextPage: false })
+
+    const result = await recomputeCatalog({ trigger: 'batch' })
+
+    expect(result.done).toBe(true)
+    expect(result.total).toBe(2)
+    expect(auditRows).toHaveLength(2)
+    expect(JSON.stringify(auditRows)).not.toContain('SKU-a-1')
+    expect(JSON.stringify(priceWrites)).not.toContain('a-1')
+    expect(JSON.stringify(launchWrites)).not.toContain('a-1')
+  })
+
+  it('treats an unparseable hold row as no holds', async () => {
+    settingsStore.set('pricing_hold_skus', '{oops')
+    pages.push({ products: [product('a', 2)], endCursor: null, hasNextPage: false })
+
+    const result = await recomputeCatalog({ trigger: 'batch' })
+
+    expect(result.total).toBe(2)
+    expect(auditRows).toHaveLength(2)
   })
 })
 

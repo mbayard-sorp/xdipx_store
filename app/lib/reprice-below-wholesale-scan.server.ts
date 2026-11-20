@@ -12,7 +12,7 @@
  */
 import { adminGraphQL, normalizeMetafieldKey } from './shopify.server'
 import { enforceWholesaleFloor } from './pricing-engine-v2.server'
-import { getMinMarkupPct } from './pricing-apply-v2.server'
+import { getMinMarkupPct, getPricingHoldSkus, isPriceHeld } from './pricing-apply-v2.server'
 
 const TEST_SKU_PREFIX = /^XDX-TEST-/i
 const PAGE_SIZE = 50
@@ -97,7 +97,11 @@ async function fetchActiveProducts(): Promise<ProductNode[]> {
 }
 
 /** Pure: builds one candidate row per violating variant. Exported for direct unit testing. */
-export function buildCandidateRows(products: readonly ProductNode[], minMarkupPct: number): {
+export function buildCandidateRows(
+  products: readonly ProductNode[],
+  minMarkupPct: number,
+  holdSkus: ReadonlySet<string> = new Set(),
+): {
   rows: RepriceCandidateRow[]
   variantsScanned: number
 } {
@@ -114,6 +118,8 @@ export function buildCandidateRows(products: readonly ProductNode[], minMarkupPc
     for (const variant of product.variants.nodes) {
       variantsScanned++
       if (TEST_SKU_PREFIX.test(variant.sku ?? '')) continue
+      // Price hold: the script's --apply writes these rows, so a held SKU never becomes one.
+      if (isPriceHeld(variant.sku, holdSkus)) continue
 
       const price = parseFloat(variant.price)
       const floorPrice = enforceWholesaleFloor(price, wholesaleCost, minMarkupPct)
@@ -155,8 +161,9 @@ export interface RepriceBelowWholesaleScanResult {
 /** Live wiring: pages the whole ACTIVE catalog and scores every variant. Read-only. */
 export async function scanRepriceBelowWholesale(): Promise<RepriceBelowWholesaleScanResult> {
   const minMarkupPct = await getMinMarkupPct()
+  const holdSkus = await getPricingHoldSkus()
   const products = await fetchActiveProducts()
-  const { rows, variantsScanned } = buildCandidateRows(products, minMarkupPct)
+  const { rows, variantsScanned } = buildCandidateRows(products, minMarkupPct, holdSkus)
   const repriceCount = rows.filter(r => r.recommendation === 'reprice').length
   return {
     scannedProducts: products.length,
