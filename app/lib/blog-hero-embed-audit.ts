@@ -89,6 +89,28 @@ const GENERIC_TOKENS = new Set<string>([
   // frame" matched bathmate-edge-pro, a product the hero never depicted.
   'edge', 'frame', 'corner', 'fold', 'light', 'shadow', 'surface', 'paper',
   'grain', 'format', 'angle', 'highlight', 'background', 'daylight',
+  // "natural" joins this list, not the lubricant-category list below, for the
+  // same reason as "edge": ticket #23256 (content run 2130) matched
+  // elixir-natural-lubricant-1-7-oz on "natural" coming from the shared
+  // prompt scaffold's "natural everyday hand-held size" (a scale/staging
+  // descriptor), not from anything naming that product.
+  'natural', 'everyday',
+  // Figure-describing vocabulary (ticket #23256, content run 2130): a
+  // section 0-H human hero necessarily contains a word for the person in
+  // frame, so treating "woman"/"man"/etc. as a distinctive brand/model token
+  // collides with any SKU whose own title happens to use one descriptively
+  // ("Woman Water-Based Personal Lubricant"). "adult" was already above.
+  'woman', 'women', 'man', 'men', 'person', 'people', 'figure', 'figures',
+  'hands', 'adults',
+  // Lubricant-category boilerplate (ticket #23256, content run 2130): "water",
+  // "based" and "personal" are shared by most of the lubricant catalog's
+  // titles ("... Water-Based Personal Lubricant ..."), the same way
+  // "rechargeable"/"silicone"/"waterproof" above are shared by most vibrators
+  // — not a brand/model token for any one SKU. Run 2130's hero for
+  // jo-h2o-original-water-based-lubricant-4-oz (itself a "Water-Based
+  // Personal Lubricant") matched pjur-woman-waterbased-lube ("Woman
+  // Water-Based Personal Lubricant") on exactly these three plus "woman".
+  'water', 'based', 'personal',
 ])
 
 /** Lowercase, replace non-alphanumerics with spaces, collapse whitespace. */
