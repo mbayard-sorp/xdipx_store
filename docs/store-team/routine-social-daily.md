@@ -66,6 +66,16 @@ by `manual` rows is reported as short, not full, and the run drafts an on-skin b
 it ends.** A run ends with the day's count in front of it: count `approved` plus `posted` rows per
 platform for today's UTC date, and the on-skin subset, before you write the final run update.
 
+**This section, not the morning or evening cloud-trigger prompt, is the authority on which platform
+is live today (ticket #22905).** Those trigger prompts are out-of-repo config this file cannot see,
+reviewed on no diff; a prompt written while a platform was live does not update itself the moment a
+valve flips or `social_freq_<platform>` drops to zero. A platform counts toward "done" above only
+when its own valve is on and its own `social_freq_<platform>` is above zero, both read live off the
+Step 2 `op:'config'` response, never assumed from the trigger prompt's framing. When no gate platform
+clears both conditions, no platform is live today, the zero-post-day failure mode in this section
+cannot fire regardless of how many rows post, and the run says so plainly in its summary instead of
+treating the trigger prompt's recovery framing as binding.
+
 **The format debt is part of done (owner direction 2026-09-25, ticket #11492).** The owner: *"We need
 to keep posting so we can get some reach."* Reach on this account comes from the two formats
 Instagram distributes beyond followers, carousels (saves) and Reels (non-follower delivery), and
