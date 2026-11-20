@@ -683,4 +683,11 @@ Keep entries terse and factual. This file is content/documentation on the agent-
 - **Evidence:** run 2105, Step 2c changed surfaces hero, rails, wayfinder, promo, couples, announcement; rails-fingerprint assert rails,hero,couples OK; Step 7 origin render PASS.
 - **Appended by:** agent-editor, from suggestion #23015 (git forbidden in that dispatch, per ticket #9503).
 
+### 2026-11-20 (Routine A, run 2124)
+
+- **What changed:** Rail `teamRail-2026-09-06-0` slot 6 `date-night-water-based-personal-lubricant` (discovery-index productType Discontinued) out, `wicked-simply-timeless` in, aside rewritten to name only the lineup. Couples band new art `image-a794db16a328b8cc95e49137fa3de3b396e07a2e-2560x1440-jpg` (archetype C, coral-soft linen, ref 98904B) and new heading/body. Wayfinder wf65c new art `image-693478e037efd10cff9066ec5bf93c8df84548c4-2560x1440-jpg` (archetype C, no-ref collection door) and label "Toys for two, handed over warm." Ticker a1003m1 rotated. `categoryPage-body` and `categoryPage-wear` masthead standfirsts plus one shelf intro each refreshed (day-2 pair).
+- **Why:** Gift It Plainly theme; discontinued-type reject rule (#5599); day 2 of the category 3-day cycle. Hero held one day after yesterday's re-pin.
+- **Evidence:** run 2124, Step 2c changed surfaces rails (product), couples (image + copy), wayfinder (image + label), announcement; rails-fingerprint assert rails,couples OK.
+- **Appended by:** homepage-orchestrator, run 2124.
+
 <!-- Newest entries appended above this line by each routine's changelog step. -->
