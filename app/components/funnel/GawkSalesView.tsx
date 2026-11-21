@@ -92,7 +92,7 @@ function Fill({ src, alt = '', pos, contain, eager, sizes = '(min-width: 768px) 
   )
 }
 
-export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: string; shop: SalesShopifyData }[]; smsOptin: boolean } }) {
+export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: string; shop: SalesShopifyData }[]; smsOptin: boolean; exitOffer: 'code' | 'gift' | null } }) {
   const { page, shop } = d
   const variant = shop.variants.find(v => v.available) ?? shop.variants[0]
   const price = variant?.price ?? 0
@@ -833,10 +833,11 @@ export function GawkSalesView({ d }: { d: SalesViewData & { upgrades: { handle: 
         </div>
       </div>
 
-      {variant?.available ? (
+      {variant?.available && d.exitOffer ? (
         <ExitOffer
           slug={page.slug}
           smsOptin={d.smsOptin}
+          gift={d.exitOffer === 'gift' ? (d.freeGift?.label ?? null) : null}
           buy={
             <BuyForm spot="exit-offer" shop={shop} variant={variant} beginCheckout={!d.hasAddOns} formClassName="w-full" className="flex min-h-[52px] w-full cursor-pointer items-center justify-center border-0 bg-coral px-6 text-[18px] font-bold text-white hover:bg-plum">
               I'll take it ♥

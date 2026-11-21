@@ -179,7 +179,7 @@ export async function action({ request }: ActionFunctionArgs) {
   const headers = new Headers()
   const emailHash = leadEmailHashCookie(request, lead.email)
   if (emailHash) headers.append('Set-Cookie', emailHash)
-  if (exitOffer) headers.append('Set-Cookie', setExitOfferCookie(exitOffer.code))
+  if (exitOffer?.code) headers.append('Set-Cookie', setExitOfferCookie(exitOffer.code))
 
   return Response.json({
     ok: true,

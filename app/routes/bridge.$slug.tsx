@@ -296,6 +296,9 @@ async function salesLoaderData(request: Request, page: SalesPage, preview: boole
   ])
   if (!product || product.variants.length === 0) throw data(BRIDGE_404, { status: 404 })
   const shop = salesShopData(product)
+  // A gift offer has nothing to give once the gift is out of stock, so the form stays off the page then.
+  const exit = getExitOffer(page.slug)
+  const exitOffer = !exit ? null : exit.code ? ('code' as const) : gift ? ('gift' as const) : null
   const onHost = isBridgeHost(requestHost(request.headers))
   const origin = onHost ? `https://${BRIDGE_HOST}` : new URL(request.url).origin
   return {
@@ -305,6 +308,7 @@ async function salesLoaderData(request: Request, page: SalesPage, preview: boole
     // A screen that sells the free gift is skipped, so it does not count here.
     hasAddOns: screenAvailability(page.addOns, page.addOns.map(() => true), gift?.handle ?? null).some(Boolean),
     freeGift: giftView(page, gift),
+    exitOffer,
     smsOptin,
     upgrades: upgrades.flatMap(p => (p ? [{ handle: p.handle, shop: salesShopData(p) }] : [])),
     preview,
@@ -699,7 +703,7 @@ export default function BridgeRoute() {
         <LeadFunnelView page={d.page} utm={d.utm} terms={d.terms} smsOptin={d.smsOptin} />
       ) : d.kind === 'sales' ? (
         d.page.slug === GAWK_SALES_SLUG ? (
-          <GawkSalesView d={{ page: d.page, shop: d.shop, upgrades: d.upgrades, smsOptin: d.smsOptin, hasAddOns: d.hasAddOns, freeGift: d.freeGift, logo: d.logo, preview: d.preview, error: actionData?.error ?? null }} />
+          <GawkSalesView d={{ page: d.page, shop: d.shop, upgrades: d.upgrades, smsOptin: d.smsOptin, exitOffer: d.exitOffer, hasAddOns: d.hasAddOns, freeGift: d.freeGift, logo: d.logo, preview: d.preview, error: actionData?.error ?? null }} />
         ) : (
           <SalesPageView d={{ page: d.page, shop: d.shop, hasAddOns: d.hasAddOns, freeGift: d.freeGift, logo: d.logo, preview: d.preview, error: actionData?.error ?? null }} />
         )
