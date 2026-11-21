@@ -346,8 +346,9 @@ below, instead of — or alongside without duplicating — the Notebook post.
   silicone-vs-water-based-lube, ai-companion-toys-vs-what-you-can-actually-buy.
 - **Same gates as any published prose:** route the comparison doc's copy (`excerpt`, item
   `blurb`s, `verdict`, `faqs`) through Step 5's dual gate before publish.
-- **The five mandatory prose checkers below (check-aphorism-closers, check-antithesis-cap,
-  check-unsourced-frequency, check-self-consistency, check-fresh-language) do not read a comparison
+- **The six mandatory prose checkers below (check-aphorism-closers, check-antithesis-cap,
+  check-unsourced-frequency, check-self-consistency, check-fresh-language,
+  check-percentage-denominator) do not read a comparison
   doc's `items[].blurb`/`bestFor`, `attributes[].label`/`values`, `verdict`, or `faqs[].question`/
   `answer`** (ticket #17824, second occurrence: comparison-water-based-vs-silicone-vs-hybrid-lube on
   run 1377 and comparison-air-pulse-toy-vs-vibrator on run 1648 both shipped with all five reporting
@@ -573,6 +574,31 @@ voice defect. Like the aphorism checker, it flags candidates and leaves the fina
 gate. **`seoTitle` and `seoDescription` are in scope** (#10266): pass them alongside
 `title`/`excerpt`/`body` in the draft JSON. Added after runs 196 and 269 each lost a gate cycle to this class with no mechanical guard in
 place (suggestions #1674, #2618).
+
+**Percentage-denominator pre-flight (mandatory, before Step 5):** run the deterministic checker on the
+draft JSON and drive it to exit 0 before submitting to the voice gate:
+
+```bash
+npx tsx scripts/check-percentage-denominator.ts <draft.json>
+```
+
+The checker flags a percentage figure (`92.9 percent`, `92.9%`) that co-occurs, in the same or an
+adjacent block, with an integer population count near a population noun (`66 women`, `recruited 61
+participants`) when the percentage is not arithmetically reachable from that count: it rounds the
+percentage to the nearest whole-person count against the stated N, then checks that count's own
+percentage lands within half a rounding unit of the figure as written. It does not flag a percentage
+with no nearby population count (nothing to check it against), and it does not mistake a
+percentage-of-a-percentage (`92.9 percent of the 61 percent who ...`) for a population count, since the
+chained number there is followed by `percent`, not a population noun. Second occurrence of the
+brief/announcement-figure denominator class after ticket #14798 (a partnered-sex subsample figure
+misread as the whole-sample figure); this one is arithmetic rather than wording, so it is cheap, exact,
+and has no false-positive problem — 92.9 percent of 66 is 61.314, and no whole number of 66 people
+rounds to 92.9 percent (61/66 is 92.4%, 62/66 is 93.9%), so the figure provably was not computed over
+the stated 66. On content run 2144 this was caught only by `sex-wellness-reviewer` doing the division
+by hand, after all six existing deterministic checkers exited 0; this checker makes that division
+mechanical. Resolve a hit by finding the actual denominator the source used, or dropping the pairing
+so the two figures are never read together. **`seoTitle` and `seoDescription` are in scope**, same as
+every checker above: pass them alongside `title`/`excerpt`/`body` in the draft JSON.
 
 **Claim-scope pre-flight (mandatory, before Step 5):** before submitting to the gates, list every
 claim in the draft that carries any of the shapes below, and for each one state the bound the evidence
