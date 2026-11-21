@@ -681,3 +681,46 @@ describe('spec-shaped distinctive tokens never become a naming requirement (#201
     })
   })
 })
+
+// Ticket #23462 (second, structural occurrence of the #23256 class): generic
+// color/light words that cluster in a hero prompt's trailing negative clause
+// ("no orange glow") are ALSO brand/model tokens for arbitrary SKUs in this
+// catalog, so enumerating more words (what #23256 did) cannot close the
+// class. The fix strips the negative clause from imagePrompt before token
+// matching. Content run 2144's real case: a hero prompt ending in a long
+// "no X, no Y, no orange glow" clause false-matched
+// together-glow-on-the-go-mini-wand-vibrator on the single short token
+// "glow", corroborated by "mini" elsewhere in the same prompt's staging
+// boilerplate.
+describe('negative-clause tokens in imagePrompt do not count as naming (#23462)', () => {
+  const GLOW_WAND: CatalogProduct = {
+    handle: 'together-glow-on-the-go-mini-wand-vibrator',
+    title: 'Glow On-The-Go Mini Wand Vibrator',
+  }
+
+  it('a catalog token appearing only inside a "no X" clause produces zero findings', () => {
+    const post: AuditBlogPost = {
+      slug: 'can-a-vibrator-help-with-menopause-symptoms',
+      heroImageAlt: 'The Womanizer Next resting in warm coral daylight',
+      imagePrompt:
+        'Editorial still life of the Womanizer Next, natural everyday mini hand-held size, ' +
+        'warm coral daylight, soft shadow, no product name callouts, no text overlays, ' +
+        'no orange glow, no colored light.',
+      embedHandles: ['womanizer-next'],
+    }
+    expect(findHeroEmbedMismatches([post], [GLOW_WAND])).toEqual([])
+    expect(heroNamesAnyProduct(post, [GLOW_WAND])).toBe(false)
+  })
+
+  it('a genuine positive mention of the same token outside any negative clause still flags', () => {
+    const post: AuditBlogPost = {
+      slug: 'p',
+      heroImageAlt: null,
+      imagePrompt: 'the Glow On-The-Go mini wand resting in warm coral daylight',
+      embedHandles: [],
+    }
+    const hits = findHeroEmbedMismatches([post], [GLOW_WAND])
+    expect(hits.map((h) => h.matchedHandle)).toContain('together-glow-on-the-go-mini-wand-vibrator')
+    expect(heroNamesAnyProduct(post, [GLOW_WAND])).toBe(true)
+  })
+})

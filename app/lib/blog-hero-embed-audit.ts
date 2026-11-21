@@ -119,6 +119,27 @@ function normalize(s: string): string {
 }
 
 /**
+ * Strips negative ("no X" / "not X") clauses from an image-generation prompt
+ * before token matching (ticket #23462, the structural version of the
+ * #23256 matcher-false-positive class). This pipeline's prompts put
+ * negatives in trailing comma/period-separated clauses ("no product
+ * callouts, no orange glow, no colored light"), and the generic color/light
+ * vocabulary that clusters there (glow, rose, blush, cherry, peach, amber,
+ * honey, silk) is also brand/model-token overlap for this catalog, so the
+ * matcher has no notion of prompt polarity and #23256's word-enumeration fix
+ * does not close the class — any word can land in a negative clause. A
+ * conservative clause-level split is enough, since these prompts always put
+ * the negative in its own clause: split on commas/periods and drop any
+ * clause whose first word is "no" or "not".
+ */
+function stripNegativeClauses(text: string): string {
+  return text
+    .split(/[,.]/)
+    .filter((clause) => !/^\s*(?:no|not)\b/i.test(clause))
+    .join(' ')
+}
+
+/**
  * Strips a trailing bundled-accessory clause ("with Storage Pouch", "with
  * Case", "with Remote", …) from a product name before tokenizing (ticket
  * #15618). Shopify catalog titles routinely bundle an accessory into the
@@ -230,7 +251,7 @@ export function findHeroEmbedMismatches(
   const results: HeroEmbedMismatch[] = []
 
   for (const post of posts) {
-    const copy = normalize([post.heroImageAlt ?? '', post.imagePrompt ?? ''].join(' '))
+    const copy = normalize([post.heroImageAlt ?? '', stripNegativeClauses(post.imagePrompt ?? '')].join(' '))
     if (!copy) continue
     const copyTokens = new Set(copy.split(' ').filter(Boolean))
     const embedSet = new Set(post.embedHandles.map((h) => h.toLowerCase().trim()).filter(Boolean))
@@ -295,7 +316,7 @@ export function findHeroEmbedMismatches(
  * exactly that (ticket #2750).
  */
 export function heroNamesAnyProduct(post: AuditBlogPost, catalog: CatalogProduct[]): boolean {
-  const copy = normalize([post.heroImageAlt ?? '', post.imagePrompt ?? ''].join(' '))
+  const copy = normalize([post.heroImageAlt ?? '', stripNegativeClauses(post.imagePrompt ?? '')].join(' '))
   if (!copy) return false
   const copyTokens = new Set(copy.split(' ').filter(Boolean))
   return catalog.some((p) =>
