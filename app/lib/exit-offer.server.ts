@@ -9,6 +9,13 @@
  * A page's code is a real Shopify code limited to that page's product, and it
  * combines with the automatic Free Shipping discount, so the page's free
  * shipping claim holds. CURIOUS15 does not combine with it.
+ *
+ * A page whose deal is a free gift carries no code (`code: null`). Shopify will
+ * not put a second product discount on the line the gift's buy-X-get-Y already
+ * uses, so GAWK10 read as not applicable on every kit cart (2026-11-20) and the
+ * form was promising 10% it could not give. The form now reminds the visitor of
+ * the gift instead, and the page shows it only while the gift is buyable. To go
+ * back to a code, set `code` and the code's own terms and text line.
  */
 
 import { parse as parseCookie, serialize as serializeCookie } from 'cookie'
@@ -16,7 +23,8 @@ import { GAWK_SALES_SLUG } from '~/lib/gawk-sales-page'
 
 export interface ExitOffer {
   slug: string
-  code: string
+  /** Null when the offer is the page's free gift: nothing goes on the cart or in a cookie. */
+  code: string | null
   terms: string
   /** Klaviyo list for these signups. Separate so they skip the CURIOUS15 welcome series. */
   listId: string
@@ -27,10 +35,10 @@ export interface ExitOffer {
 const OFFERS: Record<string, ExitOffer> = {
   [GAWK_SALES_SLUG]: {
     slug: GAWK_SALES_SLUG,
-    code: 'GAWK10',
-    terms: '10% off one Gawk Gawk 3000. One use per customer. Standard US shipping stays free.',
+    code: null,
+    terms: 'A free 4 oz bottle of JO H2O water-based lube comes with your Gawk Gawk 3000. No code to enter. Standard US shipping stays free.',
     listId: 'TVq6Jz',
-    smsLine: 'your code GAWK10 takes 10% off the Gawk Gawk 3000, one use per customer. https://curious.xdipx.com/gawk-gawk-3000',
+    smsLine: 'your Gawk Gawk 3000 comes with a free 4 oz bottle of JO H2O lube, no code needed. https://curious.xdipx.com/gawk-gawk-3000',
   },
 }
 
@@ -59,6 +67,6 @@ export function setExitOfferCookie(code: string): string {
 /** The code to put on this page's cart, only if the visitor claimed this page's own code. */
 export function claimedExitCode(request: Request, slug: string): string | null {
   const offer = getExitOffer(slug)
-  if (!offer) return null
+  if (!offer?.code) return null
   return parseCookie(request.headers.get('Cookie') ?? '')[COOKIE] === offer.code ? offer.code : null
 }

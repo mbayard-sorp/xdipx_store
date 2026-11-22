@@ -27,13 +27,13 @@ import { EMAIL_CONSENT_TEXT, PRIVACY_URL, SMS_CONSENT_TEXT, SMS_PENDING_NOTICE }
 import { trackFbLead } from '~/lib/meta-pixel.client'
 
 type LeadResponse =
-  | { ok: true; code: string; terms: string; eventId: string | null; smsPending: boolean }
+  | { ok: true; code: string | null; terms: string; eventId: string | null; smsPending: boolean }
   | { ok?: false; error: string }
 
 const ERRORS: Record<string, string> = {
   invalid_email: 'That email does not look right. Mind checking it?',
   invalid_phone: 'That number does not look right. Use a 10-digit US number.',
-  phone_required: 'Add your number and the code is yours.',
+  phone_required: 'Add your number to finish.',
 }
 
 function errorText(error: string): string {
@@ -68,8 +68,11 @@ function markSeen() {
 
 const FIELD = 'mt-1 block min-h-12 w-full border border-[#BDB4AD] bg-white px-4 text-[16px] text-[#1A1616] focus:border-plum focus:outline-none'
 
-/** `buy` is the page's own BuyForm. Its action reads the cookie /api/lead set and puts the code on the cart. */
-export function ExitOffer({ slug, smsOptin, buy }: { slug: string; smsOptin: boolean; buy: ReactNode }) {
+/**
+ * `buy` is the page's own BuyForm. Its action reads the cookie /api/lead set and puts the code on the cart.
+ * `gift` is the page's free gift label. When set, the form names the gift and promises no code.
+ */
+export function ExitOffer({ slug, smsOptin, buy, gift = null }: { slug: string; smsOptin: boolean; buy: ReactNode; gift?: string | null }) {
   const dialog = useRef<HTMLDialogElement>(null)
   const email = useRef<HTMLInputElement>(null)
   const tracked = useRef(false)
@@ -183,10 +186,20 @@ export function ExitOffer({ slug, smsOptin, buy }: { slug: string; smsOptin: boo
 
         {success ? (
           <div role="status" className="flex flex-col gap-3.5">
-            <h2 id="exit-offer-title" className="m-0 pr-8 font-display text-[34px] font-medium leading-[1.05] tracking-[-0.015em]">Here's your <span className="italic text-plum">code.</span></h2>
-            <p className="m-0 border-2 border-dashed border-coral px-4 py-3 text-center font-mono text-[28px] tracking-[0.08em]">{success.code}</p>
-            <p className="m-0 text-[15px] leading-[1.5] text-[#3E3732]">{success.terms}</p>
-            <p className="m-0 text-[15px] leading-[1.5] text-[#3E3732]">We saved it in this browser, so the buy buttons on this page use it for you. On another device, enter it at checkout.</p>
+            {success.code ? (
+              <>
+                <h2 id="exit-offer-title" className="m-0 pr-8 font-display text-[34px] font-medium leading-[1.05] tracking-[-0.015em]">Here's your <span className="italic text-plum">code.</span></h2>
+                <p className="m-0 border-2 border-dashed border-coral px-4 py-3 text-center font-mono text-[28px] tracking-[0.08em]">{success.code}</p>
+                <p className="m-0 text-[15px] leading-[1.5] text-[#3E3732]">{success.terms}</p>
+                <p className="m-0 text-[15px] leading-[1.5] text-[#3E3732]">We saved it in this browser, so the buy buttons on this page use it for you. On another device, enter it at checkout.</p>
+              </>
+            ) : (
+              <>
+                <h2 id="exit-offer-title" className="m-0 pr-8 font-display text-[34px] font-medium leading-[1.05] tracking-[-0.015em]">The lube is <span className="italic text-plum">on us.</span></h2>
+                <p className="m-0 text-[15px] leading-[1.5] text-[#3E3732]">{success.terms}</p>
+                <p className="m-0 text-[15px] leading-[1.5] text-[#3E3732]">It goes in the cart with your Gawk from any buy button on this page.</p>
+              </>
+            )}
             {success.smsPending ? <p className="m-0 text-[15px] leading-[1.5] text-[#3E3732]">{SMS_PENDING_NOTICE}</p> : null}
             {buy}
             <button type="button" onClick={close} className="min-h-11 cursor-pointer border-0 bg-transparent text-[15px] text-[#3E3732] underline">Keep reading</button>
@@ -196,9 +209,9 @@ export function ExitOffer({ slug, smsOptin, buy }: { slug: string; smsOptin: boo
             <span className="font-mono text-[12px] uppercase tracking-[0.1em] text-coral">Before you close this</span>
             <h2 id="exit-offer-title" className="m-0 font-display text-[clamp(38px,9vw,46px)] font-medium leading-[1.02] tracking-[-0.02em]">Don't go <span className="italic text-plum">yet.</span></h2>
             <p className="m-0 text-[17px] leading-[1.5] text-[#3E3732] [text-wrap:pretty]">
-              {smsOptin
-                ? 'Leave your email and number and we’ll give you a code that takes money off your first Gawk. Use it now or come back with it later.'
-                : 'Leave your email and we’ll give you a code that takes money off your first Gawk. Use it now or come back with it later.'}
+              {gift
+                ? `Leave your email${smsOptin ? ' and number' : ''} and we’ll send you the way back here. Your Gawk comes with a free bottle of lube, tonight or whenever you’re ready.`
+                : `Leave your email${smsOptin ? ' and number' : ''} and we’ll give you a code that takes money off your first Gawk. Use it now or come back with it later.`}
             </p>
 
             {/* Honeypot. Not named "company": address autofill would fill that, and a real signup would vanish. */}

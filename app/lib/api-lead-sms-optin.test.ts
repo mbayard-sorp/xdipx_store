@@ -198,13 +198,14 @@ describe('/api/lead for a sales page exit offer', () => {
 
   beforeEach(() => mocks.isLeadSmsOptinEnabled.mockResolvedValue(true))
 
-  it('gives the page code on its own list, with no first name, and sets the buy-button cookie', async () => {
+  it('names the free gift with no code on its own list, with no first name, and sets no code cookie', async () => {
     const res = await post(exit)
     const body = await res.json()
     expect(res.status).toBe(200)
-    expect(body.code).toBe('GAWK10')
+    expect(body.code).toBeNull()
+    expect(body.terms).toMatch(/free 4 oz bottle/)
     expect(mocks.subscribeLead.mock.calls[0]![0]).toMatchObject({ listId: 'TVq6Jz', phone: PHONE })
-    expect(res.headers.get('set-cookie')).toContain('xdipx_exit_code=GAWK10')
+    expect(res.headers.get('set-cookie') ?? '').not.toContain('xdipx_exit_code')
   })
 
   it('requires the phone while the SMS switch is on', async () => {
@@ -218,7 +219,7 @@ describe('/api/lead for a sales page exit offer', () => {
     mocks.isLeadSmsOptinEnabled.mockResolvedValue(false)
     const res = await post({ email: exit.email, slug: exit.slug })
     expect(res.status).toBe(200)
-    expect((await res.json()).code).toBe('GAWK10')
+    expect((await res.json()).code).toBeNull()
   })
 
   it('does not enroll a number for texts unless the box was ticked', async () => {
