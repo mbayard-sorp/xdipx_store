@@ -56,9 +56,24 @@ While a test cell is live the trigger runs hourly for the first 24 hours, then e
 
 ## How the owner hears
 
-Each new issue sends a phone push and files an `exoclick-watch-<issue>` owner blocker. Push is the alert that reaches him: `owner_queue_enabled` is on (owner, 2026-09-02), so the blocker email reports `suppressed`, as it did on the first test run. A clean run stays silent. The hourly ads pager also files rejected entities from the mirror.
+Each new issue sends a phone push and files an `exoclick-watch-<issue>` owner blocker, where `<issue>`
+is a **fixed slug per issue class**, never a free-form one invented per run: use the table's own issue
+names in kebab-case for a documented issue (e.g. `exoclick-watch-dead-placement`,
+`exoclick-watch-settings`, `exoclick-watch-blind-spot`), and for a condition not yet in the table
+above, a short fixed slug that names the condition, not the instance (e.g.
+`exoclick-watch-siteblock-failing` for the site-block brake failing on a live campaign,
+`exoclick-watch-beacon-ratio-<offer>` for a beacon-ratio-under-threshold finding, one key per offer,
+`exoclick-watch-shopify-connector-auth` for a Shopify connector re-auth failure). The same condition on
+a later run reuses the same key so it dedupes instead of filing a new row. Push is the alert that
+reaches him: `owner_queue_enabled` is on (owner, 2026-09-02), so the blocker email reports
+`suppressed`, as it did on the first test run. A clean run stays silent. The hourly ads pager also
+files rejected entities from the mirror.
 
-Known limit: `op: list` returned exactly 50 open blockers on 2026-10-31 and left out a row filed minutes earlier, so the routine may not see its own rows to clear them. Re-filing a key stays deduped.
+Known limit: `op: list` returned exactly 50 open blockers on 2026-10-31 and left out a row filed
+minutes earlier, so the routine may not see its own rows to clear them. **Read `op:list` with
+`limit:500` before filing any new blocker** (the default page is not enough to see the routine's own
+prior rows) and skip filing when an open row already carries the same fixed key. Re-filing a key
+stays deduped.
 
 ## When the campaign changes
 
