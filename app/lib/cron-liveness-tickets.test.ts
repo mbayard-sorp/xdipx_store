@@ -16,7 +16,7 @@ interface FiledTicket {
   targetTeam?: string
   suggestion: string
 }
-interface ListFilter { dedupeKeys?: string[] }
+interface ListFilter { dedupeKeys?: string[]; kinds?: string[]; statuses?: string[] }
 
 const fileDetectionTicket = vi.fn<(i: FiledTicket) => Promise<number>>(async () => 1)
 const listSuggestions = vi.fn<(f?: ListFilter) => Promise<Array<{ id: number }>>>(async () => [])
@@ -52,6 +52,7 @@ vi.mock('~/lib/team.server', () => ({
     transitionSuggestion(id, to, actor, opts),
 }))
 
+import { canonicalDedupeKey } from '~/lib/dedupe-key'
 import { ESCALATE_AFTER_SWEEPS, reconcileCronAlarms } from '~/lib/cron-liveness-tickets.server'
 
 type L = Parameters<typeof reconcileCronAlarms>[0][number]
@@ -146,6 +147,25 @@ describe('closing, which is what makes the undated key safe', () => {
     expect(out.closed).toEqual([2])
   })
 
+  it('queries the canonicalized key, not the raw colon/slash one, for a real route name (#23661)', async () => {
+    // Reproduces suggestion row #23119 (dedupeKey `cron-breach-cron-gsc-index-sweep`
+    // in production): `createSuggestion` canonicalizes a filed `dedupeKey`
+    // before storing it, collapsing `cron-breach:/cron/gsc-index-sweep` to
+    // `cron-breach-cron-gsc-index-sweep`. A close-pass lookup built from the
+    // raw, uncanonicalized key never matches that stored row, so the row sat
+    // `approved` forever despite the condition clearing. Assert the exact
+    // query shape, not just a prefix match, so a regression back to the raw
+    // key is caught here instead of in production again.
+    listSuggestions.mockClear().mockResolvedValue([])
+    await reconcileCronAlarms(
+      [live({ route: '/cron/gsc-index-sweep', breached: false })],
+      [],
+    )
+    const call = listSuggestions.mock.calls.find(c => c[0]?.kinds?.includes('process'))
+    expect(call?.[0]?.dedupeKeys).toEqual([canonicalDedupeKey('cron-breach:/cron/gsc-index-sweep')])
+    expect(call?.[0]?.dedupeKeys?.[0]).toBe('cron-breach-cron-gsc-index-sweep')
+  })
+
   it('lets the same route alarm a second time after it recovered', async () => {
     // The muting regression, stated as a test. If closing ever stops working
     // this is the assertion that fails, and it is the one failure that would
@@ -187,8 +207,13 @@ describe('unblocking a persistent code row on a fresh healthy read (#11614)', ()
   }
 
   it('unblocks a blocked persistent code row once the route is healthy again, without touching a process row', async () => {
+    // The real `createSuggestion` write path canonicalizes `dedupeKey` before
+    // storing it (team.server.ts), so `cron-failing:/cron/x:persistent`
+    // (what the filer built and what this test's own `makeDedupeKey` mock
+    // produces) is never the string in the column -- `canonicalDedupeKey`'s
+    // output is. The lookup must query that canonical form, not the raw one.
     listSuggestions.mockImplementation(
-      rowsFor({ dedupeKeys: ['cron-failing:/cron/x:persistent'], kinds: ['code'], statuses: ['blocked'] }, [321]),
+      rowsFor({ dedupeKeys: [canonicalDedupeKey('cron-failing:/cron/x:persistent')], kinds: ['code'], statuses: ['blocked'] }, [321]),
     )
     const out = await reconcileCronAlarms([live({ failing: false })], [])
 
@@ -199,7 +224,7 @@ describe('unblocking a persistent code row on a fresh healthy read (#11614)', ()
 
   it('never reopens as "re-observed": the note says resolved, and the target is approved, not a bounce', async () => {
     listSuggestions.mockImplementation(
-      rowsFor({ dedupeKeys: ['cron-breach:/cron/x:persistent'], kinds: ['code'], statuses: ['blocked'] }, [55]),
+      rowsFor({ dedupeKeys: [canonicalDedupeKey('cron-breach:/cron/x:persistent')], kinds: ['code'], statuses: ['blocked'] }, [55]),
     )
     await reconcileCronAlarms([live({ breached: false })], [])
 
@@ -224,7 +249,7 @@ describe('unblocking a persistent code row on a fresh healthy read (#11614)', ()
 
   it('survives a 409 on one row without abandoning the rest', async () => {
     listSuggestions.mockImplementation(
-      rowsFor({ dedupeKeys: ['cron-failing:/cron/x:persistent'], kinds: ['code'], statuses: ['blocked'] }, [1, 2]),
+      rowsFor({ dedupeKeys: [canonicalDedupeKey('cron-failing:/cron/x:persistent')], kinds: ['code'], statuses: ['blocked'] }, [1, 2]),
     )
     transitionSuggestion.mockRejectedValueOnce(new Error('409 conflict'))
     const out = await reconcileCronAlarms([live({ failing: false })], [])
