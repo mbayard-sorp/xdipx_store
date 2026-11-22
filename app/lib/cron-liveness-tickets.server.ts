@@ -55,6 +55,7 @@
  * hours about it would rebuild the noise this replaces.
  */
 import { fileDetectionTicket, makeDedupeKey } from '~/lib/detection-tickets.server'
+import { canonicalDedupeKey } from '~/lib/dedupe-key'
 import { kvDel, kvGet, kvSet } from '~/lib/kv.server'
 import { listSuggestions, transitionSuggestion, type TeamId } from '~/lib/team.server'
 import type { CronLiveness } from '~/lib/cron-runs.server'
@@ -217,12 +218,24 @@ async function clearCounter(key: string): Promise<void> {
   try { await kvDel(counterKey(key)) } catch { /* a stale counter costs one sweep */ }
 }
 
-/** Close every open `process` row holding one of these keys. */
+/**
+ * Close every open `process` row holding one of these keys.
+ *
+ * `keys` arrive in the raw `makeDedupeKey` shape (colons and slashes), but
+ * `createSuggestion` never stores a raw key: it runs every `dedupeKey`
+ * through `canonicalDedupeKey` before the insert (team.server.ts), which
+ * collapses `cron-breach:/cron/x` to `cron-breach-cron-x`. A lookup that
+ * skips the same canonicalization queries a string the column never holds,
+ * so this close pass must canonicalize here, not rely on its caller to have
+ * done so already.
+ */
 async function closeResolved(keys: string[], reason: string, nowIso: string): Promise<number[]> {
   if (keys.length === 0) return []
   const closed: number[] = []
+  const canonicalKeys = [...new Set(keys.map(k => canonicalDedupeKey(k)).filter(k => k.length > 0))]
+  if (canonicalKeys.length === 0) return []
   try {
-    const open = await listSuggestions({ dedupeKeys: keys, kinds: ['process'], statuses: ['proposed', 'approved'] })
+    const open = await listSuggestions({ dedupeKeys: canonicalKeys, kinds: ['process'], statuses: ['proposed', 'approved'] })
     const note =
       `Resolved ${nowIso}: ${reason} Closed automatically by /cron/janitor-sweep.`
     for (const row of open) {
@@ -263,11 +276,22 @@ async function closeResolved(keys: string[], reason: string, nowIso: string): Pr
  * instead of a manual re-check), but that costs one deliberate close instead
  * of the claim-to-discover-it-was-already-fine cycle tickets #11158/#11159
  * paid for.
+ *
+ * Same canonicalization requirement as `closeResolved`: the tier-2 row was
+ * filed with `dedupeKey: \`${a.dedupeKey}:persistent\`` (raw base key plus
+ * the literal suffix), and `createSuggestion` canonicalized that whole
+ * string before storing it. So the lookup key here is built the identical
+ * way -- raw base key, then the suffix, then canonicalized -- not
+ * canonicalized before the suffix is appended, which would collapse the
+ * colon into the wrong place and still miss the stored row.
  */
 async function unblockResolvedPersistent(keys: string[], reason: string, nowIso: string): Promise<number[]> {
   if (keys.length === 0) return []
-  const persistentKeys = keys.map(k => `${k}:persistent`)
+  const persistentKeys = [...new Set(
+    keys.map(k => canonicalDedupeKey(`${k}:persistent`)).filter(k => k.length > 0),
+  )]
   const unblocked: number[] = []
+  if (persistentKeys.length === 0) return []
   try {
     const blockedRows = await listSuggestions({ dedupeKeys: persistentKeys, kinds: ['code'], statuses: ['blocked'] })
     const note =
