@@ -67,7 +67,13 @@ Scan with WebSearch/WebFetch, honestly and within budget:
   not read.
 - **TikTok trend coverage**: press/roundup coverage of sex-ed TikTok waves (read coverage, never
   the app itself).
-- **Research + press**: newly published studies and major-outlet wellness journalism.
+- **Research + press**: newly published studies and major-outlet wellness journalism. Anchor here
+  first on 1-2 named journals/aggregators before falling back to open WebSearch: PsyPost and
+  EurekAlert for coverage, and the recent-issues pages of the Journal of Sex & Marital Therapy and
+  the Journal of Sexual Medicine for the primary research itself. Two consecutive runs found their
+  usable, honestly-sourced findings via secondary coverage of the Journal of Sex & Marital Therapy
+  only after general WebSearch queries mostly returned stale market-research spam and brand press
+  releases.
 - **Product buzz**: category launches, viral products, materials debates.
 
 No explicit-content sourcing (education/product/wellness discourse only). One `step` event
