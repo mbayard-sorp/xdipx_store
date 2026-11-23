@@ -13,7 +13,7 @@
  * thrown.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { publishProductToXdipxChannels, SHOP_CHANNEL_MIN_PRICE_USD } from './shopify.server'
+import { publishProductToXdipxChannels, isStorefrontAdminPublicationName, SHOP_CHANNEL_MIN_PRICE_USD } from './shopify.server'
 
 const PUBLICATIONS = [
   { id: 'gid://shopify/Publication/1', name: 'Online Store' },
@@ -107,5 +107,55 @@ describe('Facebook & Instagram channel stays empty (owner direction 2026-11-17)'
     await publishProductToXdipxChannels('gid://shopify/Product/558')
     expect(mutationInput(calls, 'PublishProduct')).not.toContain('gid://shopify/Publication/8')
     expect(mutationInput(calls, 'UnpublishProduct')).toContain('gid://shopify/Publication/8')
+  })
+})
+
+describe('isStorefrontAdminPublicationName (ticket #23840)', () => {
+  it('matches the bare app name', () => {
+    expect(isStorefrontAdminPublicationName('Storefront Admin')).toBe(true)
+  })
+
+  it('matches the shop-prefixed form Shopify actually uses in this store', () => {
+    expect(isStorefrontAdminPublicationName('xdipx.com: Storefront Admin')).toBe(true)
+  })
+
+  it('does not match an unrelated publication', () => {
+    expect(isStorefrontAdminPublicationName('Online Store')).toBe(false)
+    expect(isStorefrontAdminPublicationName('Xdipx.Com Headless')).toBe(false)
+  })
+})
+
+describe('Storefront Admin publish, shop-prefixed name (ticket #23840)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  // Real incident: every product created 2026-11-15 onward was permanently
+  // invisible to the Storefront API (product(handle:) AND node(id:) both
+  // null, not slow -- confirmed live) because this shop's real publication is
+  // named "xdipx.com: Storefront Admin", which XDIPX_PUBLICATION_NAMES's
+  // literal 'Storefront Admin' entry never matched, so our own explicit
+  // publish step silently never covered it once Shopify's own
+  // auto-publish-new-products default stopped filling the gap.
+  it('publishes to a shop-prefixed "Storefront Admin" publication Shopify renamed', async () => {
+    const SHOP_PREFIXED_PUBLICATIONS = PUBLICATIONS.map(p =>
+      p.name === 'Storefront Admin' ? { ...p, name: 'xdipx.com: Storefront Admin' } : p,
+    )
+    const calls: Array<{ query: string; variables: Record<string, unknown> }> = []
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(init.body as string) as { query: string; variables: Record<string, unknown> }
+      calls.push(body)
+      if (body.query.includes('GetPublicationsAndProductPrice')) {
+        return respond({
+          data: {
+            publications: { edges: SHOP_PREFIXED_PUBLICATIONS.map(node => ({ node })) },
+            product: { priceRangeV2: { maxVariantPrice: { amount: '49.00' } } },
+          },
+        })
+      }
+      return respond({ data: { publishablePublish: { userErrors: [] }, publishableUnpublish: { userErrors: [] } } })
+    }))
+    await publishProductToXdipxChannels('gid://shopify/Product/23840')
+    expect(mutationInput(calls, 'PublishProduct')).toContain('gid://shopify/Publication/3')
   })
 })

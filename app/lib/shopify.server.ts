@@ -4281,15 +4281,40 @@ const NALPAC_LOCATION_NUMERIC_ID   = XDIPX_LOCATION_IDS[1].replace('gid://shopif
 /**
  * Sales-channel publication names imported products are published to. Matched
  * by name because publication GIDs are not stable across stores/environments.
+ *
+ * 'Storefront Admin' here is deliberately NOT an exact-match entry (see
+ * isStorefrontAdminPublicationName below): Shopify names a custom app's
+ * Storefront-API publication after the shop ("xdipx.com: Storefront Admin"
+ * in this store, confirmed live via Admin GraphQL), not the bare app name,
+ * and a plain store could still have the bare name. Exact-matching only the
+ * bare string is exactly the bug ticket #23840 found: every product created
+ * 2026-11-15 onward was invisible to the Storefront API entirely (not slow —
+ * permanently null, `product(handle:)` and `node(id:)` both, confirmed
+ * against a live sample with a clean 27/27 correlation between "resolves on
+ * the Storefront API" and "published to the shop-prefixed publication") once
+ * Shopify's own auto-publish-new-products default stopped covering the gap
+ * our literal string never did. publishProductToXdipxChannels below ORs the
+ * two forms rather than hardcoding today's exact shop-prefixed name, so a
+ * future shop rename or a differently-named environment doesn't reopen the
+ * same bug.
  */
 const XDIPX_PUBLICATION_NAMES = [
   'Online Store',
   'Shop',
-  'Storefront Admin',
   'Shopify GraphiQL App',
   'Google & YouTube',
   'ChatGPT',
 ]
+
+/**
+ * True for the Storefront-API-backing "Storefront Admin" publication,
+ * whether it carries the bare app name or Shopify's shop-prefixed form
+ * ("<shop>: Storefront Admin"). See ticket #23840 and the comment on
+ * XDIPX_PUBLICATION_NAMES above. Exported for unit testing.
+ */
+export function isStorefrontAdminPublicationName(name: string): boolean {
+  return name === 'Storefront Admin' || name.endsWith(': Storefront Admin')
+}
 
 /**
  * Channels we never want products on. Point of Sale auto-attaches new products
@@ -4387,7 +4412,9 @@ export async function publishProductToXdipxChannels(numericId: string): Promise<
     wanted.delete('Shop')
     excluded.add('Shop')
   }
-  const toPublish   = publications.edges.filter(e => wanted.has(e.node.name)).map(e => e.node.id)
+  const toPublish   = publications.edges
+    .filter(e => wanted.has(e.node.name) || isStorefrontAdminPublicationName(e.node.name))
+    .map(e => e.node.id)
   const toUnpublish = publications.edges.filter(e => excluded.has(e.node.name)).map(e => e.node.id)
 
   if (toPublish.length > 0) {
