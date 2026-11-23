@@ -497,6 +497,17 @@ talk") that repeat by format on purpose. Added after that pair of live posts (ti
 manual diff it replaces had let the tic through. The limit is zero shared 6-grams; rewrite each
 recycled phrase, do not loosen the check.
 
+**The frozen-safety-string exemption is mechanical, not a judgement call (ticket #23880).** A
+mandated safety wording — the IPX7 and IPX4 house wordings a few paragraphs above, in the
+IP-rating paragraph — is REQUIRED to repeat verbatim per the frozen-safety-string rule (Step 5
+item 3), which is the opposite of what this checker otherwise enforces. `check-fresh-language.ts`
+strips every entry in `app/lib/fresh-language-frozen-strings.ts`'s `FROZEN_SAFETY_STRINGS` from
+both the draft and every retrieved prior post before computing 6-grams, so an exact, correct reuse
+of a frozen string can never produce a hit, while a paraphrase (even one word changed) still is.
+Do not hand-wave a frozen-string hit as "a checker artifact, chasing zero would mean editing
+correct safety prose" and submit anyway — that judgement call is retired. A real hit after the
+strip is a real recycled phrase; rewrite it like any other.
+
 `--slug` is not optional (ticket #3650). The script takes the self-exclusion slug as a separate flag
 and defaults it to the empty string, so without it the query's `slug.current != $slug` excludes
 nothing, and any re-run after the Sanity doc exists reports the post colliding with ITSELF.

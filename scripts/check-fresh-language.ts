@@ -29,6 +29,7 @@ import './_load-env'
 import { readFileSync } from 'node:fs'
 import { createClient } from '@sanity/client'
 import { analyzeFreshness, type DraftInput, type PriorPost } from '../app/lib/fresh-language'
+import { stripFrozenStringsFromDoc } from '../app/lib/fresh-language-frozen-strings'
 
 const TAG = '[fresh-language]'
 
@@ -87,7 +88,14 @@ async function main(): Promise<void> {
     { categoryId, slug: arg('slug') ?? '' },
   )
 
-  const report = analyzeFreshness(draft, priors ?? [])
+  // Strip the frozen, mandated safety wordings (ticket #23880) before
+  // shingling: a safety enumeration is correct to reuse verbatim per
+  // routine-content-daily.md Step 5 item 3, and the fresh-language rule does
+  // not apply to it. Stripped from both sides identically, so genuine reuse
+  // elsewhere in the same prose is still caught.
+  const strippedDraft = stripFrozenStringsFromDoc(draft)
+  const strippedPriors = (priors ?? []).map(p => stripFrozenStringsFromDoc(p))
+  const report = analyzeFreshness(strippedDraft, strippedPriors)
 
   if (!report.overlap) {
     console.log(`${TAG} OK. 0 shared 6-grams across ${priors?.length ?? 0} prior post(s) in this cluster.`)
