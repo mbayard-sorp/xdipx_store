@@ -19,6 +19,10 @@ Overall: AMBER (7/9 phases merged and probe-verified on main; p5-gate-columns an
 
 ## Status log
 
+### 2026-11-23 (program-manager, run 2172). Overall stays AMBER. No RAG changes.
+
+Probed at main 888d9f3. File probes for the done phases hold (084 migration present; `BLOCK_STAMP_REGEX` still read at `team.server.ts:3454`, p5 AMBER). p7-design: no design-critic verdict names the Studio routes (the one 10-28 event mentioning /admin/socials describes a failed precondition, not a verdict); #5232 is still `approved` and unclaimed. Lane health is the real signal: 0 posts published this week, last post 11-12/13. `instagram_autopublish_enabled` false since 11-13 (blocker #18); X skipped on `x_credits_halt` with 3 overdue (#1140); 3 approved drafts idle behind the off valve; IG post #564 failed to publish (#8287). Engagement `saved` now present and 0 across all 8 posted rows in 21 days. **Asks for the owner:** #18, #1140, #1917.
+
 ### 2026-11-16 (program-manager, run 2053). Overall stays AMBER. No RAG changes.
 
 Probed at main 818bb9d. Context the milestone table does not capture: Instagram autopublish was switched off by the store's own removal watcher on 2026-11-13 03:00Z after Meta removed two posts in 14 days (blocker #18, P1, owner-only to reopen); 5 posts published 11-09 to 11-13 and 0 since. X has been dark 25 days (blocker #1140, API credits). p5 and p7 hold. **Asks for the owner:** #18 (reopen Instagram or leave it off), #1140, #1917.
