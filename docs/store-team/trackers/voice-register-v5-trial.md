@@ -20,6 +20,8 @@ Standard tracker rules (see README.md). `v5-checkin` goes AMBER the week of 2026
 
 ## Status log
 
+- 2026-11-23 (program-manager, run 2172). Overall stays GREEN (one AMBER milestone). v5-guardrails carried at AMBER from 2026-11-16: not re-probed this run (no new email sends since 11-05 to inspect, so the ungated-subject question has no new evidence). **Ask for the owner:** still open from last week, whether Klaviyo-authored or partner-supplied sends are inside the voice gate.
+
 - 2026-11-16 (program-manager, run 2053). Overall stays GREEN (one AMBER milestone, below the two-milestone line). v5-guardrails GREEN to AMBER on an ungated email subject containing the banned adjective, sent 2026-10-28 (one of 7 sends, 577 delivered in total); see the milestone note. **Ask for the owner:** say whether Klaviyo-authored or partner-supplied sends are inside the voice gate.
 
 - 2026-09-20 (all-hands, owner decision). **DECIDED: keep. Overall RED -> GREEN, program closed.**
