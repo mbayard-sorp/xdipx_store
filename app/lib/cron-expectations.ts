@@ -238,6 +238,27 @@ export const CRON_EXPECTATIONS: readonly CronExpectation[] = [
       + 'redundant, harmless safety net: the pass is idempotent.',
   },
   {
+    route: '/cron/calendar-activate',
+    plane: 'vercel',
+    schedule: '30 0 * * *',
+    periodMinutes: DAILY,
+    graceMinutes: 90,
+    // KV heartbeat, not a cron_runs row: low-stakes (a missed day just delays
+    // a theme flip by a day, caught by the next day's run) and the recorded
+    // set is already at its 25-row cap (cron-expectations.test.ts).
+    recorded: false,
+    moneyRelevant: false,
+    ownerTeam: 'homepage',
+    notes:
+      'Ticket #20969. Activates every non-\'IG: \' marketing_calendar row still \'planned\' once its '
+      + 'eventDate arrives, via runCalendarActivationPass. api.team.calendar.tsx\'s setStatus op is '
+      + 'IG-guarded only, so a general-theme row had no automated path off \'planned\' at all: rows 45/46 '
+      + "(Wand Week, Solo Sunday Month Opener) never activated on their eventDate. Idempotent (only "
+      + 'selects/updates rows still \'planned\'); does not touch active -> done/skipped, a separate gap '
+      + "the same ticket's row 31 symptom (stuck 'active' since 2026-09-21) points at but that this "
+      + 'fix does not claim to close.',
+  },
+  {
     route: '/cron/owner-digest',
     plane: 'vercel',
     schedule: '0 13 * * *',

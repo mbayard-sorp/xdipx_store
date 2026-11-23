@@ -1324,6 +1324,30 @@ export function createCronRoutes() {
   })
 
   /**
+   * GET|POST /cron/calendar-activate
+   * Schedule: daily, 00:30 UTC.
+   *
+   * Ticket #20969: activates every general-theme (non-'IG: ') marketing_calendar
+   * row still 'planned' once its eventDate arrives. setStatus
+   * (api.team.calendar.tsx) only lets the social routine's team-token flip its
+   * own 'IG: ' rows; every other row needed an admin session, so a homepage/
+   * content theme row sat 'planned' past its eventDate indefinitely. Idempotent
+   * (runCalendarActivationPass only selects/updates rows still 'planned').
+   * Covers planned -> active only; does not auto-close an active row to
+   * done/skipped (a separate gap the same ticket's row-31 symptom pointed at).
+   */
+  cronRoute('/calendar-activate', async (_req, res) => {
+    try {
+      const { runCalendarActivationPass } = await import('../app/lib/marketing-calendar-activation.server.js')
+      const result = await runCalendarActivationPass()
+      res.status(200).json({ ok: true, ...result })
+    } catch (err) {
+      console.error('[cron:calendar-activate]', err)
+      res.status(500).json({ error: String(err) })
+    }
+  })
+
+  /**
    * GET|POST /cron/main-ci-watch
    * Schedule: every 10 minutes. Emails the owner when main's `check` run is
    * red, produced no verdict, or never happened at all.

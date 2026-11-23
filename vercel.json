@@ -39,6 +39,10 @@
       "schedule": "5 0 * * *"
     },
     {
+      "path": "/cron/calendar-activate",
+      "schedule": "30 0 * * *"
+    },
+    {
       "path": "/cron/review-reminders",
       "schedule": "0 9 * * *"
     },
