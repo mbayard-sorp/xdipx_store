@@ -1,8 +1,8 @@
 import { parse } from 'csv-parse/sync'
 import { kvGet, kvSet, KV_KEYS } from './kv.server'
 import { db } from './db.server'
-import { dealHistory, pipelineSettings } from '../../db/schema'
-import { eq } from 'drizzle-orm'
+import { dealHistory, pipelineSettings, nalpacPriceHistory } from '../../db/schema'
+import { eq, inArray } from 'drizzle-orm'
 import type { NalpacProduct, ProductScore } from '~/types'
 
 const FEED_TTL = 23 * 60 * 60 // 23 hours
@@ -539,60 +539,145 @@ export function isFeedQtyShortfall(feedQty: number | null | undefined, shopifyQt
   return feedQty < shopifyQty
 }
 
+export interface FeedQtyReconciliation {
+  /** Every carried variant SKU where feed qty is below Shopify's sellable qty. */
+  shortfalls: FeedQtyShortfall[]
+  /**
+   * The subset of `shortfalls` at feed qty exactly 0 with live Shopify stock
+   * above 0 — the real oversell exposure (ticket #23829): a customer can buy
+   * what the supplier cannot ship at all, as opposed to a nonzero-but-lower
+   * feed count, which is lower-urgency margin-of-error noise.
+   */
+  zeroFeedWithStock: FeedQtyShortfall[]
+  /**
+   * Carried variant SKUs this run could not check at all because
+   * `nalpac_price_history` has no row for that exact SKU (never reported as a
+   * shortfall — absence is not zero). Surfaced so the report never reads as
+   * full coverage when it isn't (ticket #23829's coverage-gap finding: 3,085
+   * of 9,369 Shopify variant SKUs untracked at measurement time).
+   */
+  untrackedVariantCount: number
+  /** Total carried variant SKUs this run attempted to check (tracked + untracked). */
+  checkedVariantCount: number
+}
+
 /**
  * Reporting-only reconciliation (ticket #22337, extending #20827's homepage
- * pick-surface eligibility filter). Lists every carried SKU where the feed
+ * pick-surface eligibility filter; corrected for method and source by
+ * #23829, see note below). Lists every carried variant SKU where the feed
  * quantity is below Shopify's sellable quantity, including the in-between
  * cases #20827 does not cover. Does NOT write Shopify inventory — clamping
  * or zeroing a live quantity is an inventory-ops decision the ticket
  * explicitly leaves to the strategist, so this only reports.
  *
+ * **Correction (#23829): #22337's original version compared a PRODUCT-level
+ * sum of every variant's Shopify inventory against a SINGLE deal SKU's feed
+ * qty.** At the product level that manufactures phantom gaps that evaporate
+ * once each variant is checked against its own SKU: `deal_history` carries
+ * one representative SKU per product (a leftover of the retired daily-deal
+ * system), but a product can carry several Nalpac SKUs across its variants,
+ * each with its own feed quantity. The brief published from the old method's
+ * numbers (739 vs 179 for nixie, 1029 vs 569, 22 vs 3, 8 vs 2) were method
+ * artifacts, not real stock risk — at variant level the same SKUs mostly read
+ * 178 vs 179, 528 vs 552, 3 vs 3, 2 vs 2. The feed qty source also moved from
+ * today's live top100/new/sale/main pull (`fetchAllNalpacFeeds`, whose
+ * `snapshots` Map was keyed by the deal SKU only) to `nalpac_price_history`,
+ * the persisted per-SKU qty mirror the rest of this codebase already reads
+ * for exact-SKU feed attributes (e.g. `pricing-apply-v2.server.ts`'s MAP
+ * lookup) — it accumulates coverage across many days' pulls rather than
+ * resetting to whatever happened to be in today's narrower feed subset.
+ *
+ * `deal_history` still supplies the set of currently-carried products (same
+ * universe #22337 used); only the per-product variant fan-out and the
+ * per-variant feed-qty source changed.
+ *
  * Read-only and best-effort per batch, same shape as the stock read in
  * `runDiscontinuedSweep`: a failed batch is logged and skipped rather than
  * failing the whole sweep.
  */
-export async function findFeedQtyShortfalls(): Promise<FeedQtyShortfall[]> {
-  const { fetchAllNalpacFeeds } = await import('./nalpac-feeds.server')
+export async function findFeedQtyShortfalls(): Promise<FeedQtyReconciliation> {
   const { adminGraphQL } = await import('./shopify.server')
-
-  const feeds = await fetchAllNalpacFeeds()
-  if (feeds.snapshots.size === 0) return []
-
-  const carriedRows = await db
-    .select({ sku: dealHistory.sku, productId: dealHistory.shopifyProductId, status: dealHistory.status })
-    .from(dealHistory)
-  const productBySku = new Map<string, string>()
-  for (const r of carriedRows) {
-    if (r.status !== 'archived' && r.productId) productBySku.set(r.sku, r.productId)
+  const EMPTY: FeedQtyReconciliation = {
+    shortfalls: [], zeroFeedWithStock: [], untrackedVariantCount: 0, checkedVariantCount: 0,
   }
 
-  const skus = [...productBySku.keys()].filter(sku => feeds.snapshots.has(sku))
-  const shortfalls: FeedQtyShortfall[] = []
+  const carriedRows = await db
+    .select({ productId: dealHistory.shopifyProductId, status: dealHistory.status })
+    .from(dealHistory)
+  const productIds = new Set<string>()
+  for (const r of carriedRows) {
+    if (r.status !== 'archived' && r.productId) productIds.add(r.productId)
+  }
+  const ids = [...productIds]
+  if (ids.length === 0) return EMPTY
 
-  for (let i = 0; i < skus.length; i += 50) {
-    const batch = skus.slice(i, i + 50)
-    const ids = batch.map(sku => `gid://shopify/Product/${productBySku.get(sku)!.replace('gid://shopify/Product/', '')}`)
+  // Pass 1: every carried product's own variant SKUs + Shopify stock, kept
+  // separate per variant -- never summed into a product-level total.
+  interface VariantRow { sku: string; shopifyQty: number }
+  const variantsByProductId = new Map<string, VariantRow[]>()
+
+  for (let i = 0; i < ids.length; i += 50) {
+    const batch = ids.slice(i, i + 50)
+    const gids = batch.map(id => `gid://shopify/Product/${id.replace('gid://shopify/Product/', '')}`)
     try {
-      const data = await adminGraphQL<{ nodes: Array<{ id: string; status: string; variants: { nodes: Array<{ inventoryQuantity: number | null }> } } | null> }>(`
+      const data = await adminGraphQL<{ nodes: Array<{ id: string; status: string; variants: { nodes: Array<{ sku: string | null; inventoryQuantity: number | null }> } } | null> }>(`
         query FeedQtyShortfall($ids: [ID!]!) {
-          nodes(ids: $ids) { ... on Product { id status variants(first: 50) { nodes { inventoryQuantity } } } }
-        }`, { ids })
+          nodes(ids: $ids) { ... on Product { id status variants(first: 50) { nodes { sku inventoryQuantity } } } }
+        }`, { ids: gids })
       data.nodes.forEach((node, idx) => {
-        const sku = batch[idx]!
+        const productId = batch[idx]!
         if (!node || node.status === 'ARCHIVED') return
-        const shopifyQty = node.variants.nodes.reduce((sum, v) => sum + Math.max(0, v.inventoryQuantity ?? 0), 0)
-        const feedQty = feeds.snapshots.get(sku)?.qty ?? null
-        if (isFeedQtyShortfall(feedQty, shopifyQty)) {
-          shortfalls.push({ sku, productId: productBySku.get(sku)!, feedQty: feedQty as number, shopifyQty })
-        }
+        const rows = node.variants.nodes
+          .filter((v): v is { sku: string; inventoryQuantity: number | null } => !!v.sku)
+          .map(v => ({ sku: v.sku, shopifyQty: Math.max(0, v.inventoryQuantity ?? 0) }))
+        variantsByProductId.set(productId, rows)
       })
     } catch (err) {
-      console.error('[feed-processor] feed-qty shortfall read failed (ignored):', err)
+      console.error('[feed-processor] feed-qty shortfall stock read failed (ignored):', err)
     }
   }
 
-  console.info(`[feed-processor] feed-qty shortfall report: ${shortfalls.length} carried SKU(s) below feed qty`)
-  return shortfalls
+  const allSkus = [...variantsByProductId.values()].flatMap(rows => rows.map(r => r.sku))
+  if (allSkus.length === 0) return EMPTY
+
+  // Pass 2: look up each variant's own feed qty by its own SKU, never a
+  // sibling variant's or the product's deal SKU.
+  let feedQtyBySku = new Map<string, number | null>()
+  try {
+    const feedRows = await db
+      .select({ sku: nalpacPriceHistory.sku, qty: nalpacPriceHistory.qty })
+      .from(nalpacPriceHistory)
+      .where(inArray(nalpacPriceHistory.sku, allSkus))
+    feedQtyBySku = new Map(feedRows.map(r => [r.sku, r.qty]))
+  } catch (err) {
+    console.error('[feed-processor] feed-qty shortfall nalpac_price_history read failed (ignored):', err)
+  }
+
+  const shortfalls: FeedQtyShortfall[] = []
+  const zeroFeedWithStock: FeedQtyShortfall[] = []
+  let untrackedVariantCount = 0
+
+  for (const [productId, variants] of variantsByProductId) {
+    for (const v of variants) {
+      if (!feedQtyBySku.has(v.sku)) {
+        untrackedVariantCount++
+        continue
+      }
+      const feedQty = feedQtyBySku.get(v.sku) ?? null
+      if (isFeedQtyShortfall(feedQty, v.shopifyQty)) {
+        const row: FeedQtyShortfall = { sku: v.sku, productId, feedQty: feedQty as number, shopifyQty: v.shopifyQty }
+        shortfalls.push(row)
+        if (feedQty === 0) zeroFeedWithStock.push(row)
+      }
+    }
+  }
+
+  console.info(
+    `[feed-processor] feed-qty shortfall report (per variant SKU): ${shortfalls.length} shortfall(s), ` +
+    `${zeroFeedWithStock.length} at feed qty 0 with Shopify stock, ` +
+    `${untrackedVariantCount} of ${allSkus.length} carried variant SKU(s) untracked in nalpac_price_history`,
+  )
+  return { shortfalls, zeroFeedWithStock, untrackedVariantCount, checkedVariantCount: allSkus.length }
 }
 
 /**
