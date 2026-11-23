@@ -516,6 +516,21 @@ the apparent reject rate (measured once at 71% against a true 30% by `reviewed_a
 price drops detected / repriced / routed. Per `mission-brief.md`: throughput is an activity metric,
 never a win — a high import count with zero new-product orders is a **stop-doing** signal.
 
+**`published_at` being set is not proof the product resolves on the storefront (ticket #23840).**
+A real incident, not a hypothetical: every product `published_at` 2026-11-15 through at least
+2026-11-23 was permanently invisible to the Storefront API (`product(handle:)` and `node(id:)` both
+null, every one of them published to every intended channel per Admin) because
+`publishProductToXdipxChannels` (`app/lib/shopify.server.ts`) matched this shop's "Storefront Admin"
+publication by the literal name `'Storefront Admin'`, which never equalled the shop-prefixed name
+Shopify actually uses here (`'xdipx.com: Storefront Admin'`), so our own explicit publish step never
+covered that channel at all — Shopify's own default auto-publish-to-all-channels behavior silently
+filled the gap until it stopped doing so that day. Fixed in the same PR as this note
+(`isStorefrontAdminPublicationName`), but the brief's own counting is still exposed to the next gap
+of this shape: a `published_at` count is throughput through *our write path*, not evidence a product
+is purchasable. When the week's Catalog Pipeline numbers lean on `published_at` as "live" (new-arrival
+counts, import→live latency), spot-check a handful of the most recent `published_at` products against
+the live site (`GET /products/<handle>`, not just Admin) rather than trusting the timestamp alone.
+
 **Label the enrich/publish health line measured or UNMEASURED — never carry a stale "dead" verdict.**
 The strategy sandbox has no Shopify creds, so an enrich/publish claim inferred from Shopify-less
 signals is not a measurement. Read the ground truth from Neon: `import_candidates.enriched_at` /
