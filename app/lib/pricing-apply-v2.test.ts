@@ -83,6 +83,95 @@ describe('decideStatus', () => {
   })
 })
 
+describe('decideStatus — MSRP-correction exemption (ticket #23828)', () => {
+  // Real incident rows: three love-to-love-cosmetics SKUs stuck pending
+  // forever because an 81-85% drop exceeded the aggressive threshold (0.8
+  // live override), even though the new price is a sane correction landing
+  // close to feed MSRP at well above the margin floor.
+  it('auto_applies glow-me-up-bikini-booty-moisturizing-mask (99963): 85% drop, toward MSRP', () => {
+    expect(
+      decideStatus({
+        ...BASE, map: null, mode: 'aggressive', threshold: 0.8,
+        oldPrice: 160.99, newPrice: 23.99, msrp: 28.99, marginAfter: 0.396,
+      }),
+    ).toBe('auto_applied')
+  })
+
+  it('auto_applies forever-young-firming-intimate-serum (99964): 84% drop, toward MSRP', () => {
+    expect(
+      decideStatus({
+        ...BASE, map: null, mode: 'aggressive', threshold: 0.8,
+        oldPrice: 160.99, newPrice: 24.99, msrp: 29.99, marginAfter: 0.400,
+      }),
+    ).toBe('auto_applied')
+  })
+
+  it('auto_applies foam-me-tender-intimate-cleansing-foam (99961): 81% drop, toward MSRP', () => {
+    expect(
+      decideStatus({
+        ...BASE, map: null, mode: 'aggressive', threshold: 0.8,
+        oldPrice: 79.99, newPrice: 14.99, msrp: 18.99, marginAfter: 0.366,
+      }),
+    ).toBe('auto_applied')
+  })
+
+  it('still returns pending when the change moves away from MSRP, not toward it', () => {
+    expect(
+      decideStatus({
+        ...BASE, map: null, mode: 'aggressive', threshold: 0.8,
+        oldPrice: 20, newPrice: 90, msrp: 21, marginAfter: 0.5,
+      }),
+    ).toBe('pending')
+  })
+
+  it('still returns pending when the correction overshoots past the tolerance window', () => {
+    // Moves toward MSRP (28.99) but lands at 10, more than 25% away from it.
+    expect(
+      decideStatus({
+        ...BASE, map: null, mode: 'aggressive', threshold: 0.8,
+        oldPrice: 160.99, newPrice: 10, msrp: 28.99, marginAfter: 0.5,
+      }),
+    ).toBe('pending')
+  })
+
+  it('does not exempt a MAP breach: MAP rejection runs before the MSRP check', () => {
+    expect(
+      decideStatus({
+        ...BASE, mode: 'aggressive', threshold: 0.8,
+        oldPrice: 160.99, newPrice: 23.99, msrp: 28.99, marginAfter: 0.396,
+        map: 24.99, mapBehavior: 'at_map',
+      }),
+    ).toBe('rejected')
+  })
+
+  it('never exempts review_all: every change still queues regardless of MSRP', () => {
+    expect(
+      decideStatus({
+        ...BASE, map: null, mode: 'review_all',
+        oldPrice: 160.99, newPrice: 23.99, msrp: 28.99, marginAfter: 0.396,
+      }),
+    ).toBe('pending')
+  })
+
+  it('respects a configured msrpCorrectionTolerancePct override', () => {
+    // 17.25% from MSRP, exempt at the default 25% tolerance...
+    expect(
+      decideStatus({
+        ...BASE, map: null, mode: 'aggressive', threshold: 0.8,
+        oldPrice: 160.99, newPrice: 23.99, msrp: 28.99, marginAfter: 0.396,
+      }),
+    ).toBe('auto_applied')
+    // ...but not at a tightened 10% tolerance.
+    expect(
+      decideStatus({
+        ...BASE, map: null, mode: 'aggressive', threshold: 0.8,
+        oldPrice: 160.99, newPrice: 23.99, msrp: 28.99, marginAfter: 0.396,
+        msrpCorrectionTolerancePct: 0.10,
+      }),
+    ).toBe('pending')
+  })
+})
+
 describe('isPartialBatchDay (#7516)', () => {
   // The real streak this ticket diagnosed: healthy baseline 3,000-5,900+,
   // four consecutive partial days at 1,154-2,138 — all well over the old
