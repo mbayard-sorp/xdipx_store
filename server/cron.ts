@@ -284,22 +284,30 @@ export function createCronRoutes() {
         reconcile = { error: String(err) }
       }
 
-      // Report-only, ticket #22337: carried SKUs where the Nalpac feed quantity
-      // is below what Shopify still sells, catching the oversell-risk gap
-      // between "fully in stock" and "zero everywhere" the archive step above
-      // does not see. Never writes Shopify inventory. Best-effort: a read
-      // failure here must not fail the discontinued sweep.
+      // Report-only, ticket #22337, per-variant-SKU method correction #23829:
+      // carried variant SKUs where the Nalpac feed quantity is below what
+      // Shopify still sells, catching the oversell-risk gap between "fully in
+      // stock" and "zero everywhere" the archive step above does not see.
+      // Never writes Shopify inventory. Best-effort: a read failure here must
+      // not fail the discontinued sweep.
       let feedQtyShortfalls: unknown = null
       try {
         const { findFeedQtyShortfalls } = await import('../app/lib/feed-processor.server.js')
-        const shortfalls = await findFeedQtyShortfalls()
-        if (shortfalls.length > 0) {
+        const recon = await findFeedQtyShortfalls()
+        if (recon.zeroFeedWithStock.length > 0) {
           console.warn(
-            `[cron:discontinued-sweep] feed-qty shortfall: ${shortfalls.length} carried SKU(s) below feed qty — ` +
-            shortfalls.map(s => `${s.sku} (feed ${s.feedQty} vs Shopify ${s.shopifyQty})`).join(', '),
+            `[cron:discontinued-sweep] feed-qty shortfall: ${recon.zeroFeedWithStock.length} carried variant SKU(s) ` +
+            `at feed qty 0 with Shopify stock — ` +
+            recon.zeroFeedWithStock.map(s => `${s.sku} (Shopify ${s.shopifyQty})`).join(', '),
           )
         }
-        feedQtyShortfalls = shortfalls
+        if (recon.untrackedVariantCount > 0) {
+          console.info(
+            `[cron:discontinued-sweep] feed-qty shortfall: ${recon.untrackedVariantCount} of ` +
+            `${recon.checkedVariantCount} carried variant SKU(s) have no nalpac_price_history row (untracked)`,
+          )
+        }
+        feedQtyShortfalls = recon
       } catch (err) {
         console.error('[cron:discontinued-sweep] feed-qty shortfall report failed (ignored):', err)
         feedQtyShortfalls = { error: String(err) }
