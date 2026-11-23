@@ -150,6 +150,29 @@ export async function getDigestMinDelta(): Promise<number> {
 const MODE_THRESHOLD = DEFAULT_MODE_THRESHOLD
 
 /**
+ * pipeline_settings key + default for the MSRP-correction exemption
+ * (ticket #23828): a magnitude-threshold-queued change that moves the price
+ * toward feed MSRP and lands within this fraction of it is a correction of an
+ * incoherent feed price, not a discretionary discount, and the threshold
+ * cannot otherwise tell the two apart.
+ */
+export const MSRP_CORRECTION_TOLERANCE_SETTING_KEY = 'pricing_msrp_correction_tolerance_pct'
+export const MSRP_CORRECTION_TOLERANCE_DEFAULT = 0.25
+
+export async function getMsrpCorrectionTolerancePct(): Promise<number> {
+  try {
+    const rows = await db
+      .select({ value: pipelineSettings.value })
+      .from(pipelineSettings)
+      .where(eq(pipelineSettings.key, MSRP_CORRECTION_TOLERANCE_SETTING_KEY))
+      .limit(1)
+    const n = parseFloat(rows[0]?.value ?? '')
+    if (isFinite(n) && n >= 0 && n <= 1) return n
+  } catch { /* fall through */ }
+  return MSRP_CORRECTION_TOLERANCE_DEFAULT
+}
+
+/**
  * Read admin-configured per-mode thresholds from pipeline_settings, merged over
  * the defaults. Stored as JSON under `pricing_mode_thresholds`. review_all is
  * always 0 (every change queues) regardless of stored value.
@@ -199,6 +222,19 @@ export interface DecideStatusParams {
   msrpBelowFloor?: boolean
   /** Optional per-mode threshold override; defaults to DEFAULT_MODE_THRESHOLD[mode]. */
   threshold?:   number
+  /**
+   * Feed MSRP, when known. A change that breaches the magnitude threshold
+   * below is still auto-applied when it moves toward this value and lands
+   * within `msrpCorrectionTolerancePct` of it — a correction of an incoherent
+   * feed price, not a discretionary discount (ticket #23828). Margin is
+   * already guaranteed at or above `marginFloor` by the check above this one,
+   * which is the other half of the ticket's "configured floor" condition.
+   */
+  msrp?: number | null
+  /** Fraction of MSRP the corrected price must land within to count as a
+   * correction rather than an arbitrary swing. Defaults to
+   * MSRP_CORRECTION_TOLERANCE_DEFAULT. */
+  msrpCorrectionTolerancePct?: number
 }
 
 /**
@@ -231,7 +267,20 @@ export function decideStatus(p: DecideStatusParams): AuditStatus {
     ? Math.abs(newPrice - oldPrice) / oldPrice
     : 1 // no old price -> treat as large change
 
-  if (deltaPct > threshold) return 'pending'
+  if (deltaPct > threshold) {
+    // MSRP-correction exemption (ticket #23828): the magnitude threshold
+    // cannot distinguish "a risky N% discount" from "correcting an
+    // incoherent feed price back toward MSRP". A change that moves strictly
+    // closer to MSRP and ends within tolerance of it is the latter, and
+    // marginAfter has already cleared marginFloor by the time we reach here.
+    if (p.msrp != null && p.msrp > 0 && oldPrice != null) {
+      const tolerance = p.msrpCorrectionTolerancePct ?? MSRP_CORRECTION_TOLERANCE_DEFAULT
+      const movedTowardMsrp = Math.abs(newPrice - p.msrp) < Math.abs(oldPrice - p.msrp)
+      const withinMsrpTolerance = Math.abs(newPrice - p.msrp) / p.msrp <= tolerance
+      if (movedTowardMsrp && withinMsrpTolerance) return 'auto_applied'
+    }
+    return 'pending'
+  }
 
   return 'auto_applied'
 }
@@ -530,6 +579,8 @@ interface RunContext {
   minMarkupPct: number
   /** SKUs under a price hold (pricing_hold_skus); never repriced. */
   holdSkus: ReadonlySet<string>
+  /** MSRP-correction exemption tolerance (pricing_msrp_correction_tolerance_pct); see decideStatus. */
+  msrpCorrectionTolerancePct: number
 }
 
 // Minimal variant/product data the compute core needs. Matches both the
@@ -568,7 +619,7 @@ async function recomputeFromData(
   feed: FeedCostSnapshot | null = null,
 ): Promise<RecomputeVariantResult> {
   const { variantId } = variant
-  const { trigger, mode, thresholds, mapBrands, msrpCeiling, ladder, minMarkupPct, holdSkus } = ctx
+  const { trigger, mode, thresholds, mapBrands, msrpCeiling, ladder, minMarkupPct, holdSkus, msrpCorrectionTolerancePct } = ctx
 
   // Price hold: first thing, before any compute, audit row, or launch_price write.
   if (isPriceHeld(variant.sku, holdSkus)) {
@@ -721,6 +772,8 @@ async function recomputeFromData(
     mode,
     msrpBelowFloor,
     threshold: thresholds[mode],
+    msrp,
+    msrpCorrectionTolerancePct,
   })
 
   const deltaPct = oldSell > 0 ? (newSell - oldSell) / oldSell : null
@@ -943,10 +996,11 @@ export async function recomputeVariant(
   const ladder      = await getClearanceLadder()
   const minMarkupPct = await getMinMarkupPct()
   const holdSkus    = await getPricingHoldSkus()
+  const msrpCorrectionTolerancePct = await getMsrpCorrectionTolerancePct()
 
   const feed = (await loadFeedCosts([variant.sku])).get(variant.sku) ?? null
 
-  return recomputeFromData(product, variant, { trigger, mode, thresholds, mapBrands, msrpCeiling, ladder, minMarkupPct, holdSkus }, feed)
+  return recomputeFromData(product, variant, { trigger, mode, thresholds, mapBrands, msrpCeiling, ladder, minMarkupPct, holdSkus, msrpCorrectionTolerancePct }, feed)
 }
 
 
@@ -1368,7 +1422,8 @@ export async function recomputeCatalog(opts: {
   const ladder      = await getClearanceLadder()
   const minMarkupPct = await getMinMarkupPct()
   const holdSkus    = await getPricingHoldSkus()
-  const ctx: RunContext = { trigger: opts.trigger, mode, thresholds, mapBrands, msrpCeiling, ladder, minMarkupPct, holdSkus }
+  const msrpCorrectionTolerancePct = await getMsrpCorrectionTolerancePct()
+  const ctx: RunContext = { trigger: opts.trigger, mode, thresholds, mapBrands, msrpCeiling, ladder, minMarkupPct, holdSkus, msrpCorrectionTolerancePct }
 
   for (;;) {
     // Budget is checked at the page boundary, before fetching more work.
