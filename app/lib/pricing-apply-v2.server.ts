@@ -173,6 +173,30 @@ export async function getMsrpCorrectionTolerancePct(): Promise<number> {
 }
 
 /**
+ * pipeline_settings key + default for the lapsed-sale-RISE exemption (ticket
+ * #23831): a magnitude-threshold-queued price RISE caused by
+ * `resolveEngineCost` replacing a stale Nalpac sale unit cost with the
+ * current feed wholesale (engine-cost.ts) is a cost-driven correction, not a
+ * discretionary increase, so it auto-applies once marginAfter clears this
+ * floor instead of waiting in the pending queue every time a sale lapses.
+ */
+export const LAPSED_SALE_RISE_MARGIN_FLOOR_SETTING_KEY = 'pricing_lapsed_sale_rise_margin_floor_pct'
+export const LAPSED_SALE_RISE_MARGIN_FLOOR_DEFAULT = 0.30
+
+export async function getLapsedSaleRiseMarginFloorPct(): Promise<number> {
+  try {
+    const rows = await db
+      .select({ value: pipelineSettings.value })
+      .from(pipelineSettings)
+      .where(eq(pipelineSettings.key, LAPSED_SALE_RISE_MARGIN_FLOOR_SETTING_KEY))
+      .limit(1)
+    const n = parseFloat(rows[0]?.value ?? '')
+    if (isFinite(n) && n >= 0 && n <= 1) return n
+  } catch { /* fall through */ }
+  return LAPSED_SALE_RISE_MARGIN_FLOOR_DEFAULT
+}
+
+/**
  * Read admin-configured per-mode thresholds from pipeline_settings, merged over
  * the defaults. Stored as JSON under `pricing_mode_thresholds`. review_all is
  * always 0 (every change queues) regardless of stored value.
@@ -235,6 +259,19 @@ export interface DecideStatusParams {
    * correction rather than an arbitrary swing. Defaults to
    * MSRP_CORRECTION_TOLERANCE_DEFAULT. */
   msrpCorrectionTolerancePct?: number
+  /**
+   * True when this change's cost came from `resolveEngineCost` replacing a
+   * stale Nalpac sale unit cost with the feed's list wholesale
+   * (`engineCost.source === 'feed'` in engine-cost.ts): the SKU's old sell
+   * price was set while it was on a Nalpac sale that has since lapsed. A
+   * magnitude-breaching RISE off that correction is restoring a healthy
+   * margin the lapsed sale cost was masking, not a discretionary increase
+   * (ticket #23831).
+   */
+  lapsedSaleCostCorrection?: boolean
+  /** Margin floor a lapsed-sale RISE must clear to auto-apply. Defaults to
+   * LAPSED_SALE_RISE_MARGIN_FLOOR_DEFAULT. */
+  lapsedSaleRiseMarginFloorPct?: number
 }
 
 /**
@@ -279,6 +316,18 @@ export function decideStatus(p: DecideStatusParams): AuditStatus {
       const withinMsrpTolerance = Math.abs(newPrice - p.msrp) / p.msrp <= tolerance
       if (movedTowardMsrp && withinMsrpTolerance) return 'auto_applied'
     }
+
+    // Lapsed-sale RISE exemption (ticket #23831): the magnitude threshold
+    // cannot distinguish "a risky discretionary price hike" from "the Nalpac
+    // sale that set the old, lower sell price has ended and the cost-driven
+    // correction is landing at a healthy margin". marginAfter has already
+    // cleared marginFloor by the time we reach here, so this only raises
+    // further-confirmed-healthy rises out of the pending queue.
+    if (p.lapsedSaleCostCorrection && oldPrice != null && newPrice > oldPrice) {
+      const riseFloor = p.lapsedSaleRiseMarginFloorPct ?? LAPSED_SALE_RISE_MARGIN_FLOOR_DEFAULT
+      if (marginAfter >= riseFloor) return 'auto_applied'
+    }
+
     return 'pending'
   }
 
@@ -581,6 +630,8 @@ interface RunContext {
   holdSkus: ReadonlySet<string>
   /** MSRP-correction exemption tolerance (pricing_msrp_correction_tolerance_pct); see decideStatus. */
   msrpCorrectionTolerancePct: number
+  /** Lapsed-sale-RISE exemption floor (pricing_lapsed_sale_rise_margin_floor_pct); see decideStatus. */
+  lapsedSaleRiseMarginFloorPct: number
 }
 
 // Minimal variant/product data the compute core needs. Matches both the
@@ -619,7 +670,7 @@ async function recomputeFromData(
   feed: FeedCostSnapshot | null = null,
 ): Promise<RecomputeVariantResult> {
   const { variantId } = variant
-  const { trigger, mode, thresholds, mapBrands, msrpCeiling, ladder, minMarkupPct, holdSkus, msrpCorrectionTolerancePct } = ctx
+  const { trigger, mode, thresholds, mapBrands, msrpCeiling, ladder, minMarkupPct, holdSkus, msrpCorrectionTolerancePct, lapsedSaleRiseMarginFloorPct } = ctx
 
   // Price hold: first thing, before any compute, audit row, or launch_price write.
   if (isPriceHeld(variant.sku, holdSkus)) {
@@ -774,6 +825,8 @@ async function recomputeFromData(
     threshold: thresholds[mode],
     msrp,
     msrpCorrectionTolerancePct,
+    lapsedSaleCostCorrection: engineCost.source === 'feed',
+    lapsedSaleRiseMarginFloorPct,
   })
 
   const deltaPct = oldSell > 0 ? (newSell - oldSell) / oldSell : null
@@ -997,10 +1050,11 @@ export async function recomputeVariant(
   const minMarkupPct = await getMinMarkupPct()
   const holdSkus    = await getPricingHoldSkus()
   const msrpCorrectionTolerancePct = await getMsrpCorrectionTolerancePct()
+  const lapsedSaleRiseMarginFloorPct = await getLapsedSaleRiseMarginFloorPct()
 
   const feed = (await loadFeedCosts([variant.sku])).get(variant.sku) ?? null
 
-  return recomputeFromData(product, variant, { trigger, mode, thresholds, mapBrands, msrpCeiling, ladder, minMarkupPct, holdSkus, msrpCorrectionTolerancePct }, feed)
+  return recomputeFromData(product, variant, { trigger, mode, thresholds, mapBrands, msrpCeiling, ladder, minMarkupPct, holdSkus, msrpCorrectionTolerancePct, lapsedSaleRiseMarginFloorPct }, feed)
 }
 
 
@@ -1423,7 +1477,8 @@ export async function recomputeCatalog(opts: {
   const minMarkupPct = await getMinMarkupPct()
   const holdSkus    = await getPricingHoldSkus()
   const msrpCorrectionTolerancePct = await getMsrpCorrectionTolerancePct()
-  const ctx: RunContext = { trigger: opts.trigger, mode, thresholds, mapBrands, msrpCeiling, ladder, minMarkupPct, holdSkus, msrpCorrectionTolerancePct }
+  const lapsedSaleRiseMarginFloorPct = await getLapsedSaleRiseMarginFloorPct()
+  const ctx: RunContext = { trigger: opts.trigger, mode, thresholds, mapBrands, msrpCeiling, ladder, minMarkupPct, holdSkus, msrpCorrectionTolerancePct, lapsedSaleRiseMarginFloorPct }
 
   for (;;) {
     // Budget is checked at the page boundary, before fetching more work.

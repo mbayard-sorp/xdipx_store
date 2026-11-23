@@ -172,6 +172,125 @@ describe('decideStatus — MSRP-correction exemption (ticket #23828)', () => {
   })
 })
 
+describe('decideStatus — lapsed-sale-RISE exemption (ticket #23831)', () => {
+  // Real incident rows: five variants priced below their current Nalpac
+  // wholesale cost because the sale that justified the old, lower sell price
+  // has lapsed. resolveEngineCost (engine-cost.ts) replaces the stale unit
+  // cost with feed wholesale, so recompute proposes a RISE large enough to
+  // breach the balanced-mode threshold -- without this exemption it sits
+  // pending forever even though the margin is healthy.
+  it('auto_applies vive-satu-rechargeable-...-strapless-strap-on (sku 78675)', () => {
+    expect(
+      decideStatus({
+        ...BASE, map: null, mode: 'balanced', threshold: 0.05,
+        oldPrice: 62.99, newPrice: 119.99, marginAfter: 0.4171,
+        lapsedSaleCostCorrection: true,
+      }),
+    ).toBe('auto_applied')
+  })
+
+  it('auto_applies ouch-beaded-silicone-6-5-in-g-spot-dildo-metallic (sku 85433)', () => {
+    expect(
+      decideStatus({
+        ...BASE, map: null, mode: 'balanced', threshold: 0.05,
+        oldPrice: 21.99, newPrice: 42.99, marginAfter: 0.4197,
+        lapsedSaleCostCorrection: true,
+      }),
+    ).toBe('auto_applied')
+  })
+
+  it('auto_applies realrock-double-trouble-5-in-6-in-dildo (sku 87602)', () => {
+    expect(
+      decideStatus({
+        ...BASE, map: null, mode: 'balanced', threshold: 0.05,
+        oldPrice: 20.99, newPrice: 39.99, marginAfter: 0.4011,
+        lapsedSaleCostCorrection: true,
+      }),
+    ).toBe('auto_applied')
+  })
+
+  it('auto_applies ouch-beaded-silicone-5-in-g-spot-dildo-metallic (sku 85428)', () => {
+    expect(
+      decideStatus({
+        ...BASE, map: null, mode: 'balanced', threshold: 0.05,
+        oldPrice: 14.99, newPrice: 33.99, marginAfter: 0.4131,
+        lapsedSaleCostCorrection: true,
+      }),
+    ).toBe('auto_applied')
+  })
+
+  it('auto_applies me-you-us-ultra-cock-7-5-realistic-dildo-vanilla (sku 93987), the one priced under Shopify unit cost', () => {
+    expect(
+      decideStatus({
+        ...BASE, map: null, mode: 'balanced', threshold: 0.05,
+        oldPrice: 12.99, newPrice: 27.99, marginAfter: 0.4163,
+        lapsedSaleCostCorrection: true,
+      }),
+    ).toBe('auto_applied')
+  })
+
+  it('still returns pending when marginAfter is below the configured rise floor', () => {
+    // 28% clears the 25% marginFloor hard stop but not the 30% rise-exemption floor.
+    expect(
+      decideStatus({
+        ...BASE, map: null, mode: 'balanced', threshold: 0.05,
+        oldPrice: 20, newPrice: 35, marginAfter: 0.28,
+        lapsedSaleCostCorrection: true,
+      }),
+    ).toBe('pending')
+  })
+
+  it('does not exempt a DROP: the exemption is RISE-only', () => {
+    expect(
+      decideStatus({
+        ...BASE, map: null, mode: 'balanced', threshold: 0.05,
+        oldPrice: 40, newPrice: 20, marginAfter: 0.5,
+        lapsedSaleCostCorrection: true,
+      }),
+    ).toBe('pending')
+  })
+
+  it('does not exempt an ordinary RISE with no lapsed-sale cost correction', () => {
+    expect(
+      decideStatus({
+        ...BASE, map: null, mode: 'balanced', threshold: 0.05,
+        oldPrice: 20, newPrice: 40, marginAfter: 0.5,
+        lapsedSaleCostCorrection: false,
+      }),
+    ).toBe('pending')
+  })
+
+  it('never exempts review_all: every change still queues regardless of the lapsed-sale correction', () => {
+    expect(
+      decideStatus({
+        ...BASE, map: null, mode: 'review_all',
+        oldPrice: 62.99, newPrice: 119.99, marginAfter: 0.4171,
+        lapsedSaleCostCorrection: true,
+      }),
+    ).toBe('pending')
+  })
+
+  it('respects a configured lapsedSaleRiseMarginFloorPct override', () => {
+    // 35% clears the default 30% floor...
+    expect(
+      decideStatus({
+        ...BASE, map: null, mode: 'balanced', threshold: 0.05,
+        oldPrice: 20, newPrice: 36, marginAfter: 0.35,
+        lapsedSaleCostCorrection: true,
+      }),
+    ).toBe('auto_applied')
+    // ...but not a tightened 40% floor.
+    expect(
+      decideStatus({
+        ...BASE, map: null, mode: 'balanced', threshold: 0.05,
+        oldPrice: 20, newPrice: 36, marginAfter: 0.35,
+        lapsedSaleCostCorrection: true,
+        lapsedSaleRiseMarginFloorPct: 0.40,
+      }),
+    ).toBe('pending')
+  })
+})
+
 describe('isPartialBatchDay (#7516)', () => {
   // The real streak this ticket diagnosed: healthy baseline 3,000-5,900+,
   // four consecutive partial days at 1,154-2,138 — all well over the old
