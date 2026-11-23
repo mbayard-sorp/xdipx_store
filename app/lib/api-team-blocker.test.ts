@@ -27,6 +27,7 @@ const getBlockerByIdMock = vi.hoisted(() => vi.fn(async (_id: number) => null as
 const countOpenBlockersMock = vi.hoisted(() => vi.fn(async () => 0))
 const listOpenBlockersMock = vi.hoisted(() => vi.fn(async (_limit?: number) => [] as unknown[]))
 const listRecentlyClearedMock = vi.hoisted(() => vi.fn(async (_days?: number) => [] as unknown[]))
+const supersedeBlockerMock = vi.hoisted(() => vi.fn(async () => ({ ok: true }) as { ok: boolean; reason?: string }))
 
 vi.mock('~/lib/owner-blockers.server', async () => {
   const core = await import('~/lib/owner-blockers-core')
@@ -39,6 +40,7 @@ vi.mock('~/lib/owner-blockers.server', async () => {
     fileBlocker: fileBlockerMock,
     clearBlocker: vi.fn(async () => true),
     dismissBlocker: vi.fn(async () => true),
+    supersedeBlocker: supersedeBlockerMock,
     getBlockerById: getBlockerByIdMock,
     countOpenBlockers: countOpenBlockersMock,
     listOpenBlockers: listOpenBlockersMock,
@@ -68,6 +70,8 @@ beforeEach(() => {
   listOpenBlockersMock.mockResolvedValue([])
   listRecentlyClearedMock.mockClear()
   listRecentlyClearedMock.mockResolvedValue([])
+  supersedeBlockerMock.mockClear()
+  supersedeBlockerMock.mockResolvedValue({ ok: true })
 })
 
 describe("op:'file' rejects a probe-required category with no probe and no override (#8028)", () => {
@@ -208,5 +212,56 @@ describe("op:'list' forwards a caller limit and reports totalOpen so truncation 
     listRecentlyClearedMock.mockClear()
     await post({ op: 'list' })
     expect(listRecentlyClearedMock).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * Ticket #23827. `dismiss` always writes `cleared_by = 'owner'` and `clear`
+ * means "directly confirmed satisfied" -- neither honestly expresses an
+ * agent folding a duplicate into an already-open row, so duplicates
+ * (roughly 75 exoclick-watch-* rows as of 2026-11-23) could only accumulate.
+ * The DB-level behavior (survivor must be open, cleared_by set, clear_note
+ * naming the survivor) lives in owner-blockers.server.ts's own suite, per
+ * this file's existing split between route-layer and DB-layer coverage;
+ * this file covers the route's own validation and pass-through.
+ */
+describe("op:'supersede' folds a duplicate into an open survivor, agent-attributed (#23827)", () => {
+  it('400s with no id or supersededById', async () => {
+    const res = await post({ op: 'supersede', actor: 'agent:blocker-scout' })
+    expect(res.status).toBe(400)
+    expect(supersedeBlockerMock).not.toHaveBeenCalled()
+  })
+
+  it('400s with no actor, so a dismissal can never land unattributed', async () => {
+    const res = await post({ op: 'supersede', id: 1, supersededById: 2 })
+    expect(res.status).toBe(400)
+    expect(supersedeBlockerMock).not.toHaveBeenCalled()
+  })
+
+  it('refuses self-supersede at the route layer before ever calling the DB function', async () => {
+    const res = await post({ op: 'supersede', id: 5, supersededById: 5, actor: 'agent:blocker-scout' })
+    expect(res.status).toBe(400)
+    expect(await res.text()).toMatch(/must differ/i)
+    expect(supersedeBlockerMock).not.toHaveBeenCalled()
+  })
+
+  it('records the calling actor, never defaulting to owner', async () => {
+    const res = await post({
+      op: 'supersede', id: 10, supersededById: 11, actor: 'agent:blocker-scout', note: 'same ExoClick condition',
+    })
+    expect(res.status).toBe(200)
+    expect(supersedeBlockerMock).toHaveBeenCalledWith(10, 11, 'agent:blocker-scout', 'same ExoClick condition')
+  })
+
+  it('409s when the survivor is not an open row', async () => {
+    supersedeBlockerMock.mockResolvedValue({ ok: false, reason: 'survivor-not-open' })
+    const res = await post({ op: 'supersede', id: 10, supersededById: 11, actor: 'agent:blocker-scout' })
+    expect(res.status).toBe(409)
+  })
+
+  it('404s when the row to be dismissed is not open', async () => {
+    supersedeBlockerMock.mockResolvedValue({ ok: false, reason: 'not-open' })
+    const res = await post({ op: 'supersede', id: 10, supersededById: 11, actor: 'agent:blocker-scout' })
+    expect(res.status).toBe(404)
   })
 })

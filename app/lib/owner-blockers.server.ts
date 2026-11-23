@@ -837,6 +837,67 @@ export async function dismissBlocker(id: number, note?: string | null): Promise<
   return (res.rows ?? []).length > 0
 }
 
+export interface SupersedeResult {
+  ok: boolean
+  /** Why the supersede was refused, when !ok. */
+  reason?: 'self' | 'not-open' | 'survivor-not-open'
+}
+
+/**
+ * Fold a duplicate blocker (`id`) into the row that actually describes the
+ * same condition (`supersededById`), without claiming the owner's hand.
+ *
+ * `dismissBlocker` hardcodes `cleared_by = 'owner'`, which is correct for an
+ * owner's own dismissal but wrong for an agent folding a duplicate -- that
+ * would write a dismissal record that falsely says the owner acted. `op:
+ * 'clear'` is no better fit: it means "direct evidence the condition is
+ * satisfied" (`.claude/agents/blocker-scout.md`), which a duplicate is not.
+ * Ticket #23840 — correction, #23827: neither existing op could honestly
+ * express "this is the same condition as an already-open row", so duplicates
+ * (roughly 75 `exoclick-watch-*` rows as of 2026-11-23) accumulated forever.
+ *
+ * Sets `status = 'dismissed'` (same terminal status as dismissBlocker; this
+ * is a dismissal, not a cleared condition) with `cleared_by` set to the
+ * calling actor string (e.g. `agent:blocker-scout`), never `'owner'`, and a
+ * `clear_note` naming the surviving row so the history reads clearly even
+ * once `supersededById` itself eventually clears or is superseded further.
+ *
+ * Refuses (returns `{ ok: false }`, never throws) when:
+ * - `id === supersededById` (`reason: 'self'`) — a row cannot supersede itself.
+ * - `id` is not currently `'open'` (`reason: 'not-open'`) — matches
+ *   `dismissBlocker`'s own `WHERE status = 'open'` guard: only an open row can
+ *   be dismissed, superseded or otherwise.
+ * - `supersededById` is not currently `'open'` (`reason: 'survivor-not-open'`)
+ *   — folding into a row that is itself cleared/dismissed/missing would hide
+ *   the live condition behind a dead one.
+ */
+export async function supersedeBlocker(
+  id: number,
+  supersededById: number,
+  actor: string,
+  note?: string | null,
+): Promise<SupersedeResult> {
+  if (id === supersededById) return { ok: false, reason: 'self' }
+
+  const survivorRes = await db.execute(sql`
+    SELECT status FROM owner_blockers WHERE id = ${supersededById} LIMIT 1`)
+  const survivorStatus = (survivorRes.rows ?? [])[0] as Record<string, unknown> | undefined
+  if (String(survivorStatus?.['status'] ?? '') !== 'open') {
+    return { ok: false, reason: 'survivor-not-open' }
+  }
+
+  const clearedBy = clamp(actor, 24) ?? 'agent'
+  const clearNote = clamp(note, 1000) ?? `Superseded by #${supersededById}`
+  const res = await db.execute(sql`
+    UPDATE owner_blockers
+       SET status = 'dismissed', cleared_at = now(), cleared_by = ${clearedBy},
+           clear_note = ${clearNote}, updated_at = now()
+     WHERE id = ${id} AND status = 'open'
+     RETURNING id`)
+  if ((res.rows ?? []).length === 0) return { ok: false, reason: 'not-open' }
+  return { ok: true }
+}
+
 /* ── Reading ───────────────────────────────────────────────────────────────── */
 
 function toBlocker(r: Record<string, unknown>): OwnerBlocker {
