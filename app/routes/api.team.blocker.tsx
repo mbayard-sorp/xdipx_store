@@ -17,6 +17,19 @@
  *   { op: 'get', id }                -> { blocker } or 404 (any status, not just open)
  *   { op: 'clear', id, note? }      -> { ok }
  *   { op: 'dismiss', id, note? }    -> { ok }
+ *   { op: 'supersede', id, supersededById, actor, note? }
+ *       -> { ok, id, supersededById } or 400/404/409
+ *     Folds a duplicate blocker into the row that already describes the same
+ *     condition (ticket #23827): `id` is dismissed with `cleared_by = actor`
+ *     (an agent actor string, e.g. `agent:blocker-scout`; never `'owner'`,
+ *     unlike `dismiss`) and a `clear_note` naming the survivor.
+ *     `supersededById` must be a currently-OPEN row (409 otherwise, so a
+ *     duplicate is never folded into something already dead), and
+ *     `id === supersededById` is refused (400, a row cannot supersede
+ *     itself). Use this instead of `dismiss` for a duplicate; `dismiss`
+ *     always writes `cleared_by = 'owner'`, which would misattribute an
+ *     agent's own dedup pass as an owner decision, and `clear` means "the
+ *     condition is directly confirmed satisfied", which a duplicate is not.
  *   { op: 'verify' }                -> { checked, autoCleared, stillBlocked, unknown }
  *   { op: 'probes' }                -> { probes: [{ name, describes }] }
  *
@@ -50,6 +63,7 @@ import {
   listRecentlyCleared,
   probeGapReason,
   suggestProbeFor,
+  supersedeBlocker,
   titleClaimsConfirmed,
   verifyBlockers,
 } from '~/lib/owner-blockers.server'
@@ -175,6 +189,33 @@ export async function action({ request }: ActionFunctionArgs) {
       : await dismissBlocker(id, note)
     if (!ok) return new Response('Not Found: no open blocker with that id', { status: 404 })
     return Response.json({ ok: true, id })
+  }
+
+  if (op === 'supersede') {
+    const id = Number(b['id'] ?? 0)
+    const supersededById = Number(b['supersededById'] ?? 0)
+    const actor = str(b['actor'], 64)
+    if (!id || !supersededById) {
+      return new Response('Bad Request: id and supersededById required', { status: 400 })
+    }
+    if (!actor) {
+      return new Response('Bad Request: actor required', { status: 400 })
+    }
+    if (id === supersededById) {
+      return new Response('Bad Request: id and supersededById must differ', { status: 400 })
+    }
+    const note = str(b['note'], 1000) ?? null
+    const result = await supersedeBlocker(id, supersededById, actor, note)
+    if (!result.ok) {
+      if (result.reason === 'survivor-not-open') {
+        return new Response(
+          `Conflict: supersededById ${supersededById} is not an open blocker`,
+          { status: 409 },
+        )
+      }
+      return new Response('Not Found: no open blocker with that id', { status: 404 })
+    }
+    return Response.json({ ok: true, id, supersededById })
   }
 
   if (op === 'verify') {
