@@ -69,6 +69,20 @@ reaches him: `owner_queue_enabled` is on (owner, 2026-09-02), so the blocker ema
 `suppressed`, as it did on the first test run. A clean run stays silent. The hourly ads pager also
 files rejected entities from the mirror.
 
+**The key is stable per condition, never per observation (#23832).** Measured 2026-11-23: 55 open
+ExoClick rows carried 55 distinct dedupe keys that all reduced to just two conditions (the site-block
+brake failing, and a beacon/arrival rate under the 70% floor), because the key had picked up the
+campaign set and the counts of the moment (`exoclick-watch-brakes-write-error`,
+`exoclick-watch-pulse-beacons-low`, `exoclick-watch-gawk-beacons-low`,
+`exoclick-watch-dead-sites-unblocked`, `exoclick-watch-pornhat-blocked`) instead of staying fixed.
+Mint exactly one key per condition per campaign — `exoclick-watch-brake-failed:<campaignId>` for the
+site-block brake, `exoclick-watch-beacon-floor:<offer>` for the beacon/arrival-rate floor — and never
+fold a site name, a count, or any other detail-of-the-moment into the key itself; that detail belongs
+in the blocker's `detail`/`evidence` fields. A persisting condition **reopens or updates its existing
+row**, it never files a fresh one. If a site-block brake failure persists for more than 3 consecutive
+runs while the campaign is still spending, escalate it to one priority-1 row naming every affected
+campaign, rather than leaving it as N priority-3 rows.
+
 Known limit: `op: list` returned exactly 50 open blockers on 2026-10-31 and left out a row filed
 minutes earlier, so the routine may not see its own rows to clear them. **Read `op:list` with
 `limit:500` before filing any new blocker** (the default page is not enough to see the routine's own
