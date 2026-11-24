@@ -498,7 +498,7 @@ function parseCategory(raw: string): Array<'for-him' | 'for-her' | 'couples'> {
  * have HTML strings (a `<ul>` of `<li><strong>Label:</strong> Value</li>`).
  * Returns the bullets as a plain string array regardless of source format.
  */
-function parseSpecificationsBullets(raw: string): string[] {
+export function parseSpecificationsBullets(raw: string): string[] {
   if (!raw) return []
   // New format: JSON array
   if (raw.trim().startsWith('[')) {
@@ -2518,6 +2518,65 @@ export async function getCatalogProductCopySurfaces(): Promise<ProductCopySurfac
         tagline: parseMetafieldByNsKey(node.metafields, 'xdipx', 'tagline'),
         fullStory: parseMetafieldByNsKey(node.metafields, 'xdipx', 'full_story'),
       })
+    }
+
+    if (!data.products.pageInfo.hasNextPage) break
+    cursor = data.products.pageInfo.endCursor
+    if (!cursor) break
+  }
+  return out
+}
+
+export interface ProductIpRatingMetafieldBullets {
+  handle: string
+  title: string
+  careInstructions: string[]
+  specifications: string[]
+}
+
+/**
+ * Ticket #24094: catalog-wide bullet reader for the two metafields
+ * `getCatalogProductCopySurfaces` does not cover — `xdipx.care_instructions`
+ * and `xdipx.specifications` — so `findIpRatingMetafieldHits`
+ * (app/lib/ip-rating-metafield-sweep.ts) has a catalog to sweep.
+ */
+export async function getCatalogIpRatingMetafieldBullets(): Promise<ProductIpRatingMetafieldBullets[]> {
+  const out: ProductIpRatingMetafieldBullets[] = []
+  let cursor: string | null = null
+  for (let page = 0; page < 40; page++) {
+    const data: {
+      products: {
+        pageInfo: { hasNextPage: boolean; endCursor: string | null }
+        edges: Array<{ node: {
+          handle: string
+          title: string
+          metafields: ({ namespace: string; key: string; value: string } | null)[]
+        } }>
+      }
+    } = await storefront(`
+      query CatalogIpRatingMetafields($first: Int!, $after: String) {
+        products(first: $first, after: $after, query: "available_for_sale:true") {
+          pageInfo { hasNextPage endCursor }
+          edges {
+            node {
+              handle
+              title
+              metafields(identifiers: [
+                { namespace: "xdipx", key: "care_instructions" }
+                { namespace: "xdipx", key: "specifications" }
+              ]) {
+                namespace key value
+              }
+            }
+          }
+        }
+      }
+    `, { first: 250, after: cursor })
+
+    for (const { node } of data.products.edges) {
+      const careInstructions = normalizeCareInstructions(parseMetafieldJSON<unknown>(node.metafields, 'care_instructions', null)) ?? []
+      const specifications = parseSpecificationsBullets(parseMetafield(node.metafields, 'specifications'))
+      out.push({ handle: node.handle, title: node.title, careInstructions, specifications })
     }
 
     if (!data.products.pageInfo.hasNextPage) break
