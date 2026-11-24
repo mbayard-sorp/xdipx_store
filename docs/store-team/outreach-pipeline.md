@@ -41,6 +41,16 @@ replied_negative | bounced`, plus hand-set `on_hold`, `landed`, `rejected`. Only
 itself) can be queued via the API, so a replied or rejected row is never re-entered
 by an agent.
 
+**Sending is owner-only by design (#23833).** `POST /api/team/outreach {op:'send'}` exists so the
+owner's own click on `/admin/outreach`'s Composer can reuse the same guarded code path as
+`sendOutreachEmail()` — it is not meant to be called by a cron or a routine on a schedule. No
+scheduled trigger owns the send step, and that is deliberate, not a gap: `outreach_send_enabled`
+being on is the owner's authorization to send, not an instruction for a routine to send
+unattended. `offsite-scout` stays propose-only by its own definition and never calls `op:'send'`.
+The weekly offsite routine (`routine-offsite-weekly.md`) reports the queued-prospect count as a
+standing owner ask every week — not as a team-lane TODO — so the backlog stays visible on the
+owner's own surface instead of silently growing.
+
 ## The approval UI (/admin/outreach)
 
 Added 2026-08-16. Before it, every part of this pipeline was reachable only by curl

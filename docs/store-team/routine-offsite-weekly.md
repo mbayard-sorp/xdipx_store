@@ -81,6 +81,11 @@ movement since last run (new citations spotted in search results, prior pitches 
 and the single highest-leverage next step. A summary is a report, and reports do not go on the bus
 (see the intake doctrine in `improvement-loop.md`). This step filed a `process` row every week into
 a kind with no executor, which is how the owner-decision lane grew faster than anyone could read it.
+**Report the queued-prospect count as a standing owner ask, every week (#23833).** Sending stays
+owner-only by design (see the Appendix above), so a growing `queued` count is not a team-lane TODO
+and never gets filed as one; it is a line in this run's event naming how many prospects are
+sendable right now, so the backlog stays visible on the owner's own surface instead of silently
+growing the way it did for fourteen weeks (two sends ever, 49 approved pitches).
 Log spend (feature `strategy-offsite`), then finish the run with an
 honest summary.
 
@@ -98,7 +103,18 @@ true. While it is false (the shipped default), the routine's behavior is unchang
 nothing sent, exactly as above. See `docs/store-team/outreach-pipeline.md` for the pipeline this
 drives and the policy constraints that bind every send.
 
-When the valve is on, after Step 3 the routine MAY execute approved pitches:
+**Dormant, not active, even with the valve on (#23833).** The valve has been `true` since
+2026-08-07 and `offsite-scout` has sent zero pitches in that window, because the role description
+at the top of this file is unconditional ("PROPOSE-ONLY... It never sends, never posts, never
+spends") and controls over the steps below. That is the intended reading, not a bug: per
+`docs/store-team/outreach-pipeline.md`, sending is owner-only by design — `outreach_send_enabled`
+being on is the owner's authorization for the owner's own `/admin/outreach` Composer click, not an
+instruction for this routine to send unattended. This appendix is kept, dormant, for the day the
+owner explicitly delegates the send step to the team; until that decision is recorded here, Step 4
+reports the queued-prospect count as a standing owner ask rather than attempting the steps below.
+
+When the valve is on **and the owner has explicitly delegated the send step**, the routine MAY
+execute approved pitches:
 
 1. List the sendable targets: `POST $BASE_URL/api/team/outreach {"op":"list","status":"queued"}`
    plus the approved pitch rows from Step 1's suggestion listing. A pitch is executable only
