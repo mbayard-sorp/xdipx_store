@@ -74,6 +74,71 @@ describe('remoteVisionCallVision team plumbing (ticket #11856)', () => {
     await callVision('abc', 'image/png')
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
+
+  // Ticket #23941: caller used to be dropped at this exact seam — the
+  // in-process callVision default logs `caller` against api_token_log, but
+  // this remote-fallback branch never sent it, so every sandboxed caller
+  // (no ANTHROPIC_API_KEY, which is every scheduled cloud routine) fell
+  // through to the hardcoded default label regardless of what gateImageBuffer
+  // was told to call itself.
+  it('includes caller in the POST body when given', async () => {
+    vi.stubEnv('TEAM_TOKEN', 'test-team-token')
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(init!.body as string)
+      expect(body.caller).toBe('homepage-media')
+      return new Response(JSON.stringify(CLEAN_VERDICT), { status: 200 })
+    })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    const callVision = remoteVisionCallVision(1099, 'homepage', 'homepage-media')
+    await callVision('abc', 'image/png')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('omits caller from the POST body when none is given', async () => {
+    vi.stubEnv('TEAM_TOKEN', 'test-team-token')
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(init!.body as string)
+      expect(body.caller).toBeUndefined()
+      return new Response(JSON.stringify(CLEAN_VERDICT), { status: 200 })
+    })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    const callVision = remoteVisionCallVision(1099, 'homepage')
+    await callVision('abc', 'image/png')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+// Ticket #23941: visionDepsForEnv threads caller through to
+// remoteVisionCallVision so gateImageBuffer's own caller argument survives
+// the remote-fallback branch (the branch every scheduled cloud routine
+// actually takes, since none of them carry ANTHROPIC_API_KEY).
+describe('visionDepsForEnv caller plumbing (ticket #23941)', () => {
+  const realFetch = global.fetch
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    global.fetch = realFetch
+  })
+
+  it('forwards caller to the remote route via gateImageBuffer', async () => {
+    vi.stubEnv('ANTHROPIC_API_KEY', '')
+    vi.stubEnv('TEAM_TOKEN', 'test-team-token')
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(init!.body as string)
+      expect(body.caller).toBe('ad-render')
+      return new Response(JSON.stringify(CLEAN_VERDICT), { status: 200 })
+    })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    const { gateImageBuffer } = await import('./vision-gate-buffer.server')
+    await gateImageBuffer(Buffer.from('fake-png-bytes'), undefined, 42, 'ads', 'ad-render')
+    // A clean exposure read triggers confirmExposureChecks' own mandatory
+    // second independent confirmation call (both legs go through this same
+    // remote fallback and must both carry the caller label).
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
 })
 
 // Ticket #13333: the product-fidelity gate's own remote fallback, the

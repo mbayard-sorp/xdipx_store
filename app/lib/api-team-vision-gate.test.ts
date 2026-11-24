@@ -216,6 +216,44 @@ describe('refId forwarding (ticket #13526)', () => {
   })
 })
 
+// Ticket #23941: this route is the privileged server-side relay a
+// remote-fallback caller (gateImageBuffer via remoteVisionCallVision, taken
+// by every scheduled cloud routine, which has no ANTHROPIC_API_KEY) actually
+// reaches. Before this, the route never read a `caller` field at all, so
+// every such call logged against the hardcoded default label regardless of
+// what the real caller asked for.
+describe('caller forwarding (ticket #23941)', () => {
+  it('passes caller through to runVisionGate, alongside refId', async () => {
+    const res = await post({ imageUrl: 'https://cdn.shopify.com/files/x.jpg', runId: 42, caller: 'homepage-media' })
+    expect(res.status).toBe(200)
+    expect(runVisionGateMock).toHaveBeenCalledWith('https://cdn.shopify.com/files/x.jpg', undefined, '42', 'homepage-media')
+  })
+
+  it('passes caller through to runVisionGate when no runId is given', async () => {
+    const res = await post({ imageUrl: 'https://cdn.shopify.com/files/x.jpg', caller: 'ad-render' })
+    expect(res.status).toBe(200)
+    expect(runVisionGateMock).toHaveBeenCalledWith('https://cdn.shopify.com/files/x.jpg', undefined, undefined, 'ad-render')
+  })
+
+  it('passes caller through to runVisionGateOnImage', async () => {
+    const res = await post({ imageBase64: 'abc', mediaType: 'image/jpeg', runId: 7, caller: 'notebook-hero-upload' })
+    expect(res.status).toBe(200)
+    expect(runVisionGateOnImageMock).toHaveBeenCalledWith({ data: 'abc', mediaType: 'image/jpeg' }, undefined, '7', 'notebook-hero-upload')
+  })
+
+  it('passes caller through to regateAsset', async () => {
+    const res = await post({ imageUrl: 'https://cdn.shopify.com/files/onskin.jpg', assetId: 238, runId: 99, caller: 'vision-gate-preflight' })
+    expect(res.status).toBe(200)
+    expect(regateAssetMock).toHaveBeenCalledWith(238, 'https://cdn.shopify.com/files/onskin.jpg', undefined, '99', 'vision-gate-preflight')
+  })
+
+  it('omits caller entirely (no trailing args) when neither caller nor runId is given', async () => {
+    const res = await post({ imageUrl: 'https://cdn.shopify.com/files/x.jpg' })
+    expect(res.status).toBe(200)
+    expect(runVisionGateMock).toHaveBeenCalledWith('https://cdn.shopify.com/files/x.jpg')
+  })
+})
+
 // Ticket #13333: the product-fidelity mode, the server-side sibling of the
 // anatomy branch above for gateProductFidelityBuffer's own remote fallback.
 // A cloud content run has no ANTHROPIC_API_KEY, so without this route

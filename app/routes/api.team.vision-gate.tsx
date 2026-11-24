@@ -115,6 +115,14 @@ export async function action({ request }: ActionFunctionArgs) {
     const teamParam = str(b['team'])
     const team: TeamId = teamParam && isTeamId(teamParam) ? teamParam : 'content'
 
+    // Ticket #23941: the real call-site label (homepage-media, ad-render, a
+    // Notebook hero rung, this route's own preflight), forwarded to the
+    // anatomy check below so a remote-fallback call (any scheduled cloud
+    // sandbox, which has no ANTHROPIC_API_KEY and always lands here) keeps
+    // its caller instead of losing it to the hardcoded default the model
+    // call itself falls back to when none is given.
+    const caller = str(b['caller'])
+
     if (mode === 'fidelity') {
       const referenceImageBase64 = str(b['referenceImageBase64'])
       const referenceMediaType = str(b['referenceMediaType'])
@@ -210,17 +218,27 @@ export async function action({ request }: ActionFunctionArgs) {
 
     const { runVisionGate, runVisionGateOnImage, regateAsset } = await import('~/lib/social-vision-gate.server')
     const refId = runId?.toString()
+    // Branched on caller/refId presence, rather than always passing explicit
+    // trailing undefineds, to keep each call at the exact arity the existing
+    // tests assert (api-team-vision-gate.test.ts's refId-forwarding and
+    // caller-forwarding describe blocks).
     const verdict = imageUrl
       ? assetId != null
-        ? refId !== undefined
-          ? await regateAsset(assetId, imageUrl, undefined, refId)
-          : await regateAsset(assetId, imageUrl)
+        ? caller !== undefined
+          ? await regateAsset(assetId, imageUrl, undefined, refId, caller)
+          : refId !== undefined
+            ? await regateAsset(assetId, imageUrl, undefined, refId)
+            : await regateAsset(assetId, imageUrl)
+        : caller !== undefined
+          ? await runVisionGate(imageUrl, undefined, refId, caller)
+          : refId !== undefined
+            ? await runVisionGate(imageUrl, undefined, refId)
+            : await runVisionGate(imageUrl)
+      : caller !== undefined
+        ? await runVisionGateOnImage({ data: imageBase64!, mediaType: mediaType! }, undefined, refId, caller)
         : refId !== undefined
-          ? await runVisionGate(imageUrl, undefined, refId)
-          : await runVisionGate(imageUrl)
-      : refId !== undefined
-        ? await runVisionGateOnImage({ data: imageBase64!, mediaType: mediaType! }, undefined, refId)
-        : await runVisionGateOnImage({ data: imageBase64!, mediaType: mediaType! })
+          ? await runVisionGateOnImage({ data: imageBase64!, mediaType: mediaType! }, undefined, refId)
+          : await runVisionGateOnImage({ data: imageBase64!, mediaType: mediaType! })
 
     return Response.json(
       { ...verdict, ...(assetId != null ? { recorded: true, assetId } : {}) },
