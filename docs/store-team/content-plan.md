@@ -309,6 +309,8 @@ extend freely — additions need a slug, problem, and target query):
 
 | 38 | what-do-you-do-if-you-dont-like-a-sex-toy-you-bought | A toy the reader researched and paid for is wrong on first use: too strong, too weak, in the wrong place, too big, or simply flat. Hygiene rules keep a used intimate product from going back, so no action undoes the decision, and with nothing to do the reader converts a product mismatch into a verdict on themselves (they do not know what they like, their body is wrong, the money is gone). The toy goes into a drawer with nobody ever working out WHICH thing was wrong, and the next purchase repeats the blind guess by escalating intensity, which is the one variable a too-much result already ruled out † | "what do you do if you don't like a sex toy you bought" |
 
+| 39 | will-anyone-know-i-ordered-a-sex-toy | Someone has a full cart and a settled mind and stalls at checkout, not over the product but over two things they cannot inspect in advance: what the box and its label will say when it lands somewhere other people can see it, and what the line on the card statement will read. Sellers answer with a wink ("discreet shipping") rather than a specification, which gives the reader nothing to plan around and quietly confirms the premise that the purchase is something to hide, so the reader buys down to the smallest deniable thing on the page or abandons the cart and keeps the question | "will anyone know if I order a sex toy online" |
+
 † = health-adjacent; the "worth seeing a clinician if…" line, with its tier, is mandatory (see above).
 
 **When no writable row remains (added 2026-10-28, #18359).** The bank ran fully dry on 2026-10-27:
@@ -522,3 +524,38 @@ Bank composition: roughly a third health-adjacent, a third relationship and comm
 practical confidence. Rows 1-10 are the original launch bank and seed the `real-talk` series in
 lightest-first order; rows 11-30 extend it. High-volume LLM queries (14, 15, 17, 30) are the
 citation bets; treat them with extra care on sourcing and the clinician line.
+
+Row 39 is the sixth (authored by content run 2193, 2026-11-24). By that run the bank was spent for
+the fifth time: rows 1-14, 16-24, 27, 28 and 30-38 all had published posts, rows 25, 26 and 29 are
+retired from the rotation, row 15 is still parked, and the `seoContentBrief` queue held no
+`real-talk` brief at all (its seven queued rows were four `wellness-basics`, one `comparisons`, one
+`guides` and one `care`). Row 39 targets the PRE-PURCHASE LOGISTICS stall, which no row covered: it
+is distinct from row 29 (privacy inside a shared home once the toy is already there, retired as
+covered by the published care post `how-do-you-store-sex-toys-discreetly`) and from row 2 (first-toy
+overwhelm, where the reader does not yet know what they want). In row 39 the wanting is settled and
+the blocker is the delivery and the statement line. It was chosen to serve weekly brief 24's content
+directive to write the third of the three citation queries the store lost that week, discreet
+packaging and billing, which that brief called "the easiest page in the store to write" because it is
+also our own trust copy; the other two lost queries were already covered by four and two published
+posts respectively. `check-topic-collision.ts` was clean against 20 prior posts on heading, title and
+shared-embed surfaces, and `check-self-consistency.ts` cross-post pass was clean against all 129
+published posts.
+
+Three drafting lessons from row 39 worth inheriting:
+
+- **A trust-canon topic is a first-party sourcing job, not a research job.** Every packaging and
+  billing fact in the post traces to live site copy (`app/lib/faq-content.ts`, the rendered
+  `/faq` FAQPage JSON-LD, `app/components/store/StorefrontHome.tsx`, `Footer.tsx`), and the accuracy
+  gate checked each against that copy rather than the web. Pull the strings from the live surfaces
+  before drafting, and note WHICH surface carries which phrasing: the gate caught a sentence pointing
+  all three facts at `/faq` when the phrase "no product names" is only on the storefront FAQ.
+- **An absolute about what we print cannot be verified and must not be written.** Two lines ("that is
+  the whole of what we print", "the box does not itemize") were cycle-1 BLOCK-if-unresolved, because
+  nothing first-party establishes what goes INSIDE the carton. Scope every packaging claim to the
+  outside of the parcel, which is what our published copy actually covers.
+- **A delivery-address suggestion carries a payments claim.** Telling a reader the shipping address
+  need not be their home reads as a claim that a mismatch is costless. The gate verified only that
+  AVS checks the BILLING address against the issuer's records and not the shipping address, and ruled
+  the weighting of a mismatch undocumented, so the post states the billing fact and asserts nothing
+  about holds, review or likelihood.
+
