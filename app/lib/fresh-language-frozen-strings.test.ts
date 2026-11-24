@@ -11,6 +11,7 @@ import {
   FROZEN_SAFETY_STRINGS,
   IPX7_HOUSE_WORDING,
   IPX4_HOUSE_WORDING,
+  IPX56_JET_CODE_HOUSE_WORDING,
   stripFrozenStrings,
   stripFrozenStringsFromDoc,
 } from './fresh-language-frozen-strings'
@@ -36,6 +37,14 @@ describe('stripFrozenStrings', () => {
     const text = `${IPX4_HOUSE_WORDING} ${IPX4_HOUSE_WORDING}`
     const out = stripFrozenStrings(text)
     expect(out).not.toContain('IPX4')
+  })
+
+  it('removes an exact occurrence of the IPX5/IPX6 jet-code house wording (ticket #24095)', () => {
+    const text = `Before. ${IPX56_JET_CODE_HOUSE_WORDING} After.`
+    const out = stripFrozenStrings(text)
+    expect(out).not.toContain('jet codes')
+    expect(out).toContain('Before.')
+    expect(out).toContain('After.')
   })
 
   it('is a no-op on text with no frozen string', () => {
@@ -113,8 +122,35 @@ describe('analyzeFreshness with frozen-string stripping applied (ticket #23880 D
 })
 
 describe('FROZEN_SAFETY_STRINGS', () => {
-  it('contains both the IPX7 and IPX4 house wordings', () => {
+  it('contains the IPX7, IPX4, and IPX5/IPX6 jet-code house wordings', () => {
     expect(FROZEN_SAFETY_STRINGS).toContain(IPX7_HOUSE_WORDING)
     expect(FROZEN_SAFETY_STRINGS).toContain(IPX4_HOUSE_WORDING)
+    expect(FROZEN_SAFETY_STRINGS).toContain(IPX56_JET_CODE_HOUSE_WORDING)
+  })
+})
+
+describe('analyzeFreshness with the IPX5/IPX6 jet-code wording stripped (ticket #24095)', () => {
+  it('reports no overlap when the only shared text is the jet-code frozen string', () => {
+    const draft: DraftInput = {
+      title: 'What makes a vibrator body safe',
+      body: [
+        p('A printed ingress rating instead of an adjective.'),
+        p(IPX56_JET_CODE_HOUSE_WORDING),
+      ],
+    }
+    const prior: PriorPost = {
+      slug: 'how-often-should-you-clean-your-vibrator',
+      body: [
+        p('Cleaning cadence depends on how often you use it, for entirely unrelated reasons.'),
+        p(IPX56_JET_CODE_HOUSE_WORDING),
+      ],
+    }
+
+    const unstripped = analyzeFreshness(draft, [prior])
+    expect(unstripped.overlap).toBe(true)
+
+    const stripped = analyzeFreshness(stripFrozenStringsFromDoc(draft), [stripFrozenStringsFromDoc(prior)])
+    expect(stripped.overlap).toBe(false)
+    expect(stripped.hits).toHaveLength(0)
   })
 })
