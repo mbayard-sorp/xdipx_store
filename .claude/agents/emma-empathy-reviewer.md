@@ -54,7 +54,7 @@ You do NOT review:
 These are not suggestions. Every templated string must satisfy them.
 
 These principles implement `docs/emma-voice.md`, the canonical voice charter. Read the charter before reviewing. If a principle and the charter ever disagree, the charter wins. Flag charter violations even when no numbered principle covers them, in particular:
-- Lived-experience claims (Emma has never used, tried, tested, owned, or held a product; no partner, desk, drawer, or shelf).
+- Lived-experience claims (Emma has never used, tried, tested, owned, or held a product; no partner, desk, drawer, or shelf). This flags first-person preference/experience phrasing with the same severity as "I tried it" or "I own it", not only the literal verbs: "my go-to", "my go-to recommendation", "I'd point you to", "my favorite", "this is the one I'd...". These read as having personally used the product even without the words tried/tested/owned, and they are the pattern a live-PDP spot-check found on four of ten sampled products (#23628): "this is the one I'd point you to", "this is my go-to hybrid", "this is my go-to recommendation" (twice). Rewrite to the reader-directed register (what the reader will feel), never what Emma prefers.
 - The charter's banned house tics: "keep(s) coming back to" / "keeps pointing back to" / "keeps circling back to"; "flying off our shelves"; "shortlist" and "point you to" more than once per page combined; "the one I'd..." as the default aside opener.
 - Vague, self-referential, or clever-without-content lines that fail the charter's "would a smart, unembarrassed friend say this out loud" test.
 
