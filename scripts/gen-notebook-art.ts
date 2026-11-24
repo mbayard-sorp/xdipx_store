@@ -396,7 +396,11 @@ async function generateHeroComposite(slug: string, castSlug: string, opts: {
     // Anatomy vision gate (ticket #8691): a rung whose every candidate fails
     // is treated exactly like a rung that threw, so the existing ladder below
     // is the regeneration budget — no separate retry mechanism to invent.
-    const verdicts = await Promise.all(buffers.map(buf => gateHeroBuffer(buf, undefined, opts.runId)))
+    // caller (ticket #23941) mirrors the logImageCost caller just below, so
+    // this rung's own vision-gate spend is attributable the same way.
+    const verdicts = await Promise.all(
+      buffers.map(buf => gateHeroBuffer(buf, undefined, opts.runId, 'content', `notebook-hero-composite/${rung}`)),
+    )
     // composeSceneFrame logs no spend of its own — bill both keys here, but
     // only for candidates the gate actually evaluated (ticket #8830): when
     // the gate cannot complete at all (auth/transport/timeout), nothing was
@@ -452,7 +456,10 @@ async function generateHeroComposite(slug: string, castSlug: string, opts: {
     })
     if (res.provider === 'none' || !res.buffers.length) throw new Error('single-figure generation produced no candidates')
     const buffers = await Promise.all(res.buffers.map(b => resizeToExactCover(b)))
-    const verdicts = await Promise.all(buffers.map(buf => gateHeroBuffer(buf, undefined, opts.runId)))
+    // caller (ticket #23941) mirrors the logImageCost caller just below.
+    const verdicts = await Promise.all(
+      buffers.map(buf => gateHeroBuffer(buf, undefined, opts.runId, 'content', 'notebook-hero-composite/single-figure')),
+    )
     const billable = billableCandidateCount(verdicts)
     if (billable > 0) {
       const { logImageCost } = await import('~/lib/token-log.server')
@@ -527,7 +534,12 @@ async function generate(surface: Surface, slug: string | undefined, opts: {
   let candidates = res.buffers
   if (surface === 'hero') {
     for (let attempt = 1; ; attempt++) {
-      const verdicts = await Promise.all(res.buffers.map(buf => gateHeroBuffer(buf, undefined, opts.runId)))
+      // caller (ticket #23941) mirrors generateOnce()'s own image-generation
+      // caller just above, so this rung's vision-gate spend is attributable
+      // the same way.
+      const verdicts = await Promise.all(
+        res.buffers.map(buf => gateHeroBuffer(buf, undefined, opts.runId, 'content', `media-manager/notebook-${surface}`)),
+      )
       const { passing, failing } = splitByVerdict(res.buffers, verdicts)
       if (passing.length) {
         candidates = passing
@@ -606,7 +618,9 @@ async function upload(surface: Surface, slug: string | undefined, filePath: stri
   // rather than being advisory — no upload happens on a fail.
   let heroVerdict: VisionVerdict | undefined
   if (surface === 'hero') {
-    heroVerdict = await gateHeroBuffer(buffer, undefined, runId)
+    // caller (ticket #23941): this is its own distinct call site (the final
+    // pre-upload check), separate from the generate()/composite rungs above.
+    heroVerdict = await gateHeroBuffer(buffer, undefined, runId, 'content', 'notebook-hero-upload')
     if (!heroVerdict.pass) {
       // checkCompleted:false means the gate never reached a real verdict on
       // this candidate at all (a transport/auth error, or the remote route

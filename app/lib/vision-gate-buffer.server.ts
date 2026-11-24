@@ -74,8 +74,20 @@ export function sniffImageMediaType(buf: Buffer): 'image/jpeg' | 'image/png' | '
  * caller, so a homepage --run-id could never exclude the sibling run that
  * was actually blocking it, since that sibling was a content run with a
  * different id (run 1099, 2026-09-27: 4 slots attempted, 0 placed).
+ *
+ * `caller` (ticket #23941) is the real call-site label, forwarded to the
+ * route's own `runVisionGate`/`runVisionGateOnImage` call so it reaches
+ * `api_token_log.caller` even on this remote-fallback path. Before this, any
+ * caller that passed `gateImageBuffer` an explicit `caller` (homepage-media,
+ * ad-render, the Notebook hero path once it gains one) still lost that label
+ * the moment this function's own POST body dropped it — the privileged model
+ * call happens server-side, inside the route, which judged every remote-path
+ * request with no caller of its own and fell through to the hardcoded
+ * default. That is the single largest source of the unlabeled 89% bucket
+ * ticket #23941 fixes, since a scheduled cloud routine (no ANTHROPIC_API_KEY)
+ * always takes this path.
  */
-export function remoteVisionCallVision(runId?: number, team?: TeamId): NonNullable<VisionGateDeps['callVision']> {
+export function remoteVisionCallVision(runId?: number, team?: TeamId, caller?: string): NonNullable<VisionGateDeps['callVision']> {
   const BASE_URL = (process.env['BASE_URL'] ?? 'https://xdipx.com').replace(/\/$/, '')
   const TEAM_TOKEN = process.env['TEAM_TOKEN'] ?? process.env['HOMEPAGE_TEAM_TOKEN'] ?? process.env['CRON_SECRET'] ?? ''
   return async (imageBase64, mediaType) => {
@@ -90,7 +102,13 @@ export function remoteVisionCallVision(runId?: number, team?: TeamId): NonNullab
       // sees itself as the blocking sibling run and the gate fails closed on
       // every call. `team` picks which team's lock/budget that check runs
       // against; the route defaults to 'content' when omitted.
-      body: JSON.stringify({ imageBase64, mediaType, ...(runId !== undefined ? { runId } : {}), ...(team ? { team } : {}) }),
+      body: JSON.stringify({
+        imageBase64,
+        mediaType,
+        ...(runId !== undefined ? { runId } : {}),
+        ...(team ? { team } : {}),
+        ...(caller ? { caller } : {}),
+      }),
     })
     if (!res.ok) throw new Error(`vision-gate route HTTP ${res.status}`)
     const verdict = (await res.json()) as VisionVerdict
@@ -128,9 +146,15 @@ export function remoteVisionCallVision(runId?: number, team?: TeamId): NonNullab
  * sandbox, ticket #8989). Only consulted when a caller passes no explicit
  * `deps` — every test that exercises this passes its own `callVision` and is
  * unaffected by which branch this returns.
+ *
+ * `caller` (ticket #23941) threads through to `remoteVisionCallVision` so the
+ * remote-fallback branch keeps the real call-site label instead of dropping
+ * it; the in-process branch never needs it here, since `gateImageBuffer`
+ * passes `caller` straight to `runVisionGateOnImage` itself regardless of
+ * which branch this function returns.
  */
-export function visionDepsForEnv(runId?: number, team?: TeamId): VisionGateDeps | undefined {
-  return process.env['ANTHROPIC_API_KEY']?.trim() ? undefined : { callVision: remoteVisionCallVision(runId, team) }
+export function visionDepsForEnv(runId?: number, team?: TeamId, caller?: string): VisionGateDeps | undefined {
+  return process.env['ANTHROPIC_API_KEY']?.trim() ? undefined : { callVision: remoteVisionCallVision(runId, team, caller) }
 }
 
 /**
@@ -225,7 +249,7 @@ export async function gateImageBuffer(
 ): Promise<VisionVerdict> {
   return runVisionGateOnImage(
     { data: buf.toString('base64'), mediaType: sniffImageMediaType(buf) },
-    deps ?? visionDepsForEnv(runId, team),
+    deps ?? visionDepsForEnv(runId, team, caller),
     runId?.toString(),
     caller,
   )
@@ -364,7 +388,7 @@ const PREFLIGHT_PNG_BASE64 =
  * shape for "could not tell", not an exceptional path.
  */
 export async function runVisionGatePreflight(runId?: number, team?: TeamId): Promise<VisionPreflightResult> {
-  const verdict = await gateImageBuffer(Buffer.from(PREFLIGHT_PNG_BASE64, 'base64'), undefined, runId, team)
+  const verdict = await gateImageBuffer(Buffer.from(PREFLIGHT_PNG_BASE64, 'base64'), undefined, runId, team, 'vision-gate-preflight')
   if (!verdict.checkCompleted) {
     const message = verdict.notes ?? 'vision gate did not complete'
     return { ok: false, reason: classifyVisionPreflightFailure(message), message, dependency: 'anatomy' }
