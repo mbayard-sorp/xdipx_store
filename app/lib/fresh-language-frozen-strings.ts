@@ -54,8 +54,32 @@ export const IPX7_HOUSE_WORDING =
 export const IPX4_HOUSE_WORDING =
   'IPX4 covers splashes only, so keep it out of the shower and never submerge it.'
 
+/**
+ * The IPX5/IPX6 jet-code house wording. SECOND OCCURRENCE of the #23880
+ * class (ticket #24095): content run 2095 remediated
+ * `/notebook/how-often-should-you-clean-your-vibrator` block b10 into this
+ * wording, #22828 then required the next post to agree with it, and content
+ * run 2193 applied it to `/notebook/what-makes-a-vibrator-body-safe` block
+ * b19 (quoted here verbatim) plus blocks b47 and b61 — both gates PASSED on
+ * that reuse, the voice gate ruling explicitly that near-verbatim reuse of a
+ * frozen safety sentence is not a fresh-language defect. Taken from b19
+ * specifically, not b47 or b61, because b19 is the version both gates
+ * cleared with the charging-port instruction as a bare imperative ("Keep the
+ * charging port out of the stream") rather than hung off the sealed-as-made
+ * clause.
+ */
+export const IPX56_JET_CODE_HOUSE_WORDING =
+  'IPX5 and IPX6 are the jet codes. Each names its own nozzle test at a set flow, which is a pressurised ' +
+  'spray rather than the free-falling stream out of your tap, so a toy carrying either is built to take a ' +
+  'rinse. Both tests run on a new toy sealed the way its maker intended, with water at room temperature. ' +
+  'Keep the charging port out of the stream, and keep hot water off anything with a motor in it.'
+
 /** Exact, mandated safety sentences exempt from the fresh-language check. */
-export const FROZEN_SAFETY_STRINGS: readonly string[] = [IPX7_HOUSE_WORDING, IPX4_HOUSE_WORDING]
+export const FROZEN_SAFETY_STRINGS: readonly string[] = [
+  IPX7_HOUSE_WORDING,
+  IPX4_HOUSE_WORDING,
+  IPX56_JET_CODE_HOUSE_WORDING,
+]
 
 /**
  * Remove every exact occurrence of a frozen string from `text`, replacing it
