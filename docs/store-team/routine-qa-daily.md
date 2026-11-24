@@ -23,6 +23,14 @@ Mission brief: `docs/store-team/mission-brief.md`. The repo rules a diff must sa
 1. `POST /api/team/run {"op":"start","team":"strategy","runType":"qa"}` → `$RUN_ID`.
 2. `GET /api/team/gate?team=strategy&excludeRun=$RUN_ID`. On `ok:false` → post a skipped event,
    finish the run honestly, exit cleanly.
+3. **Immediately post one cheap event before the expensive cold-start reads begin** (#23942):
+   `POST /api/team/event {"op":"record","runId":$RUN_ID,"team":"strategy","phase":"cold-start-reads","eventType":"step","summary":"cold-start-reads"}`.
+   Seven team runs in a 21-day window died with `current_phase` stuck at the generic `run-start`
+   default and zero `op:'record'` events ever posted, each holding the team's concurrency lock and
+   a daily-run-cap slot for 120-300 minutes before the idle reaper auto-expired them. This one event
+   turns a silent multi-hour lock-and-cap-slot hold into either a normal pass or a fast, visible
+   failure, and costs nothing: these runs bill to Max, so the saving is run/turn-budget and
+   lock-contention, not a dollar figure.
 
 ## Step 1 — List the queue
 

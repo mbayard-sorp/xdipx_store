@@ -133,6 +133,22 @@ curl -s -X POST "$BASE_URL/api/homepage-team/run" \
 
 Capture `id` (call it `$RUN_ID`). Use it on every `/event` and `/run update` below.
 
+**Immediately post one cheap event before the expensive cold-start reads begin** (#23942):
+
+```bash
+curl -s -X POST "$BASE_URL/api/homepage-team/event" \
+  -H "x-team-secret: $HOMEPAGE_TEAM_TOKEN" -H "content-type: application/json" \
+  -d '{"runId":'"$RUN_ID"',"eventType":"step","phase":"cold-start-reads","agentRole":"homepage-orchestrator","summary":"cold-start-reads"}'
+```
+
+Runs #1998 and #2139 each died with `current_phase` stuck at the generic `run-start` default and
+zero `op:'record'` events ever posted, holding the team's concurrency lock and a daily-run-cap slot
+for 120-300 minutes before the idle reaper auto-expired them; a close relative, run #2031,
+self-reported "turn-budget starvation on cold-start reads" after only 2.3 minutes at `phase:'read'`.
+This one event turns a silent multi-hour lock-and-cap-slot hold into either a normal pass or a fast,
+visible failure, and costs nothing: these runs bill to Max, so the saving is run/turn-budget and
+lock-contention, not a dollar figure.
+
 ## Step 1 — Gate (abort if not ok)
 
 Always pass your own `$RUN_ID` as `excludeRun`. Step 0 already inserted your
