@@ -92,6 +92,7 @@ import {
   type DraftInput,
   type DraftParagraph,
 } from './aphorism-closer'
+import { FROZEN_SAFETY_STRINGS } from './fresh-language-frozen-strings'
 
 export type { DraftInput, DraftParagraph }
 
@@ -105,6 +106,24 @@ const INGRESS_TEST_RE = /\bIPX?\d{1,2}\b/i
 /** A sentence mentioning a token also counts as DEFINING it when it uses one of these cues. */
 const DEFINER_RE =
   /\b(means|stands for|is rated (?:for|to)|rated (?:for|to)|indicates|guarantees|covers|certifies|defines)\b/i
+
+/**
+ * True when `sentence` is itself an exact substring of one of the mandated,
+ * reviewed FROZEN_SAFETY_STRINGS house wordings (app/lib/fresh-language-
+ * frozen-strings.ts). Ticket #24303, SECOND occurrence of a frozen-string
+ * gap after #22587's apposed-gloss fix: IPX56_JET_CODE_HOUSE_WORDING opens
+ * "IPX5 and IPX6 are the jet codes", which matches no DEFINER_RE cue and no
+ * apposed gloss, so the frozen wording itself reds as undefined-token on
+ * every post that correctly installs it verbatim. Scoping this to an exact
+ * frozen-string substring (rather than a looser shape like "are the ___
+ * codes") keeps the carve-out tight: a paraphrase of the frozen wording is
+ * not exempted by this check, only the mandated sentence itself.
+ */
+function isFrozenSafetySentence(sentence: string): boolean {
+  const trimmed = sentence.trim()
+  if (!trimmed) return false
+  return FROZEN_SAFETY_STRINGS.some(s => s.includes(trimmed))
+}
 
 /**
  * A plain-English gloss of what a rating covers, introduced as a noun phrase
@@ -432,7 +451,8 @@ function scanIngressSentence(
   for (const m of sentence.matchAll(INGRESS_RE)) tokens.add(m[0].toUpperCase())
   if (tokens.size === 0) return []
 
-  const isDefiner = DEFINER_RE.test(sentence) || hasApposedRatingGloss(sentence)
+  const isDefiner =
+    DEFINER_RE.test(sentence) || hasApposedRatingGloss(sentence) || isFrozenSafetySentence(sentence)
   // A sentence naming 2+ codes that explicitly declares them independent, or
   // that gives each of 2+ codes its own "<CODE> certifies ... only" clause,
   // can't be safely attributed to either one — see MULTI_CODE_INDEPENDENT_RE
@@ -558,6 +578,17 @@ function findNeighbourWaterInstructionFindings(
         if (INGRESS_TEST_RE.test(sentence)) continue // scoped by its own rating
         if (MANUFACTURER_DIRECTION_RE.test(sentence)) continue // defers to the manufacturer
         if (MARKETING_DISCLAIMER_RE.test(sentence)) continue // disclaims the term, not an instruction
+        // A sentence that is itself a mandated FROZEN_SAFETY_STRINGS wording is
+        // reviewed and correct by construction, even when it reads as water-
+        // contact but names no code of its own (ticket #24303: the IPX56 jet-
+        // code wording's second sentence, "...a toy carrying either is built
+        // to take a rinse", has no rating token for INGRESS_TEST_RE to catch
+        // above). Whether this frozen sentence lands in the ingress mention's
+        // own block or a sibling block is an editorial formatting choice
+        // (where the block boundary falls), not a real scoping difference, so
+        // the frozen wording is exempt from the proximity heuristic the same
+        // way an explicit manufacturer hand-off or marketing disclaimer is.
+        if (isFrozenSafetySentence(sentence)) continue
         // A question ("Can you use one in the shower or the bath?") is not an
         // instruction at all — it carries no polarity of its own, it is the
         // heading the surrounding paragraph then answers. Treating it as an

@@ -53,6 +53,36 @@ describe('ingress codes: undefined-token', () => {
     expect(hit).toBeDefined()
     expect(hit?.token).toBe('IPX5')
   })
+
+  // Ticket #24303: the mandated IPX56_JET_CODE_HOUSE_WORDING opens "IPX5 and
+  // IPX6 are the jet codes", which matches no DEFINER_RE verb cue and no
+  // apposed gloss, so every post that correctly installs the frozen wording
+  // verbatim reds as undefined-token with no hand-added definer sentence.
+  it('does not flag the frozen IPX5/IPX6 jet-code wording as undefined', () => {
+    const report = analyzeParagraphs([
+      {
+        section: 'Frequently asked questions',
+        text:
+          'IPX5 and IPX6 are the jet codes. Each names its own nozzle test at a set flow, which is a ' +
+          'pressurised spray rather than the free-falling stream out of your tap, so a toy carrying ' +
+          'either is built to take a rinse. Both tests run on a new toy sealed the way its maker ' +
+          'intended, with water at room temperature. Keep the charging port out of the stream, and ' +
+          'keep hot water off anything with a motor in it.',
+      },
+    ])
+    expect(report.findings.some(f => f.kind === 'undefined-token')).toBe(false)
+  })
+
+  it('still flags a lookalike "are the jet codes" sentence that is not the exact frozen wording', () => {
+    const report = analyzeParagraphs([
+      {
+        section: 'Care',
+        text: 'IPX5 and IPX6 are the jet codes you want, and this toy handles a direct spray fine.',
+      },
+    ])
+    const hit = report.findings.find(f => f.kind === 'undefined-token')
+    expect(hit).toBeDefined()
+  })
 })
 
 describe('ingress codes: conflicting-instruction (run 1239, defect #4 shape)', () => {
@@ -262,6 +292,53 @@ describe('neighbour-water-instruction (run 2004 shape, ticket #21738)', () => {
       },
     ])
     expect(report.findings.some(f => f.kind === 'neighbour-water-instruction')).toBe(false)
+  })
+
+  // Ticket #24303: the mandated IPX56_JET_CODE_HOUSE_WORDING's second
+  // sentence ("...a toy carrying either is built to take a rinse") names no
+  // rating of its own, so INGRESS_TEST_RE's "scoped by its own rating" skip
+  // never catches it. Whichever block the emma-empathy-reviewer's requested
+  // split lands it in, it still reads as an unconditional, unscoped
+  // water-contact instruction and collides with a neighbouring IPX7 block's
+  // forbid, a conflict that does not exist: the two sentences are the SAME
+  // frozen, reviewed wording and name two different rating axes on purpose.
+  it('does not flag the frozen jet-code wording split across a block boundary from a neighbouring rating block', () => {
+    const report = analyzeParagraphs([
+      {
+        section: 'Frequently asked questions',
+        text: 'An IPX7 mark comes with no promise about a shower, so never run it under the tap.',
+      },
+      {
+        section: 'Frequently asked questions',
+        text: 'IPX5 and IPX6 are the jet codes.',
+      },
+      {
+        section: 'Frequently asked questions',
+        text:
+          'Each names its own nozzle test at a set flow, which is a pressurised spray rather than the ' +
+          'free-falling stream out of your tap, so a toy carrying either is built to take a rinse.',
+      },
+    ])
+    expect(report.findings.some(f => f.kind === 'neighbour-water-instruction')).toBe(false)
+  })
+
+  it('still flags a non-frozen unconditional water instruction next to that same jet-code block', () => {
+    const report = analyzeParagraphs([
+      {
+        section: 'Frequently asked questions',
+        text: 'An IPX7 mark comes with no promise about a shower, so never run it under the tap.',
+      },
+      {
+        section: 'Frequently asked questions',
+        text: 'IPX5 and IPX6 are the jet codes.',
+      },
+      {
+        section: 'Cleaning',
+        text: 'Go ahead and run it right under the shower whenever you like.',
+      },
+    ])
+    const hit = report.findings.find(f => f.kind === 'neighbour-water-instruction')
+    expect(hit).toBeDefined()
   })
 })
 
