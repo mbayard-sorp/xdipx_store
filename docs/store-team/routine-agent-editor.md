@@ -205,6 +205,15 @@ per PR, so a full 15-PR run is ~30 minutes of Max.
 1. Read the suggestion and the files it names. Too vague to implement faithfully → leave it
    approved, post a `decision` event saying what's missing.
 
+   **Re-read the ticket's own notes/events for a correction or scope revision filed after
+   approval, not just the original suggestion text, and follow the latest one** (ticket #24068).
+   Run 2188's PR #2045 bounced because it authored a diff for suggestion #23832's *original* ask
+   17 hours after a correction note (posted by program-manager, verified by store-strategist) had
+   already revised the DONE WHEN and said explicitly that no playbook edit was needed for that
+   half of it. The PR shipped the superseded ask anyway, and introduced a second dedupe-key naming
+   convention that conflicted with the one already in the file. A suggestion row can be corrected
+   or narrowed by a later note without its own text changing, so check for one before authoring.
+
    **Check for an existing open PR before branching** (rows #11269/#11383 duplicated this way on
    2026-09-25). The most likely way this happens is silent: a prior run opened the PR but its Step
    2.6 `mark ... pr_open` call never completed (session cut off mid-run, a transient API failure),
