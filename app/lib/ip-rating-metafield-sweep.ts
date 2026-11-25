@@ -29,6 +29,18 @@ const FLAGGED_IP_CODES: readonly FlaggedIpCode[] = ['IPX4', 'IPX7']
 /** Shower, bath, or running-water (tap/jet) language. */
 const WATER_LANGUAGE_RE = /\bshower\b|\bbath\b|\brunning water\b|\btap\b|\bjets?\b/i
 
+/** True when a single bullet string names one of the two flagged IP codes. */
+function bulletNamesFlaggedIpCode(bullet: string | null | undefined): boolean {
+  if (!bullet) return false
+  return FLAGGED_IP_CODES.some(code => new RegExp(`\\b${code}\\b`, 'i').test(bullet))
+}
+
+/** True when a single bullet string carries shower/bath/running-water language. */
+function bulletHasWaterLanguage(bullet: string | null | undefined): boolean {
+  if (!bullet) return false
+  return WATER_LANGUAGE_RE.test(bullet)
+}
+
 /**
  * True when a single bullet string names one of the two flagged IP codes and
  * also carries shower/bath/running-water language, anywhere in the string.
@@ -36,9 +48,7 @@ const WATER_LANGUAGE_RE = /\bshower\b|\bbath\b|\brunning water\b|\btap\b|\bjets?
 export function bulletNamesFlaggedIpCodeWithWaterLanguage(
   bullet: string | null | undefined,
 ): boolean {
-  if (!bullet) return false
-  if (!WATER_LANGUAGE_RE.test(bullet)) return false
-  return FLAGGED_IP_CODES.some(code => new RegExp(`\\b${code}\\b`, 'i').test(bullet))
+  return bulletHasWaterLanguage(bullet) && bulletNamesFlaggedIpCode(bullet)
 }
 
 export interface IpRatingMetafieldHit {
@@ -52,21 +62,40 @@ export interface IpRatingMetafieldProductBullets {
   specifications: string[]
 }
 
-/** Scans one product's care_instructions and specifications bullets for the co-occurrence. */
+/**
+ * Scans one product's care_instructions and specifications bullets for the
+ * co-occurrence. Correlates across the two fields, not just within a single
+ * bullet: a flagged IP code named in `specifications` and water language
+ * named in a *different* `care_instructions` bullet (or vice versa) is the
+ * same unsupported-claim shape as a single self-contained bullet, and ticket
+ * #24094's own flagship product (le-wand-classique-petite-wand-massager)
+ * only reproduces this way — the IP code and the water language sit in two
+ * separate metafields, so a same-bullet-only check never flags it.
+ */
 export function findIpRatingMetafieldHits(
   product: IpRatingMetafieldProductBullets,
 ): IpRatingMetafieldHit[] {
-  const hits: IpRatingMetafieldHit[] = []
+  const entries: Array<{ surface: IpRatingMetafieldSurface; bullet: string; hasCode: boolean; hasWater: boolean }> = []
   const surfaces: Array<[IpRatingMetafieldSurface, string[]]> = [
     ['care_instructions', product.careInstructions],
     ['specifications', product.specifications],
   ]
   for (const [surface, bullets] of surfaces) {
     for (const bullet of bullets) {
-      if (bulletNamesFlaggedIpCodeWithWaterLanguage(bullet)) {
-        hits.push({ surface, bullet })
-      }
+      entries.push({
+        surface,
+        bullet,
+        hasCode: bulletNamesFlaggedIpCode(bullet),
+        hasWater: bulletHasWaterLanguage(bullet),
+      })
     }
   }
-  return hits
+
+  const productHasCode = entries.some(e => e.hasCode)
+  const productHasWater = entries.some(e => e.hasWater)
+  if (!productHasCode || !productHasWater) return []
+
+  return entries
+    .filter(e => e.hasCode || e.hasWater)
+    .map(({ surface, bullet }) => ({ surface, bullet }))
 }

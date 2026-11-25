@@ -5,7 +5,7 @@ import {
 } from './ip-rating-metafield-sweep'
 
 describe('bulletNamesFlaggedIpCodeWithWaterLanguage', () => {
-  it('does not flag the live le-wand-classique-petite care_instructions bullet in isolation (ticket #24094): it names no IP code itself, the overreach is against the sibling specifications bullet', () => {
+  it('does not flag the live le-wand-classique-petite care_instructions bullet in isolation: it names no IP code itself, the match is cross-field against the sibling specifications bullet (covered below in findIpRatingMetafieldHits)', () => {
     expect(
       bulletNamesFlaggedIpCodeWithWaterLanguage(
         'Fully waterproof — shower and bath play welcome, just avoid submerging the charging port',
@@ -70,5 +70,37 @@ describe('findIpRatingMetafieldHits', () => {
 
   it('returns no hits for empty bullet arrays', () => {
     expect(findIpRatingMetafieldHits({ handle: 'test-handle', careInstructions: [], specifications: [] })).toHaveLength(0)
+  })
+
+  it('flags the live le-wand-classique-petite shape: IP code in specifications, water language in a separate care_instructions bullet (ticket #24094 fix)', () => {
+    const hits = findIpRatingMetafieldHits({
+      handle: 'le-wand-classique-petite-wand-massager',
+      careInstructions: [
+        'Fully waterproof — shower and bath play welcome, just avoid submerging the charging port',
+      ],
+      specifications: ['Waterproof: IPX7 rating'],
+    })
+    expect(hits).toEqual([
+      { surface: 'care_instructions', bullet: 'Fully waterproof — shower and bath play welcome, just avoid submerging the charging port' },
+      { surface: 'specifications', bullet: 'Waterproof: IPX7 rating' },
+    ])
+  })
+
+  it('does not flag a product that has an IP code in one field and unrelated bullets in the other, with no water language anywhere', () => {
+    const hits = findIpRatingMetafieldHits({
+      handle: 'test-handle',
+      careInstructions: ['Charge with included USB-C cable', 'Store in the pouch provided'],
+      specifications: ['Waterproof: IPX7 rating', 'Material: Body-safe silicone'],
+    })
+    expect(hits).toHaveLength(0)
+  })
+
+  it('does not flag a product that has water language in one field and no flagged IP code anywhere', () => {
+    const hits = findIpRatingMetafieldHits({
+      handle: 'test-handle',
+      careInstructions: ['Fully waterproof, shower and bath play welcome'],
+      specifications: ['Waterproof: IPX6 rating', 'Material: Body-safe silicone'],
+    })
+    expect(hits).toHaveLength(0)
   })
 })
