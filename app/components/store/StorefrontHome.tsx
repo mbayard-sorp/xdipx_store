@@ -1359,7 +1359,7 @@ function HomeNotebookRail({ posts }: { posts: NotebookCardLean[] }) {
         <p className="mb-3 text-[11px] uppercase tracking-[0.18em] text-ink-4" style={MONO}>
           The xdipx Notebook
         </p>
-        <h2 className="mb-4 text-[1.9rem] leading-[1.1] tracking-[-0.01em] text-ink md:text-[2.9rem]" style={DISPLAY}>
+        <h2 className="mb-9 text-[1.9rem] leading-[1.1] tracking-[-0.01em] text-ink md:text-[2.9rem]" style={DISPLAY}>
           From the <em className="em">Notebook</em>
         </h2>
         {/* The Notebook is ~21% of sessions with ~20 minutes of dwell and sold
