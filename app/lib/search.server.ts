@@ -592,11 +592,17 @@ export async function searchAll(params: {
         compareAtPrice: shopify?.compareAtPrice ? String(shopify.compareAtPrice) : null,
         originalPrice: shopify?.originalPrice != null ? String(shopify.originalPrice) : null,
         mapPrice: shopify?.mapPrice != null ? String(shopify.mapPrice) : null,
+        // No ungated fallback to sp.previewImageUrl here (ticket #24294): that
+        // field is written raw from Shopify's featuredImage with no card-art
+        // doctrine gate applied, so using it whenever shopify.images is empty
+        // would show the flagged frame exactly when the gate most needs to
+        // apply. A product the gate blocked with no mood image is supposed
+        // to carry no card image at all (gateCardImages() in shopify.server.ts),
+        // and a genuine Shopify-lookup miss must degrade toward that same
+        // compliant default, never toward an unreviewed packshot.
         featuredImage: shopify?.images?.[0]
           ? { url: shopify.images[0].url, altText: shopify.images[0].altText ?? null }
-          : sp.previewImageUrl
-            ? { url: sp.previewImageUrl, altText: sp.title }
-            : null,
+          : null,
         shopifyId: sp.shopifyId ?? null,
         defaultVariantId: firstAvailable?.id ?? null,
         hasMultipleVariants: (shopify?.variants.length ?? 0) > 1,
