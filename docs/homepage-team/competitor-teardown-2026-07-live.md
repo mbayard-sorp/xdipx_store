@@ -3270,3 +3270,130 @@ Traffic remains far below the 300-sessions-per-week weighting threshold, so the
 proof, trust-placement and finder items above stay banked as design capital, and
 this cycle spends its build budget on one cheap, bounded, certain fix on the page
 our actual visitors arrive at.
+
+## Delta, 2026-11-25 (Routine B run 2212)
+
+This delta is aimed at one question, because the weekly brief (week of
+2026-11-23) names it as the week's homepage constraint: **imagery has been the
+stuck dimension for five weeks.** design-critic's 11-18 live spot-check scored
+imagery 2.5 against a 4.5 bar while every other dimension sat at 3.5 to 4.5,
+and the series has been flat at 3.2 to 3.6 for five weeks. The brief's line is
+"imagery is where the next point comes from, not layout," so the teardown went
+looking for what the bench does with product imagery that we could copy without
+spending generation budget we are traffic-gated out of.
+
+### Sourcing, stated per fetch, including the failures
+
+Six fetch attempts, three usable reads, and the failures are reported because a
+teardown that only lists its successes reads as a wider survey than it was.
+
+| Target | Result |
+|---|---|
+| `getmaude.com` | **Read.** Markdown conversion of the homepage: image URLs, filenames, alt text, requested widths. |
+| `dame.com` | **Read**, after `www.dameproducts.com` 301'd to it. Same depth. |
+| `www.glossier.com` | **Read.** Mid-Black-Friday homepage. |
+| `maude.co` | Fetched, and it is **not the brand**: a Spaceship domain-sale page. Already recorded in the 2026-10-14 delta (run 1435), and this run spent a fetch rediscovering it. See the adopted item below. |
+| `vush.com` | **DNS failure** (`EAI_AGAIN`). Not fetched, nothing inferred. The doctrine §7 Vush row is the single most imagery-relevant entry on the bench and it stayed unread. |
+| `www.lovehoney.com` | **HTTP 403.** Not fetched, nothing inferred. |
+
+### The method finding, which is the honest headline
+
+**`WebFetch` cannot see pixels, so an imagery-focused teardown run this way is
+structurally the wrong instrument, and this is the first delta in the series to
+say so.** Every read above returns the page as markdown: URLs, filenames, alt
+text, requested widths. Not one returns a background colour, a crop, a product
+scale, or a lighting treatment, which is the entire content of the imagery
+dimension design-critic scores us 2.5 on. Three of the five reads said so in
+their own words, unprompted, and marked their answers as inferred from metadata.
+
+That has a consequence worth carrying forward: the five weeks of flat imagery
+scores are not five weeks of a teardown failing to find the answer. They are
+five weeks of asking a text instrument a pixel question. What this instrument
+*can* read is the **metadata contract** a competitor enforces on its own card
+set, and that turns out to be the one genuinely useful imagery reading available
+here. It is reported below as exactly that and not as a pixel judgement.
+
+### Adopted
+
+1. **Dame declares one image width across its bestseller card set; Maude
+   declares six.** Dame requests every bestseller card image at `width=800`
+   with no height. Maude's card set requests 1500, 1920, 2000, 2048, 2100 and
+   4480, with no aspect ratio specified on any of them, and mixes a grey-ground
+   packshot (`MD_wash_12oz_no0_greybg.jpg`), a hand-held shot
+   (`MD_vibemini_grey_withhandV2_greybg_2000.jpg`), a wet-reflective-surface
+   shot and `LIFESTYLE`-named bundle frames inside one grid. This is the
+   doctrine §7 Vush steal ("one render language for every SKU") visible from
+   markup alone, and it is the first time this series has been able to read it
+   without seeing the pixels. Our own `StorefrontProductCard` already holds the
+   Dame side of this line and should keep it: one `aspect-square` tile, one
+   `bg-paper-2` ground, one `object-cover`, one `sizes` declaration.
+2. **Name the live host beside every §7 bench row.** Doctrine §7 lists
+   "**Maude**" with no host, so each teardown guesses, and the obvious guess
+   (`maude.co`) is a parked domain-sale page. Run 1435 found this on 2026-10-14
+   and recorded it *here*, in the teardown, which is why run 2212 spent a fetch
+   rediscovering it five weeks later: the correction landed in the file that
+   reports findings rather than the file that is read before fetching. A lesson
+   recorded in the wrong file gets re-learned. Filed as a docs ticket against
+   `docs/design-doctrine.md` §7 rather than edited here, because §7 is binding
+   charter text and belongs in a reviewed diff of its own.
+3. **Glossier's card images carry empty alt text** (every card link, plus all
+   three hero banner variants). Rejected as a pattern, recorded as a check: it
+   is a straightforward accessibility and AEO miss, and our own
+   `StorefrontProductCard` passes `imageAlt ?? title`, so we are already on the
+   right side of it. Worth a `aeo-geo-auditor` confirmation that nothing on the
+   homepage ships an empty `alt`, not a change.
+
+### Rejected
+
+4. **Glossier's "Black friday sale / Biggest sale of the year!" stacked
+   urgency opening.** Rejected on charter grounds, which is not a close call:
+   no countdowns, no urgency theater, and the brief's own standing line for
+   November is no countdown or urgency framing for Black Friday or Cyber Monday
+   in any week, dates only. Noted because it is the second November delta in
+   which the whole bench has gone urgency-forward and our answer has stayed the
+   same.
+5. **Maude's mixed lifestyle/packshot grid**, for the reason in adopted item 1
+   read backwards. Their grid is more varied than ours and reads less like a
+   catalogue; it also loses the "considered set" feeling the doctrine buys from
+   the Glossier/Away row. We take the uniform set and spend variety on the band
+   imagery between the rails, where it does not cost grid consistency.
+6. **Anything that needs generated imagery.** Unchanged from the 11-18 delta
+   and stated again rather than left implied: at roughly 109 organic sessions a
+   week against the 300-session weighting gate, asset-generation spend on the
+   homepage remains the worst-targeted spend on the board, and the imagery
+   dimension will not be moved this cycle by buying pixels.
+
+### The imagery finding that was not in the teardown at all
+
+Stated here because it is where this cycle's build budget actually went, and
+because it reframes the five-week imagery plateau: on this site, a measurable
+part of the imagery dimension is **not an asset problem and not an art-direction
+problem. It is a data-path problem.** The card-art doctrine gate
+(`gateCardImages`, ticket #9675) sits at one conversion point in
+`app/lib/shopify.server.ts` and its own comment claims a flagged packshot "can
+never resurface as card art from any caller." The homepage hero and every
+homepage rail do not read their image through that caller. See the design
+changelog entry and the PR for the measurement and the fix.
+
+### Banked-concept ceiling (#11085): does NOT fire, with the arithmetic
+
+The live banked bench is **exactly five**, unchanged from 11-18:
+`curiosity-echo`, `either-or`, `first-tap`, `nothing-in-the-way`,
+`the-next-step`. Three are retired and not countable: `how-you-arrive` and
+`sensation-map` (both 2026-10-07, run 1298) and `whos-holding-it` (run 1967,
+header added by run 2093 so that counting by header no longer over-counts). The
+ceiling fires only ABOVE five, so at five it does not fire and this cycle owes
+no "why not the cheapest banked concept" statement. No new wire was banked this
+cycle, said plainly rather than left implied: the cycle's ambition went into
+finding a live doctrine-gate bypass rather than into a ninth paper concept, and
+that is the trade the ceiling rule exists to make visible.
+
+### IA fence check
+
+No new section type. No Sanity schema change, additive or otherwise. No new URL
+and no new route, so nothing goes to `tech-architect`. The locked Nº 01 to Nº 11
+homepage shell is untouched: this cycle changes which image URL a card renders,
+not what bands exist or in what order. The two-link `/discover` cap is
+unchanged and untouched. The retired-route denylist is untouched. Adopted items
+2 and 3 ship no surface; item 1 is a statement that an existing component is
+already correct and asks for no diff.

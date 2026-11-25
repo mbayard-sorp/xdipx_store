@@ -25,6 +25,7 @@ import { availableToArrays, computeAvailable, rankRails, rankSingleRail } from '
 import type { ChipAvailabilityArrays } from '~/lib/discovery-emma'
 import type { ScoredProduct } from '~/types/discovery'
 import { normalizeTag } from '~/lib/discovery-tags'
+import { gateCardArtFrame } from '~/lib/card-art-gate'
 import {
   getActiveDiscoveryRules,
   getInventoryMin,
@@ -285,6 +286,8 @@ interface AdminProductNode {
   mapPriceRaw:      { value: string | null } | null
   productTypeDial:  { value: string | null } | null
   discontinuedAtRaw:{ value: string | null } | null
+  cardArtBlockedRaw: { value: string | null } | null
+  moodImageUrlRaw:  { value: string | null } | null
   moodTagsRaw:      { value: string | null } | null
   audienceTagsRaw:  { value: string | null } | null
   mattersTagsRaw:   { value: string | null } | null
@@ -373,6 +376,8 @@ const PRODUCTS_PAGE_QUERY = /* GraphQL */ `
         mapPriceRaw:      metafield(namespace: "xdipx", key: "map_price")          { value }
         productTypeDial:  metafield(namespace: "xdipx", key: "product_type_dial") { value }
         discontinuedAtRaw: metafield(namespace: "xdipx", key: "discontinued_at")   { value }
+        cardArtBlockedRaw: metafield(namespace: "xdipx", key: "card_art_blocked")  { value }
+        moodImageUrlRaw:  metafield(namespace: "xdipx", key: "mood_image_url")     { value }
         moodTagsRaw:      metafield(namespace: "xdipx", key: "mood_tags")          { value }
         audienceTagsRaw:  metafield(namespace: "xdipx", key: "audience_tags")      { value }
         mattersTagsRaw:   metafield(namespace: "xdipx", key: "matters_tags")       { value }
@@ -428,6 +433,16 @@ function nodeToDiscoveryProduct(
 
   const { priceMax, compareAtPrice, mapPrice, colorValues, sizeValues } = derivePricingAndOptions(n, price)
 
+  // The card-art doctrine gate (#9675) on this data path. `gateCardImages()` in
+  // shopify.server.ts guards every caller that goes through `nodeToProduct()`;
+  // this index is a second path to the same pixels (the homepage hero's
+  // `featured[0]`, every homepage rail, and `/discover`), so it has to ask the
+  // same question itself. See app/lib/card-art-gate.ts.
+  const cardArt = gateCardArtFrame(
+    { url: n.featuredImage?.url ?? null, altText: n.featuredImage?.altText ?? null },
+    { cardArtBlocked: n.cardArtBlockedRaw?.value, moodImageUrl: n.moodImageUrlRaw?.value },
+  )
+
   return {
     id:          n.id,
     handle:      n.handle,
@@ -439,8 +454,8 @@ function nodeToDiscoveryProduct(
     mapPrice,
     colorValues,
     sizeValues,
-    imageUrl:    n.featuredImage?.url ?? null,
-    imageAlt:    n.featuredImage?.altText ?? null,
+    imageUrl:    cardArt.url,
+    imageAlt:    cardArt.altText,
     category,
     subcategory,
     brand:       (n.vendor ?? '').trim() || null,
@@ -609,6 +624,8 @@ const NODES_BY_IDS_QUERY = /* GraphQL */ `
         mapPriceRaw:      metafield(namespace: "xdipx", key: "map_price")          { value }
         productTypeDial:  metafield(namespace: "xdipx", key: "product_type_dial") { value }
         discontinuedAtRaw: metafield(namespace: "xdipx", key: "discontinued_at")   { value }
+        cardArtBlockedRaw: metafield(namespace: "xdipx", key: "card_art_blocked")  { value }
+        moodImageUrlRaw:  metafield(namespace: "xdipx", key: "mood_image_url")     { value }
         moodTagsRaw:      metafield(namespace: "xdipx", key: "mood_tags")          { value }
         audienceTagsRaw:  metafield(namespace: "xdipx", key: "audience_tags")      { value }
         mattersTagsRaw:   metafield(namespace: "xdipx", key: "matters_tags")       { value }
@@ -653,6 +670,13 @@ export async function fetchHonoraryProducts(
       const subcategory = dialToSubcategory(dial) ?? category
       const productType = (node.productType ?? '').trim() || null
       const { priceMax, compareAtPrice, mapPrice, colorValues, sizeValues } = derivePricingAndOptions(node, price)
+      // Same gate as the crawl path above. A collection pin is an explicit
+      // curator decision about WHICH product, never a waiver on which frame of
+      // it may render as card art.
+      const honoraryCardArt = gateCardArtFrame(
+        { url: node.featuredImage?.url ?? null, altText: node.featuredImage?.altText ?? null },
+        { cardArtBlocked: node.cardArtBlockedRaw?.value, moodImageUrl: node.moodImageUrlRaw?.value },
+      )
       out.push({
         id:             node.id,
         handle:         node.handle,
@@ -664,8 +688,8 @@ export async function fetchHonoraryProducts(
         mapPrice,
         colorValues,
         sizeValues,
-        imageUrl:       node.featuredImage?.url ?? null,
-        imageAlt:       node.featuredImage?.altText ?? null,
+        imageUrl:       honoraryCardArt.url,
+        imageAlt:       honoraryCardArt.altText,
         category, // honorary — forced to the pinned rail's category
         subcategory,
         brand:          (node.vendor ?? '').trim() || null,
