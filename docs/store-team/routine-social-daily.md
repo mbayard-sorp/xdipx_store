@@ -2222,6 +2222,14 @@ regression, not a savings worth having. Record which asset the run reused and wh
 (which filter checks it passed) in the draft's event summary, the same way a generated asset's
 brief is recorded.
 
+**Stored tags are not proof of pixels; spot-check before citing them (ticket #20692).** Three
+library rows this run had metadata that did not match the actual image — a wrong-colour product, a
+wrong `sceneLocation`, a partially legible brand mark the generation-time vision pass missed — and
+each cost a full draft-plus-gate cycle for a defect that had nothing to do with the caption. Before
+writing a brief against a reused asset's stored tags, open the asset (download or view) and confirm
+the colour, scene, and any visible mark actually match what the tags claim. This is a few seconds
+against a candidate the filter above already shortlisted, not a check on every library row.
+
 **Honest sizing.** This is worth roughly $2-3/month in avoided generation, which is small: total
 metered image spend runs about $0.161/day, 0.8% of the $20/day budget. Do not oversell it as a cost
 fix. Its real value is run-time relief on days the image cap binds, and fewer generation round
