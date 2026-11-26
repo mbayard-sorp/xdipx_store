@@ -525,6 +525,20 @@ const MARKETING_DISCLAIMER_RE =
   /\b(?:marketing (?:language|words?)|label language|no fixed (?:meaning|definition))\b/i
 
 /**
+ * A sentence about a hygiene habit (washing hands, changing a condom between
+ * partners/uses), a barrier method, or closing a cover/cap/lid is not an
+ * instruction about the TOY'S water exposure, even when it happens to contain
+ * a WATER_CONTACT_RE trigger word ("wash", "tap") or sits next to an ingress
+ * block (ticket #24510/bus row #24502's DEFECT 1, second shape). Worked
+ * example: "close any cover before the toy goes near a tap" is a port-cover
+ * habit, not a water permission, and a condom-and-wash hygiene line is about
+ * the condom and the user's hands, not the device. Closed vocabulary, same
+ * tractable-subset posture as the rest of this module.
+ */
+const HYGIENE_OR_COVER_RE =
+  /\b(condom|barrier method|close (?:any |the )?(?:cover|cap|lid)|covers?\s+(?:on|closed|shut))\b/i
+
+/**
  * A block's OPENING sentence can explicitly scope the whole block to a
  * different product class than the one the nearby ingress rating describes
  * — a mains-powered wand instead of the battery toy carrying the code — in
@@ -574,10 +588,21 @@ function findNeighbourWaterInstructionFindings(
       const para = paragraphs[idx]!
       const neighbourSentences = splitSentences(para.text)
       if (neighbourSentences[0] && SCOPE_CARVEOUT_RE.test(neighbourSentences[0])) continue // whole block scoped to a different product class
+      // A block that names an ingress code ANYWHERE in it is that code's own
+      // bounded instruction, even on the one sentence that doesn't itself
+      // repeat the code (ticket #24510/bus row #24502's DEFECT 1: a sequence
+      // of per-rating blocks — IPX4's, then IPX5/IPX6's, then IPX7's — where
+      // each block's own water-contact sentence trails a separate sentence
+      // naming that block's code, not the ingress mention's). Checking only
+      // the CURRENT sentence for a rating (INGRESS_TEST_RE below) missed this
+      // because the rating and the instruction are sentence-adjacent, not
+      // sentence-identical.
+      if (neighbourSentences.some(s => INGRESS_TEST_RE.test(s))) continue
       for (const sentence of neighbourSentences) {
         if (INGRESS_TEST_RE.test(sentence)) continue // scoped by its own rating
         if (MANUFACTURER_DIRECTION_RE.test(sentence)) continue // defers to the manufacturer
         if (MARKETING_DISCLAIMER_RE.test(sentence)) continue // disclaims the term, not an instruction
+        if (HYGIENE_OR_COVER_RE.test(sentence)) continue // hygiene/barrier/cover habit, not a water-exposure instruction
         // A sentence that is itself a mandated FROZEN_SAFETY_STRINGS wording is
         // reviewed and correct by construction, even when it reads as water-
         // contact but names no code of its own (ticket #24303: the IPX56 jet-
@@ -696,6 +721,74 @@ function scanPromiseSentence(
 }
 
 /**
+ * A continuation marker: a comma-separated piece that starts with one of
+ * these is a relative clause ("...lubricant, which polyurethane tolerates")
+ * or a contrast ("buy for X, not for Y") glued onto the PRECEDING list item,
+ * not a new item of its own (ticket #24510/bus row #24502's DEFECT 2).
+ */
+const LIST_ITEM_CONTINUATION_RE = /^(which|that|who|not)\b/i
+
+/**
+ * Splits the tail of a promise sentence (the text after its colon) into its
+ * top-level list items, without over-counting a single item's own internal
+ * commas or conjunctions as separate items (ticket #24510/bus row #24502's
+ * DEFECT 2). Four worked false positives, all correct as published:
+ *   - "...what the toy is made of, whether it is wearing a barrier, and what
+ *     happens to it between one person and the next" (3 items) — blindly
+ *     turning every "and" into a comma split the THIRD item's own internal
+ *     "and the next" into a fourth.
+ *   - "...four types: primary ...; secondary, meaning you once did and now do
+ *     not; general ...; and situational ..." (4 items, semicolon-delimited) —
+ *     splitting on comma instead of the semicolons the sentence actually uses
+ *     counted the second item's internal clarifying comma as a boundary.
+ *   - "...oil based lubricant, which polyurethane tolerates" (1 item) — the
+ *     comma before a "which" relative clause is not a list boundary.
+ *   - "...buy for X, not for Y" (1 item) — the comma before a "not" contrast
+ *     is not a list boundary either.
+ * Strategy: prefer the semicolon as the top-level separator when the tail
+ * uses one; otherwise split on comma and re-merge any piece that opens with
+ * a continuation marker into the item before it. Either way, strip a leading
+ * "and " off every item after the first, so the Oxford-or-not final
+ * conjunction never becomes part of that item's own text.
+ */
+function splitPromiseListItems(tail: string): string[] {
+  const stripLeadingAnd = (s: string, index: number) => (index > 0 ? s.replace(/^and\s+/i, '') : s)
+
+  if (tail.includes(';')) {
+    return tail
+      .split(';')
+      .map(s => s.trim())
+      .filter(Boolean)
+      .map((s, i) => stripLeadingAnd(s, i))
+  }
+
+  if (tail.includes(',')) {
+    const rawParts = tail.split(',').map(s => s.trim()).filter(Boolean)
+    const merged: string[] = []
+    for (const part of rawParts) {
+      if (merged.length > 0 && LIST_ITEM_CONTINUATION_RE.test(part)) {
+        merged[merged.length - 1] = `${merged[merged.length - 1]}, ${part}`
+      } else {
+        merged.push(part)
+      }
+    }
+    return merged.map((s, i) => stripLeadingAnd(s, i))
+  }
+
+  // No comma, no semicolon: a bare two-item "X and Y" list is the only shape
+  // this tractable subset can safely split without a list-separating comma
+  // to anchor on. Two or more "and"s with nothing else to go on is ambiguous
+  // (which one is the list boundary and which is internal to an item?), so
+  // leave it unsplit rather than guessing.
+  const andOccurrences = tail.match(/\band\b/gi)
+  if (andOccurrences?.length === 1) {
+    const idx = tail.search(/\band\b/i)
+    return [tail.slice(0, idx).trim(), tail.slice(idx + 3).trim()].filter(Boolean)
+  }
+  return [tail.trim()].filter(Boolean)
+}
+
+/**
  * A promise sentence that immediately lists its items inline ("four checks:
  * A, B, C, and D") is checked against itself: parse the list after the colon
  * and compare its length to the promised number.
@@ -708,14 +801,8 @@ function inlineListMismatch(site: PromiseSite): { count: number; items: string[]
   // is unrelated punctuation elsewhere in a long sentence.
   if (colonIndex < matchIndex || colonIndex - matchIndex > 60) return null
 
-  const tail = site.sentence
-    .slice(colonIndex + 1)
-    .replace(/[.!?]+\s*$/, '')
-    .replace(/\band\s+/gi, ', ')
-  const items = tail
-    .split(',')
-    .map(s => s.trim())
-    .filter(Boolean)
+  const tail = site.sentence.slice(colonIndex + 1).replace(/[.!?]+\s*$/, '')
+  const items = splitPromiseListItems(tail)
 
   if (items.length === 0 || items.length === site.number) return null
   return { count: items.length, items }

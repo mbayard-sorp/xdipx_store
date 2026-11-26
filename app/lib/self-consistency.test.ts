@@ -340,6 +340,63 @@ describe('neighbour-water-instruction (run 2004 shape, ticket #21738)', () => {
     const hit = report.findings.find(f => f.kind === 'neighbour-water-instruction')
     expect(hit).toBeDefined()
   })
+
+  // Ticket #24510/bus row #24502's DEFECT 1, first shape (what-makes-a-
+  // vibrator-body-safe): a sequence of per-rating blocks, each carrying its
+  // OWN bounded water instruction in a sentence that trails a separate
+  // sentence naming that block's own code. The per-sentence "scoped by its
+  // own rating" check never saw the code, because it sat one sentence over
+  // in the same block, not inside the water-contact sentence itself.
+  it('does not flag a neighbour block whose water sentence is scoped by a different sentence naming its own rating earlier in the same block', () => {
+    const report = analyzeParagraphs([
+      {
+        section: 'Water ratings',
+        text: 'IPX4 means splash resistant, nothing more. Not under a running tap, not in a basin, never submerged.',
+      },
+      {
+        section: 'Water ratings',
+        text: "This toy's IPX7 rating means you can use it right in the shower.",
+      },
+    ])
+    expect(report.findings.some(f => f.kind === 'neighbour-water-instruction')).toBe(false)
+  })
+
+  // Ticket #24510/bus row #24502's DEFECT 1, second shape
+  // (how-do-you-use-a-prostate-massager b28/b29): a port-cover habit line
+  // ("close any cover before the toy goes near a tap") names no rating, but
+  // it is not a water-exposure instruction either — covering a port is not
+  // the same claim as permitting or forbidding water contact.
+  it('does not flag a cover-habit instruction as an unconditional water-contact instruction', () => {
+    const report = analyzeParagraphs([
+      {
+        section: 'Water ratings',
+        text: 'An IPX7 mark comes with no promise about a shower, so never run it under the tap.',
+      },
+      {
+        section: 'Care',
+        text: 'Close any cover before the toy goes near a tap.',
+      },
+    ])
+    expect(report.findings.some(f => f.kind === 'neighbour-water-instruction')).toBe(false)
+  })
+
+  // Same DEFECT 1 shape, the condom-and-wash hygiene variant named in the
+  // ticket: a hygiene instruction about the condom and the user's hands, not
+  // the toy's water exposure, even though it contains a WATER_CONTACT_RE
+  // trigger word ("wash").
+  it('does not flag a condom-and-wash hygiene instruction as an unconditional water-contact instruction', () => {
+    const report = analyzeParagraphs([
+      {
+        section: 'Water ratings',
+        text: 'An IPX7 mark comes with no promise about a shower, so never run it under the tap.',
+      },
+      {
+        section: 'Hygiene',
+        text: 'Wash your hands and put on a fresh condom before the next round.',
+      },
+    ])
+    expect(report.findings.some(f => f.kind === 'neighbour-water-instruction')).toBe(false)
+  })
 })
 
 describe('multi-code independence (#21947 bounce: what-makes-a-vibrator-body-safe)', () => {
@@ -456,6 +513,67 @@ describe('numbered enumerations: count-mismatch inline (own list disagrees with 
       },
     ])
     expect(report.findings.some(f => f.kind === 'count-mismatch')).toBe(false)
+  })
+
+  // Ticket #24510/bus row #24502's DEFECT 2: inlineListMismatch split on
+  // every comma and every "and", so a correct enumeration's own internal
+  // commas and conjunctions read as an over-count. Four worked false
+  // positives, all live and correct as published.
+  it('does not split a trailing "and the next"-style continuation inside the final item as a separate item (can-you-share-sex-toys-safely)', () => {
+    const report = analyzeParagraphs([
+      {
+        section: 'Body',
+        text:
+          'Three things decide it: what the toy is made of, whether it is wearing a barrier, ' +
+          'and what happens to it between one person and the next.',
+      },
+    ])
+    expect(report.findings.some(f => f.kind === 'count-mismatch')).toBe(false)
+  })
+
+  it('splits a semicolon-delimited list on the semicolons, not on the internal commas inside one item (why-you-can-orgasm-alone-but-not-with-a-partner)', () => {
+    const report = analyzeParagraphs([
+      {
+        section: 'Body',
+        text:
+          'There are four types: primary, which needs no touch at all; secondary, meaning you once ' +
+          'did and now do not; general, affecting any arousal at all; and situational, tied to one partner.',
+      },
+    ])
+    expect(report.findings.some(f => f.kind === 'count-mismatch')).toBe(false)
+  })
+
+  it('does not split a comma before a "which" relative clause as a separate item (which-non-latex-condom-material-should-you-use)', () => {
+    const report = analyzeParagraphs([
+      {
+        section: 'Body',
+        text: 'One reason stands out for most people: oil based lubricant, which polyurethane tolerates far better than latex.',
+      },
+    ])
+    expect(report.findings.some(f => f.kind === 'count-mismatch')).toBe(false)
+  })
+
+  it('does not split a comma before a "not" contrast as a separate item (which-lube-is-best-for-couples)', () => {
+    const report = analyzeParagraphs([
+      {
+        section: 'Body',
+        text: 'If you take one thing from this guide: buy for your body, not for the box it came in.',
+      },
+    ])
+    expect(report.findings.some(f => f.kind === 'count-mismatch')).toBe(false)
+  })
+
+  it('still flags a genuine inline mismatch when the list uses semicolons', () => {
+    const report = analyzeParagraphs([
+      {
+        section: 'Pre-flight',
+        text: 'Run four checks before you submit: first, the hero loads; second, the FAQ renders.',
+      },
+    ])
+    const hit = report.findings.find(f => f.kind === 'count-mismatch' && f.token === 'check')
+    expect(hit).toBeDefined()
+    expect(hit?.message).toContain('4')
+    expect(hit?.message).toContain('2')
   })
 })
 
