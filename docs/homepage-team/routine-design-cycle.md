@@ -68,7 +68,14 @@ current decision doc is `docs/homepage-team/competitor-teardown-2026-07-live.md`
 live-capture teardown; it supersedes `competitor-teardown-2026-07.md`); append a dated delta
 section to it rather than starting from scratch. Sourcing honesty is mandatory: only report what
 was actually fetched, tag anything else as prior knowledge, and never quote competitor copy from
-memory. The teardown output must respect the IA fence: proposals stay inside the locked Nº01–Nº11
+memory. **What a WebFetch teardown can and cannot answer (ticket #24297).** WebFetch returns the
+page converted to markdown — URLs, filenames, alt text, requested image widths — with no background
+color, crop, product scale, or lighting; a teardown note that infers imagery treatment from it is
+reading metadata, not pixels, and should say so rather than implying it saw the page. What it CAN
+read reliably is the metadata contract a competitor enforces on its own card set (declared widths,
+declared aspect ratios, filename conventions, whether one render language covers the whole set),
+which is itself a useful doctrine §7 reading. Direct an imagery question at that contract rather than
+at an inferred description of pixels. The teardown output must respect the IA fence: proposals stay inside the locked Nº01–Nº11
 shell, new section types need a named spec through IA review + additive Sanity schema before build,
 any pattern implying a new URL/route goes to `tech-architect`, and the two-link cap on `/discover`
 plus the retired-route denylist stand.
@@ -233,6 +240,16 @@ exactly right; the collision was the playbook's to prevent. Three rules:
    1 or 2 is skipped. Nothing in this rule requires a gate to volunteer the foreign-content caveat;
    when one does (as run 1571's did, by its own choice and not because the playbook asked), treat it
    as the trigger for this check, not as optional color in its report.
+4. **These three rules apply to any long-running read of the working tree the run itself starts, not
+   only to a dispatched gate agent (ticket #24296).** Run 2212 started a full `npx vitest` run in the
+   background, then edited two files under it while it ran; the suite reported 1 failed / 8793 passed
+   against a tree that never existed on disk (a stale read of a test file and its source mid-edit),
+   and a clean re-run on the settled tree was 8794 passed. The mechanism is identical to rule 1's
+   collision whether the reader is a subagent or the orchestrator's own backgrounded `vitest`/`tsc`/
+   build run: hold your edits until it returns, or make them in a separate worktree. The cheap
+   direction is a false red; the expensive direction is the same mechanism producing a false green (a
+   suite reading half the old file and half the new one can pass for a state that never existed on
+   disk), which is exactly what ticket #8423's own retro describes.
 
 The same hazard applies to Routine A whenever it dispatches a gate agent mid-edit. Keep the
 revert-to-prove-the-test instruction itself — it is genuinely valuable — these three rules stop it
@@ -460,6 +477,20 @@ guard had no opinion on that. When writing or reviewing a guard over a visual ru
 WHAT, HOW MUCH, HOW MANY, and WHERE it actually binds, and add the missing axis if the defect lives
 on it. The cheap test: re-introduce the original defect and confirm the guard goes red. If it stays
 green, the guard is measuring a neighbour of the defect, not the defect.
+
+**A comment claiming a gate is the single conversion point for a field is checked by grepping the
+field, not the gated function (ticket #24295).** `gateCardImages()` in `app/lib/shopify.server.ts`
+enforces design-doctrine.md §4.3's on-site imagery ceiling, and its own comment says a flagged
+packshot can never resurface as card art from any caller — true of every caller of `nodeToProduct()`,
+false of the homepage, because `app/lib/discovery.server.ts` read `featuredImage` directly at both of
+its `DiscoveryProduct` projection sites, bypassing the gate entirely. Both the #1450 variant-b audit
+above and the #22810 variants rule start from the fix or the component and look sideways for
+siblings; this is the same error one level up, about a gate not spanning a DATA PATH rather than a
+surface. When a comment claims a gate is the single conversion point for a field, grep the FIELD
+itself (not the gated function) across `app/` and `scripts/`, list every reader, and classify each as
+covered, not-a-card-surface, or a bypass — run 2212's seven-row classification (two bypasses fixed,
+one filed, three recorded as not-defects so a later sweep does not re-file them) is the worked
+example.
 
 - **Emma voice gate** — `emma-empathy-reviewer` signs off on all customer-facing copy against
   `docs/emma-voice.md` (the canonical voice charter).
