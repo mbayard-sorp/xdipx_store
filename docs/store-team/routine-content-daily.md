@@ -1019,6 +1019,27 @@ Two reviewers, both binding, sequenced so a cheap voice failure never spends the
      re-read every string the repair ADDED against that list, not just against the rest of the
      document. Naming the list is the point: the writer holding six just-deleted time figures in
      mind is exactly who writes a seventh.
+   - **Cascade-reintroduction scan (part of the same pre-resubmit self-check, ticket #24304).** The
+     defect-class reintroduction scan above models the repair against classes already deleted IN THE
+     SAME NEIGHBOURHOOD the gate just flagged; it misses a repair that narrows a claim and, as a
+     KNOCK-ON, widens or re-triggers a different claim elsewhere in the document. THIRD NAMEABLE
+     OCCURRENCE of the #21314 class: run 1875 (2026-11-06) reintroduced a clause during repair that
+     was itself the thing standing between the post and ship; run 1969 (2026-11-11) wrote a seventh
+     unsourced time figure one line after the accuracy gate deleted six; run 2214 (2026-11-25) is one
+     layer up — narrowing a definite negative in one section left that post's OPENING LINE, in a
+     different section, wider than its own body, and the cascade rewrite of the opener put the
+     definite negative straight back in. Both gates had already PASSED that opener in an earlier
+     cycle, which is why the reintroduction scan on the repair itself came back clean: it asks what
+     the repair ADDED in the repaired neighbourhood, not what else in the document depended on the
+     un-narrowed version. When a repair narrows a claim, list every OTHER site in the document whose
+     scope depended on the un-narrowed version, and treat each knock-on edit at those sites as a
+     repair in its own right, re-running the defect-class reintroduction scan on it. A site either
+     gate already PASSED in an earlier cycle is the highest-risk place for this, because its clean
+     verdict is what makes the cascade edit feel safe. Cheap mechanical hint, in the style of the
+     universal-quantifier hint above: a cascade edit is almost always triggered by the words "wider
+     than" or "narrower than" appearing in your own reasoning about a DIFFERENT section than the one
+     the gate flagged. Catching yourself writing that is the signal that the edit you are about to
+     make is a repair, not a tidy-up.
    - **Tiered-safety-block scoping scan (part of the same pre-resubmit self-check, ticket
      #22591).** A repair can introduce a SAFETY defect while asserting no spec, comparative,
      frequency, or outcome, so none of the scans above have anything to catch it with. THIRD
