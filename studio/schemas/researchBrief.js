@@ -37,7 +37,10 @@ export default {
       title: 'Target platform',
       type: 'string',
       options: {
-        list: [{ title: 'LinkedIn', value: 'linkedin' }],
+        list: [
+          { title: 'LinkedIn', value: 'linkedin' },
+          { title: 'Strategy brief', value: 'strategy' },
+        ],
         layout: 'radio',
       },
       initialValue: 'linkedin',
