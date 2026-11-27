@@ -57,6 +57,13 @@ vi.mock('~/lib/owner-alerts.server', () => ({
 const settingMock = vi.hoisted(() => vi.fn())
 vi.mock('~/lib/feed-processor.server', () => ({ getPipelineSetting: settingMock }))
 
+// The valve read is cached for a cycle in production; pass straight through
+// here so each test's settingMock value is the one the poller sees.
+vi.mock('~/lib/kv.server', async importOriginal => ({
+  ...(await importOriginal<typeof import('~/lib/kv.server')>()),
+  cached: <T,>(_key: string, _ttl: number, fn: () => Promise<T>) => fn(),
+}))
+
 // Trivial re-implementation for the test double, mirroring
 // outreach-inbox.server.ts's real (unmocked in production) header parser.
 function headerValue(raw: string, name: string): string | null {

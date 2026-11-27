@@ -102,7 +102,6 @@ export interface CronExpectation {
 
 /** Minutes between fires, for the cadences actually in use here. */
 const EVERY_2_MIN = 2
-const EVERY_10_MIN = 10
 const EVERY_15_MIN = 15
 const EVERY_30_MIN = 30
 const HOURLY = 60
@@ -207,8 +206,8 @@ export const CRON_EXPECTATIONS: readonly CronExpectation[] = [
   {
     route: '/cron/release-engine',
     plane: 'vercel',
-    schedule: '*/10 * * * *',
-    periodMinutes: EVERY_10_MIN,
+    schedule: '*/15 * * * *',
+    periodMinutes: EVERY_15_MIN,
     graceMinutes: 20,
     recorded: true,
     moneyRelevant: false,
@@ -426,15 +425,15 @@ export const CRON_EXPECTATIONS: readonly CronExpectation[] = [
   {
     route: '/cron/main-ci-watch',
     plane: 'vercel',
-    schedule: '*/10 * * * *',
-    periodMinutes: EVERY_10_MIN,
+    schedule: '*/15 * * * *',
+    periodMinutes: EVERY_15_MIN,
     graceMinutes: 40,
     recorded: true,
     moneyRelevant: false,
     ownerTeam: 'strategy',
     notes:
       'Catches a red default branch, which reds every open PR at once. Grace is deliberately wide: '
-      + 'a 10-minute poll cannot beat a multi-minute Actions run whose remedy is itself a '
+      + 'a 15-minute poll cannot beat a multi-minute Actions run whose remedy is itself a '
       + 'multi-minute deploy, so detection latency already exceeds remedy latency here.',
   },
 
@@ -522,7 +521,7 @@ export const CRON_EXPECTATIONS: readonly CronExpectation[] = [
   {
     route: '/cron/log-monitor',
     plane: 'vercel',
-    schedule: '25 * * * *',
+    schedule: '15 * * * *',
     periodMinutes: HOURLY,
     graceMinutes: 30,
     recorded: false,
@@ -551,7 +550,7 @@ export const CRON_EXPECTATIONS: readonly CronExpectation[] = [
   {
     route: '/cron/social-metrics-sweep',
     plane: 'vercel',
-    schedule: '20 */6 * * *',
+    schedule: '15 */6 * * *',
     periodMinutes: EVERY_6_HOURS,
     graceMinutes: 60,
     recorded: false,
@@ -781,7 +780,7 @@ export const CRON_EXPECTATIONS: readonly CronExpectation[] = [
   {
     route: '/cron/ads-sync-entities',
     plane: 'vercel',
-    schedule: '35 */6 * * *',
+    schedule: '45 */6 * * *',
     periodMinutes: EVERY_6_HOURS,
     graceMinutes: 60,
     recorded: true,
@@ -811,7 +810,7 @@ export const CRON_EXPECTATIONS: readonly CronExpectation[] = [
   {
     route: '/cron/ads-insights',
     plane: 'vercel',
-    schedule: '5 * * * *',
+    schedule: '45 * * * *',
     periodMinutes: HOURLY,
     graceMinutes: 30,
     recorded: true,
@@ -841,7 +840,7 @@ export const CRON_EXPECTATIONS: readonly CronExpectation[] = [
   {
     route: '/cron/meta-crm-sync',
     plane: 'vercel',
-    schedule: '40 * * * *',
+    schedule: '30 * * * *',
     periodMinutes: HOURLY,
     graceMinutes: 120,
     recorded: false,

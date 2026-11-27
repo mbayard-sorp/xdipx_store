@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   assertJsonSafe,
+  payloadContentHash,
   reshuffleRailsWithSeed,
   HOMEPAGE_PAYLOAD_VERSION,
   HOMEPAGE_PAYLOAD_B_VERSION,
@@ -143,5 +144,26 @@ describe('reshuffleRailsWithSeed', () => {
     const out = reshuffleRailsWithSeed(rails, 3)
     expect(out[0]!.items).toHaveLength(1)
     expect(out[1]!.items).toHaveLength(0)
+  })
+})
+
+// Neon compute audit 2026-11-27: the 15-min warm upserted both payloads into
+// Neon every run even when nothing but builtAt had changed. The writers now
+// skip the upsert when this hash matches the last successful Neon write.
+describe('payloadContentHash', () => {
+  const base = { version: 'v1', builtAt: 1, degraded: false, rails: [{ id: 'r1', items: ['a'] }] }
+
+  it('ignores builtAt, so an identical rebuild does not count as a change', () => {
+    expect(payloadContentHash({ ...base, builtAt: 2 })).toBe(payloadContentHash(base))
+  })
+
+  it('changes when the content changes', () => {
+    const changed = { ...base, rails: [{ id: 'r1', items: ['b'] }] }
+    expect(payloadContentHash(changed)).not.toBe(payloadContentHash(base))
+  })
+
+  it('changes when the degraded flag flips', () => {
+    const flipped = { ...base, degraded: true }
+    expect(payloadContentHash(flipped)).not.toBe(payloadContentHash(base))
   })
 })
