@@ -5,6 +5,14 @@ import { kvGetMemo, kvSet, primeKvMemo, KV_KEYS } from '~/lib/kv.server'
 import { getProductByHandle, getProductsByTag } from '~/lib/shopify.server'
 
 const TTL_SECONDS = 60 * 60
+/**
+ * Empty answers are cached too, on a shorter clock. product_copurchase has
+ * rows for almost no handles, so before this every PDP render for nearly
+ * every product missed the cache and queried Neon. Crawler traffic alone was
+ * enough to keep the compute from ever suspending (about 500k scans in a
+ * week). 15 minutes means a first co-purchase reaches the rail quickly.
+ */
+const EMPTY_TTL_SECONDS = 15 * 60
 
 /**
  * Real cross-sell signal for the PDP "Complete the set" rail — complements,
@@ -49,13 +57,14 @@ export async function getFrequentlyBoughtWith(handle: string, limit = 4): Promis
       .filter(h => h !== handle)
       .slice(0, limit)
   } catch (err) {
+    // Never cache a failure: the next request should retry the query.
     console.error('[recommendations] copurchase query failed:', err)
+    return handles
   }
 
-  if (handles.length > 0) {
-    await kvSet(cacheKey, handles, TTL_SECONDS).catch(() => {})
-    primeKvMemo(cacheKey, handles)
-  }
+  const ttl = handles.length > 0 ? TTL_SECONDS : EMPTY_TTL_SECONDS
+  await kvSet(cacheKey, handles, ttl).catch(() => {})
+  primeKvMemo(cacheKey, handles)
 
   return handles
 }
