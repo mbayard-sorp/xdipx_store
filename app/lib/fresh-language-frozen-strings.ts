@@ -21,7 +21,31 @@
  * prose is still compared exactly as before. An entry is exact-match only:
  * changing even one word of it is a paraphrase, not a reuse of the frozen
  * string, and stays caught like any other recycled phrase.
+ *
+ * A second, related exemption lives in this file for the same reason
+ * (ticket #24678, SECOND OCCURRENCE of the #23880 class, one level out from
+ * the IP-rating strings above): a post's Sources section cites the same
+ * external article as a sibling post whenever both draw a safety or
+ * clinician-trigger fact from the same source, and the cited article's
+ * title then repeats verbatim — correctly, the citation names the same
+ * real article — and trips the same zero-tolerance checker. Confirmed live
+ * against the real corpus (content run 2249, 2026-11-27):
+ * /notebook/what-to-say-when-a-sex-toy-you-were-given-doesnt-work and
+ * /notebook/what-do-you-do-if-you-dont-like-a-sex-toy-you-bought both cite
+ * Healthline's "Sex Toy Injuries: What to Do, Why It Happens, How to
+ * Prevent Them", and the shared citation title alone produced 9 shared
+ * 6-grams even after the clinician-block prose itself had been rewritten
+ * apart. `stripFrozenStringsFromDoc` also strips any span whose Portable
+ * Text mark resolves to a `link` markDef on an app/lib/citation-host-
+ * allowlist.ts host, the same vetted allowlist the accuracy gate already
+ * cites from. This is scoped to an actual Sanity link annotation, not to
+ * any sentence that merely mentions a source by name in prose, so it
+ * cannot be used to launder ordinary recycled prose: nothing exempts here
+ * unless an editor (or the content pipeline) attached a real citation link
+ * to that exact span.
  */
+
+import { isAllowedCitationHost } from './citation-host-allowlist'
 
 /**
  * The IPX7 house wording, quoted verbatim in routine-content-daily.md's
@@ -98,10 +122,24 @@ export function stripFrozenStrings(
   return out
 }
 
+/** Minimal shape of a Portable Text markDef this module needs to touch. */
+interface PtMarkDefLike {
+  _key?: string
+  _type?: string
+  href?: unknown
+}
+
+/** Minimal shape of a Portable Text span this module needs to touch. */
+interface PtSpanLike {
+  text?: string
+  marks?: string[]
+}
+
 /** Minimal shape of a Portable Text block this module needs to touch. */
 interface PtBlockLike {
   _type?: string
-  children?: { text?: string }[]
+  children?: PtSpanLike[]
+  markDefs?: PtMarkDefLike[]
 }
 
 /** Minimal shape of a blogPost draft or prior post this module needs to touch. */
@@ -112,11 +150,35 @@ interface DocLike {
 }
 
 /**
- * Return a copy of a blogPost draft or prior post with every frozen string
- * stripped from its title, excerpt, and body block text. Structure
- * (block/style/children shape) is preserved untouched; only `children[].text`
- * is rewritten, so this is safe to run before handing the doc to
- * app/lib/fresh-language.ts's toTextUnits/analyzeFreshness exactly as before.
+ * True when `span` carries a mark that resolves (via `markDefs`) to a `link`
+ * annotation whose href's host is on CITATION_HOST_ALLOWLIST. Exact span
+ * match only, same spirit as stripFrozenStrings: this never inspects the
+ * span's text itself, only whether an editor actually attached a citation
+ * link to it.
+ */
+function isAttributedCitationSpan(span: PtSpanLike, markDefs: PtMarkDefLike[] | undefined): boolean {
+  if (!Array.isArray(span.marks) || span.marks.length === 0) return false
+  if (!Array.isArray(markDefs) || markDefs.length === 0) return false
+  return span.marks.some(markKey => {
+    const def = markDefs.find(d => d._key === markKey)
+    if (!def || def._type !== 'link' || typeof def.href !== 'string') return false
+    try {
+      return isAllowedCitationHost(new URL(def.href).hostname)
+    } catch {
+      return false
+    }
+  })
+}
+
+/**
+ * Return a copy of a blogPost draft or prior post with every frozen string,
+ * and every span carrying a link annotation to an allowlisted citation host
+ * (ticket #24678), stripped from its title, excerpt, and body block text.
+ * Structure (block/style/children shape) is preserved untouched; only
+ * `children[].text` is rewritten, so this is safe to run before handing the
+ * doc to app/lib/fresh-language.ts's toTextUnits/analyzeFreshness exactly as
+ * before. Title and excerpt are plain strings with no markDefs, so only the
+ * citation-link strip applies to body blocks.
  */
 export function stripFrozenStringsFromDoc<T extends DocLike>(
   doc: T,
@@ -127,9 +189,11 @@ export function stripFrozenStringsFromDoc<T extends DocLike>(
         if (!block || block._type !== 'block' || !Array.isArray(block.children)) return block
         return {
           ...block,
-          children: block.children.map(c =>
-            typeof c.text === 'string' ? { ...c, text: stripFrozenStrings(c.text, frozen) } : c,
-          ),
+          children: block.children.map(c => {
+            if (typeof c.text !== 'string') return c
+            if (isAttributedCitationSpan(c, block.markDefs)) return { ...c, text: ' ' }
+            return { ...c, text: stripFrozenStrings(c.text, frozen) }
+          }),
         }
       })
     : doc.body

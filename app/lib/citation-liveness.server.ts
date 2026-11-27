@@ -51,31 +51,12 @@
  * dead, or non-html result, so it can never carry unread interstitial text.
  */
 
-/**
- * Hosts the accuracy gate is allowed to cite from. Suffix-matched, so a bare
- * domain also covers its subdomains (e.g. `ncbi.nlm.nih.gov` covers
- * `pubmed.ncbi.nlm.nih.gov`). The named-in-ticket set plus well-known peer
- * health and authority sources. Extend this list when the accuracy gate starts
- * citing a new reputable domain; keep it to public health/authority sources.
- */
-export const CITATION_HOST_ALLOWLIST: readonly string[] = [
-  // Named explicitly in ticket #2417
-  'medicalnewstoday.com',
-  'plannedparenthood.org',
-  'clevelandclinic.org',
-  'who.int',
-  'ncbi.nlm.nih.gov', // covers pubmed.ncbi.nlm.nih.gov
-  // Peer reputable health / authority sources the accuracy gate cites
-  'nih.gov',
-  'cdc.gov',
-  'mayoclinic.org',
-  'healthline.com',
-  'medlineplus.gov',
-  'kinseyinstitute.org',
-  'ashasexualhealth.org',
-  'issm.info',
-  'nhs.uk',
-] as const
+// CITATION_HOST_ALLOWLIST lives in citation-host-allowlist.ts (ticket #24678)
+// so a non-server module (app/lib/fresh-language-frozen-strings.ts) can read
+// it too without importing this .server.ts file. Re-exported here unchanged
+// so every existing import of it from this module keeps working.
+import { isAllowedCitationHost } from './citation-host-allowlist'
+export { CITATION_HOST_ALLOWLIST } from './citation-host-allowlist'
 
 /** Result of validating a candidate citation URL, before any network call. */
 export type UrlValidation =
@@ -150,11 +131,6 @@ export const MAX_BODY_TEXT_CHARS = 20_000
  */
 export const MAX_REDIRECT_HOPS = 3
 
-function hostAllowed(host: string): boolean {
-  const h = host.toLowerCase()
-  return CITATION_HOST_ALLOWLIST.some((d) => h === d || h.endsWith(`.${d}`))
-}
-
 /** How a returned HTTP status maps onto a liveness verdict. */
 export type StatusClass = 'live' | 'redirect' | 'blocked' | 'dead'
 
@@ -190,7 +166,7 @@ export function resolveRedirectTarget(from: URL, location: string | null): UrlVa
   } catch {
     return { ok: false, reason: 'redirect-malformed-location' }
   }
-  if (next.protocol !== 'https:' || !hostAllowed(next.hostname)) {
+  if (next.protocol !== 'https:' || !isAllowedCitationHost(next.hostname)) {
     return { ok: false, reason: 'redirect-off-allowlist' }
   }
   return { ok: true, url: next }
@@ -214,7 +190,7 @@ export function validateCitationUrl(raw: unknown): UrlValidation {
   if (url.protocol !== 'https:') {
     return { ok: false, reason: 'not-https' }
   }
-  if (!hostAllowed(url.hostname)) {
+  if (!isAllowedCitationHost(url.hostname)) {
     return { ok: false, reason: 'host-not-allowlisted' }
   }
   return { ok: true, url }
