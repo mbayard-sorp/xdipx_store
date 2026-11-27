@@ -247,11 +247,17 @@ export async function runGscIndexSweep(opts: { budget?: number } = {}): Promise<
 
   const urls = entries.map(e => e.url)
   const lastmods = entries.map(e => e.lastmod)
+  // The WHERE skips rows that are already in the sitemap with the same
+  // lastmod. Without it every run rewrote all ~6.5k rows, 8 runs a day,
+  // which is how this table reached 3.4M updates on 6.5k rows (Neon compute
+  // audit 2026-11-27). Only new, returning, or re-dated URLs are written now.
   await sql`
     INSERT INTO gsc_url_inspections (url, sitemap_lastmod)
     SELECT u, m FROM unnest(${urls}::text[], ${lastmods}::text[]) AS t(u, m)
     ON CONFLICT (url) DO UPDATE
-      SET in_sitemap = TRUE, sitemap_lastmod = EXCLUDED.sitemap_lastmod`
+      SET in_sitemap = TRUE, sitemap_lastmod = EXCLUDED.sitemap_lastmod
+      WHERE NOT gsc_url_inspections.in_sitemap
+         OR gsc_url_inspections.sitemap_lastmod IS DISTINCT FROM EXCLUDED.sitemap_lastmod`
   await sql`
     UPDATE gsc_url_inspections SET in_sitemap = FALSE
     WHERE in_sitemap AND NOT (url = ANY(${urls}::text[]))`
