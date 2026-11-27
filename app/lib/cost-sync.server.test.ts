@@ -53,11 +53,14 @@ vi.mock('./pricing-apply-v2.server', () => ({
   recomputeVariant,
 }))
 
-const fileDetectionTicket = vi.fn(async (_input: { dedupeKey: string; kind: string; targetTeam: string; suggestion: string }) => 123)
 vi.mock('./detection-tickets.server', () => ({
-  fileDetectionTicket,
   makeDedupeKey: (...parts: Array<string | number>) => parts.join(':').toLowerCase(),
   priorityFromSeverity: () => 3,
+}))
+
+const fileBlocker = vi.fn(async (_input: { dedupeKey: string; category: string; detail: string }) => ({ id: 123, created: true, reopened: false }))
+vi.mock('./owner-blockers.server', () => ({
+  fileBlocker,
 }))
 
 function snap(overrides: Partial<NalpacPriceSnapshot> & { sku: string; wholesale: number }): NalpacPriceSnapshot {
@@ -84,7 +87,7 @@ describe('runNalpacCostSync: wholesale-rise flag (#10871)', () => {
     settings['import_monitor_watch_price_drop_pct'] = '0.10'
   })
 
-  it('flags a material wholesale rise via a detection ticket, without repricing', async () => {
+  it('flags a material wholesale rise via an owner blocker, without repricing', async () => {
     priorRows = [{ sku: 'SKU1', wholesale: '10.00', mapPrice: '8.00', syncedAt: null }]
     const { runNalpacCostSync } = await import('./cost-sync.server')
 
@@ -95,13 +98,12 @@ describe('runNalpacCostSync: wholesale-rise flag (#10871)', () => {
 
     expect(result.increasesFlagged).toBe(1)
     expect(result.dropsDetected).toBe(0)
-    expect(fileDetectionTicket).toHaveBeenCalledTimes(1)
-    const call = fileDetectionTicket.mock.calls[0]![0]
+    expect(fileBlocker).toHaveBeenCalledTimes(1)
+    const call = fileBlocker.mock.calls[0]![0]
     expect(call.dedupeKey).toBe('cost-sync-wholesale-rise:sku1')
-    expect(call.kind).toBe('process')
-    expect(call.targetTeam).toBe('product')
-    expect(call.suggestion).toContain('10.00')
-    expect(call.suggestion).toContain('12.50')
+    expect(call.category).toBe('decision')
+    expect(call.detail).toContain('10.00')
+    expect(call.detail).toContain('12.50')
     // A rise is never pushed through the reprice path.
     expect(findVariantsBySkus).not.toHaveBeenCalled()
     expect(updateProductMetafield).not.toHaveBeenCalled()
@@ -118,7 +120,7 @@ describe('runNalpacCostSync: wholesale-rise flag (#10871)', () => {
     })
 
     expect(result.increasesFlagged).toBe(0)
-    expect(fileDetectionTicket).not.toHaveBeenCalled()
+    expect(fileBlocker).not.toHaveBeenCalled()
   })
 
   it('still detects and reprices a drop exactly as before, and never flags it as a rise', async () => {
@@ -135,12 +137,12 @@ describe('runNalpacCostSync: wholesale-rise flag (#10871)', () => {
 
     expect(result.dropsDetected).toBe(1)
     expect(result.increasesFlagged).toBe(0)
-    expect(fileDetectionTicket).not.toHaveBeenCalled()
+    expect(fileBlocker).not.toHaveBeenCalled()
     expect(recomputeVariant).toHaveBeenCalledTimes(1)
     expect(result.variantsRepriced).toBe(1)
   })
 
-  it('caps the number of rise tickets filed in one run', async () => {
+  it('caps the number of rise blockers filed in one run', async () => {
     const skus = Array.from({ length: 15 }, (_, i) => `SKU${i}`)
     priorRows = skus.map(sku => ({ sku, wholesale: '10.00', mapPrice: null, syncedAt: null }))
     const { runNalpacCostSync } = await import('./cost-sync.server')
@@ -151,7 +153,7 @@ describe('runNalpacCostSync: wholesale-rise flag (#10871)', () => {
     })
 
     expect(result.increasesFlagged).toBe(10) // MAX_WHOLESALE_RISE_FLAGS_PER_RUN
-    expect(fileDetectionTicket).toHaveBeenCalledTimes(10)
+    expect(fileBlocker).toHaveBeenCalledTimes(10)
   })
 
   it('does not reset the sticky rise basis on a sub-threshold rise, so it carries forward instead of tracking yesterday (#12082)', async () => {
@@ -191,9 +193,9 @@ describe('runNalpacCostSync: wholesale-rise flag (#10871)', () => {
     })
 
     expect(day2.increasesFlagged).toBe(1)
-    const call = fileDetectionTicket.mock.calls[0]![0]
-    expect(call.suggestion).toContain('10.00')
-    expect(call.suggestion).toContain('11.50')
+    const call = fileBlocker.mock.calls[0]![0]
+    expect(call.detail).toContain('10.00')
+    expect(call.detail).toContain('11.50')
     // The basis resets to today's wholesale once a rise actually fires, so
     // the next comparison starts fresh rather than re-flagging immediately.
     const chunk = insertValues.mock.calls[0]![0] as Array<{ sku: string; riseBasisWholesale: string | null }>
@@ -211,7 +213,7 @@ describe('runNalpacCostSync: wholesale-rise flag (#10871)', () => {
 
     expect(result.enabled).toBe(false)
     expect(dbSelect).not.toHaveBeenCalled()
-    expect(fileDetectionTicket).not.toHaveBeenCalled()
+    expect(fileBlocker).not.toHaveBeenCalled()
   })
 })
 

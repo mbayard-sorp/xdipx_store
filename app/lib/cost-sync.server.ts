@@ -30,7 +30,8 @@ import { getPipelineSetting } from './feed-processor.server'
 import { isNalpacMapVerifiedBrand } from './nalpac-dropship-policy'
 import { findVariantsBySkus, updateProductMetafield } from './shopify.server'
 import { recomputeVariant } from './pricing-apply-v2.server'
-import { fileDetectionTicket, makeDedupeKey, priorityFromSeverity } from './detection-tickets.server'
+import { makeDedupeKey, priorityFromSeverity } from './detection-tickets.server'
+import { fileBlocker } from './owner-blockers.server'
 import type { NalpacPriceSnapshot } from './nalpac-feeds.server'
 import { nalpacSaleTagPct } from './engine-cost'
 
@@ -45,10 +46,12 @@ export interface CostSyncResult {
   /** Variants successfully pushed through updateProductMetafield +
    *  recomputeVariant without throwing. */
   variantsRepriced: number
-  /** SKUs where a material wholesale INCREASE was detected and FLAGGED via a
-   *  detection ticket (ticket #10871). Never repriced automatically -- the
-   *  drop side of this module exists to protect margin fast, but a cost rise
-   *  is a "should we eat it or pass it on" call this module does not make. */
+  /** SKUs where a material wholesale INCREASE was detected and FLAGGED via an
+   *  owner blocker (ticket #10871; routed to the owner blocker list rather
+   *  than a suggestion-bus ticket since ticket #20959/#20797). Never repriced
+   *  automatically -- the drop side of this module exists to protect margin
+   *  fast, but a cost rise is a "should we eat it or pass it on" call this
+   *  module does not make. */
   increasesFlagged: number
   errors: string[]
 }
@@ -63,11 +66,12 @@ const DISABLED_RESULT: CostSyncResult = {
 }
 
 /**
- * Per-run ceiling on new wholesale-rise detection tickets (ticket #10871), so
- * a broad feed-wide cost jump can't flood the product-team queue in one run.
- * `fileDetectionTicket`'s own dedupe already keeps a persistently-elevated SKU
- * from refiling every day while its ticket is still open; this cap is only
- * about the first run a rise is seen across many SKUs at once.
+ * Per-run ceiling on new wholesale-rise owner blockers (ticket #10871), so
+ * a broad feed-wide cost jump can't flood the owner blocker list in one run.
+ * `fileBlocker`'s own dedupe (by `dedupeKey`, per SKU) already keeps a
+ * persistently-elevated SKU from refiling every day while its blocker is
+ * still open; this cap is only about the first run a rise is seen across
+ * many SKUs at once.
  */
 const MAX_WHOLESALE_RISE_FLAGS_PER_RUN = 10
 
@@ -284,32 +288,40 @@ export async function runNalpacCostSync(opts: {
       }
     }
 
-    // 4b. File a FLAG-only detection ticket per material wholesale rise
-    // (ticket #10871), capped per run. `fileDetectionTicket`'s own dedupe
-    // (ON CONFLICT DO NOTHING while a same-key ticket is still open) keeps a
-    // persistently-elevated sku from refiling every day on its own; the cap
-    // here is only about a single run seeing many risers at once. Never
-    // blocks or fails the drop-sync path below.
+    // 4b. File a FLAG-only owner blocker per material wholesale rise (ticket
+    // #10871), capped per run. This used to file a suggestion-bus ticket at
+    // `targetTeam: 'product'`, which product-manager's only execute path
+    // (import_candidates approve/reject/watch) cannot action -- the rows
+    // piled up unexecuted (ticket #20959, duplicate #20797). "Eat the cost or
+    // pass it on" is exactly the no-observable-completion-state judgment call
+    // the owner blocker list's `decision` category exists for, so this now
+    // files there instead, where the owner (or pricing-ops acting on the
+    // owner's behalf) actually sees it. `fileBlocker`'s own dedupe (by
+    // `dedupeKey`, per SKU) keeps a persistently-elevated sku from refiling
+    // every day on its own; the cap here is only about a single run seeing
+    // many risers at once. Never blocks or fails the drop-sync path below.
     for (const flag of riseFlags.slice(0, MAX_WHOLESALE_RISE_FLAGS_PER_RUN)) {
       try {
-        const id = await fileDetectionTicket({
-          detector:   'cost-sync',
-          dedupeKey:  makeDedupeKey('cost-sync-wholesale-rise', flag.sku),
-          priority:   priorityFromSeverity('P3'),
-          category:   'other',
-          kind:       'process',
-          targetTeam: 'product',
-          suggestion:
+        const res = await fileBlocker({
+          dedupeKey: makeDedupeKey('cost-sync-wholesale-rise', flag.sku),
+          title: `Wholesale cost rose for carried SKU ${flag.sku}: confirm margin or reprice`,
+          detail:
             `Carried SKU ${flag.sku}'s Nalpac wholesale cost rose from $${flag.priorWholesale.toFixed(2)} ` +
             `to $${flag.newWholesale.toFixed(2)} (>= the ${Math.round(dropPct * 100)}% material-change ` +
             `threshold this module also uses to detect a drop). This is a FLAG only: cost-sync never reprices ` +
             `on a rise the way it does on a drop, because passing a higher cost through to the live sell price ` +
-            `is a business call, not a mechanical margin-protection sync. Confirm whether the live sell price ` +
-            `still clears margin at the new wholesale, and reprice through the normal pricing pipeline if not. ` +
-            `DONE WHEN: ${flag.sku}'s margin at its current live price is confirmed acceptable at the new ` +
-            `wholesale, or it is repriced.`,
+            `is a business call, not a mechanical margin-protection sync.`,
+          unblocks: `Confirm whether the live sell price for ${flag.sku} still clears margin at the new ` +
+            `wholesale, and reprice through the normal pricing pipeline if not.`,
+          category: 'decision',
+          priority: priorityFromSeverity('P3'),
+          source: 'sweep',
+          sourceRef: flag.sku,
+          overrideNoProbeReason:
+            'Whether to eat the cost, reprice, or discontinue the SKU is a margin/business call only the ' +
+            'owner can make; no automated state cleanly proves the decision was made, so this clears by hand.',
         })
-        if (id) result.increasesFlagged++
+        if (res.id) result.increasesFlagged++
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         console.error(`[cost-sync] wholesale-rise flag failed for sku ${flag.sku}:`, msg)
