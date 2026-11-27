@@ -154,3 +154,87 @@ describe('analyzeFreshness with the IPX5/IPX6 jet-code wording stripped (ticket 
     expect(stripped.hits).toHaveLength(0)
   })
 })
+
+// A Portable Text block with one plain lead-in span and one linked span,
+// matching how a real "Sources" entry is authored (ticket #24678).
+const citationBlock = (leadIn: string, linkedText: string, href: string) => ({
+  _type: 'block',
+  style: 'normal',
+  markDefs: [{ _key: 'm1', _type: 'link', href }],
+  children: [
+    { _key: 's0', _type: 'span', marks: [], text: leadIn },
+    { _key: 's1', _type: 'span', marks: ['m1'], text: linkedText },
+  ],
+})
+
+describe('stripFrozenStringsFromDoc: attributed citation links (ticket #24678)', () => {
+  const ARTICLE_TITLE = 'Sex Toy Injuries: What to Do, Why It Happens, How to Prevent Them'
+
+  it('strips a span linked to an allowlisted citation host, leaving the lead-in text', () => {
+    const doc: PriorPost = {
+      body: [citationBlock('Healthline, ', ARTICLE_TITLE, 'https://www.healthline.com/health/healthy-sex/sex-toy-injury-treatment-prevention')],
+    }
+    const stripped = stripFrozenStringsFromDoc(doc)
+    const block = stripped.body as { children: { text: string }[] }[]
+    expect(block[0]!.children[0]!.text).toBe('Healthline, ')
+    expect(block[0]!.children[1]!.text).not.toContain('Sex Toy Injuries')
+  })
+
+  it('does not strip a span with the same text but no link mark', () => {
+    const doc: PriorPost = {
+      body: [p(ARTICLE_TITLE)],
+    }
+    const stripped = stripFrozenStringsFromDoc(doc)
+    const block = stripped.body as { children: { text: string }[] }[]
+    expect(block[0]!.children[0]!.text).toBe(ARTICLE_TITLE)
+  })
+
+  it('does not strip a span linked to a host off the allowlist', () => {
+    const doc: PriorPost = {
+      body: [citationBlock('Some blog, ', ARTICLE_TITLE, 'https://not-a-real-citation-host.example/article')],
+    }
+    const stripped = stripFrozenStringsFromDoc(doc)
+    const block = stripped.body as { children: { text: string }[] }[]
+    expect(block[0]!.children[1]!.text).toBe(ARTICLE_TITLE)
+  })
+
+  it('a plain mention of the source by name in prose, with no link markDef, is not exempt', () => {
+    // The laundering guard: text alone can never claim the exemption.
+    const doc: PriorPost = {
+      body: [p(`Healthline's guidance says ${ARTICLE_TITLE.toLowerCase()}.`)],
+    }
+    const stripped = stripFrozenStringsFromDoc(doc)
+    const block = stripped.body as { children: { text: string }[] }[]
+    expect(block[0]!.children[0]!.text).toContain('sex toy injuries')
+  })
+})
+
+describe('analyzeFreshness: real cross-post citation-title collision (content run 2249, ticket #24678)', () => {
+  it('reports no overlap when two posts cite the same allowlisted article in their Sources section', () => {
+    const draft: DraftInput = {
+      title: 'What Do You Say When a Sex Toy You Were Given Does Not Work?',
+      body: [
+        p('The urologist Michael Ingber, who is board certified and specializes in female pelvic medicine, is quoted on that page.'),
+        h2('Sources'),
+        citationBlock('Healthline, ', 'Sex Toy Injuries: What to Do, Why It Happens, How to Prevent Them', 'https://www.healthline.com/health/healthy-sex/sex-toy-injury-treatment-prevention'),
+      ],
+    }
+    const prior: PriorPost = {
+      slug: 'what-do-you-do-if-you-dont-like-a-sex-toy-you-bought',
+      body: [
+        p('That is the instruction of Dr. Michael Ingber, a board certified urologist and female pelvic medicine specialist.'),
+        h2('Sources'),
+        citationBlock('Healthline, ', 'Sex Toy Injuries: What to Do, Why It Happens, How to Prevent Them', 'https://www.healthline.com/health/healthy-sex/sex-toy-injury-treatment-prevention'),
+      ],
+    }
+
+    // Without stripping, the repeated citation title alone produces real hits
+    // (reproduced live on the actual two posts: 9 shared 6-grams).
+    const unstripped = analyzeFreshness(draft, [prior])
+    expect(unstripped.overlap).toBe(true)
+
+    const stripped = analyzeFreshness(stripFrozenStringsFromDoc(draft), [stripFrozenStringsFromDoc(prior)])
+    expect(stripped.overlap).toBe(false)
+    expect(stripped.hits).toHaveLength(0)
+  })
+})
