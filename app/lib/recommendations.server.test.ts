@@ -47,9 +47,10 @@ vi.mock('../../db/schema', () => ({
   productCopurchase: { handleA: 'handleA', handleB: 'handleB', count: 'count' },
 }))
 // KV memo/cache is bypassed entirely so every test call hits the "db" mock.
+const kvSetMock = vi.hoisted(() => vi.fn(async () => {}))
 vi.mock('~/lib/kv.server', () => ({
   kvGetMemo: async () => null,
-  kvSet: async () => {},
+  kvSet: kvSetMock,
   primeKvMemo: () => {},
   KV_KEYS: { fbt: (handle: string) => `fbt:v2:${handle}` },
 }))
@@ -65,6 +66,7 @@ import { getFrequentlyBoughtWith, getSimilarByTag } from './recommendations.serv
 beforeEach(() => {
   h.state.selectRows = []
   h.state.whereArgs = []
+  kvSetMock.mockClear()
   shopifyMock.getProductByHandle.mockReset()
   shopifyMock.getProductsByTag.mockReset()
 })
@@ -104,9 +106,24 @@ describe('getFrequentlyBoughtWith — the PDP cross-sell rail', () => {
     db.select = () => { throw new Error('connection reset') }
     try {
       await expect(getFrequentlyBoughtWith('some-handle', 4)).resolves.toEqual([])
+      expect(kvSetMock).not.toHaveBeenCalled()
     } finally {
       db.select = original
     }
+  })
+
+  // Neon compute audit 2026-11-27: empty answers were never cached, so nearly
+  // every PDP render queried Neon and the compute never suspended.
+  it('caches an empty answer on the short TTL so the next render skips Neon', async () => {
+    h.state.selectRows = []
+    await getFrequentlyBoughtWith('doxy-die-cast-max', 4)
+    expect(kvSetMock).toHaveBeenCalledWith('fbt:v2:doxy-die-cast-max', [], 15 * 60)
+  })
+
+  it('caches a real answer on the long TTL', async () => {
+    h.state.selectRows = [{ other: 'lube-water-based-4oz', count: 12 }]
+    await getFrequentlyBoughtWith('lelo-sona-cruise', 4)
+    expect(kvSetMock).toHaveBeenCalledWith('fbt:v2:lelo-sona-cruise', ['lube-water-based-4oz'], 60 * 60)
   })
 })
 
