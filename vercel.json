@@ -48,7 +48,7 @@
     },
     {
       "path": "/cron/log-monitor",
-      "schedule": "25 * * * *"
+      "schedule": "15 * * * *"
     },
     {
       "path": "/cron/conversion-watch",
@@ -148,11 +148,11 @@
     },
     {
       "path": "/cron/release-engine",
-      "schedule": "*/10 * * * *"
+      "schedule": "*/15 * * * *"
     },
     {
       "path": "/cron/main-ci-watch",
-      "schedule": "*/10 * * * *"
+      "schedule": "*/15 * * * *"
     },
     {
       "path": "/cron/outreach-inbox",
@@ -168,7 +168,7 @@
     },
     {
       "path": "/cron/social-metrics-sweep",
-      "schedule": "20 */6 * * *"
+      "schedule": "15 */6 * * *"
     },
     {
       "path": "/cron/instagram-comments-ingest",
@@ -200,7 +200,7 @@
     },
     {
       "path": "/cron/ads-sync-entities",
-      "schedule": "35 */6 * * *"
+      "schedule": "45 */6 * * *"
     },
     {
       "path": "/cron/ads-token-health",
@@ -208,7 +208,7 @@
     },
     {
       "path": "/cron/ads-insights",
-      "schedule": "5 * * * *"
+      "schedule": "45 * * * *"
     },
     {
       "path": "/cron/ads-audience-sync",
@@ -216,7 +216,7 @@
     },
     {
       "path": "/cron/meta-crm-sync",
-      "schedule": "40 * * * *"
+      "schedule": "30 * * * *"
     }
   ]
 }

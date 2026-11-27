@@ -16,6 +16,7 @@
  * Server-only. Never import from a client component.
  */
 
+import { createHash } from 'node:crypto'
 import { eq } from 'drizzle-orm'
 import { db } from '~/lib/db.server'
 import { homepagePayload } from '../../db/schema'
@@ -51,6 +52,31 @@ export const HOMEPAGE_PAYLOAD_KV_PREFIX = 'homepage:payload'
 // KV TTL — generous so the blob outlives normal traffic gaps. Rotation + the
 // 15-min warm refresh it well before expiry; Neon is the durable backstop.
 const KV_TTL_SECONDS = 6 * 60 * 60 // 6h
+
+// Neon durable-copy dedupe. The 15-min warm rebuilds both payloads every run,
+// and most builds are identical apart from builtAt, yet each one upserted a
+// large JSON row. We remember a content hash (builtAt excluded) of the last
+// successful Neon write and skip the upsert when it matches. KV is still
+// written every time. The hash key expires on the same 6h clock, so the Neon
+// row is refreshed at least that often even when nothing changed.
+const NEON_HASH_TTL_SECONDS = KV_TTL_SECONDS
+
+/** Content hash of a payload, ignoring builtAt (which changes every build). */
+export function payloadContentHash(payload: { builtAt: number }): string {
+  return createHash('sha1').update(JSON.stringify({ ...payload, builtAt: 0 })).digest('hex')
+}
+
+const neonHashKey = (variant: 'a' | 'b', version: string) => `homepage:payload:neonhash:${variant}:${version}`
+
+/** True when Neon already holds a payload with this exact content. */
+async function neonCopyIsCurrent(variant: 'a' | 'b', version: string, hash: string): Promise<boolean> {
+  const prev = await kvGet<string>(neonHashKey(variant, version)).catch(() => null)
+  return prev === hash
+}
+
+async function rememberNeonCopy(variant: 'a' | 'b', version: string, hash: string): Promise<void> {
+  await kvSet(neonHashKey(variant, version), hash, NEON_HASH_TTL_SECONDS).catch(() => {})
+}
 
 // Per-leg wall-clock budgets — mirror the loader's so a slow upstream can't
 // sink the precompute build either.
@@ -491,7 +517,9 @@ export async function writeHomepagePayloadA(
   // KV (L1/L2).
   await kvSet(HOMEPAGE_PAYLOAD_KV_KEY, payload, KV_TTL_SECONDS)
 
-  // Neon durable row — upsert on (variant, version).
+  // Neon durable row — upsert on (variant, version), skipped when unchanged.
+  const hash = payloadContentHash(payload)
+  if (await neonCopyIsCurrent('a', HOMEPAGE_PAYLOAD_VERSION, hash)) return true
   try {
     await db
       .insert(homepagePayload)
@@ -509,6 +537,7 @@ export async function writeHomepagePayloadA(
           builtAt: new Date(),
         },
       })
+    await rememberNeonCopy('a', HOMEPAGE_PAYLOAD_VERSION, hash)
   } catch (err) {
     // KV already holds the blob; a Neon write failure is non-fatal (the next
     // warm retries). Surface it but don't throw into the cron/rotation path.
@@ -792,6 +821,8 @@ export async function writeHomepagePayloadB(
 
   await kvSet(HOMEPAGE_PAYLOAD_B_KV_KEY, payload, KV_TTL_SECONDS)
 
+  const hash = payloadContentHash(payload)
+  if (await neonCopyIsCurrent('b', HOMEPAGE_PAYLOAD_B_VERSION, hash)) return true
   try {
     await db
       .insert(homepagePayload)
@@ -809,6 +840,7 @@ export async function writeHomepagePayloadB(
           builtAt: new Date(),
         },
       })
+    await rememberNeonCopy('b', HOMEPAGE_PAYLOAD_B_VERSION, hash)
   } catch (err) {
     console.error('[homepage-payload:b] Neon upsert failed (KV still written):', err)
   }

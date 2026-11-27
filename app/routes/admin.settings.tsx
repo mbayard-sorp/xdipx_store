@@ -8,6 +8,7 @@ import { kvGet, kvDel, KV_KEYS } from '~/lib/kv.server'
 import { paginateAllProductsForSanity } from '~/lib/shopify.server'
 import { upsertProductPage } from '~/lib/sanity.server'
 import { resolveGa4, invalidateGa4Cache } from '~/lib/ga4-config.server'
+import { invalidateSupportInboxValveCache } from '~/lib/support-inbox.server'
 
 export const meta: MetaFunction = () => [{ title: 'Pipeline Settings — xdipx Admin' }]
 
@@ -75,6 +76,11 @@ export async function action({ request }: ActionFunctionArgs) {
     // the 5-min TTL.
     if (key === 'ga4MeasurementId') {
       await invalidateGa4Cache()
+    }
+
+    // The support poller caches its valve for one 15-minute cycle.
+    if (key === 'support_inbox_enabled') {
+      await invalidateSupportInboxValveCache()
     }
 
     return { ok: true, saved: key }

@@ -46,12 +46,27 @@ import { SONNET } from '~/lib/models.server'
 import { EMMA_VOICE_SUPPORT } from '~/lib/emma-voice.server'
 import { escapeHtml, sendOwnerEmail } from '~/lib/owner-alerts.server'
 import { getPipelineSetting } from '~/lib/feed-processor.server'
+import { cached, invalidateCache, kvDel } from '~/lib/kv.server'
 
 const LOOKBACK_DAYS = 3
 const SUPPORT_INBOX_VALVE_KEY = 'support_inbox_enabled'
 
+// The valve is OFF (no row) and the poller runs every 15 minutes, so an
+// uncached read was a Neon query every run just to learn "off". Cache it for
+// one cycle. A save from /admin/settings busts it immediately via
+// invalidateSupportInboxValveCache(); a direct DB edit lands within 15 minutes.
+const SUPPORT_INBOX_VALVE_CACHE_KEY = 'support:inbox:valve'
+const SUPPORT_INBOX_VALVE_TTL_SEC = 15 * 60
+
 export async function isSupportInboxEnabled(): Promise<boolean> {
-  return (await getPipelineSetting(SUPPORT_INBOX_VALVE_KEY)) === 'true'
+  return cached(SUPPORT_INBOX_VALVE_CACHE_KEY, SUPPORT_INBOX_VALVE_TTL_SEC, async () =>
+    (await getPipelineSetting(SUPPORT_INBOX_VALVE_KEY)) === 'true',
+  )
+}
+
+export async function invalidateSupportInboxValveCache(): Promise<void> {
+  invalidateCache(SUPPORT_INBOX_VALVE_CACHE_KEY)
+  await kvDel(SUPPORT_INBOX_VALVE_CACHE_KEY).catch(() => {})
 }
 
 /**
