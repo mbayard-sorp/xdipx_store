@@ -1,6 +1,6 @@
 // Vision-gate hard check on generated social imagery (ticket #6763).
 // Every seam is injected: no network, no Anthropic client, no database.
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import {
   runVisionGate,
   runVisionGateOnImage,
@@ -1733,5 +1733,62 @@ describe('rescoreStoredHandOverride (stored pre-#13695 verdicts)', () => {
     const lookup = vi.fn(async () => stale())
     const result = await getVisionVerdictByUrl('https://cdn.shopify.com/files/x.jpg?v=1', { lookupVerdictByUrl: lookup })
     expect(result?.pass).toBe(true)
+  })
+})
+
+// Ticket #24676: a freshly-uploaded Shopify Files CDN url 429s on the very
+// next fetch. `fetchImageBase64` is only the real (non-injected) implementation
+// when no deps override is passed, so these exercise it directly, same idiom
+// as `shopify-admin-rest-429-retry.test.ts` for the identical upstream limiter.
+describe('defaultDeps.fetchImageBase64 — retry on 429 (ticket #24676)', () => {
+  const respond = (status: number, headers: Record<string, string> = {}) =>
+    ({
+      ok: status >= 200 && status < 300,
+      status,
+      headers: { get: (k: string) => headers[k.toLowerCase()] ?? null },
+      arrayBuffer: async () => Buffer.from('fake-image-bytes'),
+    }) as unknown as Response
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
+  })
+
+  it('retries a 429 honoring Retry-After and still reaches a real vision verdict', async () => {
+    vi.useFakeTimers()
+    let call = 0
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      call++
+      return call < 3 ? respond(429, { 'retry-after': '1' }) : respond(200, { 'content-type': 'image/jpeg' })
+    }))
+    const callVision = vi.fn(async () => CLEAN_RESPONSE)
+    const p = runVisionGate('https://cdn.shopify.com/files/fresh.jpg', { callVision })
+    await vi.runAllTimersAsync()
+    const verdict = await p
+    expect(call).toBe(3)
+    expect(verdict.checkCompleted).toBe(true)
+    expect(verdict.pass).toBe(true)
+  })
+
+  it('fails closed with a diagnosable message after the attempt ceiling on a persistent 429', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('fetch', vi.fn(async () => respond(429, { 'retry-after': '0' })))
+    const callVision = vi.fn(async () => CLEAN_RESPONSE)
+    const p = runVisionGate('https://cdn.shopify.com/files/stuck.jpg', { callVision })
+    await vi.runAllTimersAsync()
+    const verdict = await p
+    expect(verdict.pass).toBe(false)
+    expect(verdict.checkCompleted).toBe(false)
+    expect(verdict.notes).toMatch(/429/)
+    expect(callVision).not.toHaveBeenCalled()
+  })
+
+  it('does not retry a non-429 error', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => respond(500)))
+    const callVision = vi.fn(async () => CLEAN_RESPONSE)
+    const verdict = await runVisionGate('https://cdn.shopify.com/files/x.jpg', { callVision })
+    expect(verdict.checkCompleted).toBe(false)
+    expect(verdict.notes).toMatch(/500/)
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1)
   })
 })

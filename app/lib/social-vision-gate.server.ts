@@ -480,11 +480,25 @@ function cacheableSystem(system: string): Anthropic.TextBlockParam[] {
 function buildDefaultDeps(refId?: string, caller?: string): Required<VisionGateDeps> {
   return {
   fetchImageBase64: async (url) => {
-    const res = await fetch(url)
-    if (!res.ok) throw new Error(`fetch ${url} failed: HTTP ${res.status}`)
-    const buffer = Buffer.from(await res.arrayBuffer())
-    const mediaType = (res.headers.get('content-type') ?? '').split(';')[0] || 'image/jpeg'
-    return { data: buffer.toString('base64'), mediaType }
+    // Ticket #24676: a freshly-uploaded Shopify Files CDN url 429s on the very
+    // next fetch (19 of 24 packshot-card/plate calls in one run, independent
+    // of this caller's own request volume or spacing between attempts) — the
+    // same upstream leaky-bucket limiter `shopifyAdmin`/`adminGraphQL` in
+    // shopify.server.ts already retry around, so this seam gets the identical
+    // retry-after-driven backoff rather than a new scheme.
+    const MAX_ATTEMPTS = 4
+    for (let attempt = 1; ; attempt++) {
+      const res = await fetch(url)
+      if (res.status === 429 && attempt < MAX_ATTEMPTS) {
+        const retryAfter = Number(res.headers.get('retry-after')) || 1
+        await new Promise((r) => setTimeout(r, Math.min(retryAfter * 1000, 5000)))
+        continue
+      }
+      if (!res.ok) throw new Error(`fetch ${url} failed: HTTP ${res.status}`)
+      const buffer = Buffer.from(await res.arrayBuffer())
+      const mediaType = (res.headers.get('content-type') ?? '').split(';')[0] || 'image/jpeg'
+      return { data: buffer.toString('base64'), mediaType }
+    }
   },
   callVision: async (imageBase64, mediaType, opts) => {
     const { default: Anthropic } = await import('@anthropic-ai/sdk')
