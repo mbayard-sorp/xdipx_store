@@ -134,3 +134,17 @@ describe('NOT_YET_DISCOVERED_STATES', () => {
     }
   })
 })
+
+// Neon compute audit 2026-11-27: the sitemap refresh upserted every row on
+// every run with no conflict filter, 3.4M updates on a 6.5k-row table.
+// runGscIndexSweep needs live GSC credentials, so guard the statement text.
+describe('sitemap refresh upsert', () => {
+  it('only rewrites rows that are new, returning, or re-dated', async () => {
+    const { readFileSync } = await import('node:fs')
+    const src = readFileSync(new URL('./gsc-index.server.ts', import.meta.url), 'utf8')
+    const upsert = src.slice(src.indexOf('INSERT INTO gsc_url_inspections (url, sitemap_lastmod)'))
+    const conflict = upsert.slice(0, upsert.indexOf('`'))
+    expect(conflict).toMatch(/WHERE NOT gsc_url_inspections\.in_sitemap/)
+    expect(conflict).toMatch(/sitemap_lastmod IS DISTINCT FROM EXCLUDED\.sitemap_lastmod/)
+  })
+})
