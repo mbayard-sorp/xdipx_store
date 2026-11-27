@@ -31,10 +31,10 @@ import {
   type VariantInventoryPolicy,
 } from '~/lib/shopify.server'
 import {
-  fileDetectionTicket,
   makeDedupeKey,
   priorityFromSeverity,
 } from '~/lib/detection-tickets.server'
+import { fileBlocker } from '~/lib/owner-blockers.server'
 
 const KV_OOS_ZERO_SINCE = 'monitor:oos-zero-since'
 
@@ -129,8 +129,11 @@ export interface OosMonitorResult {
 
 /**
  * Detect carried SKUs sitting at supplier qty=0 for N consecutive days and file
- * one deduped detection ticket per SKU (kind `process`, target team `product`),
- * up to a per-run cap. Reads config from `pipeline_settings` (never writes it):
+ * one deduped owner blocker per SKU (category `decision`; routed there rather
+ * than a suggestion-bus ticket at `targetTeam: 'product'` since ticket #24667
+ * -- product-manager's only execute path, import_candidates approve/reject/
+ * watch, cannot hide or backorder-badge a live product), up to a per-run cap.
+ * Reads config from `pipeline_settings` (never writes it):
  *   - `oos_flag_min_days`   (default 3): consecutive-day threshold.
  *   - `oos_flag_max_per_run`(default 20): max new tickets per run. Set to 0 to
  *     keep tracking streaks but file nothing — an off-switch with no new valve.
@@ -185,24 +188,27 @@ export async function flagSustainedOutOfStock(opts: {
   const toFile = riskyFlags.slice(0, maxPerRun)
   let ticketsFiled = 0
   for (const f of toFile) {
-    const id = await fileDetectionTicket({
-      detector:   'oos-monitor',
-      dedupeKey:  makeDedupeKey('inv-oos-sustained', f.sku),
-      priority:   priorityFromSeverity('P3'),
-      category:   'other',
-      kind:       'process',
-      targetTeam: 'product',
-      suggestion:
+    const res = await fileBlocker({
+      dedupeKey: makeDedupeKey('inv-oos-sustained', f.sku),
+      title: `Carried SKU ${f.sku} out of supplier stock ${f.streakDays}+ days: hide or backorder-badge`,
+      detail:
         `Carried SKU ${f.sku} has shown Nalpac supplier qty=0 for ${f.streakDays} consecutive day(s) ` +
         `(first observed 0 on ${f.sinceStr}). The discontinued-sweep only archives on an explicit Nalpac ` +
         `discontinued flag, not a temporary out-of-stock, so this product may still be live and orderable ` +
-        `on the storefront with zero supplier stock. Confirm the storefront state and hide or backorder-badge ` +
-        `it so a customer does not reach a sold-out checkout. This is a FLAG for human action, not an ` +
-        `auto-archive: if stock returns, no action is needed; if Nalpac later marks it discontinued, ` +
-        `/cron/discontinued-sweep archives it. DONE WHEN: ${f.sku} is hidden, backorder-badged, or confirmed ` +
-        `still sellable.`,
+        `on the storefront with zero supplier stock. This is a FLAG for human action, not an auto-archive: ` +
+        `if stock returns, no action is needed; if Nalpac later marks it discontinued, ` +
+        `/cron/discontinued-sweep archives it.`,
+      unblocks: `Confirm the storefront state and hide or backorder-badge ${f.sku} so a customer does not ` +
+        `reach a sold-out checkout, or confirm it is still sellable.`,
+      category: 'decision',
+      priority: priorityFromSeverity('P3'),
+      source: 'sweep',
+      sourceRef: f.sku,
+      overrideNoProbeReason:
+        'Whether to hide, backorder-badge, or leave this SKU live is a merchandising call only the owner or ' +
+        'shopify-ops can make; no automated state cleanly proves the decision was made, so this clears by hand.',
     })
-    if (id) ticketsFiled++
+    if (res.id) ticketsFiled++
   }
 
   const capped = riskyFlags.length - toFile.length
