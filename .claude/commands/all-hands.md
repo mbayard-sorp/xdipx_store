@@ -28,6 +28,9 @@ The standup, gathered live and not from memory:
   before
 - The last `gsc_index_daily` row and the indexed-count trend
 - Anything failing: healthchecks, the checkout probe, recent run errors
+- Neon burn: open `neon-burn:*` tickets and the awake streak from `GET /cron/neon-burn-watch?dryRun=1`.
+  New burn with no ticket moving on it goes under "what is stuck" (owner direction 2026-11-27,
+  `docs/store-team/neon-burn-runbook.md`)
 - Ads, one line: spend month to date against `ads_media_monthly_cap_cents`, our leads and CPL
   against `ads_lead_cpl_ceiling_cents`, ledger rows waiting on him, the latest pixel health, and the
   last burn verdict. Read-only sources: the `meta doctor` line in the newest `ads-render` run summary

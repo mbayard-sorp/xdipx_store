@@ -251,6 +251,26 @@ explicitly as the proxy the brief is steering by rather than quoting a reach fig
 suppressed near-zero, or say plainly that engagement is unmeasured if even saves has too few rows
 to read.
 
+## Step 3e: Neon burn check (the healing loop)
+
+Owner direction 2026-11-27, verbatim: "We need to only spend what is required to keep the site
+alive and functioning. When /all-hands team sees extra burn where there was not before, we need to
+do something about it or we are wasting money." The recipe and thresholds live in
+[`neon-burn-runbook.md`](./neon-burn-runbook.md).
+
+1. List the open `neon-burn:*` tickets (`POST /api/team/suggestion {"op":"list"}`, filter on
+   `dedupeKey` starting `neon-burn:`). `/cron/neon-burn-watch` files them daily at 12:45 UTC.
+2. Put a three-line verdict in the brief: the current awake streak and whether the compute
+   suspended at all this week (`GET /cron/neon-burn-watch?dryRun=1` with the cron secret), each
+   open `neon-burn:*` ticket with its age and state, and the tables it names.
+3. A `neon-burn:*` ticket open more than 7 days with no linked PR is **Red** in the brief, and you
+   bump its priority one step (never past 2) with the reason in the row.
+4. A week where the watch filed nothing and the compute suspended is a one-line green, said
+   plainly. Do not pad it.
+
+Never propose changing the Neon autoscaling range, suspend timeout, or plan as the fix. Those are
+owner money settings; raise them in "Needs Mike" if you think one is wrong.
+
 ## Step 4 — Sub-specialists (sequence, same $RUN_ID)
 
 **You make every API call below, not the sub-specialist.** A spawned subagent in this runtime

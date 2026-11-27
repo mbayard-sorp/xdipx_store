@@ -676,6 +676,17 @@ export const CRON_EXPECTATIONS: readonly CronExpectation[] = [
     notes: 'Daily SEO aggregate.',
   },
   {
+    route: '/cron/neon-burn-watch',
+    plane: 'vercel',
+    schedule: '45 12 * * *',
+    periodMinutes: DAILY,
+    graceMinutes: 120,
+    recorded: false,
+    moneyRelevant: false,
+    ownerTeam: 'strategy',
+    notes: 'Neon compute over-burn watch (owner direction 2026-11-27): awake streak + day-over-day table activity, snapshots in KV, files neon-burn:* code tickets.',
+  },
+  {
     route: '/cron/conversation-quality-daily',
     plane: 'vercel',
     schedule: '20 3 * * *',

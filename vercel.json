@@ -131,6 +131,10 @@
       "schedule": "30 12 * * *"
     },
     {
+      "path": "/cron/neon-burn-watch",
+      "schedule": "45 12 * * *"
+    },
+    {
       "path": "/cron/conversation-quality-daily",
       "schedule": "20 3 * * *"
     },

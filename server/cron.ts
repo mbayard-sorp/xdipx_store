@@ -692,6 +692,26 @@ export function createCronRoutes() {
   })
 
   /**
+   * GET|POST /cron/neon-burn-watch
+   * Schedule: daily 12:45 UTC, a quarter-hour minute the compute is already
+   * awake for the 15-minute crons, so the watch never causes a wake of its own.
+   * Owner direction 2026-11-27: spend only what keeps the site alive. Reads the
+   * compute's awake streak and per-table activity, diffs it against the prior
+   * week (snapshots in KV, no Neon writes), and files a deduped `code` ticket
+   * per finding. `?dryRun=1` assesses without saving or filing.
+   */
+  cronRoute('/neon-burn-watch', async (req, res) => {
+    try {
+      const { runNeonBurnWatch } = await import('../app/lib/neon-burn.server.js')
+      const dryRun = req.query['dryRun'] === '1'
+      res.json(await runNeonBurnWatch({ dryRun }))
+    } catch (err) {
+      console.error('[cron:neon-burn-watch]', err)
+      res.status(500).json({ error: String(err) })
+    }
+  })
+
+  /**
    * GET|POST /cron/conversation-quality-daily
    * Schedule: daily 03:20 UTC — well after midnight UTC so it always
    * aggregates a fully-closed prior day across every timezone that matters
