@@ -311,6 +311,8 @@ extend freely — additions need a slug, problem, and target query):
 
 | 39 | will-anyone-know-i-ordered-a-sex-toy | Someone has a full cart and a settled mind and stalls at checkout, not over the product but over two things they cannot inspect in advance: what the box and its label will say when it lands somewhere other people can see it, and what the line on the card statement will read. Sellers answer with a wink ("discreet shipping") rather than a specification, which gives the reader nothing to plan around and quietly confirms the premise that the purchase is something to hide, so the reader buys down to the smallest deniable thing on the page or abandons the cart and keeps the question | "will anyone know if I order a sex toy online" |
 
+| 40 | what-to-say-when-a-sex-toy-you-were-given-doesnt-work | A partner gave the reader a sex toy. They said thank you and meant it about the gesture, then used it and found the object wrong for them: too strong, in the wrong place, the wrong category of sensation, or simply uncomfortable. Two things separate this from disliking a toy they chose. They did not choose it, so there is no reasoning of their own to debug and no way to read what the giver was aiming at, and the gift arrived finished with a person attached, so "I do not like it" parses as a verdict on the chooser rather than a fact about an object. The polite yes is the cheapest move on the night and gets more expensive every week it stands, so the toy goes in a drawer, the giver believes it landed and plans the next one on that basis, and neither of them can raise it without reopening the yes † | "my partner gave me a sex toy I don't like what do I say" |
+
 † = health-adjacent; the "worth seeing a clinician if…" line, with its tier, is mandatory (see above).
 
 **When no writable row remains (added 2026-10-28, #18359).** The bank ran fully dry on 2026-10-27:
@@ -559,3 +561,41 @@ Three drafting lessons from row 39 worth inheriting:
   the weighting of a mismatch undocumented, so the post states the billing fact and asserts nothing
   about holds, review or likelihood.
 
+Row 40 was authored by content run 2249 (2026-11-27). By that run the bank was spent again: rows
+1-14, 16-24, 27, 28 and 30-39 all had published posts, rows 25, 26 and 29 are retired from the
+rotation, row 15 is still parked, and the `seoContentBrief` queue held no `real-talk` brief at all
+(its seven queued rows were four `wellness-basics`, one `comparisons`, one `guides` and one `care`).
+Row 40 targets the RECEIVER of a gift, after the yes, which no row covered. It is distinct from row
+35 and the published `is-it-ok-to-give-your-partner-a-sex-toy-as-a-gift`, which is entirely
+giver-side at the moment of handover (its H2s are "A wrapped box asks differently than a question
+does", "Hand over the exit with the gift" and "What happens after a flat reaction") and ends exactly
+where row 40 begins. It is distinct from row 38 and the published
+`what-do-you-do-if-you-dont-like-a-sex-toy-you-bought`, where the reader chose and paid and the
+subject is sorting WHICH variable missed. And it is distinct from row 7 (raising the subject at
+all), row 21 (a partner who refuses), row 22 (a partner who feels replaced by a toy already in use)
+and row 33 (a toy bought together whose first partnered use went badly): in none of those is the
+object a gift the reader accepted and then found wrong, with a social debt attached to the honest
+answer. It was chosen to serve the live gifting window on the calendar (row 68's Instagram campaign
+"The Short List, Gifting Plainly", 11-24 to 12-06, and the "Winter Nights In, Gifted Plainly" theme
+that follows it), since weekly brief 24's content directive to write the three lost citation queries
+was already spent: materials safety is held by four published posts, air-pulse versus vibration by
+two, and discreet packaging and billing by row 39 on 2026-11-24. `check-slug-precheck.ts` returned
+slug-free, `check-topic-collision.ts` was clean against 20 prior posts on heading, title and
+shared-embed surfaces, and `check-self-consistency.ts` cross-post pass was clean against all 132
+published posts.
+
+One drafting lesson from row 40 worth inheriting, because it will recur on every health-adjacent
+row whose clinician block rests on a source an adjacent post already used:
+
+- **A tiered clinician block built on the SAME primary source as a recent sibling post will red
+  `check-fresh-language.ts`, and the frozen-safety-string carve-out does not cover it.** Row 40's
+  first draft shared 113 word-6-grams with `what-do-you-do-if-you-dont-like-a-sex-toy-you-bought`,
+  108 of them in body prose and almost all of them inside the clinician block, because both posts
+  build it on Healthline's sex toy injury guidance. Step 5 item 3 freezes safety enumerations and
+  says an exact repeated safety phrase across posts is correct, but
+  `FROZEN_SAFETY_STRINGS` registers only the three IP-rating house wordings, so none of these
+  sentences are stripped and the checker's zero limit still binds. Budget for a full fresh rewrite
+  of the block, re-derived from the source text rather than paraphrased off the sibling post, and
+  check each sentence back against the source so the rewrite cannot loosen a bound. Two residual
+  hits after the rewrite were the reviewer credential string and the few-hours external-injury
+  allowance; both re-worded with the credential and the bound intact.
