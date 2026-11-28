@@ -1056,6 +1056,27 @@ Two reviewers, both binding, sequenced so a cheap voice failure never spends the
      run 2074: restructure the block per-trigger rather than per-reader, isolating the single
      history-dependent trigger in its own sentence and stating the others as history-independent
      in so many words.
+   - **Transcribe-then-diff for clinician trigger blocks, the drafting-side twin of the scan
+     above (ticket #24679).** The tiered-safety-block scoping scan above is scoped to REPAIRS; this
+     is the same failure in the FIRST DRAFT, with no repair involved. SECOND OCCURRENCE: run 2249
+     (2026-11-27) narrowed two unconditional triggers while writing the clinician block in the
+     post's voice for the first time (the source's "intense internal pain, burning, or other
+     discomfort" lost "severe" moved onto burning, gained "internal" added to burning, and dropped
+     "other discomfort" entirely; separately, "then" was added in front of both external-injury
+     tests, sequencing two independently-stated tests into one), and a flared-base sentence turned
+     a REQUIREMENT into a GUARANTEE while a vagina trigger dropped the source's own "if you think
+     you can remove it" condition. All four were invisible to every deterministic checker and caught
+     only by the accuracy gate reading the source line by line, because none of them change a
+     number and none feel like a claim edit while you are making them: tightening a sentence for
+     rhythm is exactly what drops a disjunct, relocates a modifier, promotes a requirement to a
+     guarantee, or sequences two independent tests into one. Before writing a tiered clinician block
+     in the post's voice, copy each trigger out of the source VERBATIM into the working notes, one
+     per line, with its tier and its condition. Write the block, then before submitting it diff
+     each finished sentence against its transcribed line, checking four things specifically: every
+     disjunct in the source's list survives; every modifier sits on the same word the source put it
+     on; a requirement has not become a guarantee; and two tests the source states independently
+     have not been sequenced into one. This runs before any gate, at draft time, same as the
+     tiered-safety-block scan runs at repair time.
    - **Whole-document aphorism recount:** before resubmitting, re-run your own whole-document
      aphorism-as-closer count on the REWRITTEN draft (not just the changed strings), and separately
      count any newly added first-person sentences.
